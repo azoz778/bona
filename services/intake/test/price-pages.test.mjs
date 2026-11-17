@@ -1838,6 +1838,39 @@ describe('processPdf: a single property is never "From" its cheapest model', { t
     } finally { image.cleanup(); }
   });
 
+  it('S2r (final review M4): a whole-property check whose citation is a page off — the page whose text prints the figure is looked at too', async () => {
+    const reading = () => {
+      const a = villa({ amount: 2000000, from: false, quote: 'SAR 2,000,000', models: [model('Ground floor', 2000000, 3), model('First floor', 2500000, 3)] });
+      a.priceEvidence = { page: 2, quote: 'SAR 2,000,000' };
+      return a;
+    };
+    const pageText = textPages('Ground floor SAR 2,000,000\nFirst floor SAR 2,500,000\nThe villa as one: SAR 2,000,000');
+    const floorsOn3 = [{ fig: 2000000, mark: 'SAR', kind: 'floor', model: 'Ground floor' }, { fig: 2500000, mark: 'SAR', kind: 'floor', model: 'First floor' }];
+    const asked = (r) => headlineCalls(r).map((c) => [c.amount, c.whole, c.page]);
+    // Cites page 2 (whose text has no such figure); page 3 prints it as the villa's price: confirmed there.
+    const r = await rig({ listing: reading(), pageText, facts: { 3: [...floorsOn3, { fig: 2000000, mark: 'SAR', kind: 'whole' }] } });
+    try {
+      const report = await r.run();
+      assert.deepEqual(asked(r), [[2000000, true, 3]], 'the page whose text carries the figure first');
+      assert.deepEqual(report.listingPreview.price, { amount: 2000000, currency: 'SAR', from: false, period: null, onRequest: false });
+    } finally { r.cleanup(); }
+    // Page 3 prints it only as a floor's; the cited page 2 (an image) prints it as the villa's: both are looked at.
+    const both = await rig({ listing: reading(), pageText, facts: { 3: floorsOn3, 2: [{ fig: 2000000, mark: 'SAR', kind: 'whole' }] } });
+    try {
+      const report = await both.run();
+      assert.deepEqual(asked(both), [[2000000, true, 3], [2000000, true, 2]]);
+      assert.deepEqual(report.listingPreview.price, { amount: 2000000, currency: 'SAR', from: false, period: null, onRequest: false });
+    } finally { both.cleanup(); }
+    // Neither prints it as the villa's price: on request, "not printed" — after looking at both.
+    const none = await rig({ listing: reading(), pageText, facts: { 3: floorsOn3 } });
+    try {
+      const report = await none.run();
+      assert.deepEqual(asked(none), [[2000000, true, 3], [2000000, true, 2]]);
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST);
+      assert.notEqual(report.priceEvidence.unchecked, true);
+    } finally { none.cleanup(); }
+  });
+
   it('S2r (final review M5): a whole-property check after a quota error, its page not rendered — "could not be checked, try again later", never "not printed"', async () => {
     const a = villa({ amount: 2000000, from: false, quote: 'SAR 2,000,000', models: [model('Ground floor', 2000000, 3), model('First floor', 2500000, 3)] });
     a.priceEvidence = { page: 4, quote: 'SAR 2,000,000' };

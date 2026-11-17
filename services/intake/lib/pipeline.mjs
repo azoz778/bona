@@ -461,7 +461,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
    * second model — on a rendered page. Evidence the model forgot is looked for in the rendered
    * pages' text, so a price it read from the text layer is still checked on its page. After a quota
    * error no call is made: `unchecked: true`, never confirmed. `uncheckedWhy` says why: 'quota', or
-   * 'render' — a whole-property check whose page could not be rendered (wholeCheckPage).
+   * 'render' — a whole-property check whose page could not be rendered (printedWhole).
    */
   const printed = async (amount, evidence, { subsidised = false, whole = false } = {}) => {
     // In the text: printed IN the price's currency, or bare where bare figures are in it (printedInCurrency).
@@ -469,19 +469,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // property's price — which the text layer cannot tell from a floor's or a model's, so only a page can.
     const out = { inText: subsidised || whole ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency, home: local }), confirmed: null };
     if (out.inText) return out;
-    // Only a page can settle a whole-property check, so its page is rendered when it was not, as the
-    // model check renders a model's cited page (final review S2r). A render that fails means nothing was
-    // looked at: unchecked ("try again later"), never "the brochure does not print it".
-    // After a quota error nothing more can be looked at, rendered or not: a page to check is "try again
-    // later" too (final review M5), never "the brochure does not print it".
-    if (whole && quotaHit && wholeCheckTarget(amount, evidence) !== null) {
-      log.info('intake.price_evidence_skipped', { page: wholeCheckTarget(amount, evidence), subsidised, whole, reason: 'quota' });
-      return { ...out, unchecked: true, uncheckedWhy: 'quota' };
-    }
-    if (whole && !quotaHit && !(await wholeCheckPage(amount, evidence))) {
-      log.info('intake.price_evidence_skipped', { page: evidence?.page ?? null, subsidised, whole, reason: 'render' });
-      return { ...out, unchecked: true, uncheckedWhy: 'render' };
-    }
+    if (whole) return printedWhole(amount, evidence, { subsidised, out });
     if (!pageImages.length) return out;
     // The model's citation when it names a rendered page; otherwise the rendered page whose text
     // carries the number. Either way the second model looks at the page before anything counts.
@@ -496,11 +484,18 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       log.info('intake.price_evidence_skipped', { page: cited.page, subsidised, reason: 'quota' });
       return { ...out, unchecked: true, uncheckedWhy: 'quota' };
     }
+    const check = await askPage(page, amount, cited.quote, { subsidised, whole, inferred: cited !== evidence });
+    out.confirmed = check.confirmed;
+    if (check.fatal) return { ...out, unchecked: true, uncheckedWhy: 'quota' };
+    return out;
+  };
+  /** One second-model look at a rendered page (confirmPriceEvidence). A quota error sets quotaHit. */
+  const askPage = async (page, amount, quote, { subsidised, whole, inferred }) => {
     const check = await confirmPriceEvidence({
       pageImage: page.abs,
       amount,
       currency: price.currency,
-      quote: cited.quote,
+      quote,
       subsidised,
       bareCounts: home === price.currency,
       home: local,
@@ -514,11 +509,39 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       addDirs: [workDir],
       settingsPath: confinement.file,
     });
-    out.confirmed = check.confirmed;
-    log.info('intake.price_evidence', { page: cited.page, subsidised, whole, inferred: cited !== evidence, confirmed: check.confirmed, error: check.error ?? null, fatal: check.fatal === true });
-    if (check.fatal) {
-      quotaHit = true;
+    log.info('intake.price_evidence', { page: page.page, subsidised, whole, inferred, confirmed: check.confirmed, error: check.error ?? null, fatal: check.fatal === true });
+    if (check.fatal) quotaHit = true;
+    return check;
+  };
+  /**
+   * A whole-property check: only a page can settle it, so each page it looks at (wholeCheckPages) is rendered
+   * when it was not, as the model check renders a model's cited page (final review S2r), and the first page a
+   * second model confirms it on settles it. A render that fails means that page was not looked at: unless
+   * another page confirms it, unchecked ("try again later"), never "the brochure does not print it". So is a
+   * check after a quota error, rendered page or not (final review M5): nothing more can be looked at.
+   */
+  const printedWhole = async (amount, evidence, { subsidised, out }) => {
+    const pages = wholeCheckPages(amount, evidence);
+    if (!pages.length) return out;
+    if (quotaHit) {
+      log.info('intake.price_evidence_skipped', { page: pages[0], subsidised, whole: true, reason: 'quota' });
       return { ...out, unchecked: true, uncheckedWhy: 'quota' };
+    }
+    let unrendered = null;
+    for (const n of pages) {
+      if (!(await renderForWholeCheck(n))) {
+        unrendered ??= n;
+        continue;
+      }
+      const page = pageImages.find((p) => p.page === n);
+      const check = await askPage(page, amount, n === evidence?.page ? evidence.quote : String(amount), { subsidised, whole: true, inferred: n !== evidence?.page });
+      out.confirmed = check.confirmed;
+      if (check.fatal) return { ...out, unchecked: true, uncheckedWhy: 'quota' };
+      if (check.confirmed) return out;
+    }
+    if (unrendered !== null) {
+      log.info('intake.price_evidence_skipped', { page: unrendered, subsidised, whole: true, reason: 'render' });
+      return { ...out, unchecked: true, uncheckedWhy: 'render' };
     }
     return out;
   };
@@ -530,25 +553,27 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const inPdf = (n) => Number.isInteger(n) && n >= 1 && (!Number.isInteger(pageCount) || pageCount < 1 || n <= pageCount);
   const isRendered = (n) => pageImages.some((p) => p.page === n);
   /**
-   * The page a whole-property check looks at: the evidence's page when it cites one of the PDF's pages,
-   * else — no usable citation — a rendered page whose text carries the figure, else the first page whose
-   * text does; null when there is none (nothing printed it).
+   * The pages a whole-property check looks at, in order: the evidence's page when it cites one of the PDF's
+   * pages and its text carries the figure (or no page's text does). A citation whose page's text lacks the
+   * figure while another page's text has it is as likely a page off (final review M4): that page first — a
+   * rendered one whose text carries the figure, else the first page whose text does — then the cited one,
+   * which may print it as an image. No usable citation: that page alone. None at all: nothing printed it.
    */
-  const wholeCheckTarget = (amount, evidence) => {
-    if (inPdf(evidence?.page)) return evidence.page;
-    const rendered = pageImages.find((p) => priceAppearsIn(pageText[p.page - 1] ?? '', amount));
-    if (rendered) return rendered.page;
+  const wholeCheckPages = (amount, evidence) => {
+    const carries = (n) => priceAppearsIn(pageText[n - 1] ?? '', amount);
+    const cited = inPdf(evidence?.page) ? evidence.page : null;
+    if (cited !== null && carries(cited)) return [cited];
+    const rendered = pageImages.find((p) => carries(p.page));
     const i = pageText.findIndex((t) => priceAppearsIn(t ?? '', amount));
-    return i === -1 ? null : i + 1;
+    const inText = rendered ? rendered.page : i === -1 ? null : i + 1;
+    return [inText, cited].filter((n, k, all) => n !== null && all.indexOf(n) === k);
   };
   /**
-   * Makes sure the page a whole-property check needs (wholeCheckTarget) is among the rendered pages: renders
-   * it (into `headline-pages`) when it is not there yet. false only when that render failed; true otherwise,
-   * including when there is no page to look at (printed() then finds none: nothing printed it).
+   * Makes sure page `want` is among the rendered pages: renders it (into `headline-pages`) when it is not
+   * there yet. false only when that render failed (or failed before, this run).
    */
-  const wholeCheckPage = async (amount, evidence) => {
-    const want = wholeCheckTarget(amount, evidence);
-    if (want === null || isRendered(want)) return true;
+  const renderForWholeCheck = async (want) => {
+    if (isRendered(want)) return true;
     if (unrenderable.has(want)) return false;
     try {
       const more = await renderPdfPages(pdfPath, workDir, {
