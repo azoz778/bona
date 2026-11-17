@@ -37,6 +37,21 @@ export function homeCurrency(countryCode) {
   return typeof countryCode === 'string' ? HOME_CURRENCY[countryCode.toUpperCase()] ?? null : null;
 }
 
+/** Countries whose own currency the site does not print, but whose bare "ريال" is theirs (price.mjs riyalOf). */
+const RIYAL_COUNTRIES = Object.freeze({ QA: 'QAR', YE: 'YER', IR: 'IRR' });
+
+/**
+ * The currency a property's own country prices in, printed by the site or not, as far as reading a page
+ * needs to know it: homeCurrency's, plus the riyal countries the site does not print (QA, YE, IR) — on
+ * their pages, as on an Omani one, a bare "ريال" is not the Saudi riyal (price.mjs riyalOf, claude.mjs
+ * currencyRule). null for any other country, and for no country at all.
+ */
+export function countryCurrency(countryCode) {
+  if (typeof countryCode !== 'string') return null;
+  const cc = countryCode.toUpperCase();
+  return HOME_CURRENCY[cc] ?? RIYAL_COUNTRIES[cc] ?? null;
+}
+
 /**
  * The currency a reading's unit-model prices are in, or null when the reading does not establish one.
  * prompt.md has the model write every model price in `listing.price.currency`, and the page check asks

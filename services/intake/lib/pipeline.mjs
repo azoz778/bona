@@ -40,7 +40,7 @@ import {
   writeInboxListing,
 } from './listing.mjs';
 import { log } from './log.mjs';
-import { alignHeadline, checkModelPrices, homeCurrency, isFigure, modelPriceCurrency } from './model-prices.mjs';
+import { alignHeadline, checkModelPrices, countryCurrency, homeCurrency, isFigure, modelPriceCurrency } from './model-prices.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
 import { priceAppearsIn, printedInCurrency, westernise } from './price.mjs';
@@ -420,6 +420,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // is taken for that currency only; a property abroad needs its currency printed beside the figure.
   const country = (enrichTarget ? enrichTarget.listing.location : ai.listing?.location)?.countryCode ?? ai.listing?.location?.countryCode;
   const home = homeCurrency(country);
+  // The country's own currency, printed by the site or not: on its pages a bare "ريال" / ﷼ is ITS riyal —
+  // an Omani "190,000 ريال" is 190,000 OMR, never 190,000 SAR (price.mjs riyalOf, claude.mjs currencyRule).
+  const local = countryCurrency(country);
   // The "a price for one of its unit models counts" allowance is for a whole development quoted
   // "from" its cheapest model — never for one specific unit, and never for a price not marked `from`.
   const wholeDevelopment = Boolean(ai.listing?.project) && !ai.listing?.unit && price?.from === true;
@@ -437,7 +440,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // In the text: printed IN the price's currency, or bare where bare figures are in it (printedInCurrency).
     // "£1,250,000" is a price in pounds, never "1,250,000 SAR". `whole`: the figure must be the whole
     // property's price — which the text layer cannot tell from a floor's or a model's, so only a page can.
-    const out = { inText: subsidised || whole ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency }), confirmed: null };
+    const out = { inText: subsidised || whole ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency, home: local }), confirmed: null };
     if (out.inText || !pageImages.length) return out;
     // The model's citation when it names a rendered page; otherwise the rendered page whose text
     // carries the number. Either way the second model looks at the page before anything counts.
@@ -459,6 +462,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       quote: cited.quote,
       subsidised,
       bareCounts: home === price.currency,
+      home: local,
       project: wholeDevelopment,
       whole,
       subject: ai.listing?.title?.en,
@@ -576,7 +580,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         // IN the currency the reading established, the figures printed in another one refused; a bare
         // figure counts only in the property's own country's currency.
         const res = await confirmModelPrices({
-          pageImage: abs, items, currency: readingCurrency, bareCounts: readingCurrency !== null && readingCurrency === home, bin: cfg.claudeBin, model: cfg.claudeModel,
+          pageImage: abs, items, currency: readingCurrency, bareCounts: readingCurrency !== null && readingCurrency === home, home: local, bin: cfg.claudeBin, model: cfg.claudeModel,
           cwd: workDir, addDirs: [workDir], settingsPath: confinement.file,
         });
         log.info('intake.model_price_evidence', { page, models: items.length, answers: res.answers.length, error: res.error, fatal: res.fatal });

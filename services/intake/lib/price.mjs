@@ -48,13 +48,15 @@ export function priceAppearsIn(text, amount) {
 /**
  * The currency marks a brochure prints beside a price, and the currencies each can stand for —
  * matched on NFKC-folded text (Arabic presentation forms -> letters; ﷼ folds to "ریال", Farsi yeh).
- * The specific ones come first: "ريال عماني" is Omani, a bare "ريال" or ﷼ any riyal.
+ * The specific ones come first: "ريال عماني" is Omani, "ريال سعودي" Saudi; a bare "ريال", ﷼ or
+ * "riyal" is RIYAL — the riyal of the country the property is in (riyalOf).
  */
+const RIYAL = 'RIYAL';
 const MARKS = [
-  ['ر[يی]ال\\s*(?:عماني|عُماني)', ['OMR']],
-  ['ر[يی]ال\\s*قطري', ['QAR']],
-  ['ر[يی]ال\\s*سعودي', ['SAR']],
-  ['ر[يی]الا?ت?|riyals?|rials?', ['SAR', 'OMR', 'QAR']],
+  ['ر[يی]ال\\s*(?:عماني|عُماني)|omani\\s+(?:riyals?|rials?)', ['OMR']],
+  ['ر[يی]ال\\s*قطري|qatari\\s+riyals?', ['QAR']],
+  ['ر[يی]ال\\s*سعودي|saudi\\s+riyals?', ['SAR']],
+  ['ر[يی]الا?ت?|riyals?|rials?', [RIYAL]],
   // ر.س / ر.ع — not the end of a word ("مدارس", "شارع").
   ['(?<![\\u0600-\\u06ff])ر\\.?\\s?س\\.?', ['SAR']],
   ['(?<![\\u0600-\\u06ff])ر\\.?\\s?ع\\.?', ['OMR']],
@@ -76,24 +78,41 @@ const marksIn = (slice, table) => {
   return hit ? hit[1] : [];
 };
 
+/** The countries where a bare riyal is not the Saudi one: their own currency is a riyal or rial too. */
+const OWN_RIYALS = Object.freeze(['OMR', 'QAR', 'YER', 'IRR']);
+
+/**
+ * The currency a bare "ريال" / ﷼ / "riyal" stands for on the pages of a property whose own country prices
+ * in `home` (model-prices.mjs countryCurrency): that country's riyal in Oman (OMR — worth about ten Saudi
+ * riyals), Qatar (QAR, which the site does not print), Yemen and Iran; the Saudi riyal anywhere else,
+ * and when the country is not known.
+ */
+export function riyalOf(home) {
+  return OWN_RIYALS.includes(home) ? home : 'SAR';
+}
+
 /**
  * Is `amount` printed in `text` AS a price in `currency`? Some occurrence of it (priceAppearsIn's
  * figure rules) must carry a mark of that currency right beside it — its code, symbol or name — or,
  * when `bareCounts`, no currency mark at all. An occurrence marked with any other currency ("£1,250,000",
  * "$1,250,000", "1,250,000 AED") is that other currency's price, never this one's. The pipeline passes
  * `bareCounts: false` when a bare figure cannot be taken for `currency` — the property is not in the
- * country whose currency it is (pipeline.mjs printed()).
+ * country whose currency it is (pipeline.mjs printed()). `home` is the currency of the country the
+ * property is in, printed by the site or not (model-prices.mjs countryCurrency): a bare "ريال" / ﷼ is
+ * that country's riyal (riyalOf) — an Omani "190,000 ريال" is 190,000 OMR, never 190,000 SAR — and a
+ * marked figure, so never a bare one.
  * @returns {boolean}
  */
-export function printedInCurrency(text, amount, currency, { bareCounts = true } = {}) {
+export function printedInCurrency(text, amount, currency, { bareCounts = true, home = null } = {}) {
   if (!Number.isFinite(amount) || amount <= 0 || typeof currency !== 'string' || !currency) return false;
   const t = westernise(text || '');
   if (!t) return false;
+  const riyal = riyalOf(home);
   for (const re of figurePatterns(amount, 'g')) {
     for (const m of t.matchAll(re)) {
       const before = marksIn(t.slice(Math.max(0, m.index - 24), m.index), MARK_BEFORE);
       const after = marksIn(t.slice(m.index + m[0].length, m.index + m[0].length + 32), MARK_AFTER);
-      const marks = [...before, ...after];
+      const marks = [...before, ...after].map((c) => (c === RIYAL ? riyal : c));
       if (marks.includes(currency) || (bareCounts && marks.length === 0)) return true;
     }
   }

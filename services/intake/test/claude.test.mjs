@@ -590,6 +590,48 @@ describe('runListingAi', () => {
   });
 });
 
+/**
+ * The marks the prompt lists for `code` — "printed IN SAR — SAR's code, symbol or name (SAR, SR, …)" — as a
+ * second model following it reads them: one entry per comma, slash or "or".
+ */
+const promptMarks = (prompt, code) => {
+  const head = `printed IN ${code} — ${code}'s code, symbol or name`;
+  const at = prompt.indexOf(head);
+  if (at < 0) return [];
+  const open = prompt.indexOf('(', at + head.length);
+  return prompt.slice(open + 1, prompt.indexOf(')', open)).split(/,| or |[/]/).map((s) => s.trim()).filter(Boolean);
+};
+const listsMark = (marks, mark) => marks.some((t) => t === mark || t.endsWith(` ${mark}`));
+
+/** OM1/QA1: what each confirm prompt tells the second model a bare ريال / ﷼ is, by the property's own currency (`home`). */
+async function riyalRules(call) {
+  const ask = async (currency, home) => {
+    const f = fakeSpawn([{ envelope: envelope({ confirmed: false }) }]);
+    await call({ currency, home, spawnImpl: f.spawnImpl });
+    return f.calls[0].prompt;
+  };
+  // Oman: SAR is only the Saudi riyal marked as such; a bare ريال / ﷼ is the Omani rial.
+  const omSar = await ask('SAR', 'OMR');
+  for (const bare of ['ريال', '﷼']) assert.ok(!listsMark(promptMarks(omSar, 'SAR'), bare), `SAR in Oman does not list a bare ${bare}`);
+  for (const mark of ['SAR', 'ر.س', 'ريال سعودي', '⃁']) assert.ok(listsMark(promptMarks(omSar, 'SAR'), mark), `SAR in Oman lists ${mark}`);
+  assert.match(omSar, /Oman: a bare ريال[^\n]*is the Omani rial/);
+  const omOmr = await ask('OMR', 'OMR');
+  for (const mark of ['OMR', 'ريال عماني', 'ريال', '﷼']) assert.ok(listsMark(promptMarks(omOmr, 'OMR'), mark), `OMR in Oman lists ${mark}`);
+  // Qatar: a bare ريال is the Qatari riyal — never SAR.
+  const qaSar = await ask('SAR', 'QAR');
+  for (const bare of ['ريال', '﷼']) assert.ok(!listsMark(promptMarks(qaSar, 'SAR'), bare), `SAR in Qatar does not list a bare ${bare}`);
+  assert.match(qaSar, /Qatar: a bare ريال[^\n]*is the Qatari riyal/);
+  // Anywhere else a bare riyal is the Saudi riyal — and never the Omani rial.
+  for (const home of ['SAR', null, undefined, 'USD']) {
+    const sar = await ask('SAR', home);
+    for (const mark of ['ريال', '﷼', 'ريال سعودي']) assert.ok(listsMark(promptMarks(sar, 'SAR'), mark), `SAR with home ${home} lists ${mark}`);
+    assert.doesNotMatch(sar, /a bare ريال/);
+    const omr = await ask('OMR', home);
+    for (const bare of ['ريال', '﷼']) assert.ok(!listsMark(promptMarks(omr, 'OMR'), bare), `OMR with home ${home} does not list a bare ${bare}`);
+    assert.ok(listsMark(promptMarks(omr, 'OMR'), 'ريال عماني'));
+  }
+}
+
 describe('confirmModelPrices', () => {
   const items = [
     { i: 0, name: { en: 'Lulu 2', ar: 'لولو 2' }, price: 319015, subsidisedPrice: 270425 },
@@ -634,6 +676,10 @@ describe('confirmModelPrices', () => {
     await confirmModelPrices({ ...opts, currency: 'AED', spawnImpl: f.spawnImpl });
     assert.match(f.calls[1].prompt, /printed IN AED/);
     assert.ok(f.calls[1].prompt.includes('درهم'));
+  });
+
+  it('a bare riyal is the riyal of the country the property is in: in Oman the Omani rial, in Qatar the Qatari riyal (OM1/QA1)', async () => {
+    await riyalRules((o) => confirmModelPrices({ ...opts, ...o }));
   });
 
   it('without a currency the site prints there is nothing to check the figures in: no call, an error', async () => {
@@ -717,6 +763,10 @@ describe('confirmPriceEvidence', () => {
     assert.match(prompt, /does NOT count/);
     await confirmPriceEvidence({ ...opts, currency: 'USD', spawnImpl: f.spawnImpl });
     assert.match(f.calls[1].prompt, /printed IN USD/);
+  });
+
+  it('a bare riyal is the riyal of the country the property is in: in Oman the Omani rial, in Qatar the Qatari riyal (OM1/QA1)', async () => {
+    await riyalRules((o) => confirmPriceEvidence({ ...opts, ...o }));
   });
 
   it('`whole`: only a price printed for the whole property counts — not a floor\'s, a part\'s or a layout\'s (a single property, review 2026-11-17)', async () => {

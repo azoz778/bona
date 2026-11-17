@@ -112,7 +112,7 @@ const opt = (k) => { const i = rest.indexOf(k); return i === -1 ? null : rest[i 
 const mode = opt('--mode') ?? 'extract';
 const pages = (opt('--pages') ?? '').split(',').filter(Boolean).map(Number);
 const put = (rel) => { const abs = path.join(outDir, rel); fs.mkdirSync(path.dirname(abs), { recursive: true }); fs.copyFileSync(cfg.photo, abs); return abs; };
-fs.appendFileSync(new URL('./calls.jsonl', import.meta.url), JSON.stringify({ tool: 'py-' + mode, pages }) + '\\n');
+fs.appendFileSync(new URL('./calls.jsonl', import.meta.url), JSON.stringify({ tool: 'py-' + mode, pages, dir: opt('--page-dir') }) + '\\n');
 let out;
 if (mode === 'extract') {
   const candidates = Array.from({ length: 6 }, (_, index) => {
@@ -123,7 +123,8 @@ if (mode === 'extract') {
   });
   out = { ok: true, pages: cfg.pageText.length, text: cfg.pageText.join('\\n'), pageText: cfg.pageText, candidates,
     rendered: false, embeddedImageCount: candidates.length, links: [], meta: {} };
-} else if (cfg.failPageDir && opt('--page-dir') === cfg.failPageDir) {
+} else if ([].concat(cfg.failPageDir ?? []).includes(opt('--page-dir'))) {
+  // cfg.failPageDir: a page folder (or a list of them) whose render fails.
   out = { ok: false, error: 'extract_pdf.py failed (exit 1): cannot render' };
 } else {
   const dir = opt('--page-dir') ?? 'pages';
@@ -148,6 +149,25 @@ const printedOn = (page) => {
 const inCurrency = (page, asked) => {
   const printed = printedOn(page);
   return asked !== null && (printed === asked || (printed === null && /may be taken as/.test(prompt)));
+};
+// cfg.facts — a second model that follows its prompt to the letter (review 2026-11-17): { [page]: [{ fig, mark,
+// header, kind, model, sub }] } is what each page really prints. mark: the currency mark printed beside the figure,
+// header: the one heading its table (null = none shown); kind: 'whole' (a price for the whole listing) | 'model' |
+// 'floor'; model: the row's name; sub: a price for subsidy beneficiaries. A figure is IN the currency asked only when
+// its mark is one the PROMPT lists for that currency (claude.mjs currencyRule), or it shows none and the prompt lets
+// a bare figure be taken as that currency. When set, it decides every confirm answer (confirm / printedIn do not).
+const facts = (page) => (cfg.facts ?? {})[page] ?? [];
+const marksOf = (code) => {
+  const head = 'printed IN ' + code + ' — ' + code + "'s code, symbol or name";
+  const at = prompt.indexOf(head);
+  if (at < 0) return [];
+  const open = prompt.indexOf('(', at + head.length);
+  return prompt.slice(open + 1, prompt.indexOf(')', open)).split(/,| or |[/]/).map((s) => s.trim()).filter(Boolean);
+};
+const factIn = (e, asked) => {
+  if (!asked) return false;
+  const shown = e.mark ?? e.header ?? null;
+  return shown === null ? /may be taken as/.test(prompt) : marksOf(asked).some((t) => t === shown || t.endsWith(' ' + shown));
 };
 let answer;
 if (prompt.includes('For each numbered model')) {
@@ -176,6 +196,11 @@ if (prompt.includes('For each numbered model')) {
     ? { i: it.i, price: mc.includes(it.price), subsidisedPrice: mc.includes(it.subsidisedPrice) }
     : { i: it.i, price: true, subsidisedPrice: true, ...((mc ?? {})[it.i] ?? {}) }));
   if (!inCurrency(page, currency)) answer = answer.map((a) => ({ ...a, price: false, subsidisedPrice: false }));
+  if (cfg.facts) {
+    const names = Object.fromEntries(fenced.split('\\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l)).map((it) => [it.i, String(it.name).split(' / ')[0]]));
+    const on = (it, sub, fig) => facts(page).some((e) => !!e.sub === sub && e.fig === fig && e.model === names[it.i] && factIn(e, currency));
+    answer = items.map((it) => ({ i: it.i, price: on(it, false, it.price), subsidisedPrice: on(it, true, it.subsidisedPrice) }));
+  }
 } else if (prompt.includes('VISIBLY PRINT')) {
   const [, amountText, currency = null] = prompt.match(/VISIBLY PRINT[^\\d]*(\\d+)(?: ([A-Z]{3}))?/) || [];
   const amount = Number(amountText);
@@ -189,6 +214,11 @@ if (prompt.includes('For each numbered model')) {
     process.exit(1);
   }
   answer = { confirmed: ((subsidised ? cfg.confirmSub : null) ?? cfg.confirm ?? []).includes(amount) && inCurrency(page, currency) };
+  if (cfg.facts) {
+    // A whole development: a model's price counts as the property's; otherwise only a price for the whole listing.
+    const project = /unit models counts as the property/.test(prompt);
+    answer = { confirmed: facts(page).some((e) => !!e.sub === subsidised && e.fig === amount && factIn(e, currency) && (e.kind === 'whole' || (project && e.kind === 'model'))) };
+  }
 } else {
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-listing', prompt }) + '\\n');
   answer = cfg.listing;
@@ -240,14 +270,14 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, u
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, printedIn = 'SAR', cfgExtra = {}, build = '' }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, printedIn = 'SAR', facts = null, cfgExtra = {}, build = '' }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail, printedIn }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail, printedIn, facts }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   fs.writeFileSync(path.join(bin, 'fake-brochure.mjs'), FAKE_BROCHURE);
@@ -1388,6 +1418,97 @@ describe('processPdf: TAQEEM currency — a figure printed in another currency i
       assert.deepEqual(report.ai.models.map((m) => m.price), [419994, 319015]);
       assert.equal(report.listingPreview.price.amount, 319015);
     } finally { r.cleanup(); }
+  });
+});
+
+// OM1 / QA1 (final review 2026-11-17): a bare "ريال" / ﷼ is the riyal of the country the property is in — the
+// Omani rial in Oman (about ten Saudi riyals each), the Qatari riyal in Qatar (a currency the site does not print)
+// — and the Saudi riyal anywhere else. Readings and the second model follow their prompts (rig `facts`: the
+// second model counts a figure IN a currency only by the marks its prompt lists for that currency).
+describe('processPdf: a bare riyal is the riyal of the country the property is in', { timeout: 120000 }, () => {
+  const place = (countryCode, en) => ({ district: { en: 'Al Khuwair', ar: 'الخوير' }, city: { en, ar: 'مدينة' }, country: { en, ar: 'دولة' }, countryCode });
+  const OMAN = place('OM', 'Muscat');
+  const QATAR = place('QA', 'Doha');
+  const SAUDI = place('SA', 'Jeddah');
+  const long = (s) => `${s}\nA residential villa for sale (فيلا سكنية للبيع). This page of the brochure describes the property in detail: its location, finishes, amenities, parking, security and the neighbourhood around it.`;
+  const textPages = (p3) => [long('Overview'), long('Location'), long(p3), long('Specification'), long('Contact the sales team')];
+  const headlineCalls = (r) => r.calls().filter((c) => c.tool === 'claude-confirm');
+  const modelCalls = (r) => r.calls().filter((c) => c.tool === 'claude-model-confirm');
+  const ON_REQUEST = (currency) => ({ amount: null, currency, from: false, period: null, onRequest: true });
+  const villa = (amount, currency, location) => {
+    const a = { ...answer({ price: { amount, currency, from: false, period: null, onRequest: false }, priceEvidence: { page: 3, quote: `${amount.toLocaleString('en-US')} ريال` } }), models: [] };
+    a.listing.project = null;
+    a.listing.type = 'villa';
+    a.listing.category = 'buy';
+    a.listing.location = location;
+    return a;
+  };
+
+  it('OM1: an Omani villa printing "190,000 ريال", read as SAR, is never published as 190,000 SAR — the text layer settles nothing', async () => {
+    const r = await rig({ listing: villa(190000, 'SAR', OMAN), pageText: textPages('السعر 190,000 ريال') });
+    try {
+      const report = await r.run();
+      assert.equal(report.priceEvidence.inText, false, 'a bare ريال in Oman is the Omani rial');
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST('SAR'));
+      assert.ok(report.warningCodes.includes('price-not-printed'));
+    } finally { r.cleanup(); }
+    // OM2: read truthfully, in OMR, it is published as such.
+    const ok = await rig({ listing: villa(190000, 'OMR', OMAN), pageText: textPages('السعر 190,000 ريال') });
+    try {
+      const report = await ok.run();
+      assert.equal(report.priceEvidence.inText, true);
+      assert.deepEqual(report.listingPreview.price, { amount: 190000, currency: 'OMR', from: false, period: null, onRequest: false });
+      assert.deepEqual(checkListing(report.listingPreview), []);
+    } finally { ok.cleanup(); }
+  });
+
+  it('QA1: a Qatari villa printing "1,250,000 ريال", read as SAR, is on request (Qatari riyals, which the site does not print)', async () => {
+    const r = await rig({ listing: villa(1250000, 'SAR', QATAR), pageText: textPages('السعر 1,250,000 ريال') });
+    try {
+      const report = await r.run();
+      assert.equal(report.priceEvidence.inText, false);
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST('SAR'));
+    } finally { r.cleanup(); }
+  });
+
+  it('a Saudi villa printing "1,250,000 ريال" is still 1,250,000 SAR off the text layer', async () => {
+    const r = await rig({ listing: villa(1250000, 'SAR', SAUDI), pageText: textPages('السعر 1,250,000 ريال') });
+    try {
+      const report = await r.run();
+      assert.equal(report.priceEvidence.inText, true);
+      assert.equal(headlineCalls(r).length, 0, 'settled by the text layer, no second model');
+      assert.deepEqual(report.listingPreview.price, { amount: 1250000, currency: 'SAR', from: false, period: null, onRequest: false });
+    } finally { r.cleanup(); }
+  });
+
+  it('OM3: an Omani development whose page rows print a bare "ريال" (image-only), read "from 190,000 SAR" — the second model is told the rows are Omani rials', async () => {
+    const model = (en, price) => ({
+      name: { en, ar: `نموذج ${en}` }, bedrooms: 2, bathrooms: 2, areaSqm: 105, rooms: null, availability: null,
+      price, subsidisedPrice: null, evidence: { page: 3, quote: `${price.toLocaleString('en-US')} ريال` }, floorPlan: null,
+    });
+    const reading = (currency) => {
+      const a = { ...answer({ price: { amount: 190000, currency, from: true, period: null, onRequest: false }, priceEvidence: { page: 3, quote: '190,000 ريال' } }), models: [model('A', 190000), model('B', 250000)] };
+      a.listing.location = OMAN;
+      return a;
+    };
+    const facts = { 3: [{ fig: 190000, mark: 'ريال', kind: 'model', model: 'A' }, { fig: 250000, mark: 'ريال', kind: 'model', model: 'B' }] };
+    const pageText = ['a', 'b', 'c', 'd', 'e'];
+    const r = await rig({ listing: reading('SAR'), pageText, facts });
+    try {
+      const report = await r.run();
+      assert.deepEqual(modelCalls(r).map((c) => [c.page, c.currency, c.bare]), [[3, 'SAR', false]]);
+      assert.deepEqual(report.ai.models.map((m) => m.price), [null, null], 'Omani rials are not SAR');
+      assert.deepEqual(headlineCalls(r).map((c) => [c.amount, c.currency, c.bare]), [[190000, 'SAR', false]]);
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST('SAR'));
+    } finally { r.cleanup(); }
+    // Read truthfully, in OMR: every row is confirmed IN OMR and the headline is "from" the cheaper one.
+    const ok = await rig({ listing: reading('OMR'), pageText, facts });
+    try {
+      const report = await ok.run();
+      assert.deepEqual(modelCalls(ok).map((c) => [c.currency, c.bare]), [['OMR', true]]);
+      assert.deepEqual(report.ai.models.map((m) => m.price), [190000, 250000]);
+      assert.deepEqual(report.listingPreview.price, { amount: 190000, currency: 'OMR', from: true, period: null, onRequest: false });
+    } finally { ok.cleanup(); }
   });
 });
 

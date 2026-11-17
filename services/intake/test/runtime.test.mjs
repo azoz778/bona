@@ -260,6 +260,35 @@ describe('TAQEEM currency — a figure printed in another currency is not that p
     assert.equal(printedInCurrency('£1,250,000 … total 1,250,000', 1250000, 'SAR', { bareCounts: false }), false);
   });
 
+  it('a bare riyal is the riyal of the country the property is in (`home`): Omani in Oman, Qatari in Qatar, Saudi elsewhere (OM1/QA1)', () => {
+    // OM1: an Omani villa printing "190,000 ريال" is 190,000 Omani rials — about 1.85 million SAR, not 190,000 SAR.
+    for (const t of ['السعر 190,000 ريال', '190,000 ﷼', '190,000 riyals', 'Rial 190,000']) {
+      assert.equal(printedInCurrency(t, 190000, 'SAR', { bareCounts: false, home: 'OMR' }), false, `${t} in Oman is not SAR`);
+      assert.equal(printedInCurrency(t, 190000, 'SAR', { bareCounts: true, home: 'OMR' }), false, `${t} in Oman: a marked figure, never a bare one`);
+      assert.equal(printedInCurrency(t, 190000, 'OMR', { bareCounts: true, home: 'OMR' }), true, `${t} in Oman is OMR`);
+      // QA1: in Qatar it is the Qatari riyal — a currency the site does not print.
+      assert.equal(printedInCurrency(t, 190000, 'SAR', { bareCounts: false, home: 'QAR' }), false, `${t} in Qatar is not SAR`);
+      assert.equal(printedInCurrency(t, 190000, 'SAR', { bareCounts: true, home: 'QAR' }), false, `${t} in Qatar is not bare`);
+      // Anywhere else — Saudi Arabia, no country recorded — a bare riyal is the Saudi riyal, and only that.
+      for (const home of ['SAR', null, undefined, 'AED', 'USD']) {
+        assert.equal(printedInCurrency(t, 190000, 'SAR', { bareCounts: false, home }), true, `${t} with home ${home} is SAR`);
+        assert.equal(printedInCurrency(t, 190000, 'OMR', { bareCounts: false, home }), false, `${t} with home ${home} is not OMR`);
+      }
+    }
+    // The Saudi riyal marked as such stays SAR in Oman and Qatar; the Omani rial marked as such stays OMR anywhere.
+    for (const t of ['190,000 ريال سعودي', 'ر.س 190,000', 'SAR 190,000', '⃁ 190,000', '190,000 Saudi riyals']) {
+      for (const home of ['OMR', 'QAR', 'SAR']) assert.equal(printedInCurrency(t, 190000, 'SAR', { bareCounts: false, home }), true, `${t} with home ${home}`);
+    }
+    for (const t of ['190,000 ريال عماني', '190,000 ر.ع.', 'OMR 190,000', '190,000 Omani rials']) {
+      for (const home of ['OMR', 'SAR', null]) {
+        assert.equal(printedInCurrency(t, 190000, 'OMR', { bareCounts: false, home }), true, `${t} with home ${home}`);
+        assert.equal(printedInCurrency(t, 190000, 'SAR', { bareCounts: true, home }), false, `${t} with home ${home} is not SAR`);
+      }
+    }
+    assert.equal(printedInCurrency('190,000 ريال قطري', 190000, 'SAR', { bareCounts: true }), false);
+    assert.equal(printedInCurrency('190,000 Qatari riyals', 190000, 'SAR', { bareCounts: true }), false);
+  });
+
   it('the figure rules are priceAppearsIn\'s: no figure inside a longer one, nothing that is not a price', () => {
     assert.equal(printedInCurrency('SAR 1,450,000', 450000, 'SAR'), false);
     assert.equal(printedInCurrency('', 1250000, 'SAR'), false);

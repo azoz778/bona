@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { isFigure as rulesIsFigure } from '../../../scripts/curate/rules.mjs';
 import {
-  alignHeadline, checkModelPrices, homeCurrency, isFigure, MAX_MODEL_PRICE_PAGES, MODEL_PRICE_CONCURRENCY, modelPriceCurrency, pagesToRenderFor,
+  alignHeadline, checkModelPrices, countryCurrency, homeCurrency, isFigure, MAX_MODEL_PRICE_PAGES, MODEL_PRICE_CONCURRENCY, modelPriceCurrency, pagesToRenderFor,
 } from '../lib/model-prices.mjs';
 
 const pages = [{ page: 9, abs: '/x/p9.jpg' }, { page: 10, abs: '/x/p10.jpg' }];
@@ -211,6 +211,11 @@ describe('modelPriceCurrency — the currency a reading\'s unit-model prices are
   it('homeCurrency: the currency a country prices in, when the site prints it (SA, AE, OM, US, the euro area) — else null', () => {
     assert.deepEqual(['SA', 'sa', 'AE', 'OM', 'US', 'FR', 'DE', 'ES', 'IE'].map(homeCurrency), ['SAR', 'SAR', 'AED', 'OMR', 'USD', 'EUR', 'EUR', 'EUR', 'EUR']);
     for (const cc of ['GB', 'QA', 'EG', 'TR', 'CH', '', null, undefined, 42]) assert.equal(homeCurrency(cc), null, String(cc));
+  });
+
+  it('countryCurrency: homeCurrency\'s, plus the riyal countries the site does not print — a bare ريال there is theirs (OM1/QA1)', () => {
+    assert.deepEqual(['SA', 'AE', 'om', 'US', 'FR', 'QA', 'qa', 'YE', 'IR'].map(countryCurrency), ['SAR', 'AED', 'OMR', 'USD', 'EUR', 'QAR', 'QAR', 'YER', 'IRR']);
+    for (const cc of ['GB', 'EG', 'TR', '', null, undefined, 42]) assert.equal(countryCurrency(cc), null, String(cc));
   });
 
   it('a currency the site does not take never counts, and nothing is not a price', () => {
