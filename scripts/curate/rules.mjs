@@ -68,6 +68,36 @@ export function videoEntryProblems(v, i) {
 }
 export const isLocalSrc = (s) => LOCAL_LAND_STILL.test(s) || LOCAL_LISTING_SRC.test(s);
 
+/**
+ * A photo's focus point (optional): the centre of its subject as fractions of width (x) and
+ * height (y) from the top-left. The site crops every photo into a wide frame and uses this as
+ * the CSS object-position, so a tall façade shot keeps the building instead of the sky.
+ * Written by the WhatsApp intake (2026-11-17); absent = centred, as before.
+ */
+export const isImageFocus = (f) => Boolean(f) && typeof f === 'object' && !Array.isArray(f)
+  && [f.x, f.y].every((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1);
+export function imageFocusProblems(focus, i) {
+  if (focus === undefined) return [];
+  return isImageFocus(focus) ? [] : [`images[${i}].focus must be { x, y } with both numbers between 0 and 1`];
+}
+
+/**
+ * The price for housing-subsidy (Sakani) beneficiaries (optional), printed by NHC-style
+ * brochures beside the regular price ("السعر لمستفيدي الدعم" / "السعر لغير مستفيدي الدعم").
+ * `amount` stays the regular price; this is the lower figure, same currency, shown as a
+ * second line. Only on a sale with a published price (owner decision 2026-11-17).
+ */
+export function subsidisedPriceProblems(price, category) {
+  const s = price?.subsidisedAmount;
+  if (s === undefined) return [];
+  if (!(typeof s === 'number' && Number.isFinite(s) && s > 0)) return ['price.subsidisedAmount must be a number > 0 when present'];
+  const e = [];
+  if (price.onRequest || !(typeof price.amount === 'number' && price.amount > 0)) e.push('price.subsidisedAmount needs a published price.amount');
+  else if (s >= price.amount) e.push('price.subsidisedAmount must be lower than price.amount');
+  if (category === 'rent') e.push('price.subsidisedAmount is for sales only');
+  return e;
+}
+
 // ---- withholding listings from the public site --------------------------------------
 // Two separate owner rules, deliberately not merged:
 //   land   — a SAR 50,000,000 cap (2026-09-06, in build.mjs): exact plot locations are

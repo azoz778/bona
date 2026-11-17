@@ -23,11 +23,13 @@ Array of listing objects:
     "currency": "SAR",              // SAR | AED | EUR | USD | OMR
     "from": false,                  // true => "From SAR 1,700,000"
     "period": null,                 // null | "year" | "month" (rent)
-    "onRequest": false              // true => "Price on request" (amount may be null)
+    "onRequest": false,             // true => "Price on request" (amount may be null)
+    "subsidisedAmount": 270425      // OPTIONAL — see "Two printed prices" below; omit when there is none
   },
   "specs": { "beds": 5, "baths": 6, "areaSqm": 537, "plotSqm": null, "yearBuilt": null, "floors": null },
   "images": [
-    { "src": "https://tk-storage.azoz.uk/tk-estate-media/media/<folder>/<file>", "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/<file>.webp", "alt": { "en": "...", "ar": "..." } }
+    { "src": "https://tk-storage.azoz.uk/tk-estate-media/media/<folder>/<file>", "thumb": "https://tk-storage.azoz.uk/tk-estate-media/website-thumbs/<file>.webp", "alt": { "en": "...", "ar": "..." },
+      "focus": { "x": 0.5, "y": 0.8 } }   // OPTIONAL — see "Photo focus points" below
   ],                                // images[0] is the hero; 4–10 images
   "description": { "en": "2–4 short paragraphs", "ar": "..." },
   "highlights": { "en": ["Private beach", "..."], "ar": ["شاطئ خاص", "..."] },
@@ -39,6 +41,19 @@ Array of listing objects:
 ```
 
 Rules: prices are asking prices from TK only (never an estimate — TAQEEM rule). Arabic must be real Arabic, not transliteration. Every listing needs at least 4 images with working URLs (HEAD 200).
+
+## Two printed prices and photo focus points (2026-11-17)
+- **Two printed prices** — optional `price.subsidisedAmount`: NHC-style brochures print every unit twice,
+  "السعر لغير مستفيدي الدعم" (regular) and "السعر لمستفيدي الدعم" (housing-subsidy / Sakani beneficiaries).
+  `amount` is the regular price and stays the headline; `subsidisedAmount` is the lower one, same currency
+  and same `from`, rendered as a second line ("Sakani beneficiaries: From SAR 270,425"). Only on a sale with
+  a published `amount`, and lower than it (`subsidisedPriceProblems` in `scripts/curate/rules.mjs`). The intake
+  publishes it only when it is printed (TAQEEM check, like `amount`); `price <id> …` on WhatsApp clears it.
+- **Photo focus points** — optional `images[].focus` `{ x, y }`, 0–1 fractions of the width and height from
+  the top-left: the centre of the photo's subject. Every place the site crops a listing photo
+  (`object-fit: cover`) uses it as `object-position` (`focusStyle()` in `src/lib/listings.ts`), so a tall
+  façade shot in a wide frame keeps the building instead of the sky. Written by the intake's model; absent =
+  centred, as before (`imageFocusProblems` in `scripts/curate/rules.mjs`).
 
 ## Round 2 additions (2026-09-05 17:00)
 - `kind`: `"house" | "apartment" | "land" | "building"` — REQUIRED on every listing. Derived from `type`: villa/mansion/duplex/palais → house; apartment/penthouse → apartment; land → land; building → building. The site has separate Houses and Apartments sections driven by this field.
@@ -118,7 +133,7 @@ this repo. Nothing else in the pipeline changes.
   - `_intake: { source, messageId, groupJid, pdfSha256, pdfFileName, caption, model, confidence,
     warnings, images[], createdAt, site }` — provenance, so a listing can always be traced back to
     the WhatsApp message and the PDF that produced it. `warnings` is an array of **codes** from a
-    fixed vocabulary (`not-enough-photos`, `price-not-printed`, `brochure-too-large`,
+    fixed vocabulary (`not-enough-photos`, `price-not-printed`, `subsidised-price-not-printed`, `brochure-too-large`,
     `brochure-failed`, `images-skipped`, `model-flagged`) and never free text: the model's own
     `warnings` are model output about an untrusted document, so they stay in the run's `ai.json`
     and are not committed.

@@ -11,9 +11,12 @@ export interface Listing {
   type: string; kind?: Kind; featured?: boolean;
   title: Localised;
   location: { district: Localised; city: Localised; country: Localised; countryCode: string };
-  price: { amount: number | null; currency: string; from?: boolean; period?: string | null; onRequest?: boolean };
+  /** `subsidisedAmount` = the brochure's second, lower price for housing-subsidy (Sakani) beneficiaries; `amount` stays the regular price. */
+  price: { amount: number | null; currency: string; from?: boolean; period?: string | null; onRequest?: boolean; subsidisedAmount?: number | null };
   specs: { beds?: number | null; baths?: number | null; areaSqm?: number | null; plotSqm?: number | null; yearBuilt?: number | null; floors?: number | null };
-  images: { src: string; thumb?: string | null; alt?: Localised }[];
+  /** `focus` = the centre of the photo's subject as 0–1 fractions of width/height (WhatsApp intake, 2026-11-17).
+      Used as the CSS object-position wherever the photo is cropped; absent = centred. */
+  images: { src: string; thumb?: string | null; alt?: Localised; focus?: { x: number; y: number } | null }[];
   /** Set only when the owner confirmed the photos show something else, e.g. the developer's completed sister project.
       Shown under the gallery, carried in every image label, and opens the daily post's caption. */
   photoNote?: Localised | null;
@@ -48,6 +51,14 @@ export interface Listing {
 }
 
 export const listings: Listing[] = raw as Listing[];
+
+/** Inline style that keeps a cropped photo on its subject (`object-position` from `focus`); undefined = centred, as before. */
+export function focusStyle(img?: { focus?: { x: number; y: number } | null } | null): string | undefined {
+  const f = img?.focus;
+  if (!f || !Number.isFinite(f.x) || !Number.isFinite(f.y)) return undefined;
+  const pct = (v: number) => `${Math.round(Math.min(1, Math.max(0, v)) * 100)}%`;
+  return `object-position: ${pct(f.x)} ${pct(f.y)}`;
+}
 export const featured = (): Listing[] => listings.filter(l => l.featured && l.status !== 'sold').slice(0, 9);
 export const byCategory = (c: Listing['category']): Listing[] => listings.filter(l => l.category === c);
 export const bySlug = (slug: string): Listing | undefined => listings.find(l => l.slug === slug);

@@ -9,6 +9,9 @@
 //     --model <name>       override BONA_CLAUDE_MODEL
 //     --work <path>        scratch dir (default $BONA_DATA/intake/manual/<timestamp>)
 //     --json               print the whole report as JSON instead of the human summary
+//     --replace <id>       re-run the brochure over the listing it already published (same id,
+//                          slug, date and reference; new copy, price and photos). Refused for a
+//                          listing with videos, a licence, or `hidden` — those are not carried over.
 //
 // Without --dry-run and without --no-git this commits and pushes, exactly like the daemon.
 import fs from 'node:fs';
@@ -18,8 +21,9 @@ import { loadConfig } from './lib/env.mjs';
 import { parseCaption } from './lib/commands.mjs';
 import { withLock } from './lib/lock.mjs';
 import { say } from './lib/log.mjs';
+import { replaceMetaFor } from './lib/listing.mjs';
 import { processPdf, RejectError } from './lib/pipeline.mjs';
-import { assertCleanTree, gitCommitPush, gitPull, resetTree } from './lib/publish.mjs';
+import { assertCleanTree, gitCommitPush, gitPull, gitStatus, resetTree } from './lib/publish.mjs';
 
 function parseArgs(argv) {
   const out = { flags: new Set(), opts: {}, positional: [] };
@@ -32,7 +36,7 @@ function parseArgs(argv) {
   return out;
 }
 
-const money = (p) => (p.onRequest || !p.amount ? 'Price on request' : `${p.currency} ${p.amount.toLocaleString('en-US')}${p.period ? ` / ${p.period}` : ''}${p.from ? ' (from)' : ''}`);
+const money = (p) => (p.onRequest || !p.amount ? 'Price on request' : `${p.currency} ${p.amount.toLocaleString('en-US')}${p.period ? ` / ${p.period}` : ''}${p.from ? ' (from)' : ''}${typeof p.subsidisedAmount === 'number' ? ` · Sakani beneficiaries ${p.currency} ${p.subsidisedAmount.toLocaleString('en-US')}` : ''}`);
 
 function printReport(r) {
   const l = r.listing || r.listingPreview;
@@ -98,7 +102,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const pdf = args.positional[0];
   if (!pdf) {
-    say('usage: run-once.mjs <file.pdf> [--dry-run] [--no-git] [--repo <path>] [--caption "…"] [--model <name>] [--json]');
+    say('usage: run-once.mjs <file.pdf> [--dry-run] [--no-git] [--repo <path>] [--caption "…"] [--model <name>] [--replace <id>] [--json]');
     process.exit(2);
   }
   const pdfPath = path.resolve(pdf);
@@ -110,6 +114,11 @@ async function main() {
   const cfg = loadConfig(overrides);
   const dryRun = args.flags.has('dry-run');
   const noGit = args.flags.has('no-git') || dryRun;
+  // A replacement deletes the old files and relies on git to bring them back if the run fails.
+  if (args.opts.replace && args.flags.has('no-git') && !dryRun) {
+    say('--replace needs git (it rolls a failed run back from the last commit): drop --no-git, or add --dry-run to preview');
+    process.exit(2);
+  }
 
   if (!fs.existsSync(path.join(cfg.repo, 'scripts', 'curate', 'build.mjs'))) {
     say(`--repo ${cfg.repo} does not look like the Bona repo (no scripts/curate/build.mjs)`);
@@ -128,20 +137,28 @@ async function main() {
     // people's uncommitted changes in it is safe to point at.
     const report = await withLock(cfg.lockPath, async () => {
       if (!noGit) {
+        // assertCleanTree() RECOVERS a dirty clone by discarding its changes — right for a crashed
+        // job, wrong for a replacement, whose guard must see the listing as it stands. Refuse instead.
+        if (args.opts.replace) {
+          const dirty = await gitStatus(cfg.repo);
+          if (dirty) throw new Error(`--replace: ${cfg.repo} has uncommitted changes, which --replace will not discard — commit or clean them first (run it in the publishing clone)`);
+        }
         await assertCleanTree(cfg.repo);
         await gitPull(cfg.repo, { remote: cfg.gitRemote, branch: cfg.gitBranch });
       }
+      const meta = { pdfFileName: path.basename(pdfPath) };
+      if (args.opts.replace) Object.assign(meta, replaceMetaFor(cfg.repo, args.opts.replace));
       const r = await processPdf({
         pdfPath,
         cfg,
         caption,
         workDir: work,
         dryRun: dryRun || caption.dryRun,
-        meta: { pdfFileName: path.basename(pdfPath) },
+        meta,
       });
       if (r.dryRun || noGit) return r;
       try {
-        r.push = await gitCommitPush(cfg.repo, `intake: ${r.listing.title.en} (${r.id})`, {
+        r.push = await gitCommitPush(cfg.repo, `intake: ${meta.replace ? 'replace ' : ''}${r.listing.title.en} (${r.id})`, {
           remote: cfg.gitRemote, branch: cfg.gitBranch,
           paths: [`public/listings/${r.slug}`, 'scripts/curate/inbox', 'src/data/listings.json'],
         });

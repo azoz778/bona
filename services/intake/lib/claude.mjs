@@ -28,7 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
-import { FORBIDDEN as COPY_FORBIDDEN, HYPE_WORDS as SHARED_HYPE_WORDS } from '../../../scripts/curate/rules.mjs';
+import { FORBIDDEN as COPY_FORBIDDEN, HYPE_WORDS as SHARED_HYPE_WORDS, isImageFocus as isFocus } from '../../../scripts/curate/rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PROMPT_TEMPLATE = path.join(HERE, 'prompt.md');
@@ -85,9 +85,12 @@ export function fence(label, body) {
 /**
  * @param {{extraction:object, sheets:Array<{file:string,from:number,to:number}>, caption:object,
  *          pageImages?:Array<{page:number,abs:string,width:number,height:number}>,
- *          rubricPath?:string}} input
+ *          pageReason?:'no-text'|'price-pages', rubricPath?:string}} input
+ *   `pageReason` says why `pageImages` exist: 'no-text' = the PDF has no text layer, so EVERY page
+ *   was rendered; 'price-pages' = the text layer is fine except that the pages listed print prices
+ *   whose digits it cannot read (see price-pages.mjs), so only those were rendered.
  */
-export function buildPrompt({ extraction, sheets, caption, pageImages = [], rubricPath }) {
+export function buildPrompt({ extraction, sheets, caption, pageImages = [], pageReason = 'no-text', rubricPath }) {
   let rubric = DEFAULT_RUBRIC;
   if (rubricPath) {
     try { rubric = fs.readFileSync(rubricPath, 'utf8').trim() || DEFAULT_RUBRIC; } catch { /* default */ }
@@ -109,7 +112,27 @@ export function buildPrompt({ extraction, sheets, caption, pageImages = [], rubr
     .join('\n\n')
     .slice(0, 60000);
 
-  const pageBlock = pageImages.length
+  const evidenceRule = [
+    'A price printed on one of these pages MUST come with `priceEvidence: { "page": <n>, "quote": "<the',
+    'exact printed text>" }` — even when the text layer seems to show it too — and a subsidised price',
+    'with `subsidisedPriceEvidence` in the same shape. Without it that price is not published.',
+  ];
+  const pageBlock = pageImages.length && pageReason === 'price-pages'
+    ? [
+      `${pageImages.length} page(s) of this PDF print prices whose digits are missing or scrambled in the`,
+      'text layer below — the PDF\'s font maps its digits to other characters, so a price printed as',
+      '270,425 can read "DIB,FDG" in the text. Those pages were rendered as images. **Read every one of them',
+      'with the Read tool** and take every price, area and unit figure on them from the image, never from the',
+      'text layer. Elsewhere in the text layer, a figure scrambled the same way (capital letters where digits',
+      'should be) cannot be trusted: leave it out unless you can read it on a page image. Readable figures stay',
+      'usable. Some of these pages were rendered for another reason: they print separate prices for',
+      'housing-subsidy beneficiaries, and the two prices must be told apart by looking.',
+      '',
+      ...pageImages.map((p) => `  - page ${p.page}: ${p.abs}  (${p.width}x${p.height})`),
+      '',
+      ...evidenceRule,
+    ].join('\n')
+    : pageImages.length
     ? [
       `This PDF has **no usable text layer**, so all ${pageImages.length} of its pages were rendered as images.`,
       '**Read every one of them with the Read tool** and take the specs, the price, the district, the',
@@ -119,8 +142,7 @@ export function buildPrompt({ extraction, sheets, caption, pageImages = [], rubr
       '',
       ...pageImages.map((p) => `  - page ${p.page}: ${p.abs}  (${p.width}x${p.height})`),
       '',
-      'A price you take from a page image MUST come with `priceEvidence: { "page": <n>, "quote": "<the',
-      'exact printed text>" }`. Without it the listing is published as "price on request".',
+      ...evidenceRule,
     ].join('\n')
     : '(the PDF has a readable text layer — it is reproduced below)';
 
@@ -233,6 +255,18 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
   if (!p.onRequest && !(typeof p.amount === 'number' && p.amount > 0)) e.push('listing.price: amount must be > 0 unless onRequest is true');
   if (![null, undefined, 'year', 'month'].includes(p.period)) e.push('listing.price.period must be null, "year" or "month"');
   if (l.category === 'rent' && !p.period && !p.onRequest) e.push('rent listings need price.period');
+  // A second, lower price for housing-subsidy (Sakani) beneficiaries, printed beside the regular one.
+  if (p.subsidisedAmount !== null && p.subsidisedAmount !== undefined) {
+    if (!(typeof p.subsidisedAmount === 'number' && Number.isFinite(p.subsidisedAmount) && p.subsidisedAmount > 0)) {
+      e.push('listing.price.subsidisedAmount must be null or a number > 0');
+    } else if (p.onRequest || !(typeof p.amount === 'number' && p.amount > 0)) {
+      e.push('listing.price.subsidisedAmount needs a published amount (it is null when onRequest is true)');
+    } else if (p.subsidisedAmount >= p.amount) {
+      e.push('listing.price.subsidisedAmount must be lower than amount (amount = the regular, non-subsidised price)');
+    } else if (l.category === 'rent') {
+      e.push('listing.price.subsidisedAmount is for sales only — null on a rental');
+    }
+  }
 
   const s = l.specs || {};
   for (const k of ['beds', 'baths', 'areaSqm', 'plotSqm', 'yearBuilt', 'floors']) {
@@ -262,6 +296,9 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
       else if (seen.has(im.index)) e.push(`images: duplicate index ${im.index}`);
       else seen.add(im.index);
       if (!ROOM_KEYS.includes(im?.room) && !im?.exclude) e.push(`images[#${im?.index}]: unknown room key "${im?.room}"`);
+      if (im?.focus !== null && im?.focus !== undefined && !isFocus(im.focus)) {
+        e.push(`images[#${im?.index}]: focus must be null or { x, y } with both numbers between 0 and 1`);
+      }
       if (im?.hero) heroes += 1;
     }
     if (heroes > 1) e.push('images: more than one hero');
@@ -274,14 +311,17 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
   if (typeof result.confidence !== 'number' || result.confidence < 0 || result.confidence > 1) e.push('confidence must be a number between 0 and 1');
   // Optional, and only meaningful for a PDF with no text layer. Shape-checked here; whether
   // the evidence is TRUE is decided by pipeline.mjs, which looks at the page itself.
-  const ev = result.priceEvidence;
-  if (ev !== null && ev !== undefined) {
-    if (!(typeof ev === 'object' && Number.isInteger(ev.page) && ev.page >= 1 && isStr(ev.quote))) {
-      e.push('priceEvidence must be null or { page: <1-based page number>, quote: "<printed text>" }');
+  for (const key of ['priceEvidence', 'subsidisedPriceEvidence']) {
+    const ev = result[key];
+    if (ev !== null && ev !== undefined) {
+      if (!(typeof ev === 'object' && Number.isInteger(ev.page) && ev.page >= 1 && isStr(ev.quote))) {
+        e.push(`${key} must be null or { page: <1-based page number>, quote: "<printed text>" }`);
+      }
     }
   }
   return e;
 }
+
 
 /**
  * Second opinion on ONE page render: is the price the model claimed actually printed there?
@@ -290,17 +330,32 @@ export function validateAiResult(result, { candidateCount = 0 } = {}) {
  * @returns {Promise<{confirmed:boolean, error?:string}>}
  */
 export async function confirmPriceEvidence({
-  pageImage, amount, currency, quote, bin = 'claude', model = 'sonnet', cwd,
+  pageImage, amount, currency, quote, subsidised = false, project = false, subject = null, unit = null, bin = 'claude', model = 'sonnet', cwd,
   addDirs = [], settingsPath = null, timeoutMs = 300000, spawnImpl = spawn,
 }) {
+  const which = subsidised
+    ? 'the price for housing-subsidy (Sakani) beneficiaries'
+    : 'the price';
   const prompt = [
     'Read the image file below with the Read tool. It is one page of a property brochure.',
     '',
     `  ${pageImage}`,
     '',
-    `Question: does that page VISIBLY PRINT the price ${amount} ${currency} for the property?`,
+    `Question: does that page VISIBLY PRINT ${which} ${amount} ${currency} for the property?`,
+    ...(subject || unitLabel(unit) ? [fence('the listing this price is for', [subject, unitLabel(unit)].filter(Boolean).join(' — '))] : []),
+    ...(unitLabel(unit) ? ['It is ONE unit: a price printed for a different unit or model does not count.'] : []),
     'A number you have to compute, infer or assume does not count. A price for a different unit',
     'on the same page does not count unless the page makes clear it is this property\'s price.',
+    ...(project
+      ? ['The listing is a whole development sold as several unit models: a price printed for one of its',
+        'unit models counts as the property\'s price.']
+      : []),
+    ...(subsidised
+      ? ['It must be printed as the price for subsidy beneficiaries (for example "السعر لمستفيدي الدعم");',
+        'the regular price for everyone else does not count here.']
+      : ['If the page prints separate prices for housing-subsidy beneficiaries ("لمستفيدي الدعم") and for',
+        'everyone else ("لغير مستفيدي الدعم"), only the price for everyone else counts here: a price printed',
+        'only for subsidy beneficiaries does NOT count.']),
     '',
     fence('what the first pass claimed it saw', quote ?? '(nothing quoted)'),
     '',
@@ -314,7 +369,30 @@ export async function confirmPriceEvidence({
   }
 }
 
-/** Copy hygiene: no other agency's brand, no phone numbers, no hype. */
+const unitLabel = (u) => {
+  if (!u || typeof u !== 'object') return '';
+  const parts = [u.unitRef && `unit ${u.unitRef}`, u.block && `block ${u.block}`, u.floor !== null && u.floor !== undefined && `floor ${u.floor}`].filter(Boolean);
+  return parts.join(', ');
+};
+
+/**
+ * A price inside the copy: a price-sized figure next to a currency. The site prints the price from
+ * `price` (which the TAQEEM check may have cleared), so a figure in the prose could outlive it.
+ */
+const CUR = '(?:\\b(?:SAR|SR|AED|USD|EUR|GBP|OMR)\\b|riyals?|ريال|ر\\.\\s?س|[$€£﷼\u20c1])';
+const SCALE = '(?:k|m|mn|million|bn|billion|ألف|الف|آلاف|الاف|مليون|ملايين|مليار)';
+const PRICE_IN_COPY_RE = new RegExp([
+  `${CUR}\\s*(?:[\\d٠-٩]{1,3}(?:[,٬.\\s][\\d٠-٩]{3})+|[\\d٠-٩]{4,})`,         // SAR 319,015 / SAR 8500 — not "SR 15"
+  `${CUR}\\s*[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*${SCALE}(?![a-z])`,           // SAR 2.5m
+
+  `[\\d٠-٩]{1,3}(?:[,٬.][\\d٠-٩]{3})+\\s*(?:(?:saudi|ريال سعودي)\\s*)?${CUR}`, // 319,015 ريال
+  `[\\d٠-٩]{5,}\\s*${CUR}`,                                             // 319015 SAR
+  `[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*${SCALE}\\s*(?:saudi\\s*)?${CUR}`,       // 2.5 million SAR / 3 ملايين ريال
+  `(?:^|[^\\d٠-٩\\s.,])\\s*(?:مليون|ملايين|ألف|آلاف|الف|الاف)\\s*(?:ريال|ر\\.\\s?س)`, // مليون ريال (no figure)
+  `(?:بسعر|السعر|ابتداء[ًا]? من|تبدأ من|يبدأ من|starting (?:at|from)|priced at)\\s*[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*${SCALE}(?![a-z²³2])(?!\\s*(?:m²|m2|sq|square|met|متر|م²|م2|km|كم|min|دقيق|دقائق|هكتار))`, // ابتداءً من 5 ملايين — not "from 120 m²"
+].join('|'), 'i');
+
+/** Copy hygiene: no other agency's brand, no phone numbers, no hype, no prices. */
 export function copyProblems(listing) {
   const bad = [];
   const FORBIDDEN = [...COPY_FORBIDDEN, /\bwhatsapp\b/i];
@@ -329,6 +407,9 @@ export function copyProblems(listing) {
   for (const [label, value] of fields) {
     if (!isStr(value)) continue;
     for (const re of FORBIDDEN) if (re.test(value)) bad.push(`${label} mentions "${value.match(re)[0]}"`);
+    if (PRICE_IN_COPY_RE.test(value)) {
+      bad.push(`${label} states a price ("${value.match(PRICE_IN_COPY_RE)[0].trim()}") — prices go in listing.price only`);
+    }
     for (const w of HYPE_WORDS) if (new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(value)) bad.push(`${label} uses hype word "${w}"`);
   }
   return bad;

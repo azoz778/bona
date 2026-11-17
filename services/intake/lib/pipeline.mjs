@@ -31,18 +31,36 @@ import { classifyPdf } from './classify.mjs';
 import { writeConfinement } from './confine.mjs';
 import { buildContactSheets } from './contact-sheet.mjs';
 import { buildPrompt, confirmPriceEvidence, runListingAi } from './claude.mjs';
-import { writeListingImages } from './images.mjs';
+import { removeListingImages, writeListingImages } from './images.mjs';
 import {
-  addWarningCode, buildListing, checkListing, findByPdfSha, inboxIds, nextListingId, orderedPicks,
+  addWarningCode, buildListing, checkListing, findByPdfSha, findInbox, inboxIds, nextListingId, orderedPicks,
   readIndex, seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing,
 } from './listing.mjs';
 import { log } from './log.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
-import { priceAppearsIn } from './price.mjs';
+import { priceAppearsIn, westernise } from './price.mjs';
+import { isSubsidyPricePage, pricePagesToRender } from './price-pages.mjs';
 import { pinFromLinks } from './geo.mjs';
-import { rebuild, resetTree } from './publish.mjs';
+import { changedSincePublished, committedUnchanged, rebuild, resetTree } from './publish.mjs';
 import { loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNamedIn, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
+
+/** Words that make a figure in the copy a price: a currency, "price", "from"-style openers. */
+const PRICE_CONTEXT_RE = /سعر|أسعار|اسعار|ريال|ر\.\s?س|ثمن|قيمة(?!\s*المضافة)|ابتداء|تبدأ|يبدأ|\b(?:SAR|SR|AED|USD|EUR|GBP|riyals?|prices?|priced|costs?|starting|starts)\b|[$€£﷼\u20c1]/i;
+
+/**
+ * A measurement or a count: ONE figure followed straight away by its unit — "3 million square
+ * metres", "120 m²", "1,710 units", "a 20 m street", "٣ ملايين متر مربع" (after westernise). These
+ * are cut out of a sentence before a refused price is looked for in it, so only the mention that IS
+ * the figure is excused, never a sentence that merely has an area in it somewhere. The digit run has
+ * no spaces, so "from 319,015, 1,710 units" cannot swallow the price into the measurement. A bare
+ * "m" is metres only with a space before it ("20 m"): written solid ("4.5m") it is millions, the
+ * same rule priceAppearsIn applies.
+ */
+const MEASURE_G = new RegExp(String.raw`(?<![\d.,٫٬])\d+(?:[.,٫٬]\d{3})*(?:[.٫]\d+)?\s*(?:(?:million|thousand|mn|m|k|مليون|ملايين|ألف|آلاف|الف)\s*)?`
+  + String.raw`(?:m²|m2(?!\d)|sq\.?\s?(?:m|ft)\b|square\s+(?:met|feet|foot)|met(?:re|er)s?\b|(?<=\s)m(?![a-z²\d])|ft\b|feet\b|hectares?\b|km\b|units?\b|buildings?\b|residents?\b|visitors?\b|trees?\b|`
+  + String.raw`م²|م2|متر|هكتار|كم(?![\u0600-\u06ff])|م(?![\u0600-\u06ff])|وحد(?:ة|ات)|مبن[ىي]|مباني|ساكن|سكان|زائر|شجر)`, 'gi');
+const withoutMeasures = (seg) => westernise(seg).replace(MEASURE_G, ' ');
 
 export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
@@ -74,7 +92,8 @@ export class RejectError extends Error {
  * @param {object} opts.caption      parseCaption() result
  * @param {string} opts.workDir      scratch dir for extraction + sheets + staging
  * @param {boolean} [opts.dryRun]    stop before writing to the repo
- * @param {object} [opts.meta]       messageId / groupJid / pdfFileName
+ * @param {object} [opts.meta]       messageId / groupJid / pdfFileName; or, for run-once --replace,
+ *                                   { replace: true, id, slug, listedAt, sourceRef } of the listing to rewrite
  * @returns {Promise<object>} run report
  */
 export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun = false, meta = {} }) {
@@ -85,6 +104,29 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const stat = fs.statSync(pdfPath);
   report.bytes = stat.size;
   report.sha256 = sha256File(pdfPath);
+
+  // --- replace: checked first, before a page is read or a model is paid ------------
+  // `meta.replace` (run-once --replace <id>): re-run a brochure over the listing it already
+  // published — same id, slug, date and reference, new copy, price and photos. Used after a fix to
+  // the intake itself (2026-11-17: W023's prices were on pages the first run could not read).
+  if (meta.replace) {
+    if (!meta.id || !meta.slug) throw new Error('replace needs the id and slug of the listing it replaces');
+    const current = findInbox(cfg.repo, meta.id);
+    if (!current || current.listing.slug !== meta.slug) throw new Error(`${meta.id} is not in the inbox under ${meta.slug} — nothing to replace`);
+    // The old photos are deleted before the new ones are copied in, and a failed run is rolled
+    // back from git: so the listing as it stands must BE in git, unchanged, or it is lost.
+    if (!dryRun && !(await committedUnchanged(cfg.repo, [path.join('public', 'listings', meta.slug), path.relative(cfg.repo, current.file)]))) {
+      throw new Error(`${meta.id} has uncommitted changes (or is not in git) — commit or discard them before --replace`);
+    }
+    // A re-run rebuilds title, place, copy, photos and labels from the brochure, so any later
+    // commit to the listing or its photos — a district corrected by hand, an Arabic name fixed, a
+    // photo re-cropped, a WhatsApp edit made before edits were recorded — would be undone
+    // silently. Only the commit that published it, and earlier replacements, may be in its history.
+    if (!dryRun) {
+      const changed = await changedSincePublished(cfg.repo, [path.relative(cfg.repo, current.file), path.join('public', 'listings', meta.slug)]);
+      if (changed) throw new Error(`${meta.id} has been changed since it was published (${changed}) — a re-run would undo that; do it by hand`);
+    }
+  }
 
   // --- 0. withdrawn advertising -------------------------------------------------
   // A brochure whose project the developer withdrew from advertising (rules.mjs
@@ -136,6 +178,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // A brochure with no text layer is NOT accepted locally: every page is rendered and the
   // AI reads them. Default-deny still holds — it just happens one gate later.
   let pageImages = [];
+  let pageReason = 'no-text';
   if (verdict.imageOnly) {
     report.stage = 'page-renders';
     const pages = await renderPdfPages(pdfPath, workDir, {
@@ -145,6 +188,27 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     pageImages = pages.pageImages || [];
     report.pageImages = pageImages.length;
     log.info('intake.page_renders', { pages: pageImages.length, longSide: cfg.pageReadLongSide });
+  } else {
+    // A readable text layer can still be unreadable exactly where it matters: a font that maps
+    // its digits to letters prints 270,425 on the page and "DIB,FDG" in the text. The pages that
+    // talk about a price without a readable one are rendered so the model can look (price-pages.mjs).
+    // A failed render costs only the price (it stays on request), never the listing.
+    const pricePages = pricePagesToRender(extraction.pageText, { maxPages: cfg.maxPricePages });
+    if (pricePages.length) {
+      report.stage = 'page-renders';
+      const pages = await renderPdfPages(pdfPath, workDir, {
+        pyCmd: cfg.pyCmd, maxPages: cfg.maxPdfPages, longSide: cfg.pageReadLongSide,
+        pages: pricePages, dir: 'price-pages',
+      });
+      if (pages.ok === false) {
+        log.warn('intake.price_pages_failed', { pages: pricePages, error: pages.error });
+      } else {
+        pageImages = pages.pageImages || [];
+        pageReason = 'price-pages';
+        report.pricePages = pageImages.map((p) => p.page);
+        log.info('intake.price_pages', { pages: report.pricePages, longSide: cfg.pageReadLongSide });
+      }
+    }
   }
 
   const confinement = writeConfinement(workDir);
@@ -212,7 +276,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const askModel = async () => {
     const sheets = await buildContactSheets(extraction.candidates, path.join(workDir, 'sheets'));
     report.sheets = sheets.map((s) => s.file);
-    const prompt = buildPrompt({ extraction, sheets, caption, pageImages, rubricPath: fs.existsSync(rubricPath) ? rubricPath : null });
+    const prompt = buildPrompt({ extraction, sheets, caption, pageImages, pageReason, rubricPath: fs.existsSync(rubricPath) ? rubricPath : null });
     fs.writeFileSync(path.join(workDir, 'prompt.txt'), prompt);
     return runListingAi({
       prompt,
@@ -275,36 +339,108 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // brochure with no text layer make a second `claude -p` look at the page it cited.
   report.stage = 'price';
   const price = ai.listing?.price;
+  const pageText = extraction.pageText ?? [];
+  // A page that mentions subsidy beneficiaries prints TWO prices per unit. A number found in its
+  // text layer proves the number is printed, not WHICH price it is — so text found only on such
+  // pages never settles a price; the page image does (those pages are always rendered, see
+  // price-pages.mjs). The caption is the owner's own words and always counts.
+  const plainText = pageText.length ? pageText.filter((t) => !isSubsidyPricePage(t)).join('\n') : (extraction.text || '');
+  const haystack = `${plainText}\n${caption.text || ''}`;
+  // The "a price for one of its unit models counts" allowance is for a whole development quoted
+  // "from" its cheapest model — never for one specific unit, and never for a price not marked `from`.
+  const wholeDevelopment = Boolean(ai.listing?.project) && !ai.listing?.unit && price?.from === true;
+  /**
+   * Is `amount` printed as THIS price? In the plain text layer (headline only), or — confirmed by a
+   * second model — on a rendered page. Evidence the model forgot is looked for in the rendered
+   * pages' text, so a price it read from the text layer is still checked on its page.
+   */
+  const printed = async (amount, evidence, { subsidised = false } = {}) => {
+    const out = { inText: subsidised ? false : priceAppearsIn(haystack, amount), confirmed: null };
+    if (out.inText || !pageImages.length) return out;
+    // The model's citation when it names a rendered page; otherwise the rendered page whose text
+    // carries the number. Either way the second model looks at the page before anything counts.
+    const citedRendered = evidence && pageImages.some((p) => p.page === evidence.page) ? evidence : null;
+    const cited = citedRendered ?? (() => {
+      const hit = pageImages.find((p) => priceAppearsIn(pageText[p.page - 1] ?? '', amount));
+      return hit ? { page: hit.page, quote: String(amount) } : null; // the model's quote was about another page
+    })();
+    const page = cited && pageImages.find((p) => p.page === cited.page);
+    if (!page) return out;
+    const check = await confirmPriceEvidence({
+      pageImage: page.abs,
+      amount,
+      currency: price.currency,
+      quote: cited.quote,
+      subsidised,
+      project: wholeDevelopment,
+      subject: ai.listing?.title?.en,
+      unit: ai.listing?.unit ?? null,
+      bin: cfg.claudeBin,
+      model: cfg.claudeModel,
+      cwd: workDir,
+      addDirs: [workDir],
+      settingsPath: confinement.file,
+    });
+    out.confirmed = check.confirmed;
+    log.info('intake.price_evidence', { page: cited.page, subsidised, inferred: cited !== evidence, confirmed: check.confirmed, error: check.error ?? null });
+    return out;
+  };
+  const rejectedPrices = [];
+  const copySegments = [ai.listing?.title?.en, ai.listing?.title?.ar, ...(ai.listing?.description?.en ?? []), ...(ai.listing?.description?.ar ?? []),
+    ...(ai.listing?.highlights?.en ?? []), ...(ai.listing?.highlights?.ar ?? [])].filter(Boolean)
+    .flatMap((x) => String(x).split(/[.!?؟؛;\n]+(?=\s|$)/));
+  const inCopy = (n) => copySegments.some((seg) => priceAppearsIn(seg, n));
+  // Under the owner's caption price the model's own figure is not published as the price — but if
+  // it also wrote it into the copy, that figure must be printed in the brochure too.
+  if (caption.price && price && typeof price.amount === 'number' && price.amount > 0
+      && price.amount !== caption.price.amount && inCopy(price.amount)) {
+    const check = await printed(price.amount, ai.priceEvidence);
+    if (!check.inText && !check.confirmed) rejectedPrices.push(price.amount);
+  }
   if (!caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
-    const haystack = `${extraction.text || ''}\n${caption.text || ''}`;
-    let evidenced = priceAppearsIn(haystack, price.amount);
-    report.priceEvidence = { inText: evidenced, confirmed: null };
-    if (!evidenced && pageImages.length && ai.priceEvidence) {
-      const page = pageImages.find((p) => p.page === ai.priceEvidence.page);
-      if (page) {
-        const check = await confirmPriceEvidence({
-          pageImage: page.abs,
-          amount: price.amount,
-          currency: price.currency,
-          quote: ai.priceEvidence.quote,
-          bin: cfg.claudeBin,
-          model: cfg.claudeModel,
-          cwd: workDir,
-          addDirs: [workDir],
-          settingsPath: confinement.file,
-        });
-        evidenced = check.confirmed;
-        report.priceEvidence.confirmed = check.confirmed;
-        log.info('intake.price_evidence', { page: ai.priceEvidence.page, confirmed: check.confirmed, error: check.error ?? null });
-      }
-    }
-    if (!evidenced) {
+    report.priceEvidence = await printed(price.amount, ai.priceEvidence);
+    if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
       log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency });
+      rejectedPrices.push(price.amount);
       price.amount = null;
       price.onRequest = true;
       price.from = false;
       report.warningCodes.push('price-not-printed');
       report.warnings.push('the price was not printed in the brochure, so the listing says "price on request" — send `price <id> <amount>` to set one');
+    }
+  }
+  // The subsidised (Sakani) price rides on the headline price: it is published only beside a
+  // published brochure price, and only when a second model has seen it printed AS the subsidy
+  // beneficiaries' price on a page image. The owner's caption price replaces both.
+  if (price && typeof price.subsidisedAmount === 'number') {
+    const headline = !caption.price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0;
+    // Checked even under the owner's caption price: the price field drops the figure then (the
+    // caption replaces both), but if the model also wrote it into the copy it must be a printed one.
+    const evidence = (headline || (caption.price && inCopy(price.subsidisedAmount)))
+      ? await printed(price.subsidisedAmount, ai.subsidisedPriceEvidence, { subsidised: true }) : null;
+    report.subsidisedPriceEvidence = evidence;
+    if (!evidence?.confirmed) {
+      if (headline) {
+        log.warn('intake.subsidised_price_unevidenced', { amount: price.subsidisedAmount, currency: price.currency });
+        report.warningCodes.push('subsidised-price-not-printed');
+        report.warnings.push('the subsidised (Sakani) price could not be confirmed on the brochure, so only the regular price is shown');
+      }
+      if (price.subsidisedAmount > 0) rejectedPrices.push(price.subsidisedAmount);
+      price.subsidisedAmount = null;
+    }
+  }
+
+  // A price the check took away must not survive in the words: the site prints `price`, but a
+  // figure in the title, description or highlights would still be read as the asking price. The
+  // same matcher that looks for the number in the brochure looks for it in the copy, mention by
+  // mention: a sentence with price wording counts whole; otherwise only what is left once the
+  // measurements are cut out — "3 million square metres" is an area, "the asking figure is
+  // 1,250,000 for a 120 m² flat" is still the refused price.
+  for (const n of rejectedPrices) {
+    if (copySegments.some((seg) => priceAppearsIn(seg, n) && (PRICE_CONTEXT_RE.test(seg) || priceAppearsIn(withoutMeasures(seg), n)))) {
+      throw new RejectError(caption.price
+        ? `the copy states the price ${n.toLocaleString('en-US')}, which could not be confirmed on the brochure — send it again; the next reading may leave it out`
+        : `the copy states the price ${n.toLocaleString('en-US')}, which could not be confirmed on the brochure — resend with the price in the caption, or without it`, 'price');
     }
   }
 
@@ -350,7 +486,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // that stands between a replay and a second listing id.
   if (!dryRun) {
     const twin = findByPdfSha(cfg.repo, report.sha256);
-    if (twin) {
+    if (twin && !(meta.replace && twin.id === meta.id)) {
       const err = new RejectError(`this brochure is already published as ${twin.id} — ${cfg.site}/properties/${twin.slug}/`, 'duplicate');
       err.published = { id: twin.id, slug: twin.slug, url: `${cfg.site}/properties/${twin.slug}/` };
       throw err;
@@ -367,7 +503,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
 
   const day = (meta.listedAt || todayRiyadh()).replace(/-/g, '');
   const tail = meta.messageId ? String(meta.messageId).replace(/[^A-Za-z0-9]/g, '').slice(0, 6) : report.sha256.slice(0, 6);
-  const sourceRef = `WA-${day}-${tail.toUpperCase()}`;
+  const sourceRef = (meta.replace && meta.sourceRef) || `WA-${day}-${tail.toUpperCase()}`;
 
   if (dryRun) {
     report.stage = 'dry-run';
@@ -446,11 +582,15 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const listingDirs = [path.join('public', 'listings', slug)];
   try {
     fs.mkdirSync(path.dirname(publicDir), { recursive: true });
+    // A replacement starts from an empty folder: a photo (or brochure) the new run did not
+    // publish must not stay reachable by URL. The rollback below restores the old files from git.
+    if (meta.replace) removeListingImages(path.join(cfg.repo, 'public'), slug);
     // The branded brochure was staged alongside the photos, so it is promoted — and rolled
     // back — with them; nothing is copied into the repo out of band.
     fs.cpSync(stageDir, publicDir, { recursive: true });
     report.file = writeInboxListing(cfg.repo, listing);
-    writeIndex(cfg.repo, { ...index, nextSeq: seqAfter(id), listings: { ...index.listings, [slug]: id } });
+    // Never wind the counter back: a replacement re-uses an id older than the newest one.
+    writeIndex(cfg.repo, { ...index, nextSeq: Math.max(Number(index.nextSeq) || 0, seqAfter(id)), listings: { ...index.listings, [slug]: id } });
     report.listing = listing;
 
     report.stage = 'rebuild';

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  buildListing, checkListing, inboxIds, nextListingId, orderedPicks, readIndex, seqAfter, slugify,
+  buildListing, checkListing, inboxIds, nextListingId, orderedPicks, readIndex, replaceMetaFor, seqAfter, slugify,
   takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing, findInbox, findByPdfSha, listInbox,
 } from '../lib/listing.mjs';
 import * as edits from '../lib/edits.mjs';
@@ -112,6 +112,14 @@ describe('orderedPicks', () => {
     const picks = orderedPicks([{ index: 0, room: 'not-a-room', rank: 1, exclude: false }]);
     assert.equal(picks[0].room, 'view');
   });
+  it('carries a valid focus point, rounded, and nothing else', () => {
+    const picks = orderedPicks([
+      { index: 0, room: 'exterior', rank: 1, exclude: false, focus: { x: 0.5, y: 0.8234 } },
+      { index: 1, room: 'living', rank: 2, exclude: false, focus: { x: 2, y: 0.5 } },
+      { index: 2, room: 'kitchen', rank: 3, exclude: false },
+    ]);
+    assert.deepEqual(picks.map((p) => p.focus), [{ x: 0.5, y: 0.82 }, null, null]);
+  });
 });
 
 describe('buildListing', () => {
@@ -125,6 +133,40 @@ describe('buildListing', () => {
 
   it('produces a listing that passes the local checks', () => {
     assert.deepEqual(checkListing(base()), []);
+  });
+
+  it('writes a photo\'s focus point, and leaves the key out when there is none', () => {
+    const images = imagesFor(slug, picks).map((im, i) => (i === 0 ? { ...im, focus: { x: 0.5, y: 0.8 } } : im));
+    const l = buildListing({ ai: structuredClone(AI), images, slug, id: 'BONA-W007', repo: REPO, caption: {}, meta: {} });
+    assert.deepEqual(l.images[0].focus, { x: 0.5, y: 0.8 });
+    assert.equal('focus' in l.images[1], false);
+    assert.deepEqual(checkListing(l), []);
+    l.images[1].focus = { x: -0.1, y: 0.5 };
+    assert.ok(checkListing(l).some((p) => /images\[1\]\.focus/.test(p)));
+  });
+
+  it('keeps a subsidised price only under a published headline price', () => {
+    const ai = structuredClone(AI);
+    ai.listing.price = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
+    const l = buildListing({ ai, images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: {}, meta: {} });
+    assert.equal(l.price.subsidisedAmount, 270425);
+    assert.deepEqual(checkListing(l), []);
+
+    const onReq = structuredClone(AI);
+    onReq.listing.price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true, subsidisedAmount: 270425 };
+    assert.equal('subsidisedAmount' in buildListing({ ai: onReq, images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: {}, meta: {} }).price, false);
+
+    const owner = buildListing({ ai: structuredClone(ai), images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { price: { amount: 300000, currency: 'SAR' } }, meta: {} });
+    assert.equal('subsidisedAmount' in owner.price, false, 'the owner\'s own price replaces both brochure prices');
+
+    const plain = base();
+    assert.equal('subsidisedAmount' in plain.price, false, 'an ordinary listing gets no new key');
+  });
+
+  it('the local checks refuse a subsidised price that is not below the headline price', () => {
+    const l = base();
+    l.price.subsidisedAmount = l.price.amount;
+    assert.ok(checkListing(l).some((p) => /subsidisedAmount/.test(p)));
   });
 
   it('derives kind from type and never features itself', () => {
@@ -344,6 +386,26 @@ describe('inbox + edits', () => {
     const onReq = edits.setPrice(tmp, 'BONA-W001', { onRequest: true }).listing.price;
     assert.equal(onReq.onRequest, true);
     assert.equal(onReq.amount, null);
+  });
+
+  it('price and hero record that the owner edited the listing by hand', () => {
+    const fresh = listing();
+    fresh.id = 'BONA-W005'; fresh.slug = 'edit-marker-test';
+    writeInboxListing(tmp, fresh);
+    edits.setPrice(tmp, 'BONA-W005', { amount: 900000, currency: 'SAR' });
+    edits.setHero(tmp, 'BONA-W005', 2);
+    edits.setPrice(tmp, 'BONA-W005', { onRequest: true });
+    assert.deepEqual(findInbox(tmp, 'BONA-W005').listing._intake.edits, ['price', 'hero']);
+    edits.removeListing(tmp, 'BONA-W005'); // the suite below counts the inbox
+  });
+
+  it('price clears a subsidised price read from the brochure', () => {
+    const found = findInbox(tmp, 'BONA-W001');
+    found.listing.price = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
+    fs.writeFileSync(found.file, `${JSON.stringify(found.listing, null, 2)}\n`);
+    const p = edits.setPrice(tmp, 'BONA-W001', { amount: 330000, currency: 'SAR' }).listing.price;
+    assert.equal(p.amount, 330000);
+    assert.equal('subsidisedAmount' in p, false);
   });
 
   it('status and hidden are persisted', () => {
@@ -734,5 +796,48 @@ describe('findByPdfSha — the repo remembers which PDF made which listing', () 
   it('is quiet on a repo with no inbox at all', () => {
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-pdfsha-empty-'));
     try { assert.equal(findByPdfSha(empty, SHA), null); } finally { fs.rmSync(empty, { recursive: true, force: true }); }
+  });
+});
+
+describe('replaceMetaFor (run-once --replace)', () => {
+  let tmp;
+  const base = (over = {}) => ({
+    id: 'BONA-W023', slug: 'jeddah-heights', status: 'available', category: 'off-plan', type: 'apartment', kind: 'apartment',
+    featured: false, title: { en: 'X', ar: 'س' }, location: {}, price: { amount: null, currency: 'SAR', from: false, period: null, onRequest: true },
+    specs: {}, images: [], videos: [], description: {}, highlights: {}, virtualTourUrl: null, brochureUrl: null, project: null, unit: null,
+    map: null, mapPrecision: null, listedAt: '2026-11-17', hidden: false, licence: null, sourceRef: 'WA-20261117-AC7D06',
+    _intake: { source: 'whatsapp' }, ...over,
+  });
+  const put = (l) => { fs.rmSync(path.join(tmp, 'scripts', 'curate', 'inbox'), { recursive: true, force: true }); writeInboxListing(tmp, l); };
+  before(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-replace-')); });
+  after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  it('keeps the id, slug, date, reference and status of a listing the intake built', () => {
+    put(base({ status: 'reserved' }));
+    assert.deepEqual(replaceMetaFor(tmp, 'BONA-W023'), {
+      replace: true, id: 'BONA-W023', slug: 'jeddah-heights', listedAt: '2026-11-17', sourceRef: 'WA-20261117-AC7D06', status: 'reserved',
+    });
+  });
+
+  const refused = [
+    ['a photo note', { photoNote: { en: 'Photos show the sister project', ar: 'الصور للمشروع الشقيق' } }, /hand-added field\(s\) photoNote/],
+    ['an FAQ, SEO title and project facts', { faq: [], seoTitle: { en: 'a', ar: 'ب' }, projectFacts: { buildings: 2 } }, /faq, seoTitle, projectFacts/],
+    ['videos', { videos: [{ src: '/listings/jeddah-heights/v-01.mp4', poster: null }] }, /1 video/],
+    ['a licence', { licence: { adNumber: '7200123', adExpiry: null, wafiNumber: null, escrowAccount: null } }, /a licence/],
+    ['hidden', { hidden: true }, /hidden: true/],
+    ['featured', { featured: true }, /featured: true/],
+    ['a virtual tour', { virtualTourUrl: 'https://my.matterport.com/show/?m=abc' }, /a virtual tour/],
+    ['the owner\'s own price', { _intake: { edits: ['price'] } }, /owner's own price/],
+  ];
+  for (const [label, over, re] of refused) {
+    it(`refuses a listing with ${label}`, () => {
+      put(base(over));
+      assert.throws(() => replaceMetaFor(tmp, 'BONA-W023'), re);
+    });
+  }
+
+  it('refuses an id that is not in the inbox', () => {
+    put(base());
+    assert.throws(() => replaceMetaFor(tmp, 'BONA-W999'), /no inbox listing/);
   });
 });

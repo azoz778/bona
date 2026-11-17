@@ -57,7 +57,7 @@ export function loadConfig(overrides = {}) {
   }
   const repo = overrides.repo || raw.BONA_REPO || path.join(HOME, 'bona-bot');
   const data = overrides.data || raw.BONA_DATA || path.join(HOME, 'bona-data');
-  return {
+  const cfg = {
     evolutionUrl: (raw.EVOLUTION_API_URL || '').replace(/\/+$/, ''),
     evolutionKey: raw.EVOLUTION_API_KEY || '',
     instance: raw.BONA_WA_INSTANCE || 'abdulaziz-personal',
@@ -74,8 +74,8 @@ export function loadConfig(overrides = {}) {
     // out to one groupMetadata query per group -> rate-overlimit, see lib/groups.mjs scanDue),
     // every 5 min only when the group must be found by subject.
     groupScanMs: num(raw.BONA_GROUP_SCAN_MS, String(raw.BONA_WA_GROUP_JIDS || '').trim() ? 0 : 300000),
-    claudeModel: raw.BONA_CLAUDE_MODEL || 'sonnet',
-    claudeFallbackModel: raw.BONA_CLAUDE_FALLBACK_MODEL || 'opus',
+    claudeModel: raw.BONA_CLAUDE_MODEL || 'opus',
+    claudeFallbackModel: raw.BONA_CLAUDE_FALLBACK_MODEL || null, // filled in below, from the EFFECTIVE main model
     claudeBin: raw.BONA_CLAUDE_BIN || 'claude',
     claudeTimeoutMs: num(raw.BONA_CLAUDE_TIMEOUT_MS, 600000),
     // argv ARRAY, never a shell string: nothing here is ever handed to a shell.
@@ -129,6 +129,10 @@ export function loadConfig(overrides = {}) {
     sendReplies: bool(raw.BONA_SEND_REPLIES, true),
     ...overrides,
   };
+  // The last-attempt rescue must be a DIFFERENT model, or a contract the main model keeps failing
+  // is simply asked of it a third time — also when run-once's --model changed the main one.
+  if (!cfg.claudeFallbackModel) cfg.claudeFallbackModel = cfg.claudeModel === 'opus' ? 'sonnet' : 'opus';
+  return cfg;
 }
 
 /** Human-readable list of what is missing, so the daemon can refuse to start loudly. */

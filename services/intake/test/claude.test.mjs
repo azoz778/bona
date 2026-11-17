@@ -72,6 +72,15 @@ describe('validateAiResult', () => {
     ['a missing confidence', (r) => { delete r.confidence; }, /confidence/],
     ['a rent listing with no period', (r) => { r.listing.category = 'rent'; r.listing.price.period = null; }, /price.period/],
     ['a bad project shape', (r) => { r.listing.project = { name: 'Kian' }; }, /project must be null/],
+    ['a subsidised price that is not a number', (r) => { r.listing.price.subsidisedAmount = '270,425'; }, /subsidisedAmount/],
+    ['a subsidised price at or above the headline price', (r) => { r.listing.price.subsidisedAmount = 4500000; }, /subsidisedAmount/],
+    ['a subsidised price on a price-on-request listing', (r) => {
+      r.listing.price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true, subsidisedAmount: 270425 };
+    }, /subsidisedAmount/],
+    ['a subsidised price on a rental', (r) => { r.listing.category = 'rent'; r.listing.price.period = 'year'; r.listing.price.subsidisedAmount = 100; }, /subsidisedAmount/],
+    ['bad subsidised-price evidence', (r) => { r.subsidisedPriceEvidence = { page: 0, quote: '' }; }, /subsidisedPriceEvidence/],
+    ['a focus point outside the photo', (r) => { r.images[0].focus = { x: 0.5, y: 1.4 }; }, /focus/],
+    ['a focus point that is not two numbers', (r) => { r.images[0].focus = { x: '50%', y: 0.5 }; }, /focus/],
   ];
   for (const [label, mutate, re] of bad) {
     it(`refuses ${label}`, () => {
@@ -85,6 +94,26 @@ describe('validateAiResult', () => {
   it('accepts price on request with a null amount', () => {
     const r = clone();
     r.listing.price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+    assert.deepEqual(validateAiResult(r, { candidateCount: 2 }), []);
+  });
+
+  it('accepts a subsidised price below the headline price, with its evidence', () => {
+    const r = clone();
+    r.listing.price.subsidisedAmount = 3800000;
+    r.priceEvidence = { page: 9, quote: '4,500,000' };
+    r.subsidisedPriceEvidence = { page: 9, quote: '3,800,000' };
+    assert.deepEqual(validateAiResult(r, { candidateCount: 2 }), []);
+    r.listing.price.subsidisedAmount = null;
+    r.subsidisedPriceEvidence = null;
+    assert.deepEqual(validateAiResult(r, { candidateCount: 2 }), []);
+  });
+
+  it('accepts a focus point on a kept photo, and none at all', () => {
+    const r = clone();
+    r.images[0].focus = { x: 0.5, y: 0.82 };
+    r.images[1].focus = null;
+    assert.deepEqual(validateAiResult(r, { candidateCount: 2 }), []);
+    delete r.images[0].focus;
     assert.deepEqual(validateAiResult(r, { candidateCount: 2 }), []);
   });
 });
@@ -105,6 +134,20 @@ describe('copyProblems — owner rules', () => {
       assert.ok(copyProblems(l).length > 0, `${field} should be caught`);
     }
   });
+  it('catches a price written into the copy, in either language', () => {
+    for (const text of ['Apartments from SAR 319,015 in phase one.', 'شقق ابتداءً من 319,015 ريال.', 'Priced at 2.5 million SAR.', 'السعر 2.5 مليون ريال',
+      '270,425 riyals', '270 ألف ريال', 'SAR 2.5m', 'SAR 990k', '£2.5m', '319015 SAR', 'السعر 319015 ريال',
+      'السعر مليون ريال', 'بسعر 3 ملايين ريال', 'ابتداءً من 5 ملايين', 'SAR 5m', 'SAR 3 million', '250 الف ريال', '\u20c1 319,015']) {
+      const l = structuredClone(GOOD.listing);
+      l.description.en = [text, 'Two.'];
+      assert.ok(copyProblems(l).some((p) => /states a price/.test(p)), text);
+    }
+    const ok = structuredClone(GOOD.listing);
+    ok.description.en = ['Eight layouts from 79.77 to 175.40 m², ten-year warranty, 1,710 units, 1.3 million m² of master plan.', 'Off the SR 15 road; plots starting from 1,000 m², starting from 5 minutes away.'];
+    ok.description.ar = ['تبدأ من 3 آلاف متر مربع.', 'اثنان.'];
+    assert.deepEqual(copyProblems(ok), []);
+  });
+
   it('catches a phone number', () => {
     const l = structuredClone(GOOD.listing);
     l.description.en = ['Call +966 59 329 6933.', 'Two.'];
@@ -224,6 +267,23 @@ describe('buildPrompt', () => {
     assert.match(p, /reject: true/);
     // and says nothing about page renders when there is a text layer
     assert.ok(!/no usable text layer/.test(buildPrompt({ extraction, sheets, caption: {} })));
+  });
+
+  it('explains price-page renders differently from a PDF with no text layer', () => {
+    const pageImages = [{ page: 9, abs: '/tmp/x/pages/p9.jpg', width: 1600, height: 1131 }];
+    const p = buildPrompt({ extraction, sheets, caption: {}, pageImages, pageReason: 'price-pages' });
+    assert.match(p, /digits are missing or scrambled/);
+    assert.ok(p.includes('page 9: /tmp/x/pages/p9.jpg'));
+    assert.match(p, /priceEvidence/);
+    assert.match(p, /subsidisedPriceEvidence/);
+    assert.doesNotMatch(p, /no usable text layer/);
+  });
+
+  it('asks for a focus point and a subsidised price', () => {
+    const p = buildPrompt({ extraction, sheets, caption: {} });
+    assert.match(p, /"focus"/);
+    assert.match(p, /subsidisedAmount/);
+    assert.match(p, /مستفيدي الدعم/);
   });
 
   it('the template file is the one the code documents', () => {

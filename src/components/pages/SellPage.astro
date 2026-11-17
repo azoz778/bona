@@ -3,7 +3,7 @@ import Base from '../../layouts/Base.astro';
 import EnquiryForm from '../EnquiryForm.astro';
 import site from '../../data/site.json';
 import { localePath, t, ui, type Locale } from '../../lib/i18n';
-import { editorialImage, editorialListing, imageAlt } from '../../lib/listings';
+import { editorialImage, editorialListing, focusStyle, imageAlt } from '../../lib/listings';
 import { breadcrumbJsonLd } from '../../lib/seo';
 interface Props { locale: Locale }
 const { locale } = Astro.props;
@@ -41,7 +41,7 @@ const crumbs = [{ name: t(ui.home, locale), path: localePath(locale, '/') }, { n
       </div>
       {img && imgL && (
         <div class="lg:col-span-5 lg:pt-10" data-reveal data-reveal-delay="1">
-          <div class="img-zoom aspect-[4/5]"><img src={img.src} alt={imageAlt(img, imgL, locale)} loading="lazy" decoding="async" class="h-full w-full object-cover" /></div>
+          <div class="img-zoom aspect-[4/5]"><img src={img.src} alt={imageAlt(img, imgL, locale)} loading="lazy" decoding="async" style={focusStyle(img)} class="h-full w-full object-cover" /></div>
         </div>
       )}
     </div>

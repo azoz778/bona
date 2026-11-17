@@ -14,7 +14,7 @@ import unitsData from '../../data/units.json';
 import { liveSummary, localFaq, recordFor, sheetVars } from '../../lib/units-summary.mjs';
 import Icon from '../Icon.astro';
 import site from '../../data/site.json';
-import { localePath, formatPrice, formatNumber, t, ui, fill, waLink, type Locale } from '../../lib/i18n';
+import { localePath, formatPrice, formatSubsidisedPrice, formatNumber, t, ui, fill, waLink, type Locale } from '../../lib/i18n';
 import { localeTitle, categoryLabel, categorySlug, typeLabel, similar, kindOf, kindLabel, kindLabelPlural, kindSlug, matterportId, type Listing } from '../../lib/listings';
 import { listingJsonLd, breadcrumbJsonLd, listingFaqJsonLd, metaDescription } from '../../lib/seo';
 interface Props { locale: Locale; listing: Listing }
@@ -87,6 +87,7 @@ const faq = localFaq(l.faq, locale, sheetVars(liveSummary(recordFor(unitsData, l
 const locationLine = [t(l.location.district, locale), t(l.location.city, locale), t(l.location.country, locale)].filter(Boolean).join(locale === 'ar' ? '، ' : ', ');
 const project = l.project?.name ? t(l.project.name, locale) : '';
 const developer = l.project?.developer ? t(l.project.developer, locale) : '';
+const subsidisedPrice = formatSubsidisedPrice(l.price, locale);
 const hasMatterport = matterportId(l.virtualTourUrl) !== null;
 const mapLink = l.map && Number.isFinite(l.map.lat) && Number.isFinite(l.map.lng) ? `https://www.google.com/maps/search/?api=1&query=${l.map.lat},${l.map.lng}` : null;
 const typeText = typeLabel(l.type, locale);
@@ -120,6 +121,7 @@ const kindText = t(kindLabel[kind], locale);
             )}
             <p class="mt-4 flex items-center gap-2 text-sm text-stone-2"><Icon name="pin" size={16} class="shrink-0 text-champagne" />{locationLine}{mapLink && <a href="#map" class="link ms-2 text-ink" data-track="map_click" data-cta="listing_map_jump" data-listing={l.id}>{t(ui.showMap, locale)}</a>}</p>
             <p class="mt-6 font-sans text-xl font-semibold">{formatPrice(l.price, locale)}</p>
+            {subsidisedPrice && <p class="mt-1 text-sm text-stone-2" data-subsidised-price>{subsidisedPrice}</p>}
           </header>}
 
           {specs.length > 0 && (
@@ -205,6 +207,7 @@ const kindText = t(kindLabel[kind], locale);
           <div class="border border-ink/10 bg-ivory-2 p-7 lg:sticky lg:top-28">
             <p class="label text-stone-2">{t(ui.privateEnquiry, locale)}</p>
             <p class="display-md mt-3">{formatPrice(l.price, locale)}</p>
+            {subsidisedPrice && <p class="mt-2 text-sm text-stone-2" data-subsidised-price>{subsidisedPrice}</p>}
             <p class="mt-3 text-sm text-stone-2">{t(ui.enquiryPanelText, locale)}</p>
             <a href={pilot ? viewingWa : wa} target="_blank" rel="noopener" class="btn btn-ink mt-7 w-full" data-cta={pilot ? "pilot_sidebar_viewing" : "listing_whatsapp"} data-listing={l.id}><Icon name="whatsapp" size={17} />{pilot ? (locale === "ar" ? "طلب معاينة" : "Arrange a viewing") : t(ui.enquireWhatsApp, locale)}</a>
             <a href={`tel:${site.phone.e164}`} class="btn btn-outline mt-3 w-full" data-cta="listing_tel" data-listing={l.id}><Icon name="phone" size={16} /><span dir="ltr">{site.phone.display}</span></a>

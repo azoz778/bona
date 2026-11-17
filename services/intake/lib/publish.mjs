@@ -54,6 +54,43 @@ const must = async (label, res) => {
   return res;
 };
 
+/**
+ * True when every path is tracked by git and unchanged from HEAD — the condition for deleting
+ * it, because a rollback (resetTree) can only bring back what HEAD holds.
+ */
+export async function committedUnchanged(repo, paths) {
+  for (const p of paths) {
+    const tracked = await run('git', ['ls-files', '--error-unmatch', '--', p], { cwd: repo });
+    if (tracked.code !== 0) return false;
+  }
+  const status = await run('git', ['status', '--porcelain', '--', ...paths], { cwd: repo });
+  return status.code === 0 && status.out === '';
+}
+
+/**
+ * Why a published listing may NOT be rebuilt from its brochure, or null when it may: every commit
+ * touching `paths` must be the one that published it or a later `intake: replace …` run. Anything
+ * else (a hand fix, a re-crop, an edit) is reported. A shallow clone cannot show the history, so
+ * it is refused rather than trusted.
+ */
+export async function changedSincePublished(repo, paths) {
+  const shallow = await run('git', ['rev-parse', '--is-shallow-repository'], { cwd: repo });
+  if (shallow.code !== 0 || shallow.out !== 'false') return 'its git history could not be read in full';
+  // One log over all the paths, so the commits come back in history order (newest first).
+  const r = await run('git', ['log', '--format=%H%x09%s', '--', ...paths], { cwd: repo });
+  if (r.code !== 0) return 'its git history could not be read';
+  const commits = r.out.split('\n').filter(Boolean).map((line) => line.split('\t').slice(1).join('\t'));
+  if (!commits.length) return 'it is not in git';
+  // The oldest commit on these paths must be the intake's own publish commit ("intake: <title> (<id>)").
+  // If it is not — a hand rename moved the files, so their history starts at the rename — the real
+  // history cannot be read from these paths, and the listing is refused.
+  const origin = commits[commits.length - 1];
+  if (!/^intake: (?!replace )/.test(origin)) return `its history starts at "${origin.slice(0, 60)}", not at the intake's publish commit`;
+  const later = commits.slice(0, -1);
+  const others = later.filter((subject) => !subject.startsWith('intake: replace '));
+  return others.length ? `${others.length} later commit(s), e.g. "${others[0].slice(0, 60)}"` : null;
+}
+
 export async function gitStatus(repo) {
   return (await run('git', ['status', '--porcelain'], { cwd: repo })).out;
 }

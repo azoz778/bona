@@ -126,6 +126,12 @@ describe('reply messages', () => {
     assert.match(text, /hero BONA-W001 4/);
   });
 
+  it('the success reply shows a Sakani price beside the regular one', () => {
+    const two = structuredClone(report);
+    two.listing.price = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
+    assert.match(msg.published(two), /SAR 319,015 \(from\) · Sakani SAR 270,425/);
+  });
+
   // Finding 14: the reply goes out the moment the push lands, not after a 3-minute poll.
   it('promises the page in about three minutes instead of waiting for it', () => {
     assert.match(msg.published(report), /live in about 3 minutes/);

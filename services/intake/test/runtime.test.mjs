@@ -196,6 +196,20 @@ describe('TAQEEM cross-check — a price must actually be printed', () => {
   it('reads the "4.5m" and "مليون" forms', () => {
     assert.ok(priceAppearsIn('from 4.5m SAR', 4500000));
     assert.ok(priceAppearsIn('4.5 million', 4500000));
+  });
+
+  it('a figure inside a longer one is not "printed" (review 2026-11-17)', () => {
+    assert.equal(priceAppearsIn('السعر 1,450,000 ريال', 450000), false);
+    assert.equal(priceAppearsIn('2,319,015', 319015), false);
+    assert.equal(priceAppearsIn('319,015,000', 319015), false);
+    assert.equal(priceAppearsIn('spans 1.3 million square metres', 3000000), false);
+    assert.equal(priceAppearsIn('السعر 319,015 ريال.', 319015), true);
+    assert.equal(priceAppearsIn('بسعر 3 ملايين ريال', 3000000), true);
+    assert.equal(priceAppearsIn('250 آلاف', 250000), true);
+    assert.equal(priceAppearsIn('SAR 1,250,000.00', 1250000), true, 'a decimal tail is not more digits');
+    assert.equal(priceAppearsIn('ر.س.1,250,000', 1250000), true, 'nor is a dot before the figure');
+    assert.equal(priceAppearsIn('a 20 m street', 20000000), false, '"20 m" is metres; only "20m" is a million');
+    assert.equal(priceAppearsIn('990 k', 990000), false);
     assert.ok(priceAppearsIn('٤٫٥ مليون ريال', 4500000));
     assert.ok(priceAppearsIn('990k', 990000));
   });
@@ -280,5 +294,21 @@ describe('pdf.mjs — the python command is argv, not a shell line', () => {
   it('the config hands it an array', async () => {
     const { loadConfig } = await import('../lib/env.mjs');
     assert.ok(Array.isArray(loadConfig().pyCmd));
+  });
+
+  it('the rescue attempt always uses a different model from the main one', async () => {
+    const { loadConfig } = await import('../lib/env.mjs');
+    const saved = { m: process.env.BONA_CLAUDE_MODEL, f: process.env.BONA_CLAUDE_FALLBACK_MODEL };
+    try {
+      delete process.env.BONA_CLAUDE_FALLBACK_MODEL;
+      process.env.BONA_CLAUDE_MODEL = 'sonnet';
+      assert.deepEqual([loadConfig().claudeModel, loadConfig().claudeFallbackModel], ['sonnet', 'opus']);
+      process.env.BONA_CLAUDE_MODEL = 'opus';
+      assert.deepEqual([loadConfig().claudeModel, loadConfig().claudeFallbackModel], ['opus', 'sonnet']);
+    } finally {
+      for (const [k, v] of [['BONA_CLAUDE_MODEL', saved.m], ['BONA_CLAUDE_FALLBACK_MODEL', saved.f]]) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+    }
   });
 });

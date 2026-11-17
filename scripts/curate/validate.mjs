@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HYPE, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, loadRegisterWithdrawals, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, unitsSheetProblems, videoEntryProblems, withdrawnAdvertising, withdrawnInboxListings, withdrawnNotice, WITHDRAWN_ADVERTISING } from './rules.mjs';
+import { FORBIDDEN, HYPE, imageFocusProblems, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, loadRegisterWithdrawals, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, subsidisedPriceProblems, unitsSheetProblems, videoEntryProblems, withdrawnAdvertising, withdrawnInboxListings, withdrawnNotice, WITHDRAWN_ADVERTISING } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -122,6 +122,7 @@ for (const l of data) {
   if (!p.onRequest && !(typeof p.amount === 'number' && p.amount > 0)) err(id, 'price.amount must be > 0 unless onRequest');
   if (l.category === 'rent' && !p.period) err(id, 'rent listings need price.period');
   if (l.category !== 'rent' && p.period) err(id, 'only rent listings may have price.period');
+  for (const m of subsidisedPriceProblems(p, l.category)) err(id, m);
 
   const s = l.specs ?? {};
   for (const k of ['beds', 'baths', 'areaSqm', 'plotSqm', 'yearBuilt', 'floors']) if (!isNumOrNull(s[k])) err(id, `specs.${k} must be number or null`);
@@ -136,6 +137,7 @@ for (const l of data) {
     } else if (!MEDIA.test(src)) err(id, `images[${i}].src is not a tk-storage media URL, /land/<name>.jpg or /listings/<slug>/<nn>.jpg`);
     if (!(im.thumb === null || THUMB.test(im.thumb) || LOCAL_LISTING_THUMB.test(im.thumb))) err(id, `images[${i}].thumb must be null, a website-thumbs webp URL, or /listings/<slug>/<nn>-thumb.webp`);
     if (!isLoc(im.alt)) err(id, `images[${i}].alt.en/ar required`);
+    for (const m of imageFocusProblems(im.focus, i)) err(id, m);
     const prev = srcs.get(src);
     if (prev && prev !== l) {
       const k = shareKey(l);
