@@ -47,8 +47,12 @@ export function published(report) {
     const pages = report.brochure?.pages ? `, ${report.brochure.pages} pages` : '';
     lines.push(`📄 Bona brochure (English + Arabic${pages})${mb}: ${l.brochureUrl}`);
   }
-  const nModels = Array.isArray(l.models) ? l.models.length : 0;
-  if (nModels) lines.push(`🏢 ${nModels} unit model${nModels === 1 ? '' : 's'} with floor plans`);
+  // The floor plans counted, never assumed: a brochure often prints the models without a plan for each.
+  const models = Array.isArray(l.models) ? l.models : [];
+  const plans = models.filter((m) => m?.floorPlan?.src).length;
+  if (models.length) {
+    lines.push(`🏢 ${models.length} unit model${models.length === 1 ? '' : 's'}${plans ? ` · ${plans} floor plan${plans === 1 ? '' : 's'}` : ''}`);
+  }
   if (l.hidden) lines.push('_Hidden: it is in the repo but not on the site (`show ' + l.id + '` publishes it)._');
   const warn = (report.warnings || []).filter(Boolean).slice(0, 3);
   if (warn.length) lines.push('', ...warn.map((w) => `⚠️ ${w}`));

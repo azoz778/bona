@@ -147,9 +147,19 @@ describe('reply messages', () => {
     };
     const text = msg.published(withBrochure);
     assert.match(text, /📄 Bona brochure \(English \+ Arabic, 12 pages\) \(3\.0 MB\): \/brochures\/x\.pdf/);
-    assert.match(text, /🏢 3 unit models with floor plans/);
+    assert.match(text, /🏢 3 unit models$/m, 'no floor plan claimed when none was published');
+    assert.doesNotMatch(text, /floor plan/);
     assert.doesNotMatch(text, /re-published/);
     assert.doesNotMatch(msg.published(report), /unit model/);
+  });
+
+  it('counts the floor plans actually published beside the unit models', () => {
+    const plan = (n) => ({ floorPlan: { src: `/listings/x/plan-0${n}.jpg`, thumb: `/listings/x/plan-0${n}-thumb.webp` } });
+    const withModels = (models) => msg.published({ ...report, listing: { ...report.listing, models } });
+    assert.match(withModels([plan(1), plan(2), {}]), /🏢 3 unit models · 2 floor plans$/m);
+    assert.match(withModels(Array.from({ length: 8 }, (_, i) => plan(i + 1))), /🏢 8 unit models · 8 floor plans$/m);
+    assert.match(withModels([plan(1)]), /🏢 1 unit model · 1 floor plan$/m);
+    assert.match(withModels([{ floorPlan: null }]), /🏢 1 unit model$/m);
   });
 
   it('the success reply carries the URL, the count, the cover and the commands', () => {
