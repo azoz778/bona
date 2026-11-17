@@ -8,8 +8,8 @@
   "kind": "apartment",
   "featured": false,
   "title": {
-    "en": "Jeddah Heights Residential Community, Jeddah",
-    "ar": "مجتمع جدة هايتس السكني، جدة"
+    "en": "Araco Jeddah Heights Apartments, Jeddah",
+    "ar": "شقق أراكو جدة هايتس، جدة"
   },
   "location": {
     "district": {
@@ -27,11 +27,12 @@
     "countryCode": "SA"
   },
   "price": {
-    "amount": null,
+    "amount": 319015,
     "currency": "SAR",
-    "from": false,
+    "from": true,
     "period": null,
-    "onRequest": true
+    "onRequest": false,
+    "subsidisedAmount": 270425
   },
   "specs": {
     "beds": null,
@@ -46,71 +47,83 @@
       "src": "/listings/jeddah-heights-residential-community-jeddah/01.jpg",
       "thumb": "/listings/jeddah-heights-residential-community-jeddah/01-thumb.webp",
       "alt": {
-        "en": "Garden — Jeddah Heights Residential Community, Jeddah",
-        "ar": "الحديقة — مجتمع جدة هايتس السكني، جدة"
+        "en": "Exterior — Araco Jeddah Heights Apartments, Jeddah",
+        "ar": "الواجهة الخارجية — شقق أراكو جدة هايتس، جدة"
+      },
+      "focus": {
+        "x": 0.51,
+        "y": 0.73
       }
     },
     {
       "src": "/listings/jeddah-heights-residential-community-jeddah/02.jpg",
       "thumb": "/listings/jeddah-heights-residential-community-jeddah/02-thumb.webp",
       "alt": {
-        "en": "Façade at night — Jeddah Heights Residential Community, Jeddah",
-        "ar": "الواجهة ليلاً — مجتمع جدة هايتس السكني، جدة"
+        "en": "Garden — Araco Jeddah Heights Apartments, Jeddah",
+        "ar": "الحديقة — شقق أراكو جدة هايتس، جدة"
+      },
+      "focus": {
+        "x": 0.5,
+        "y": 0.55
       }
     },
     {
       "src": "/listings/jeddah-heights-residential-community-jeddah/03.jpg",
       "thumb": "/listings/jeddah-heights-residential-community-jeddah/03-thumb.webp",
       "alt": {
-        "en": "Grounds — Jeddah Heights Residential Community, Jeddah",
-        "ar": "الحدائق المحيطة — مجتمع جدة هايتس السكني، جدة"
+        "en": "Gym — Araco Jeddah Heights Apartments, Jeddah",
+        "ar": "النادي الرياضي — شقق أراكو جدة هايتس، جدة"
+      },
+      "focus": {
+        "x": 0.45,
+        "y": 0.6
       }
     },
     {
       "src": "/listings/jeddah-heights-residential-community-jeddah/04.jpg",
       "thumb": "/listings/jeddah-heights-residential-community-jeddah/04-thumb.webp",
       "alt": {
-        "en": "Gym — Jeddah Heights Residential Community, Jeddah",
-        "ar": "النادي الرياضي — مجتمع جدة هايتس السكني، جدة"
+        "en": "Study — Araco Jeddah Heights Apartments, Jeddah",
+        "ar": "المكتب — شقق أراكو جدة هايتس، جدة"
+      },
+      "focus": {
+        "x": 0.5,
+        "y": 0.58
       }
     },
     {
       "src": "/listings/jeddah-heights-residential-community-jeddah/05.jpg",
       "thumb": "/listings/jeddah-heights-residential-community-jeddah/05-thumb.webp",
       "alt": {
-        "en": "Artist's impression — Jeddah Heights Residential Community, Jeddah",
-        "ar": "تصور معماري — مجتمع جدة هايتس السكني، جدة"
-      }
-    },
-    {
-      "src": "/listings/jeddah-heights-residential-community-jeddah/06.jpg",
-      "thumb": "/listings/jeddah-heights-residential-community-jeddah/06-thumb.webp",
-      "alt": {
-        "en": "Aerial view — Jeddah Heights Residential Community, Jeddah",
-        "ar": "منظر جوي — مجتمع جدة هايتس السكني، جدة"
+        "en": "Aerial view — Araco Jeddah Heights Apartments, Jeddah",
+        "ar": "منظر جوي — شقق أراكو جدة هايتس، جدة"
+      },
+      "focus": {
+        "x": 0.48,
+        "y": 0.64
       }
     }
   ],
   "videos": [],
   "description": {
-    "en": "Jeddah Heights is a residential community of apartment buildings in Jeddah, planned around shared green space and everyday services. The master plan groups the buildings into residential clusters, each with its own model of apartment.\n\nThe brochure presents several apartment models in two- and three-bedroom layouts. Each has a living room, a majlis in some models, a kitchen, a laundry room and one bathroom per bedroom. Some models add a dining room, a terrace or a maid's room.\n\nThe community includes mosques and larger congregational mosques, gardens, educational facilities, a health centre and commercial facilities. A health club, a children's nursery, diwaniyas and outdoor seating areas are also shown. The project lists a ten-year warranty on the structural frame and on waterproofing and insulation.",
-    "ar": "جدة هايتس مجتمع سكني من المباني السكنية في مدينة جدة، صُمّم حول مساحات خضراء وخدمات يومية قريبة من السكان. يوزّع المخطط العام المباني على مجموعات سكنية، ولكل مجموعة نماذج شقق خاصة بها.\n\nيعرض الكتيّب عدة نماذج من الشقق بتوزيعات من غرفتي نوم وثلاث غرف نوم. تضم الشقق صالة معيشة ومطبخاً وغرفة غسيل ودورة مياه لكل غرفة نوم، ويضيف بعضها مجلساً أو غرفة طعام أو شرفة أو غرفة خادمة.\n\nيشمل المجتمع مساجد وجوامع وحدائق ومرافق تعليمية ومركزاً صحياً ومرافق تجارية. كما تظهر في المشروع نادٍ صحي وحضانة أطفال وديوانيات وجلسات خارجية. ويذكر المشروع ضمان عشر سنوات على الهيكل الإنشائي وعلى العزل المائي والحراري."
+    "en": "Araco Jeddah Heights is a residential apartment project inside the Jeddah Heights destination in Jeddah, and this brochure covers its first phase. The destination is planned around daily needs, with Friday mosques, neighbourhood mosques, parks, educational facilities, a health centre and commercial facilities. King Abdulaziz International Airport, King Abdullah Sports City, Al Hamdaniyah Boulevard, Marina Avenue Mall, The Village Mall and Obhur beach are each a few minutes' drive away.\n\nPhase one offers eight apartment layouts from 79.77 m² to 175.40 m². Lulu 2 is the compact option, with two bedrooms, two bathrooms and a laundry room, while Nawras 2 (105.02 m²) and Saif 2 (122.98 m²) each have three bedrooms, the latter adding a dining room and a balcony. Saif 3 (127.93 m²) pairs a majlis with two bedrooms, three bathrooms and a dressing room, and Marafi 3 (148.46 m²) has a majlis, three bedrooms, a dining room and two entrances.\n\nThe three largest layouts each combine a majlis, three bedrooms, a maid's room and four bathrooms. Zumurrud 2 (156.84 m²) and Fairouz 1 (160.05 m²) add a dressing room, and Kahraman 2 (175.40 m²) adds a dining room, a balcony and two entrances. The brochure gives the room dimensions of every layout and the floors on which it is available, from the ground floor up to the seventh.\n\nResidents share a health club, a children's nursery, diwaniyas, green spaces, retail shops and outdoor seating, all shown in the brochure as artist's impressions. The developer's printed warranties run for ten years on the structure and on waterproofing and insulation, and for one year on plumbing, electrical installation and paintwork.",
+    "ar": "يقع مشروع أراكو جدة هايتس السكني داخل وجهة جدة هايتس في مدينة جدة، ويعرض هذا الكتيب مرحلته الأولى. خُططت الوجهة لتلبي احتياجات الحياة اليومية، ففيها جوامع ومساجد وحدائق ومرافق تعليمية ومركز صحي ومرافق تجارية. ويبعد المشروع دقائق بالسيارة عن مطار الملك عبدالعزيز الدولي ومدينة الملك عبدالله الرياضية وبوليفارد الحمدانية ومارينا أفينيو مول وذا فيليج مول وشاطئ أبحر.\n\nتضم المرحلة الأولى ثمانية نماذج من الشقق تتراوح مساحاتها بين 79.77 و175.40 مترًا مربعًا. أصغرها نموذج لؤلؤ 2، وفيه غرفتا نوم ودورتا مياه وغرفة غسيل، أما نموذجا نورس 2 (105.02 م²) وسيف 2 (122.98 م²) ففي كل منهما ثلاث غرف نوم، ويزيد الثاني بغرفة طعام وشرفة. ويجمع نموذج سيف 3 (127.93 م²) بين مجلس وغرفتي نوم وثلاث دورات مياه وغرفة ملابس، بينما يضم نموذج مرافئ 3 (148.46 م²) مجلسًا وثلاث غرف نوم وغرفة طعام ومدخلين.\n\nوتشترك النماذج الثلاثة الأكبر في مجلس وثلاث غرف نوم وغرفة خادمة وأربع دورات مياه. ويضيف نموذجا الزمرد 2 (156.84 م²) والفيروز 1 (160.05 م²) غرفة ملابس، ويضيف نموذج كهرمان 2 (175.40 م²) غرفة طعام وشرفة ومدخلين. ويبيّن الكتيب لكل نموذج مقاسات غرفه والأدوار المتاحة له، من الدور الأرضي حتى الدور السابع.\n\nويتشارك السكان ناديًا صحيًا وحضانة أطفال وديوانيات ومساحات خضراء ومحلات تجارية وجلسات خارجية، وجميعها معروضة في الكتيب بصور تخيلية. ويقدّم المطوّر ضمانًا مكتوبًا مدته عشر سنوات على الهيكل الإنشائي وعلى العزل المائي والحراري، وسنة واحدة على تأسيس السباكة والكهرباء والدهانات."
   },
   "highlights": {
     "en": [
       "Two- and three-bedroom apartments",
-      "Landscaped gardens",
-      "Mosques within the community",
-      "Health club and nursery",
-      "Commercial and education facilities",
+      "Eight layouts, 79.77–175.40 m²",
+      "Majlis and maid's room options",
+      "Health club and children's nursery",
+      "Diwaniyas and outdoor seating",
       "Ten-year structural warranty"
     ],
     "ar": [
-      "شقق من غرفتين وثلاث غرف نوم",
-      "حدائق مهيأة",
-      "مساجد داخل المجتمع",
+      "شقق بغرفتين أو ثلاث غرف نوم",
+      "ثمانية نماذج، 79.77–175.40 م²",
+      "نماذج بمجلس وغرفة خادمة",
       "نادٍ صحي وحضانة أطفال",
-      "مرافق تجارية وتعليمية",
+      "ديوانيات وجلسات خارجية",
       "ضمان الهيكل الإنشائي عشر سنوات"
     ]
   },
@@ -118,12 +131,12 @@
   "brochureUrl": "https://bona-real-estate.com/listings/jeddah-heights-residential-community-jeddah/brochure.pdf",
   "project": {
     "name": {
-      "en": "Jeddah Heights",
-      "ar": "جدة هايتس"
+      "en": "Araco Jeddah Heights",
+      "ar": "أراكو جدة هايتس"
     },
     "developer": {
-      "en": "NHC",
-      "ar": "الشركة الوطنية للإسكان (NHC)"
+      "en": "Araco (Al Raem International Company)",
+      "ar": "أراكو (شركة الرائم العالمية)"
     }
   },
   "unit": null,
@@ -134,8 +147,8 @@
   "_intake": {
     "source": "whatsapp",
     "pdfSha256": "7a0a5548a87f0cacb47c39dc84fc40f4995fb5f802a42cb3e7ba5509b790b74d",
-    "model": "sonnet",
-    "confidence": 0.6,
+    "model": "opus",
+    "confidence": 0.85,
     "warnings": [
       "model-flagged",
       "map-unconfirmed"
@@ -143,36 +156,31 @@
     "images": [
       {
         "n": 1,
+        "candidate": 12,
+        "room": "exterior"
+      },
+      {
+        "n": 2,
         "candidate": 4,
         "room": "garden"
       },
       {
-        "n": 2,
-        "candidate": 12,
-        "room": "facade_night"
-      },
-      {
         "n": 3,
-        "candidate": 21,
-        "room": "grounds"
-      },
-      {
-        "n": 4,
         "candidate": 6,
         "room": "gym"
       },
       {
-        "n": 5,
+        "n": 4,
         "candidate": 7,
-        "room": "render"
+        "room": "study"
       },
       {
-        "n": 6,
+        "n": 5,
         "candidate": 1,
         "room": "aerial"
       }
     ],
-    "createdAt": "2026-11-17T11:02:32.888Z",
+    "createdAt": "2026-11-17T13:34:00.781Z",
     "site": "https://bona-real-estate.com"
   }
 }
