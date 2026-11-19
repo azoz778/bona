@@ -121,7 +121,7 @@ export function createToolHandlers({
       results,
       note: results.length
         ? 'These are the only matching homes in Bona inventory. Quote these prices exactly; never estimate.'
-        : 'No match in Bona inventory. Do not invent a property or a price — offer to connect the visitor with a Bona specialist on WhatsApp +966 59 329 6933.',
+        : 'No match in Bona inventory. Do not invent a property or a price — offer to connect the visitor with a Bona specialist on WhatsApp +966 57 626 7694.',
     };
   }
 
@@ -262,7 +262,7 @@ export function createToolHandlers({
       }
     }
     await notifyHandoff(record.lead_id);
-    return { saved: true, id: record.lead_id, note: 'Enquiry saved. Tell the visitor a Bona principal will be in touch, and offer WhatsApp +966 59 329 6933 to speak now.' };
+    return { saved: true, id: record.lead_id, note: 'Enquiry saved. Tell the visitor a Bona principal will be in touch, and offer WhatsApp +966 57 626 7694 to speak now.' };
   }
 
   /**

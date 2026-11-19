@@ -65,3 +65,11 @@ test('the FAQ "How do I reach Bona?" answer gives the WhatsApp number and says c
   assert.doesNotMatch(ar, /لا عبر مركز اتصال/);
   assert.ok(ar.includes(`‎${site.whatsapp.display}`), 'the Arabic number keeps its left-to-right mark');
 });
+
+test("a number Dana or a tool note offers as WhatsApp is site.whatsapp (prompt.md, tools.mjs, index.mjs)", () => {
+  for (const f of ['services/api/retell/prompt.md', 'services/api/lib/tools.mjs', 'services/api/index.mjs']) {
+    const offers = [...read(f).matchAll(/WhatsApp(?: and phone)?:?\s+\**(\+966 \d{2} \d{3} \d{4})/g)].map((m) => m[1]);
+    assert.ok(offers.length > 0, `${f} offers a WhatsApp number`);
+    for (const n of offers) assert.equal(n, site.whatsapp.display, `${f}: WhatsApp ${n}`);
+  }
+});

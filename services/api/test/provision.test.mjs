@@ -24,6 +24,8 @@ const NEW_SITE = 'https://bona-real-estate.com';
 const urlSources = (site) => knowledgeBasePayload({ siteUrl: site }).knowledge_base_urls
   .map((url, i) => ({ type: 'url', source_id: `src_${i}`, url }));
 const prompt = fs.readFileSync(PROMPT_FILE, 'utf8');
+const site = JSON.parse(fs.readFileSync(new URL('../../../src/data/site.json', import.meta.url), 'utf8'));
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function tempHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-prov-'));
@@ -132,7 +134,11 @@ test('the persona states the rules the owner cannot have broken', () => {
   assert.match(prompt, /TAQEEM/);
   assert.match(prompt, /Never invent a property/i);
   assert.match(prompt, /1100313556/, 'the FAL licence number');
-  assert.match(prompt, /\+966 59 329 6933/);
+  // Dana hands over on the site's WhatsApp number (src/data/site.json) and quotes no other.
+  assert.match(prompt, new RegExp(`hand over: WhatsApp \\*\\*${esc(site.whatsapp.display)}\\*\\*`));
+  assert.match(prompt, new RegExp(`offer WhatsApp \\*\\*${esc(site.whatsapp.display)}\\*\\*`));
+  assert.match(prompt, new RegExp(`- WhatsApp: \\*\\*${esc(site.whatsapp.display)}\\*\\*\\. Phone: \\*\\*${esc(site.phone.display)}\\*\\*\\.`));
+  for (const [n] of prompt.matchAll(/\+966 \d{2} \d{3} \d{4}/g)) assert.ok([site.whatsapp.display, site.phone.display].includes(n), `unknown number in prompt.md: ${n}`);
   assert.match(prompt, /Sunday–Thursday, 10:00–19:00/);
   assert.match(prompt, /AI concierge/i);
   assert.match(prompt, /\{\{locale\}\}/);

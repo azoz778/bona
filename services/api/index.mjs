@@ -908,7 +908,7 @@ export function createApp(options = {}) {
       return sendRaw(res, 200, JSON.stringify(await tools.run(toolName, body)));
     } catch (err) {
       log({ level: 'error', evt: 'tool.failed', tool: toolName, error: String(err?.message ?? err) });
-      return sendRaw(res, 200, JSON.stringify(JSON.stringify({ error: 'tool_failed', note: 'Tell the visitor you cannot check that right now and offer WhatsApp +966 59 329 6933.' })));
+      return sendRaw(res, 200, JSON.stringify(JSON.stringify({ error: 'tool_failed', note: 'Tell the visitor you cannot check that right now and offer WhatsApp +966 57 626 7694.' })));
     }
   }
 
