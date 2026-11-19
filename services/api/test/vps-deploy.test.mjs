@@ -164,8 +164,11 @@ function runShimmed(script, args = [], scenario = {}) {
   // SHIM_PRESEED_START (test-side only): pretend an `enable --now bona-api` already went over ssh,
   // so a SHIM_SSH_DOWN_AFTER_START scenario is down from the very first call.
   // SHIM_STALE_WAL (test-side only): the PC still has a bona.db-wal from before the cutover.
-  const { SHIM_PRESEED_START, SHIM_STALE_WAL, ...env } = scenario;
+  // PC_WA (test-side only): the PC bona-api twin's WhatsApp drop-in (services/README.md, "The PC
+  // bona-api twin since the WhatsApp move"); see pcWa() below. Default 'dropin': in place and good.
+  const { SHIM_PRESEED_START, SHIM_STALE_WAL, PC_WA = 'dropin', ...rest } = scenario;
   if (SHIM_STALE_WAL) writeFileSync(path.join(home, 'bona-data', 'bona.db-wal'), 'stale');
+  const env = { ...pcWa(home, PC_WA), ...rest };
   writeFileSync(log, SHIM_PRESEED_START ? 'ssh -o BatchMode=yes -o ConnectTimeout=20 fake-vps sudo -n systemctl enable --now bona-api\n' : '');
   const r = bash([path.join(VPS, script), ...args], {
     env: {
@@ -182,6 +185,30 @@ function runShimmed(script, args = [], scenario = {}) {
   });
   const lines = readFileSync(log, 'utf8').split('\n').filter(Boolean);
   return { status: r.status, out: r.stdout + r.stderr, lines, home };
+}
+// pcWa(home, kind) → lays out the PC's ~/.secrets as the WhatsApp move left it (bona-services.env
+// keeps the owner's personal instance for bona-intake) plus the twin's drop-in in the shape `kind`
+// names, and returns the systemctl shim's answer to `show bona-api -p EnvironmentFiles`.
+const PC_WA_LINES = 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n';
+function pcWa(home, kind) {
+  const secrets = path.join(home, '.secrets');
+  mkdirSync(secrets, { recursive: true });
+  writeFileSync(path.join(secrets, 'bona-services.env'), 'X=1\nBONA_WA_INSTANCE=abdulaziz-personal\n', { mode: 0o600 });
+  const shared = `${path.join(secrets, 'bona-services.env')} (ignore_errors=yes)`;
+  const marketing = `${path.join(secrets, 'bona-marketing.env')} (ignore_errors=yes)`;
+  const wa = path.join(secrets, 'bona-api-pc-wa.env');
+  const listed = `${wa} (ignore_errors=no)`;
+  const file = {
+    dropin: PC_WA_LINES, early: PC_WA_LINES, 'no-file': null, none: null,
+    'no-jid': 'BONA_WA_INSTANCE=bona\n', 'blank-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=\n',
+    personal: 'BONA_WA_INSTANCE=abdulaziz-personal\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n',
+    'quoted-export': 'export BONA_WA_INSTANCE="bona"\nexport BONA_WA_INSTANCE_JID=\'966576267694@s.whatsapp.net\'\n',
+    'show-fails': PC_WA_LINES,
+  }[kind];
+  assert.ok(file !== undefined, `unknown PC_WA kind ${kind}`);
+  if (file !== null) writeFileSync(wa, file, { mode: 0o600 });
+  const order = kind === 'none' ? [shared, marketing] : kind === 'early' ? [listed, shared, marketing] : [shared, marketing, listed];
+  return { SHIM_PC_ENVFILES: order.join('|'), ...(kind === 'show-fails' ? { SHIM_SHOW_FAIL: '1' } : {}) };
 }
 const REMOTE = '^ssh -o BatchMode=yes -o ConnectTimeout=20 fake-vps ';
 // On the VPS the units are SYSTEM units driven with `sudo -n systemctl` (lib.sh VPS_SYSTEMCTL);
@@ -204,6 +231,7 @@ const CALL = {
   pcNodeSqlite: /^node -e require\("node:sqlite"\)$/,
   pcDisable: /^systemctl --user disable bona-api cloudflared-bona$/,
   pcStart: /^systemctl --user enable --now bona-api cloudflared-bona$/,
+  pcWaShow: /^systemctl --user show bona-api -p EnvironmentFiles --value$/,
   publicHealth: /^curl .*https:\/\/public-health\.invalid\/health$/,
   // rollback.sh --copy-back: VPS → a temp dir under the PC's bona-data
   scpBack: (f) => new RegExp(`^scp -q -p fake-vps:bona-data\\/${f.replace(/\./g, '\\.')} \\S+\\/bona-data\\/\\.copy-back\\.[^/]+\\/$`),
@@ -319,9 +347,71 @@ test('cutover.sh: ssh dies after the VPS API was started — fail closed, PC uni
 test('rollback.sh: stops the VPS units and verifies them inactive, only then starts the PC units', () => {
   const r = runShimmed('rollback.sh');
   assert.equal(r.status, 0, r.out);
-  assertOrdered(r.lines, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
+  // The twin's WhatsApp drop-in is checked first, before anything is stopped anywhere.
+  assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
   assert.ok(!r.lines.some((l) => /^scp /.test(l)), `plain rollback copies nothing\n${r.lines.join('\n')}`);
+  assert.ok(!r.out.includes('966576267694'), `no env value is printed\n${r.out}`);
   noRemoteUserManager(r);
+});
+
+// ---- the PC twin must not come back on the owner's personal WhatsApp (A2Z go-live item 7, 2026-11-19)
+// The PC's bona-services.env keeps BONA_WA_INSTANCE=abdulaziz-personal for bona-intake; without the
+// drop-in, `enable --now bona-api` would poll and send from the owner's personal number again while
+// the site sends every client to Bona's own number, which nothing on the PC would read.
+const refusedUntouched = (r, why) => {
+  assert.notEqual(r.status, 0, `rollback must refuse: ${why}\n${r.out}`);
+  assert.ok(r.lines.some((l) => CALL.pcWaShow.test(l)), `the drop-in must have been looked up\n${r.lines.join('\n')}`);
+  assert.ok(!r.lines.some((l) => /^(ssh|scp) /.test(l)), `${why}: nothing may be stopped or copied on the VPS\n${r.lines.join('\n')}`);
+  assert.ok(!r.lines.some((l) => /^systemctl --user (stop|enable|disable)/.test(l)), `${why}: no PC unit touched\n${r.lines.join('\n')}`);
+  // The refusal says what to do instead: the drop-in, the reload, and the explicit way out.
+  for (const s of ['bona-api.service.d/wa-own-number.conf', 'EnvironmentFile=%h/.secrets/bona-api-pc-wa.env', 'BONA_WA_INSTANCE_JID=', 'systemctl --user daemon-reload', '--personal-instance', 'The PC bona-api twin since the WhatsApp move']) {
+    assert.ok(r.out.includes(s), `${why}: the refusal should mention ${s}\n${r.out}`);
+  }
+};
+
+for (const [kind, why] of [
+  ['none', 'no drop-in'],
+  ['no-file', 'the drop-in names an env file that is not there'],
+  ['no-jid', 'the env file has no BONA_WA_INSTANCE_JID'],
+  ['blank-jid', 'the env file leaves BONA_WA_INSTANCE_JID empty'],
+  ['personal', "the env file names the owner's personal instance"],
+  ['early', 'the env file is loaded before bona-services.env, so it does not win'],
+  ['show-fails', 'systemctl --user show failed'],
+]) {
+  test(`rollback.sh: PC twin WhatsApp guard refuses before anything is stopped (${why})`, () => {
+    refusedUntouched(runShimmed('rollback.sh', [], { PC_WA: kind }), why);
+  });
+}
+
+test('rollback.sh --copy-back: no drop-in — refused before the VPS is stopped or the PC API touched', () => {
+  const r = runShimmed('rollback.sh', ['--copy-back'], { PC_WA: 'none' });
+  refusedUntouched(r, 'no drop-in, --copy-back');
+  assert.ok(!r.lines.some((l) => /^systemctl --user is-active/.test(l)), r.lines.join('\n'));
+});
+
+test('rollback.sh: the drop-in env file may use export and quotes (as lib/env.mjs and systemd read it)', () => {
+  const r = runShimmed('rollback.sh', [], { PC_WA: 'quoted-export' });
+  assert.equal(r.status, 0, r.out);
+  assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.pcStart);
+});
+
+test('rollback.sh --personal-instance: no drop-in needed, a loud warning, then the usual fail-closed order', () => {
+  for (const args of [['--personal-instance'], ['--copy-back', '--personal-instance'], ['--personal-instance', '--copy-back']]) {
+    const r = runShimmed('rollback.sh', args, { PC_WA: 'none', SHIM_REMOTE_MISSING: 'bona.db-wal bona.db-shm' });
+    assert.equal(r.status, 0, `${args}: ${r.out}`);
+    assert.ok(!r.lines.some((l) => CALL.pcWaShow.test(l)), `${args}: an explicit choice skips the lookup`);
+    assertOrdered(r.lines, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
+    assert.match(r.out, /personal WhatsApp/);
+    assert.match(r.out, /item 7/);
+    if (args.includes('--copy-back')) assert.ok(r.lines.some((l) => CALL.scpBack('bona.db').test(l)), `${args}: --copy-back still copies`);
+  }
+});
+
+test('rollback.sh: an unknown argument is a usage error and touches nothing', () => {
+  const r = runShimmed('rollback.sh', ['--personal']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.out, /usage: rollback\.sh \[--copy-back\] \[--personal-instance\]/);
+  assert.ok(!r.lines.some((l) => /^(ssh|scp|systemctl) /.test(l)), r.lines.join('\n'));
 });
 
 // ---- --copy-back: the VPS's newer data replaces the PC's, all of it or none of it (Codex review)

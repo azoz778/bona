@@ -3,10 +3,22 @@
 # and exits 0. `is-active --quiet U` answers active (0) until a `stop` has been recorded here,
 # inactive (1) after — and inactive from the start for every unit named in SHIM_LOCAL_INACTIVE
 # (space-separated).
+# `show U -p EnvironmentFiles [--value]` prints one entry per line of SHIM_PC_ENVFILES ('|'-separated,
+# each "PATH (ignore_errors=yes|no)" as systemd prints it; nothing when unset) and fails when
+# SHIM_SHOW_FAIL is set.
 set -u
 log=${SHIM_LOG:?SHIM_LOG must point at the log file}
 printf 'systemctl %s\n' "$*" >> "$log"
 case " $* " in
+  *" show "*" -p EnvironmentFiles "*)
+    [ -z "${SHIM_SHOW_FAIL:-}" ] || exit 1
+    if [ -n "${SHIM_PC_ENVFILES:-}" ]; then
+      IFS='|' read -ra entries <<< "$SHIM_PC_ENVFILES"
+      for e in "${entries[@]}"; do
+        case " $* " in *" --value "*) printf '%s\n' "$e" ;; *) printf 'EnvironmentFiles=%s\n' "$e" ;; esac
+      done
+    fi
+    exit 0 ;;
   *" is-active "*)
     unit=${!#}
     case " ${SHIM_LOCAL_INACTIVE:-} " in *" $unit "*) exit 1 ;; esac

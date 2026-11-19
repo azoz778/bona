@@ -12,6 +12,14 @@
 #                            PC's files and the PC units start. Any failure leaves the PC data as it
 #                            was, removes the temp dir and starts nothing (Codex review 2026-09-08:
 #                            a swallowed scp error must not start the service on stale data).
+#   rollback.sh --personal-instance
+#                            start the PC twin without its WhatsApp drop-in, i.e. on the owner's
+#                            personal WhatsApp: only once the VPS env and the site are back on that
+#                            number (cutover runbook R1 + R2). Combines with --copy-back.
+# Since Bona's WhatsApp moved to its own number (2026-11-19) the PC's bona-services.env keeps the
+# owner's personal instance for bona-intake. Without --personal-instance, nothing is stopped anywhere
+# unless the PC bona-api unit loads the drop-in env file that names Bona's own instance and number
+# (lib.sh pc_wa_dropin_ok; services/README.md, "The PC bona-api twin since the WhatsApp move").
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
@@ -20,11 +28,23 @@ need ssh; need scp; need curl; need systemctl
 vps() { ssh -o BatchMode=yes -o ConnectTimeout=20 "$BONA_VPS_SSH" "$@"; }
 
 COPY_BACK=0
-case "${1:-}" in
-  "") ;;
-  --copy-back) COPY_BACK=1 ;;
-  *) die "usage: rollback.sh [--copy-back]" ;;
-esac
+PERSONAL=0
+for arg in "$@"; do
+  case "$arg" in
+    --copy-back) COPY_BACK=1 ;;
+    --personal-instance) PERSONAL=1 ;;
+    *) die "usage: rollback.sh [--copy-back] [--personal-instance]" ;;
+  esac
+done
+
+# The PC twin must not come back on the owner's personal WhatsApp (A2Z go-live item 7): checked
+# before anything is stopped anywhere, like everything below.
+if [ "$PERSONAL" = 1 ]; then
+  warn "--personal-instance: the PC bona-api will poll and send from the owner's personal WhatsApp ($PC_PERSONAL_INSTANCE). A2Z go-live item 7 is undone; the site must be back on that number too (runbook R1 + R2)."
+elif ! pc_wa_dropin_ok; then
+  pc_wa_dropin_help
+  die "refused: $PC_WA_WHY. Nothing was stopped, copied or started."
+fi
 
 # Everything --copy-back needs on the PC is checked before anything is stopped anywhere.
 if [ "$COPY_BACK" = 1 ]; then

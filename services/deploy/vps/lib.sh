@@ -95,6 +95,80 @@ keep_vps_keys() {
   ' "$2" "$1" > "$3"
 }
 
+# ---- The PC bona-api twin's WhatsApp drop-in (A2Z go-live item 7, 2026-11-19) -------------------
+# The PC's bona-services.env keeps the owner's personal instance for bona-intake, so the twin that
+# rollback.sh starts must load a later env file that names Bona's own instance and number
+# (services/README.md, "The PC bona-api twin since the WhatsApp move"). A later EnvironmentFile=
+# wins in systemd, and the process env wins over the files lib/env.mjs loads itself.
+PC_WA_ENV="$SECRETS_DIR/bona-api-pc-wa.env"
+PC_WA_DROPIN="$HOME_DIR/.config/systemd/user/bona-api.service.d/wa-own-number.conf"
+PC_PERSONAL_INSTANCE=abdulaziz-personal   # lib/wa.mjs: the instance when BONA_WA_INSTANCE is unset
+
+# env_value FILE KEY → prints KEY's value as lib/env.mjs parseEnvText reads it (the last KEY= line,
+# `export ` stripped, one pair of quotes stripped); nothing when the file or the key is not there.
+# For comparisons in this script only: never echo what it returns.
+env_value() {
+  [ -r "$1" ] || return 0
+  awk -v k="$2" -v q="'" '
+    { line = $0; sub(/\r$/, "", line); gsub(/^[ \t]+|[ \t]+$/, "", line)
+      if (line == "" || substr(line, 1, 1) == "#") next
+      if (substr(line, 1, 7) == "export ") { line = substr(line, 8); sub(/^[ \t]+/, "", line) }
+      eq = index(line, "="); if (eq <= 1) next
+      key = substr(line, 1, eq - 1); sub(/[ \t]+$/, "", key); if (key != k) next
+      v = substr(line, eq + 1); gsub(/^[ \t]+|[ \t]+$/, "", v)
+      f = substr(v, 1, 1); l = substr(v, length(v), 1)
+      if (length(v) > 1 && f == l && (f == "\"" || f == q)) v = substr(v, 2, length(v) - 2)
+      val = v; found = 1 }
+    END { if (found) print val }' "$1"
+}
+
+# pc_wa_dropin_ok → 0 when the PC bona-api unit loads $PC_WA_ENV after bona-services.env and that
+# file sets BONA_WA_INSTANCE (not the owner's personal instance) and BONA_WA_INSTANCE_JID, both
+# non-empty. Otherwise 1, with the reason in PC_WA_WHY (paths only, never a value).
+pc_wa_dropin_ok() {
+  local files wa_at shared_at inst jid
+  PC_WA_WHY=
+  if ! files=$(systemctl --user show bona-api -p EnvironmentFiles --value 2>/dev/null); then
+    PC_WA_WHY="systemctl --user show bona-api failed"; return 1
+  fi
+  files=$(printf '%s\n' "$files" | sed 's/ (ignore_errors=[a-z]*)$//')
+  wa_at=$(printf '%s\n' "$files" | grep -nxF "$PC_WA_ENV" | tail -n 1 | cut -d: -f1 || true)
+  if [ -z "$wa_at" ]; then PC_WA_WHY="the PC bona-api unit does not load $PC_WA_ENV (no drop-in)"; return 1; fi
+  shared_at=$(printf '%s\n' "$files" | grep -nxF "$SECRETS_DIR/bona-services.env" | tail -n 1 | cut -d: -f1 || true)
+  if [ -n "$shared_at" ] && [ "$wa_at" -lt "$shared_at" ]; then
+    PC_WA_WHY="$PC_WA_ENV is loaded before $SECRETS_DIR/bona-services.env, so it does not win"; return 1
+  fi
+  if [ ! -f "$PC_WA_ENV" ]; then PC_WA_WHY="$PC_WA_ENV is missing"; return 1; fi
+  inst=$(env_value "$PC_WA_ENV" BONA_WA_INSTANCE)
+  jid=$(env_value "$PC_WA_ENV" BONA_WA_INSTANCE_JID)
+  if [ -z "$inst" ] || [ -z "$jid" ]; then
+    PC_WA_WHY="$PC_WA_ENV does not set both BONA_WA_INSTANCE and BONA_WA_INSTANCE_JID"; return 1
+  fi
+  if [ "$inst" = "$PC_PERSONAL_INSTANCE" ]; then
+    PC_WA_WHY="$PC_WA_ENV names the owner's personal instance"; return 1
+  fi
+}
+
+# pc_wa_dropin_help → stderr: how to give the twin its drop-in (as in services/README.md).
+pc_wa_dropin_help() {
+  cat >&2 <<HELP
+The PC bona-api twin would poll and send from the owner's personal WhatsApp ($PC_PERSONAL_INSTANCE)
+while the site sends clients to Bona's own number, which nothing on the PC would read (A2Z go-live
+item 7). See services/README.md, "The PC bona-api twin since the WhatsApp move". Give it a drop-in:
+
+  # $PC_WA_DROPIN
+  [Service]
+  EnvironmentFile=%h/.secrets/bona-api-pc-wa.env
+
+  # $PC_WA_ENV (mode 0600)
+  BONA_WA_INSTANCE=bona
+  BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net
+
+then \`systemctl --user daemon-reload\` and run rollback.sh again. Only when the VPS env and the
+site are back on the personal number (runbook R1 + R2): rollback.sh --personal-instance
+HELP
+}
+
 # render TEMPLATE  → stdout, with every @PLACEHOLDER@ substituted; refuses to leave one behind.
 # Bash parameter substitution, not sed: a `|` or `&` in a value would break or corrupt a sed
 # expression. The replacements are quoted because bash ≥ 5.2 (patsub_replacement) would otherwise
