@@ -23,8 +23,8 @@ Profile art: `marketing/brand/` — `avatar-{320,400,800}.png` plus per-platform
 Link everywhere: https://bona-real-estate.com
 
 ## X / Twitter (bio ≤160) — handle `bonarealestate` (dots illegal on X)
-**EN** `Private luxury real estate, Jeddah. Villas, penthouses, waterfront & off-market homes — shown by appointment. REGA FAL 1100313556. WhatsApp +966 59 329 6933`
-**AR** `عقارات فاخرة خاصة في جدة. فلل، بنتهاوس، واجهات بحرية وعقارات خارج السوق — المعاينة بموعد. رخصة فال 1100313556. واتساب +966 59 329 6933`
+**EN** `Private luxury real estate, Jeddah. Villas, penthouses, waterfront & off-market homes — shown by appointment. REGA FAL 1100313556. WhatsApp +966 57 626 7694`
+**AR** `عقارات فاخرة خاصة في جدة. فلل، بنتهاوس، واجهات بحرية وعقارات خارج السوق — المعاينة بموعد. رخصة فال 1100313556. واتساب +966 57 626 7694`
 Location: Jeddah, Saudi Arabia · Website: site URL · Pin the launch thread.
 
 ## TikTok (bio ≤80) — handle `bona.com.sa`
@@ -47,8 +47,8 @@ Set up: Snapchat Business Manager → Public Profile → category *Real Estate* 
 - Cadence: 2 posts/week (market-insight and district guides, no listing spam; 1 listing/month as a "case study").
 
 ## YouTube (channel description ≤1000)
-**EN** `Bona is a private luxury real-estate boutique in Jeddah, Saudi Arabia. On this channel: cinematic walkthroughs of villas, penthouses and waterfront homes in Jeddah and Riyadh, district guides, and plain-language explainers on buying, selling and letting property in the Kingdom. REGA-licensed brokerage, FAL 1100313556. Enquiries: WhatsApp +966 59 329 6933 · https://bona-real-estate.com`
-**AR** `بونا بوتيك عقاري فاخر في جدة. في هذه القناة: جولات سينمائية في الفلل والبنتهاوس والمنازل الواجهية في جدة والرياض، أدلّة الأحياء، وشروحات مبسّطة عن شراء وبيع وتأجير العقار في المملكة. وساطة مرخّصة من الهيئة العامة للعقار، رخصة فال 1100313556. للاستفسار: واتساب +966 59 329 6933`
+**EN** `Bona is a private luxury real-estate boutique in Jeddah, Saudi Arabia. On this channel: cinematic walkthroughs of villas, penthouses and waterfront homes in Jeddah and Riyadh, district guides, and plain-language explainers on buying, selling and letting property in the Kingdom. REGA-licensed brokerage, FAL 1100313556. Enquiries: WhatsApp +966 57 626 7694 · https://bona-real-estate.com`
+**AR** `بونا بوتيك عقاري فاخر في جدة. في هذه القناة: جولات سينمائية في الفلل والبنتهاوس والمنازل الواجهية في جدة والرياض، أدلّة الأحياء، وشروحات مبسّطة عن شراء وبيع وتأجير العقار في المملكة. وساطة مرخّصة من الهيئة العامة للعقار، رخصة فال 1100313556. للاستفسار: واتساب +966 57 626 7694`
 Handle: **`@bonarealestatesa`** (verified free 2026-09-08). Create a **Brand Account**, not a personal channel. Upload defaults: title `[Type] in [District], Jeddah — Ref. BONA-0xx | Bona`, chapters per room, end screen → site.
 
 ## Pinterest (display name ≤30, about ≤500)
@@ -75,6 +75,8 @@ Cadence: 3–4 updates/week — new listing, price change, one district note. No
 
 ## Launch announcement texts
 
+(Posted 2026-09 with the old number; kept as a record. Old posts stay as they are.)
+
 **Instagram / Facebook (post #9 caption — see launch-posts.md for the full version)**
 EN: `Bona is open. A private real-estate boutique in Jeddah for homes that are not meant to be seen by everyone — villas, penthouses, waterfront and off-market residences, shown by appointment. Ref. numbers in every post; WhatsApp +966 59 329 6933.`
 AR: `بونا تفتح أبوابها. بوتيك عقاري خاص في جدة للمنازل التي لا تُعرض على الجميع — فلل، بنتهاوس، واجهات بحرية وعقارات خارج السوق، المعاينة بموعد. رقم المرجع في كل منشور؛ واتساب +966 59 329 6933.`
@@ -93,7 +95,7 @@ AR: `بونا تفتح أبوابها. بوتيك عقاري خاص في جدة 
 > بونا — بوتيك عقاري فاخر في جدة، افتتح اليوم. فلل وبنتهاوس وواجهات بحرية بموعد مسبق. تصفّح: bona-real-estate.com
 > Bona — private luxury real estate, Jeddah. Open today. Browse: bona-real-estate.com
 
-## WhatsApp Business profile — +966 59 329 6933
+## WhatsApp Business profile — +966 57 626 7694 (Bona's own number, on the Fold)
 | Field | Value |
 |---|---|
 | Business name | Bona · بونا |
@@ -101,7 +103,7 @@ AR: `بونا تفتح أبوابها. بوتيك عقاري خاص في جدة 
 | Description (256) | EN: `Private luxury real estate in Jeddah. Villas, penthouses, waterfront & off-market homes, shown by appointment. REGA FAL 1100313556.` AR: `عقارات فاخرة خاصة في جدة. فلل، بنتهاوس، واجهات بحرية وعقارات خارج السوق، المعاينة بموعد. رخصة فال 1100313556.` |
 | Address | Al Rawdah District, Jeddah 23432 |
 | Hours | Sun–Thu 10:00–19:00 |
-| Email | (leave blank until bona.com.sa mail exists) |
+| Email | info@bona-real-estate.com |
 | Website | https://bona-real-estate.com , https://www.instagram.com/bonarealestatesa/ |
 | Catalog | Add 6–9 featured listings (photo, title, "Price on request" or asking price + ad licence no., link to listing page) |
 
