@@ -463,8 +463,11 @@ itself, `lib/env.mjs`). The refusal prints the steps; they are:
     # ~/.secrets/bona-api-pc-wa.env (0600): BONA_WA_INSTANCE=bona and BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net
     # then: systemctl --user daemon-reload
 
-`rollback.sh --personal-instance` skips that check and starts the twin on the personal number, with
-a warning: only once the VPS env and the site are back on that number (cutover runbook R1 + R2).
+`rollback.sh --personal-instance` starts the twin on the personal number instead, with a warning:
+only once the VPS env and the site are back on that number (cutover runbook R1 + R2). It refuses,
+before it stops anything, while the unit still loads `bona-api-pc-wa.env`: the twin would otherwise
+poll and send through Bona's instance after all. It prints the two commands that take the drop-in
+away (`rm` the `.conf` above, then `systemctl --user daemon-reload`).
 
 `sync-secrets.sh` keeps the VPS's own `BONA_WA_INSTANCE` / `BONA_WA_INSTANCE_JID` (lib.sh
 `VPS_KEEP_KEYS`), and copies nothing when it cannot read them; run it only from a checkout that has

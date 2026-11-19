@@ -122,16 +122,24 @@ env_value() {
     END { if (found) print val }' "$1"
 }
 
+# pc_wa_files → PC_WA_FILES = the PC bona-api unit's EnvironmentFiles, one path per line, in the
+# order systemd reads them. 1 when systemctl cannot say, with the reason in PC_WA_WHY.
+pc_wa_files() {
+  PC_WA_FILES=
+  if ! PC_WA_FILES=$(systemctl --user show bona-api -p EnvironmentFiles --value 2>/dev/null); then
+    PC_WA_WHY="systemctl --user show bona-api failed"; return 1
+  fi
+  PC_WA_FILES=$(printf '%s\n' "$PC_WA_FILES" | sed 's/ (ignore_errors=[a-z]*)$//')
+}
+
 # pc_wa_dropin_ok → 0 when the PC bona-api unit loads $PC_WA_ENV after bona-services.env and that
 # file sets BONA_WA_INSTANCE (not the owner's personal instance) and BONA_WA_INSTANCE_JID, both
 # non-empty. Otherwise 1, with the reason in PC_WA_WHY (paths only, never a value).
 pc_wa_dropin_ok() {
   local files wa_at shared_at inst jid
   PC_WA_WHY=
-  if ! files=$(systemctl --user show bona-api -p EnvironmentFiles --value 2>/dev/null); then
-    PC_WA_WHY="systemctl --user show bona-api failed"; return 1
-  fi
-  files=$(printf '%s\n' "$files" | sed 's/ (ignore_errors=[a-z]*)$//')
+  pc_wa_files || return 1
+  files=$PC_WA_FILES
   wa_at=$(printf '%s\n' "$files" | grep -nxF "$PC_WA_ENV" | tail -n 1 | cut -d: -f1 || true)
   if [ -z "$wa_at" ]; then PC_WA_WHY="the PC bona-api unit does not load $PC_WA_ENV (no drop-in)"; return 1; fi
   shared_at=$(printf '%s\n' "$files" | grep -nxF "$SECRETS_DIR/bona-services.env" | tail -n 1 | cut -d: -f1 || true)
@@ -164,9 +172,39 @@ item 7). See services/README.md, "The PC bona-api twin since the WhatsApp move".
   BONA_WA_INSTANCE=bona
   BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net
 
-then \`systemctl --user daemon-reload\` and run rollback.sh again. Only when the VPS env and the
-site are back on the personal number (runbook R1 + R2): rollback.sh --personal-instance
+then \`systemctl --user daemon-reload\` and run this again. Only when the VPS env and the site are
+back on the personal number (runbook R1 + R2): run it with --personal-instance
 HELP
+}
+
+# pc_wa_preflight PERSONAL → the PC bona-api twin's WhatsApp route, checked before the caller stops,
+# copies or starts anything (A2Z go-live item 7); dies with the reason (paths only, never a value).
+#   PERSONAL=0  the unit must load the Bona drop-in (pc_wa_dropin_ok).
+#   PERSONAL=1  (--personal-instance) the unit must NOT load $PC_WA_ENV: after R1 + R2 the twin would
+#               otherwise still poll and send through Bona's instance while the site and the VPS are
+#               back on the owner's number (Codex review r1, 2026-11-19).
+pc_wa_preflight() {
+  PC_WA_WHY=
+  if [ "$1" != 1 ]; then
+    pc_wa_dropin_ok && return 0
+    pc_wa_dropin_help
+    die "refused: $PC_WA_WHY. Nothing was stopped, copied or started."
+  fi
+  pc_wa_files || die "refused: $PC_WA_WHY, so the route --personal-instance asks for cannot be checked. Nothing was stopped, copied or started."
+  if printf '%s\n' "$PC_WA_FILES" | grep -qxF "$PC_WA_ENV"; then
+    cat >&2 <<HELP
+--personal-instance: the PC bona-api unit still loads $PC_WA_ENV, so it would poll and
+send through Bona's own instance while the site and the VPS are back on the owner's personal number.
+Take the drop-in away first (services/README.md, "The PC bona-api twin since the WhatsApp move"):
+
+  rm $PC_WA_DROPIN
+  systemctl --user daemon-reload
+
+then run this again with --personal-instance.
+HELP
+    die "refused: the Bona drop-in is still active. Nothing was stopped, copied or started."
+  fi
+  warn "--personal-instance: the PC bona-api will poll and send from the owner's personal WhatsApp ($PC_PERSONAL_INSTANCE). A2Z go-live item 7 is undone; the site must be back on that number too (runbook R1 + R2)."
 }
 
 # render TEMPLATE  → stdout, with every @PLACEHOLDER@ substituted; refuses to leave one behind.

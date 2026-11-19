@@ -399,13 +399,41 @@ test('rollback.sh --personal-instance: no drop-in needed, a loud warning, then t
   for (const args of [['--personal-instance'], ['--copy-back', '--personal-instance'], ['--personal-instance', '--copy-back']]) {
     const r = runShimmed('rollback.sh', args, { PC_WA: 'none', SHIM_REMOTE_MISSING: 'bona.db-wal bona.db-shm' });
     assert.equal(r.status, 0, `${args}: ${r.out}`);
-    assert.ok(!r.lines.some((l) => CALL.pcWaShow.test(l)), `${args}: an explicit choice skips the lookup`);
-    assertOrdered(r.lines, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
+    // Looked up all the same, first: the route it asks for must be the one the unit will take.
+    assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
     assert.match(r.out, /personal WhatsApp/);
     assert.match(r.out, /item 7/);
     if (args.includes('--copy-back')) assert.ok(r.lines.some((l) => CALL.scpBack('bona.db').test(l)), `${args}: --copy-back still copies`);
   }
 });
+
+// Codex review r1: after R1 + R2 the site and the VPS are back on the owner's number, but a drop-in
+// still in place would start the twin on Bona's instance — reading and sending from a number the
+// site no longer gives out. So --personal-instance needs the drop-in gone, checked before anything
+// is stopped anywhere.
+for (const [kind, why] of [
+  ['dropin', 'the Bona drop-in is still active'],
+  ['quoted-export', 'the Bona drop-in is still active (export and quotes)'],
+  ['personal', 'a drop-in env file is still loaded, whatever it names'],
+  ['show-fails', 'systemctl --user show failed, so the route cannot be checked'],
+]) {
+  test(`rollback.sh --personal-instance: refused before anything is stopped (${why})`, () => {
+    for (const args of [['--personal-instance'], ['--copy-back', '--personal-instance']]) {
+      const r = runShimmed('rollback.sh', args, { PC_WA: kind });
+      assert.notEqual(r.status, 0, `${args}: must refuse: ${why}\n${r.out}`);
+      assert.ok(r.lines.some((l) => CALL.pcWaShow.test(l)), `${args}: the route must have been looked up\n${r.lines.join('\n')}`);
+      assert.ok(!r.lines.some((l) => /^(ssh|scp) /.test(l)), `${args}: nothing may be stopped or copied on the VPS\n${r.lines.join('\n')}`);
+      assert.ok(!r.lines.some((l) => /^systemctl --user (stop|enable|disable|is-active)/.test(l)), `${args}: no PC unit touched\n${r.lines.join('\n')}`);
+      assert.match(r.out, /Nothing was stopped, copied or started/);
+      if (kind !== 'show-fails') {
+        for (const s of ['bona-api.service.d/wa-own-number.conf', 'systemctl --user daemon-reload', '--personal-instance']) {
+          assert.ok(r.out.includes(s), `${args}: the refusal should mention ${s}\n${r.out}`);
+        }
+      }
+      assert.ok(!r.out.includes('966576267694'), `${args}: no env value is printed\n${r.out}`);
+    }
+  });
+}
 
 test('rollback.sh: an unknown argument is a usage error and touches nothing', () => {
   const r = runShimmed('rollback.sh', ['--personal']);

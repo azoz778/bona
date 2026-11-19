@@ -13,9 +13,10 @@
 #                            was, removes the temp dir and starts nothing (Codex review 2026-09-08:
 #                            a swallowed scp error must not start the service on stale data).
 #   rollback.sh --personal-instance
-#                            start the PC twin without its WhatsApp drop-in, i.e. on the owner's
-#                            personal WhatsApp: only once the VPS env and the site are back on that
-#                            number (cutover runbook R1 + R2). Combines with --copy-back.
+#                            start the PC twin on the owner's personal WhatsApp: only once the VPS
+#                            env and the site are back on that number (cutover runbook R1 + R2), and
+#                            refused while the unit still loads the drop-in (remove it first).
+#                            Combines with --copy-back.
 # Since Bona's WhatsApp moved to its own number (2026-11-19) the PC's bona-services.env keeps the
 # owner's personal instance for bona-intake. Without --personal-instance, nothing is stopped anywhere
 # unless the PC bona-api unit loads the drop-in env file that names Bona's own instance and number
@@ -37,14 +38,10 @@ for arg in "$@"; do
   esac
 done
 
-# The PC twin must not come back on the owner's personal WhatsApp (A2Z go-live item 7): checked
-# before anything is stopped anywhere, like everything below.
-if [ "$PERSONAL" = 1 ]; then
-  warn "--personal-instance: the PC bona-api will poll and send from the owner's personal WhatsApp ($PC_PERSONAL_INSTANCE). A2Z go-live item 7 is undone; the site must be back on that number too (runbook R1 + R2)."
-elif ! pc_wa_dropin_ok; then
-  pc_wa_dropin_help
-  die "refused: $PC_WA_WHY. Nothing was stopped, copied or started."
-fi
+# The PC twin must come back on the WhatsApp the site gives out (A2Z go-live item 7): Bona's own,
+# through the drop-in, or with --personal-instance the owner's, with no drop-in left. Checked before
+# anything is stopped anywhere, like everything below (lib.sh pc_wa_preflight).
+pc_wa_preflight "$PERSONAL"
 
 # Everything --copy-back needs on the PC is checked before anything is stopped anywhere.
 if [ "$COPY_BACK" = 1 ]; then

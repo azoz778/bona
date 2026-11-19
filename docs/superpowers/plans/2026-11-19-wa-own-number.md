@@ -1757,8 +1757,9 @@ C5. Never start the PC bona-api twin as it is (its env says abdulaziz-personal);
     needs the drop-in in services/README.md "The PC bona-api twin since the WhatsApp move".
     `rollback.sh` from a checkout with this branch refuses, before it stops anything on the VPS,
     until the drop-in is there (it prints the steps); `--personal-instance` overrides that only for
-    a rollback that also undoes the move (R1 + R2). An older checkout's rollback.sh has no such
-    check, and never run sync-secrets.sh from a checkout older than the merge either.
+    a rollback that also undoes the move (R1 + R2), and itself refuses while the drop-in is still
+    loaded (it prints how to take it away). An older checkout's rollback.sh has no such check, and
+    never run sync-secrets.sh from a checkout older than the merge either.
 C6. The Evolution API key once leaked into the VPS Caddy log (approvals row 77, "Later"); the
     Bona instance now sits behind the same key.
 C7. Public `/health` publishes `poller.instance` (the instance NAME): today "abdulaziz-personal",
