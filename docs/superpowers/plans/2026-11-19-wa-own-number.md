@@ -1764,7 +1764,7 @@ B9a. RECONCILE what the first poll could not see. A new instance has no poll cur
      and pulls its last 30 days), then answers it there by hand (Dana is off since B1). Not the
      owner's or a team member's own chat. A Ref line in such a chat stays in the thread; the lead
      does not get its campaign. If the B7 link gate failed and the env was switched later, the
-     owner also goes through the Fold's chats from B6 to FROM whatever the count says: what reached
+     owner also goes through the Fold's chats from the site update (SINCE, or the verified Pages publication time if earlier) to FROM whatever the count says: what reached
      the number while the instance was not linked is on the Fold only. Write the count and the
      chats added into the A2Z checklist row 7 (counts only).
 B10. Functional checks: a non-team phone sends a site Ref line (copy one from a listing's
