@@ -761,6 +761,15 @@ in `lib/wa-send.mjs` (Sending switch on the Team page — only the owner's own c
 20/min, 500/day, 6/min per recipient). Known limit: anyone who knows a member's number can
 spend that member's code budget and block *new* logins for up to a day; existing sessions
 keep working.
+Known exposure since the move to Bona's own number (2026-11-19; the route is the owner's decision,
+design §11): every code, the owner's own included, is a message *sent from* the Bona account, so it
+also shows in that account's chat with the member on the Fold (WhatsApp Business) and on every
+device linked to it (the owner's warm-up companion, Evolution). Whoever can read the Fold's
+WhatsApp can type the owner's number at `/dashboard/login`, read his code there and get an owner
+session (Team page, Sending switch, Dana). Before then only his own phone and Evolution showed it.
+So the Fold stays screen-locked with WhatsApp's notification text hidden on the lock screen, is
+not a shared staff phone, and no bot or viewer gets screen access to WhatsApp Business on it
+(cutover runbook A2; the owner confirms).
 Sessions carry the member; deactivating someone deletes their sessions and codes at once, and
 every admin write re-checks the person after the body is read. Every stage change and note
 records who made it, and `audit_log` records logins, team changes and switches (ids only —

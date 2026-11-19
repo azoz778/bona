@@ -1582,7 +1582,16 @@ A2. WhatsApp Business on the Fold (Lebara SIM 0576267694), one attempt (slow-dow
       `python3 ~/secrets-vault/scripts/secrets-vault.py sync` (never ask the owner to keep it);
       recovery email info@bona-real-estate.com;
     - profile from `marketing/social-bios.md` "WhatsApp Business profile";
-    - check the number was not someone else's WhatsApp before (no old chats or groups appear).
+    - check the number was not someone else's WhatsApp before (no old chats or groups appear);
+    - LOGIN CODES SHOW ON THE FOLD: after B7 every dashboard login code, the owner's own
+      included, is sent FROM this account, so it appears in the Fold's chat with that person and
+      on every device linked to the account (the owner's companion from A3, Evolution). Whoever
+      can read the Fold's WhatsApp can sign in as the owner (Team page, Sending switch, Dana).
+      Before B7: a screen lock on the Fold (it has no lock PIN today), WhatsApp Business
+      notification text hidden on the lock screen, not a shared staff phone, and no bot or Home
+      Lab viewer screen access to WhatsApp Business on it (check with the bona-line session that
+      the lock does not stop the AI line answering calls over adb). The owner confirms this in
+      the A2Z checklist row 7; the route itself is his decision (design §11), so no code change.
 A3. Warm-up (D4, ~3 days): the owner uses it by hand from a linked device on his phone. He
     messages the Bona number once from his personal WhatsApp and saves it as a contact (lead
     notes and his login codes will come from it); each team member does the same (their codes).
