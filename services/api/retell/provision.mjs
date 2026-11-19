@@ -371,6 +371,9 @@ const truthy = (v, fallback = false) => (v == null || v === '' ? fallback : !['0
 /** Create ~/.secrets/bona-services.env (or top up missing keys). Never prints values. */
 export function ensureEnvFile({ home = os.homedir(), env = process.env } = {}) {
   const defaults = {
+    // Top-up defaults only (an existing key is never touched). The PC file is shared with
+    // bona-intake, which reads the owner's personal instance. BONA_WA_INSTANCE_JID is never
+    // defaulted: unset means "the owner's number", the state before the 2026-11-19 move.
     BONA_WA_INSTANCE: 'abdulaziz-personal',
     BONA_OWNER_JID: '966593296933@s.whatsapp.net',
     BONA_WA_GROUP_MATCH: 'bona',

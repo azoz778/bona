@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   knowledgeBasePayload, knowledgeBaseFreshness, toolsPayload, llmPayload, voiceAgentPayload,
-  chatAgentPayload, redactPayload, provision, PROMPT_FILE, PREFERRED_MODEL, FALLBACK_MODEL,
+  chatAgentPayload, redactPayload, provision, ensureEnvFile, PROMPT_FILE, PREFERRED_MODEL, FALLBACK_MODEL,
   BEGIN_MESSAGE, KB_NAME, VOICE_AGENT_NAME, CHAT_AGENT_NAME,
   WA_PROMPT_FILE, WA_LLM_NAME, WA_CHAT_AGENT_NAME, WA_SESSION_MS, whatsappToolsPayload, whatsappLlmPayload, whatsappChatAgentPayload,
 } from '../retell/provision.mjs';
@@ -870,6 +870,19 @@ test('--dry-run --rebuild-kb shows her LLM moving to the new base too', async ()
     const wa = text.slice(text.indexOf('— WhatsApp'));
     assert.match(wa, /<new_knowledge_base_id>/);
     assert.doesNotMatch(text, new RegExp(TOKEN));
+  } finally {
+    cleanup();
+  }
+});
+
+test('ensureEnvFile never writes BONA_WA_INSTANCE_JID: its absence is the rollback state', () => {
+  const { home, cleanup } = tempHome();
+  try {
+    const first = ensureEnvFile({ home, env: {} });
+    assert.ok(!first.keys.includes('BONA_WA_INSTANCE_JID'));
+    const again = ensureEnvFile({ home, env: {} });
+    assert.ok(!(again.added ?? []).includes('BONA_WA_INSTANCE_JID'));
+    assert.doesNotMatch(fs.readFileSync(first.file, 'utf8'), /^BONA_WA_INSTANCE_JID=/m);
   } finally {
     cleanup();
   }
