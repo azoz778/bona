@@ -1599,10 +1599,27 @@ A7. Pick the window: not 20:30–21:45 Riyadh (the social publishers run then, a
 
 ## B. The cutover window (~30 min, one sitting)
 
-B1. Dana off for the first days: the owner switches "Dana on WhatsApp" off on the dashboard Team
-    page. Check:
+B1. Dana off for the first days, chats under test included: the owner switches "Dana on WhatsApp"
+    off on the dashboard Team page. Check:
     `curl -s https://api.bona-real-estate.com/health | python3 -c 'import json,sys; print(json.load(sys.stdin)["dana"])'`
     → `'enabled': False`. Note what it was, for R3.
+    That switch does NOT stop a Dana test: she still answers a chat the owner armed with "Let Dana
+    test on this chat" (dana-wa.mjs:221 `team.danaEnabled() || lead.dana_test === 1`), and such a
+    client writing to the new number after B7 would get Dana from it on day 1. So also:
+    - read the Team page's Dana line: "Off. Dana answers nobody on WhatsApp, except N chats under
+      test" means N tests still run (render-team.mjs:108);
+    - list them on the VPS (read-only; prints the count and the lead ids only, nothing personal):
+
+          ssh hermes-vps "~/.local/opt/node-v24.19.0-linux-x64/bin/node -e 'const {DatabaseSync}=require(\"node:sqlite\");const db=new DatabaseSync(process.argv[1],{readOnly:true});const ids=db.prepare(\"SELECT lead_id FROM leads WHERE dana_test=1 AND dana_off=0 AND inbox_state=?\").all(\"in\").map((r)=>r.lead_id);console.log(ids.length, ids.join(\" \"))' ~/bona-data/bona.db"
+          # → 0   (the same count as the Team page line, inbox/store.mjs:558)
+
+    - for each id: the owner opens `https://api.bona-real-estate.com/dashboard/inbox/<lead_id>` and
+      presses "Stop the Dana test here" (owner only; it clears `dana_test` and leaves the chat's own
+      switch alone). Not "Turn Dana off for this chat": that sets `dana_off`, which R3/C1 would
+      then have to undo by hand;
+    - re-run the list → `0`, and the Team page line has no "except". Write the stopped lead ids
+      into the A2Z checklist row 7 (ids only) so R3/C1 can re-arm each test.
+    Do not go on to B2 until the list prints `0`.
 B2. Create the Evolution instance `bona` on the VPS with NO webhook, websocket, RabbitMQ or SQS
     (Evolution v2; check the version first, the image is `latest`):
 
@@ -1690,7 +1707,9 @@ B11. Owner by hand, same day: the FB Page / IG WhatsApp button and any click-to-
 
 ## C. After
 
-C1. Dana back on when the owner is ready (suggested: after 3 quiet days on the new number).
+C1. Dana back on when the owner is ready (suggested: after 3 quiet days on the new number), and
+    each test stopped in B1 re-armed only if he still wants it: that chat's page → "Let Dana test
+    on this chat" (ids in the A2Z checklist row 7).
 C2. Brochures: they print `site.json` `whatsapp` (rebrand_pdf.py `load_brand`). The 21 published
     ones keep the old number until a re-render; re-render only at cutover and only when the owner
     decides, together with REGA O1. New intake brochures follow site.json once ~/bona is pulled to
@@ -1727,7 +1746,8 @@ R2. Site: revert the merge commit in a PR (CI, then merge) so site.json, the pri
     FAQ and Dana's prompt go back; re-run provision.mjs from the reverted main. A site still
     showing the Bona number while the env is rolled back sends WhatsApp clicks to a number
     nothing reads, so do R1 and R2 together.
-R3. Dana's setting back to what it was before B1.
+R3. Dana's setting back to what it was before B1, and the tests B1 stopped re-armed (each id from
+    the A2Z checklist row 7: its chat page → "Let Dana test on this chat").
 R4. If WhatsApp bans the new number: R1 + R2 the same day (the site, brochures and Page would
     otherwise point at a dead number). The WhatsApp Business account itself is not undone.
 ```
