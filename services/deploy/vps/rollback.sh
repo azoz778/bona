@@ -17,6 +17,8 @@
 #                            env and the site are back on that number (cutover runbook R1 + R2), and
 #                            refused while the unit still loads the drop-in (remove it first).
 #                            Combines with --copy-back.
+# Refused outright, before anything is stopped anywhere, while the PC twin is locked (since the
+# WhatsApp cutover, runbook B5a; lib.sh pc_twin_lock_check): the fall-back is then the VPS env.
 # Since Bona's WhatsApp moved to its own number (2026-11-19) the PC's bona-services.env keeps the
 # owner's personal instance for bona-intake. Without --personal-instance, nothing is stopped anywhere
 # unless the PC bona-api unit loads the drop-in env file that names Bona's own instance and number
@@ -37,6 +39,10 @@ for arg in "$@"; do
     *) die "usage: rollback.sh [--copy-back] [--personal-instance]" ;;
   esac
 done
+
+# Locked at the WhatsApp cutover (runbook B5a): no rollback to this PC at all, checked before
+# anything is stopped anywhere; the fall-back is the VPS env (runbook R1). Unlock only with the owner.
+pc_twin_lock_check
 
 # The PC twin must come back on the WhatsApp the site gives out (A2Z go-live item 7): Bona's own,
 # through the drop-in, or with --personal-instance the owner's, with no drop-in left. Checked before

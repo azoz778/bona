@@ -1679,14 +1679,29 @@ B5. Code first, env unchanged (the split is inert while BONA_WA_INSTANCE_JID is 
         ssh hermes-vps 'curl -s http://127.0.0.1:4120/health' | python3 -c 'import json,sys; p=json.load(sys.stdin)["poller"]; print(p["instance"], p.get("ownNumber"))'
         # → abdulaziz-personal owner
 
+B5a. LOCK THE PC TWIN (on the PC, while Pages deploys; nothing public changes). From B7 on, the PC
+     bona-api twin's env still reads abdulaziz-personal, so nothing may start it (owner decision
+     2026-11-19, "Lock the PC backup"). The drop-in makes systemd refuse every start of the unit
+     while the file LOCKED exists (a reboot, `systemctl --user start`, any script), and install.sh
+     and rollback.sh refuse before they write, stop or start anything:
+
+         d=~/.config/systemd/user/bona-api.service.d; mkdir -p "$d" && printf '%s\n' '[Unit]' '# The PC twin is locked since the WhatsApp move (cutover runbook B5a): no start while LOCKED is here.' 'AssertPathExists=!%h/.config/systemd/user/bona-api.service.d/LOCKED' > "$d/locked.conf" && printf 'Locked %s at the WhatsApp move. Fall-back: cutover runbook R1 on the VPS. Unlock only with the owner: rm this file.\n' "$(date -Is)" > "$d/LOCKED" && systemctl --user daemon-reload
+         # the LOCK CHECK:
+         ls ~/.config/systemd/user/bona-api.service.d/LOCKED; systemctl --user show bona-api -p DropInPaths -p NeedDaemonReload -p ActiveState -p UnitFileState
+         # → the LOCKED path, DropInPaths= naming …/bona-api.service.d/locked.conf,
+         #   NeedDaemonReload=no, ActiveState=inactive, UnitFileState=disabled
+
+     Anything else: fix the lock before B7. Undo is one command and only with the owner (R):
+     `rm ~/.config/systemd/user/bona-api.service.d/LOCKED`.
 B6. Wait for the Pages deploy: `curl -s https://bona-real-estate.com/contact/ | grep -c 966576267694`
     > 0 and `curl -s https://bona-real-estate.com/contact/ | grep -c 'wa.me/966593296933'` = 0.
     Note the time.
 B7. Within 10 minutes of B6 (the new instance's first poll looks back 10 min,
     `FIRST_RUN_LOOKBACK_MS`, wa-poller.mjs:87), switch the VPS env. That keeps B9a short; it does
-    not make it safe on its own: Pages can be live before B6 sees it. Gate first: the B2 LINK CHECK
-    → `open`. Anything else: do NOT switch the env (bona-api keeps reading abdulaziz-personal and
-    the owner's codes keep working); the site already shows the new number, so either the link is
+    not make it safe on its own: Pages can be live before B6 sees it. Gate first: the B5a LOCK CHECK
+    as shown there (else fix the lock first), then the B2 LINK CHECK → `open`. Anything else: do
+    NOT switch the env (bona-api keeps reading abdulaziz-personal and the owner's codes keep
+    working); the site already shows the new number, so either the link is
     back within the hour (one attempt, by the owner on the Fold) or do R2 the same day. The values
     are not secret but the file is: never cat it. Works whether or not the file already has the
     lines:
@@ -1781,19 +1796,29 @@ C3. Chats still open on the personal number: the owner finishes them by hand fro
     a dashboard reply to such a lead now comes from the Bona number.
 C4. Hermes memory (~/.hermes/memories/MEMORY.md lines about the dashboard code and Bona's
     WhatsApp) is out of date: update it in a Hermes session.
-C5. Never start the PC bona-api twin as it is (its env says abdulaziz-personal); a PC rollback
-    needs the drop-in in services/README.md "The PC bona-api twin since the WhatsApp move".
-    `rollback.sh` from a checkout with this branch refuses, before it stops anything on the VPS,
-    until the drop-in is there (it prints the steps); `--personal-instance` overrides that only for
-    a rollback that also undoes the move (R1 + R2), and itself refuses while the drop-in is still
-    loaded (it prints how to take it away). An older checkout's rollback.sh has no such check, and
-    never run sync-secrets.sh from a checkout older than the merge either.
+C5. The PC bona-api twin stays locked (B5a); its env says abdulaziz-personal. While LOCKED is
+    there, `rollback.sh` and `services/deploy/install.sh` from a checkout with this branch refuse
+    before they write, stop or start anything (each says why), and systemd refuses every start of
+    the unit. Unlock only with the owner (R). Unlocked, a PC rollback still needs the drop-in in
+    services/README.md "The PC bona-api twin since the WhatsApp move": `rollback.sh` refuses,
+    before it stops anything on the VPS, until the drop-in is there (it prints the steps);
+    `--personal-instance` overrides that only for a rollback that also undoes the move (R1 + R2),
+    and itself refuses while the drop-in is still loaded (it prints how to take it away);
+    `install.sh` has no WhatsApp check (unlocked, it starts the twin on whatever the unit loads).
+    An older checkout's rollback.sh and install.sh have no lock check (systemd still refuses the
+    start, but an older rollback.sh stops the VPS first): never run them, or sync-secrets.sh, from
+    a checkout older than the merge.
 C6. The Evolution API key once leaked into the VPS Caddy log (approvals row 77, "Later"); the
     Bona instance now sits behind the same key.
 C7. Public `/health` publishes `poller.instance` (the instance NAME): today "abdulaziz-personal",
     after the cutover "bona". The board on /dashboard/ no longer prints it (verify-integrations).
 
 ## R. Rollback
+
+After B7 the fall-back is ONLY the VPS: R1, the two env lines back + `ssh hermes-vps sudo systemctl
+restart bona-api` (minutes), with R2 for the site. The PC bona-api twin stays locked (B5a, C5):
+rollback.sh and install.sh refuse while it is, and systemd refuses to start it. Unlock
+(`rm ~/.config/systemd/user/bona-api.service.d/LOCKED`) only with the owner.
 
 R1. Env (minutes): restore the backup from B7, or edit the two lines back, then restart:
 

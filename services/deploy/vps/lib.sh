@@ -104,6 +104,28 @@ PC_WA_ENV="$SECRETS_DIR/bona-api-pc-wa.env"
 PC_WA_DROPIN="$HOME_DIR/.config/systemd/user/bona-api.service.d/wa-own-number.conf"
 PC_PERSONAL_INSTANCE=abdulaziz-personal   # lib/wa.mjs: the instance when BONA_WA_INSTANCE is unset
 
+# ---- The PC bona-api twin's lock (owner decision 2026-11-19, "Lock the PC backup") --------------
+# At the WhatsApp cutover (runbook B5a) the twin gets the drop-in bona-api.service.d/locked.conf,
+# `AssertPathExists=!%h/.config/systemd/user/bona-api.service.d/LOCKED`, and that LOCKED file beside
+# it. While the file exists systemd refuses every start of the unit (a reboot, `systemctl --user
+# start`, any script, an older checkout's included), and install.sh and rollback.sh refuse before
+# they write, stop or start anything. After the switch the fall-back is the VPS env (runbook R1),
+# not this PC. Unlock only with the owner: rm the file (the drop-in alone changes nothing).
+PC_TWIN_LOCK="$HOME_DIR/.config/systemd/user/bona-api.service.d/LOCKED"
+
+# pc_twin_lock_check → returns when the twin is not locked; when it is, says why and dies.
+pc_twin_lock_check() {
+  [ -e "$PC_TWIN_LOCK" ] || return 0
+  cat >&2 <<HELP
+The PC bona-api twin is LOCKED ($PC_TWIN_LOCK).
+Since the WhatsApp move it must not start, from this script or any other way: its env reads the
+owner's personal WhatsApp (A2Z go-live item 7). The fall-back is the VPS, not this PC: the two env
+lines back, then \`ssh $BONA_VPS_SSH sudo systemctl restart bona-api\` (cutover runbook R1).
+Unlock only together with the owner: rm $PC_TWIN_LOCK
+HELP
+  die "refused: the PC bona-api twin is locked. Nothing was written, stopped, copied or started."
+}
+
 # env_value FILE KEY → prints KEY's value as lib/env.mjs parseEnvText reads it (the last KEY= line,
 # `export ` stripped, one pair of quotes stripped); nothing when the file or the key is not there.
 # For comparisons in this script only: never echo what it returns.

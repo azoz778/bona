@@ -441,7 +441,8 @@ cannot apply the hardening directives (`ProtectSystem`, `PrivateTmp`, …) — i
 | is the repo-sync timer ticking | `ssh hermes-vps sudo systemctl list-timers bona-repo-sync.timer` |
 | check readiness / what is missing | `ssh hermes-vps bash /opt/bona/services/deploy/vps/install-vps.sh --check` |
 | copy changed secrets from the PC | `bash services/deploy/vps/sync-secrets.sh` (on the PC) |
-| bring it back to the PC | `bash services/deploy/vps/rollback.sh [--copy-back]` (on the PC; refuses until the PC twin has its WhatsApp drop-in, below) |
+| undo the WhatsApp move | on the VPS only: the two `BONA_WA_INSTANCE*` env lines back, then `ssh hermes-vps sudo systemctl restart bona-api` (cutover runbook R1, minutes); the PC twin stays locked (below) |
+| bring it back to the PC | `bash services/deploy/vps/rollback.sh [--copy-back]` (on the PC): refuses while the PC twin is locked, and until it has its WhatsApp drop-in (below); unlock only with the owner |
 
 `install.sh` in this directory is the **PC/WSL** installer and is kept only for rollback; its units
 are disabled on the PC. `bona-intake` (WhatsApp PDF → listing) still runs on the PC — it needs the
@@ -451,7 +452,19 @@ owner's Claude login — and never talks to the API. Scripts: the header comment
 **The PC `bona-api` twin since the WhatsApp move (2026-11-19).** The user unit is disabled but its
 preset is `enabled`, and the PC's `~/.secrets/bona-services.env` keeps
 `BONA_WA_INSTANCE=abdulaziz-personal` for bona-intake. Started as it is, the twin would poll the
-owner's personal WhatsApp again and undo A2Z go-live item 7. Never start it by hand. `rollback.sh`
+owner's personal WhatsApp again and undo A2Z go-live item 7.
+
+*Locked at the switch* (owner decision 2026-11-19, "Lock the PC backup"; cutover runbook B5a). The
+unit gets the drop-in `~/.config/systemd/user/bona-api.service.d/locked.conf` with
+`AssertPathExists=!%h/.config/systemd/user/bona-api.service.d/LOCKED`, and that `LOCKED` file
+beside it. While the file exists systemd refuses every start of the unit (a reboot, a manual
+`systemctl --user start`, an older checkout's script), and `install.sh` and `rollback.sh` refuse
+before they write, stop or start anything, saying why (lib.sh `pc_twin_lock_check`;
+`install.sh --uninstall` still runs). After the switch the fall-back is the VPS env alone (table
+above), not this PC. Unlock only with the owner, one command (the drop-in left behind changes
+nothing): `rm ~/.config/systemd/user/bona-api.service.d/LOCKED`.
+
+Once unlocked, never start it by hand. `rollback.sh`
 starts it, and refuses before it stops anything on the VPS unless the unit loads a drop-in whose env
 file is read after the shared one and names Bona's own instance and number (lib.sh
 `pc_wa_dropin_ok`; a later `EnvironmentFile=` wins, and the process env wins over the files it loads
@@ -565,7 +578,7 @@ Data files under `~/bona-data` (owner-only, mode 0600):
 | `leads.jsonl` | the append-only raw log: one line per **new** lead, same `id` as the store's `lead_id`. Imported into `bona.db` once at startup (`import.legacy` in the log; a rerun is a no-op) |
 | `calls.jsonl`, `chats.jsonl` | Retell webhook events and transcripts, one line per finished conversation |
 
-- **Dana down, site shows the WhatsApp fallback** → `ssh hermes-vps sudo systemctl status bona-api cloudflared-bona`; `ssh hermes-vps sudo journalctl -u bona-api -n 50`. Uptime Kuma #25 (`api.bona-real-estate.com/health`, keyword `"retell":"ok"`) pages Telegram after ~3 minutes. If the VPS itself is gone: `bash services/deploy/vps/rollback.sh` on the PC restores the previous setup in about a minute, once the PC twin has its WhatsApp drop-in (§6, "The PC `bona-api` twin since the WhatsApp move"; the script refuses and prints the steps until then).
+- **Dana down, site shows the WhatsApp fallback** → `ssh hermes-vps sudo systemctl status bona-api cloudflared-bona`; `ssh hermes-vps sudo journalctl -u bona-api -n 50`. Uptime Kuma #25 (`api.bona-real-estate.com/health`, keyword `"retell":"ok"`) pages Telegram after ~3 minutes. If the VPS itself is gone: the PC twin is locked since the WhatsApp move, so `bash services/deploy/vps/rollback.sh` on the PC refuses; only with the owner, unlock it and give it its WhatsApp drop-in, and the script then restores the previous setup in about a minute (§6, "The PC `bona-api` twin since the WhatsApp move"; it says what is missing until then). Undoing the WhatsApp move itself is the VPS env alone (cutover runbook R1).
 - **Inventory stale after an intake publish** → `ssh hermes-vps sudo systemctl list-timers bona-repo-sync.timer` and `ssh hermes-vps sudo journalctl -u bona-repo-sync -n 5`; the API re-reads `listings.json` within 30 s of the pull.
 - **A client asks for a WhatsApp conversation to be deleted** (the privacy page offers it) →
   the owner's *Not a client* on the chat deletes what this service stored of it — messages,

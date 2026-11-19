@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
@@ -166,8 +166,11 @@ function runShimmed(script, args = [], scenario = {}) {
   // SHIM_STALE_WAL (test-side only): the PC still has a bona.db-wal from before the cutover.
   // PC_WA (test-side only): the PC bona-api twin's WhatsApp drop-in (services/README.md, "The PC
   // bona-api twin since the WhatsApp move"); see pcWa() below. Default 'dropin': in place and good.
-  const { SHIM_PRESEED_START, SHIM_STALE_WAL, PC_WA = 'dropin', ...rest } = scenario;
+  // PC_LOCK (test-side only): 'locked' = the twin locked by the cutover runbook's own B5a command;
+  // 'unlocked' = the same, then the one-command unlock (rm LOCKED); see lockTwin() below.
+  const { SHIM_PRESEED_START, SHIM_STALE_WAL, PC_WA = 'dropin', PC_LOCK, ...rest } = scenario;
   if (SHIM_STALE_WAL) writeFileSync(path.join(home, 'bona-data', 'bona.db-wal'), 'stale');
+  if (PC_LOCK) lockTwin(home, PC_LOCK);
   const env = { ...pcWa(home, PC_WA), ...rest };
   writeFileSync(log, SHIM_PRESEED_START ? 'ssh -o BatchMode=yes -o ConnectTimeout=20 fake-vps sudo -n systemctl enable --now bona-api\n' : '');
   const r = bash([path.join(VPS, script), ...args], {
@@ -434,6 +437,96 @@ for (const [kind, why] of [
     }
   });
 }
+
+// ---- the PC twin is LOCKED at the switch (owner decision 2026-11-19, "Lock the PC backup")
+// The lock is made exactly as the cutover runbook makes it: its B5a command, read from the plan's
+// Appendix B (a verbatim copy of the runbook) and run in the fake HOME. systemd's side of it (the
+// drop-in's AssertPathExists refuses a reboot or a manual start) cannot run here; what can: the
+// drop-in names the very file the command creates, and install.sh and rollback.sh refuse before
+// they write, stop or start anything, saying why. After the one-command unlock (rm LOCKED) they make
+// exactly the calls they make on a PC that was never locked.
+const REPO_ROOT = path.resolve(HERE, '../../..');
+const PLAN = path.join(REPO_ROOT, 'docs/superpowers/plans/2026-11-19-wa-own-number.md');
+const LOCK_REL = '.config/systemd/user/bona-api.service.d/LOCKED';
+function lockCommand() {
+  const plan = readFileSync(PLAN, 'utf8');
+  const appendixB = plan.slice(plan.indexOf('## Appendix B: Cutover runbook'));
+  const cmds = appendixB.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('d=~/.config/systemd/user/bona-api.service.d;'));
+  assert.equal(cmds.length, 1, 'runbook B5a has exactly one lock command');
+  return cmds[0];
+}
+// lockTwin(home, 'locked' | 'unlocked') → the runbook's lock command in that HOME (systemctl is the
+// shim, logged apart from the script's calls); 'unlocked' then runs the unlock, rm LOCKED.
+function lockTwin(home, kind) {
+  const r = spawnSync('bash', ['-c', lockCommand()], { encoding: 'utf8', env: { PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: path.join(home, 'lock.log') } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(existsSync(path.join(home, LOCK_REL)), 'the lock command creates LOCKED');
+  if (kind === 'unlocked') rmSync(path.join(home, LOCK_REL));
+  else assert.equal(kind, 'locked');
+}
+const runInstall = (args, scenario = {}) => runShimmed('../install.sh', args, { BONA_REPO_DIR: REPO_ROOT, TMPDIR: tmpdir(), ...scenario });
+const lockedUntouched = (r, why) => {
+  assert.notEqual(r.status, 0, `must refuse: ${why}\n${r.out}`);
+  assert.deepEqual(r.lines, [], `${why}: not one call (no systemctl, ssh, scp, node, cloudflared, curl)\n${r.lines.join('\n')}`);
+  for (const f of ['.config/systemd/user/bona-api.service', '.config/systemd/user/cloudflared-bona.service', '.cloudflared/bona.yml', '.secrets/bona-marketing.env']) {
+    assert.ok(!existsSync(path.join(r.home, f)), `${why}: ${f} must not be written`);
+  }
+  // It says why, what the fall-back is, and how to unlock.
+  for (const s of [`The PC bona-api twin is LOCKED (${path.join(r.home, LOCK_REL)})`, 'sudo systemctl restart bona-api', 'cutover runbook R1', `rm ${path.join(r.home, LOCK_REL)}`, 'Nothing was written, stopped, copied or started']) {
+    assert.ok(r.out.includes(s), `${why}: the refusal should say ${s}\n${r.out}`);
+  }
+};
+
+test('the runbook B5a lock: a drop-in whose AssertPathExists names the LOCKED file it creates, then daemon-reload', () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
+  lockTwin(home, 'locked');
+  const dropin = readFileSync(path.join(home, '.config/systemd/user/bona-api.service.d/locked.conf'), 'utf8');
+  assert.match(dropin, /^\[Unit\]$/m);
+  // %h is the home of the user manager's user: the same file the scripts check under $HOME.
+  assert.deepEqual(dropin.split('\n').filter((l) => /^Assert|^Condition/.test(l)), [`AssertPathExists=!%h/${LOCK_REL}`]);
+  assert.match(readFileSync(path.join(home, LOCK_REL), 'utf8'), /Unlock only with the owner: rm this file/);
+  assert.deepEqual(readFileSync(path.join(home, 'lock.log'), 'utf8').split('\n').filter(Boolean), ['systemctl --user daemon-reload']);
+});
+
+test('install.sh: locked — refused before it writes or starts anything (with and without --restart), saying why', () => {
+  for (const args of [[], ['--restart'], ['--no-dns'], ['--restart', '--no-dns']]) {
+    lockedUntouched(runInstall(args, { PC_LOCK: 'locked' }), `install.sh ${args.join(' ') || '(no flags)'}`);
+  }
+});
+
+test('install.sh --uninstall still runs while locked: stopping the units is always allowed', () => {
+  const r = runInstall(['--uninstall'], { PC_LOCK: 'locked' });
+  assert.equal(r.status, 0, r.out);
+  assert.ok(r.lines.some((l) => /^systemctl --user disable --now bona-api\.service$/.test(l)), r.lines.join('\n'));
+  assert.ok(!r.lines.some((l) => /^systemctl --user (start|restart|enable )/.test(l)), r.lines.join('\n'));
+});
+
+test('rollback.sh: locked — refused before anything is stopped, copied or started (every flag), saying why', () => {
+  for (const args of [[], ['--copy-back'], ['--personal-instance'], ['--copy-back', '--personal-instance']]) {
+    lockedUntouched(runShimmed('rollback.sh', args, { PC_LOCK: 'locked' }), `rollback.sh ${args.join(' ') || '(no flags)'}`);
+    lockedUntouched(runShimmed('rollback.sh', args, { PC_LOCK: 'locked', PC_WA: 'none' }), `rollback.sh ${args.join(' ') || '(no flags)'}, no WhatsApp drop-in`);
+  }
+});
+
+test('unlocked (rm LOCKED): install.sh and rollback.sh make exactly the calls of a PC that was never locked', () => {
+  for (const args of [[], ['--restart']]) {
+    const never = runInstall(args);
+    const unlocked = runInstall(args, { PC_LOCK: 'unlocked' });
+    assert.ok(never.lines.some((l) => /^node /.test(l)), `past the lock the install goes on to its own checks\n${never.lines.join('\n')}`);
+    assert.deepEqual(unlocked.lines, never.lines, `install.sh ${args.join(' ')}`);
+    assert.equal(unlocked.status, never.status);
+  }
+  for (const [args, scenario] of [[[], {}], [['--personal-instance'], { PC_WA: 'none' }], [[], { PC_WA: 'none' }]]) {
+    const never = runShimmed('rollback.sh', args, scenario);
+    const unlocked = runShimmed('rollback.sh', args, { ...scenario, PC_LOCK: 'unlocked' });
+    assert.deepEqual(unlocked.lines, never.lines, `rollback.sh ${args.join(' ')} ${JSON.stringify(scenario)}`);
+    assert.equal(unlocked.status, never.status, unlocked.out);
+  }
+  // and the plain one is the usual successful fail-closed rollback
+  const r = runShimmed('rollback.sh', [], { PC_LOCK: 'unlocked' });
+  assert.equal(r.status, 0, r.out);
+  assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
+});
 
 test('rollback.sh: an unknown argument is a usage error and touches nothing', () => {
   const r = runShimmed('rollback.sh', ['--personal']);
