@@ -937,11 +937,10 @@ export function createPoller({
           // still be recognised as this same team member, without ever guessing a phone
           // from the lid's own digits.
           //
-          // Only from a message WE received (`!rec.fromMe`), though: `key.senderPn` and
-          // `key.remoteJidAlt` are folded into one `jidAlt` field by `lib/evolution.mjs`
-          // `normaliseRecord`, with nothing left to tell which one an outbound record's
-          // alt actually came from — and an outbound alt can be our own number for
-          // reasons that have nothing to do with whose CHAT this is. Binding a client's
+          // Only from a message WE received (`!rec.fromMe`), though: an outbound record's
+          // alt can still be our own number for reasons that have nothing to do with whose
+          // CHAT this is (`key.senderPn` always is, which is why `lib/evolution.mjs`
+          // `normaliseRecord` leaves it out of a sent record's `jidAlt`). Binding a client's
           // lid to a team member's phone from a bad pairing would be worse than the gap
           // this closes.
           if (teamWired && recJids.waLid && !rec.fromMe) learnLidSafely(recJids.phone, recJids.waLid);

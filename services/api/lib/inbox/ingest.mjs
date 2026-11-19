@@ -97,7 +97,8 @@ function namedBy(rec) {
  * True when a number or lid the record names is excluded. Each is checked as the row would
  * be if it held that identifier, so whatever decides exclusion for a row (`isExcluded`)
  * decides for the record too. On a record we sent, the owner's own number as the alt is left
- * out: lib/evolution.mjs folds `key.senderPn` into `jidAlt`, and there it names the sender.
+ * out: there it names the sender, not the chat (lib/evolution.mjs no longer takes a sent
+ * record's `key.senderPn` as the alt; this still covers an alt that is our number anyway).
  */
 function recordNamesExcluded(lead, rec, isExcluded, ownerPhone) {
   const senderAlt = rec.fromMe && ownerPhone && jidsOf({ jid: rec.jidAlt }).phone === ownerPhone;
@@ -169,9 +170,9 @@ export function createIngest({
 
   /**
    * What the lead may learn from a record it received: its empty lid / phone jid / phone. Not
-   * from one we sent: lib/evolution.mjs folds `key.senderPn` into the same `jidAlt`, and on an
-   * outbound record that can be our own number — the same caution as the poller's team
-   * pairing. Only from a record of the row's own chat (`sameChat`). Never a value another
+   * from one we sent: on an outbound record the alt can be our own number (lib/evolution.mjs
+   * leaves out a sent record's `key.senderPn`, which always is) — the same caution as the
+   * poller's team pairing. Only from a record of the row's own chat (`sameChat`). Never a value another
    * lead already holds: `phone_e164` is unique, and two leads on one jid would make every
    * later lookup by that jid a coin toss. A phone jid and its number name one person, so
    * when another lead holds either — a form lead's phone alone, say — neither is learned:

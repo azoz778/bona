@@ -24,6 +24,7 @@ import { createIngest } from '../lib/inbox/ingest.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
 import { createOrMergeLead, leadNote } from '../lib/leads.mjs';
 import { loadConfig } from '../lib/config.mjs';
+import { normaliseRecord } from '../lib/evolution.mjs';
 
 const NOW = Date.UTC(2026, 8, 6, 12, 0, 0);
 const ANON = '9f1c'.repeat(8);
@@ -2734,7 +2735,8 @@ test("(z) unset or blank BONA_WA_INSTANCE_JID: the owner's own chat is still the
 test("(z) set: the Bona number's own chat is never read, and no lead ever carries the Bona number", async () => {
   const h = harness({ env: SPLIT, windows: [[
     msg({ id: 'B1', jid: BONA, fromMe: true, text: 'Ref BONA-W003 · K7Q2XR' }),
-    // A record we sent in a privacy-mode chat whose alt is our own number (key.senderPn).
+    // Our own chat filed under a privacy-mode lid, its alt (key.remoteJidAlt) our own number.
+    // (A sent record's key.senderPn is never the alt: lib/evolution.mjs normaliseRecord.)
     msg({ id: 'B2', jid: '101010101010102@lid', jidAlt: BONA, fromMe: true, text: 'https://bona-real-estate.com/properties/bona-w003/' }),
   ]] });
   const tally = await h.poller.tick();
@@ -2770,4 +2772,32 @@ test('(z) set: a client Ref line to the Bona number is a lead and the owner gets
   assert.equal(tally.created, 1);
   assert.equal(h.sent.length, 1);
   h.cleanup();
+});
+
+test("(z) a reply typed on the instance's phone into a client's chat is stored and stops the clock, on either number (key.senderPn)", async () => {
+  // Codex review r1 (2026-11-19). The record as Evolution returns a message typed on the
+  // instance's own phone — the Fold after the split, the owner's phone before it — when it
+  // carries no remoteJidAlt: the chat is the client's (a lid or a phone jid) and `key.senderPn`
+  // is the sender, i.e. the instance's own number. That number read as the chat's alt made the
+  // record the instance's chat with itself: skipped, so the reply never reached the thread and
+  // never counted as a human reply (Dana's cooldown, the Hermes watchdog).
+  const LID = '272516946294519@lid';
+  for (const [env, own, label] of [[SPLIT, BONA, 'Bona number'], [{}, OWNER, "owner's number, today"]]) {
+    for (const remoteJid of [LID, SENDER]) {
+      const raw = {
+        id: 'cmi5x0row', key: { id: '3EB0A1B2C3D4E5F60718', fromMe: true, remoteJid, senderPn: own },
+        pushName: 'Bona', messageType: 'conversation', message: { conversation: 'Yes, it is still available', messageContextInfo: {} },
+        messageTimestamp: Math.floor((NOW - 30_000) / 1000), source: 'android', MessageUpdate: [],
+      };
+      const h = harness({ inbox: true, env, windows: [[normaliseRecord(raw)]] });
+      seedInLead(h, { wa_lid: LID });
+      const tally = await h.poller.tick(); // eslint-disable-line no-await-in-loop
+      const what = `${label}, chat ${remoteJid === LID ? 'lid' : 'phone jid'}`;
+      assert.equal(tally.ignored, 0, `${what}: not the instance's own chat`);
+      assert.equal(tally.replies, 1, what);
+      assert.equal(h.db.getLead('LEAD-in').first_reply_ts, NOW - 30_000, `${what}: the reply clock stops`);
+      assert.deepEqual(rows(h, 'LEAD-in'), [['3EB0A1B2C3D4E5F60718', 'out', 'owner_number']], `${what}: in the thread, as typed on the phone`);
+      h.cleanup();
+    }
+  }
 });

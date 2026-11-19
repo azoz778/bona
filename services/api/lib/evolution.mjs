@@ -339,6 +339,12 @@ export function isNoise(record) {
  * (D16) — all four from `fileNameOf`, `noise` is `isNoise`. A document's name is chosen by its sender
  * and is often a person's name or a phone number, so `media` and `fileName` are never
  * logged — the same care as `text`, `pushName` and the jids.
+ *
+ * `jidAlt` is the CHAT's other address: `remoteJidAlt`, else `key.senderPn` on a record we
+ * received (in a 1:1 chat its sender is the client). Never `senderPn` on a record we sent:
+ * there it is the instance's own number whatever the chat, and as the alt it made a reply
+ * typed on the instance's phone read as the instance's chat with itself (Codex review r1,
+ * 2026-11-19).
  * @typedef {{ id: string|null, jid: string|null, jidAlt: string|null, fromMe: boolean,
  *             ts: number|null, text: string, pushName: string|null,
  *             contextInfo: object|null, messageType: string|null,
@@ -348,7 +354,7 @@ export function isNoise(record) {
 export function normaliseRecord(record) {
   const key = record?.key ?? {};
   const jid = typeof key.remoteJid === 'string' ? key.remoteJid : null;
-  const alt = key.remoteJidAlt ?? record?.remoteJidAlt ?? key.senderPn ?? null;
+  const alt = key.remoteJidAlt ?? record?.remoteJidAlt ?? (key.fromMe === true ? null : key.senderPn) ?? null;
   const { name: fileName, truncated: fileNameTruncated, tk: fileNameTk, bona: fileNameBona } = fileNameOf(record);
   return {
     id: typeof key.id === 'string' && key.id ? key.id : null,
