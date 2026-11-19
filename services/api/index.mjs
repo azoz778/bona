@@ -249,7 +249,9 @@ export function createApp(options = {}) {
   // before the split): a sent record whose alt is this number names its sender, not the
   // chat — known even while the owner's account is deactivated or demoted.
   const selfDigits = bareJid(wa.instanceJid);
-  if (wa.ownNumberFrom === 'instance' && !/^\d{8,15}$/.test(selfDigits)) {
+  // A phone jid (`966…@s.whatsapp.net`, a device suffix allowed) or bare digits; a lid, a group
+  // or a name would make the poller read the instance's own chat as a client's.
+  if (wa.ownNumberFrom === 'instance' && !/^\d{8,15}(?::\d+)?(?:@s\.whatsapp\.net)?$/.test(wa.instanceJid)) {
     // Never the value: only that it is not a phone jid.
     log({ level: 'error', evt: 'wa.instance_jid_invalid' });
   }

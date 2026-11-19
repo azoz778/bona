@@ -999,12 +999,22 @@ test('BONA_WA_INSTANCE_JID unset: a sent record whose alt is the owner\'s number
 });
 
 test('a BONA_WA_INSTANCE_JID that is not a phone jid is said out loud at start-up (no value logged), and the app still builds', async () => {
-  const h = build({ env: { ...ENV, BONA_WA_INSTANCE_JID: 'bona@s.whatsapp.net' } });
-  try {
-    const line = h.logs.find((l) => l.evt === 'wa.instance_jid_invalid');
-    assert.ok(line && line.level === 'error');
-    assert.doesNotMatch(JSON.stringify(line), /bona@/);
-  } finally {
-    await h.close();
+  for (const value of ['bona@s.whatsapp.net', '101010101010102@lid', '966576267694@g.us']) {
+    const h = build({ env: { ...ENV, BONA_WA_INSTANCE_JID: value } });
+    try {
+      const line = h.logs.find((l) => l.evt === 'wa.instance_jid_invalid');
+      assert.ok(line && line.level === 'error', value);
+      assert.doesNotMatch(JSON.stringify(line), /bona@|101010101010102|576267694/);
+    } finally {
+      await h.close();
+    }
+  }
+  for (const value of ['966576267694@s.whatsapp.net', '966576267694', '966576267694:12@s.whatsapp.net']) {
+    const h = build({ env: { ...ENV, BONA_WA_INSTANCE_JID: value } });
+    try {
+      assert.ok(!h.logs.some((l) => l.evt === 'wa.instance_jid_invalid'), value);
+    } finally {
+      await h.close();
+    }
   }
 });
