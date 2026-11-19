@@ -11,10 +11,11 @@
  *     the row came to be `in`. Checked here, not left to callers: the poller screens its
  *     records, but a per-chat read (join history, catch-up, refresh) goes straight to a lead.
  *     The row is checked, and so is every number and lid the record names, sent or received
- *     (a lid-only chat first shows whose it is there) — except the owner's own number as a
+ *     (a lid-only chat first shows whose it is there) — except the instance's own number as a
  *     sent record's alt, which names the sender, not the chat. That number is the instance's
- *     own (`ownerPhone`), not read from the owner's account, so it is still known while his
- *     row is deactivated or demoted. Such a record stores nothing.
+ *     own (`ownerPhone`: `BONA_WA_INSTANCE_JID`, the owner's number while that is unset), not
+ *     read from the owner's account, so it is still known while his row is deactivated or
+ *     demoted. Such a record stores nothing.
  *     A received one may teach a row that holds no number yet that number, when it then
  *     excludes the row by itself; nothing else is learned from it, so a client's chat never
  *     excludes itself. Ingest never moves a chat out: the never-list add (P2-7) and the
@@ -127,7 +128,7 @@ function sameChat(lead, rec) {
  * @param {() => string|null} [o.ownerUserId] the env owner's `users.user_id`: the handler of a
  *        chat his own phone answers first
  * @param {string|(() => string|null)|null} [o.ownerPhone] the instance's own number (digits,
- *        from `BONA_OWNER_JID`): a sent record's alt that is this number names the sender, not
+ *        from `BONA_WA_INSTANCE_JID`, else `BONA_OWNER_JID`): a sent record's alt that is this number names the sender, not
  *        the chat. Left out, it is read from the `ownerUserId` account, which a deactivated or
  *        demoted owner row no longer yields
  * @param {((lead: object) => boolean)|null} [o.isExcludedLead] true for a chat that is never a
