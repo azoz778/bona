@@ -243,3 +243,67 @@ test('the Changes section flags the chats kept only to be checked, in both langu
   assert.match(ar, /مدةً أقصاها سنة/);
   assert.ok(policy.updated >= '2026-09-29', 'the version date is the newest change');
 });
+
+// ---- Bona's own WhatsApp number and the AI phone line (2026-11-19, design 2026-11-16 §8/§11) ----
+// CANDIDATE text: the owner OKs the EN and AR wording before the branch is merged.
+
+test('the AI phone assistant section: who answers, the recording, where the voice goes, how long audio is kept, how to have it deleted', () => {
+  const s = section('ai-phone-line');
+  assert.ok(s, 'the WhatsApp number is public and callable, and calls to it reach the AI line (design §8)');
+  const ids = policy.sections.map((x) => x.id);
+  assert.equal(ids.indexOf('ai-phone-line'), ids.indexOf('ai-concierge') + 1);
+  const en = body(s, 'en');
+  const ar = body(s, 'ar');
+  for (const text of [en, ar]) assert.ok(text.includes(site.whatsapp.display), 'the number it answers');
+  assert.match(en, /an AI system, not a person/);
+  assert.match(en, /the call is recorded/);
+  assert.match(en, /sent to OpenAI/);
+  assert.match(en, /outside Saudi Arabia/);
+  assert.match(en, /up to 90 days/);
+  assert.match(en, /no audio recording is kept/);
+  assert.match(en, /never asks for ID numbers, bank or payment details/);
+  assert.match(ar, /الذكاء الاصطناعي/);
+  assert.match(ar, /مسجّلة/);
+  assert.match(ar, /OpenAI/);
+  assert.match(ar, /خارج المملكة/);
+  assert.match(ar, /تسعون يوماً/);
+  assert.match(ar, /فلا يُحتفظ بأي تسجيل صوتي/);
+  assert.match(body(section('sharing'), 'en'), /OpenAI for the AI phone assistant/);
+  assert.match(body(section('sharing'), 'ar'), /OpenAI للمساعدة الهاتفية/);
+  // Its pointers lead to real headings, the same ones in both languages.
+  const heads = (locale) => new Map(policy.sections.map((x) => [x.heading[locale], x.id]));
+  const to = (text, re, locale) => [...text.matchAll(re)].map((m) => heads(locale).get(m[1]));
+  const enTo = to(en, /“([^”]+)”\)?\s+below/g, 'en');
+  const arTo = to(ar, /«([^»]+)»\)?\s+أدناه/g, 'ar');
+  assert.ok(enTo.length > 0 && enTo.every(Boolean), `en pointers: ${enTo}`);
+  assert.deepEqual([...new Set(arTo)].sort(), [...new Set(enTo)].sort());
+});
+
+test("dashboard replies are said to come from the site's WhatsApp number", () => {
+  const s = section('whatsapp-conversations');
+  assert.ok(body(s, 'en').includes(`come from Bona’s WhatsApp number, ${site.whatsapp.display}`));
+  assert.ok(body(s, 'ar').includes(`من رقم واتساب بونا ${site.whatsapp.display}`));
+});
+
+test('every number the policy writes out is site.whatsapp or site.phone, and the version date moved with the new number', () => {
+  const all = JSON.stringify(policy);
+  const digits = (x) => String(x).replace(/\D/g, '');
+  for (const m of all.matchAll(/\+966 5\d \d{3} \d{4}/g)) assert.ok([site.whatsapp.display, site.phone.display].includes(m[0]), m[0]);
+  assert.ok(policy.updated >= '2026-11-19', 'the version date moves with the new number');
+  assert.notEqual(digits(site.whatsapp.e164), digits(site.phone.e164));
+});
+
+// The dated line comes out once its 30 days are up (on or after 2026-12-19), and this test with it.
+test('the Changes section flags the new WhatsApp number and the AI phone assistant, in both languages (30 days)', () => {
+  if (new Date().toISOString().slice(0, 10) >= '2026-12-19') return;
+  const changes = section('changes');
+  const en = changes.body.en.find((p) => /^19 November 2026:/.test(p));
+  const ar = changes.body.ar.find((p) => /^19 نوفمبر 2026:/.test(p));
+  assert.ok(en && ar, 'a dated line in each language');
+  for (const text of [en, ar]) {
+    assert.ok(text.includes(site.whatsapp.display), 'the new number');
+    assert.ok(text.includes(site.phone.display), 'the number it replaces');
+  }
+  assert.match(en, /“The AI phone assistant”/);
+  assert.match(ar, /«المساعدة الهاتفية بالذكاء الاصطناعي»/);
+});

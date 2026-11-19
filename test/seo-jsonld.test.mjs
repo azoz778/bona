@@ -383,7 +383,7 @@ test('Organization sameAs lists only verified, live profiles', () => {
   const org = nodesOf(page('/'), 'RealEstateAgent')[0];
   assert.ok(Array.isArray(org.sameAs) && org.sameAs.includes('https://www.instagram.com/bonarealestatesa/'));
   for (const u of org.sameAs) {
-    assert.ok(/^https:\/\/(www\.instagram\.com\/bonarealestatesa\/|www\.tiktok\.com\/@bonarealestatesa|www\.linkedin\.com\/company\/bonarealestate\/|www\.facebook\.com\/1245646955305748|wa\.me\/966593296933)$/.test(u), `unverified profile in sameAs: ${u}`);
+    assert.ok(/^https:\/\/(www\.instagram\.com\/bonarealestatesa\/|www\.tiktok\.com\/@bonarealestatesa|www\.linkedin\.com\/company\/bonarealestate\/|www\.facebook\.com\/1245646955305748|wa\.me\/966576267694)$/.test(u), `unverified profile in sameAs: ${u}`);
   }
 });
 

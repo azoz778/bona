@@ -243,7 +243,8 @@ ${site.description.ar}
 - Licence: REGA FAL brokerage licence ${site.licences.fal}${site.licences.cr ? ` · CR ${site.licences.cr}` : ''}
 - Office: ${site.address.en.street}, ${site.address.en.city} ${site.address.en.postalCode}, ${site.address.en.region}, ${site.address.en.country} (lat ${site.geo.lat}, lng ${site.geo.lng})
 - Hours: ${site.hours.en} · ${site.hours.ar}
-- WhatsApp / phone: ${site.whatsapp.display} — ${wa}
+- WhatsApp: ${site.whatsapp.display} — ${wa}
+- Phone: ${site.phone.display}
 - Instagram: @${site.instagram.handle} — ${site.instagram.url}
 - Languages: English, Arabic
 
