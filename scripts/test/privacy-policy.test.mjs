@@ -272,6 +272,15 @@ test('the AI phone assistant section: who answers, the recording, where the voic
   assert.match(ar, /OpenAI/);
   assert.match(ar, /خارج المملكة/);
   assert.match(ar, /تسعون يوماً/);
+  // Phase 1 makes no enquiry from a call (~/bona-line catalogue.py refuses create_lead; POST /v1/calls
+  // does not exist yet): the transcript and details stay with the local call record, and the text
+  // says where they are rather than pointing at the enquiry store.
+  assert.ok(en.includes('The transcript and your details are kept with the call record on Bona’s own systems until you ask us to delete them.'), en);
+  assert.ok(ar.includes('أما النص المكتوب وبياناتك فتُحفظ مع سجل المكالمة على أنظمة بونا الخاصة إلى أن تطلب منا حذفها.'), ar);
+  for (const gone of ['kept as an enquiry, like any other', 'the enquiry it produced']) assert.ok(!en.includes(gone), `en still says: ${gone}`);
+  for (const gone of ['بوصفها استفساراً كأي استفسار آخر', 'الاستفسار الناتج عنها']) assert.ok(!ar.includes(gone), `ar still says: ${gone}`);
+  assert.match(en, /To have a call recording, its transcript or your details deleted, message us on WhatsApp/);
+  assert.match(ar, /ولطلب حذف تسجيل مكالمة أو نصها أو بياناتك، راسلنا على واتساب/);
   assert.match(ar, /فلا يُحتفظ بأي تسجيل صوتي/);
   // Declining keeps no audio, but the transcript and the details stay (~/bona-line call_record.py
   // finish_audio deletes only the raw tracks and the WAV): the same paragraph says so.
