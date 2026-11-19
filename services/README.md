@@ -469,10 +469,6 @@ before it stops anything, while the unit still loads `bona-api-pc-wa.env`: the t
 poll and send through Bona's instance after all. It prints the two commands that take the drop-in
 away (`rm` the `.conf` above, then `systemctl --user daemon-reload`).
 
-`install.sh` (the PC installer, above) runs the same check, lib.sh `pc_wa_preflight` with the same
-`--personal-instance`, before it writes or starts anything: it too would otherwise start the twin
-on the personal number.
-
 `sync-secrets.sh` keeps the VPS's own `BONA_WA_INSTANCE` / `BONA_WA_INSTANCE_JID` (lib.sh
 `VPS_KEEP_KEYS`), and copies nothing when it cannot read them; run it only from a checkout that has
 that guard.

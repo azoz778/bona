@@ -26,15 +26,6 @@
 #   --no-dns      skip tunnel creation and DNS routing (units only)
 #   --restart     restart both units even if they were already running
 #   --uninstall   stop and disable both units (leaves the tunnel and DNS alone)
-#   --personal-instance
-#                 bona-api on the owner's personal WhatsApp, only once the VPS env and the
-#                 site are back on that number (cutover runbook R1 + R2); refused while the
-#                 unit still loads the Bona drop-in
-#
-# Before anything is written or started, bona-api's WhatsApp route is checked exactly as
-# vps/rollback.sh checks it (vps/lib.sh pc_wa_preflight): since the WhatsApp move the PC's
-# bona-services.env keeps the owner's personal instance for bona-intake, so the unit must load
-# the drop-in in services/README.md, "The PC bona-api twin since the WhatsApp move".
 #
 set -euo pipefail
 
@@ -60,14 +51,12 @@ ALL_HOSTNAMES="$(printf '%s\n' "$HOSTNAME_API" $(printf '%s' "$HOSTNAMES_EXTRA" 
 DO_DNS=1
 DO_RESTART=0
 DO_UNINSTALL=0
-PERSONAL=0
 for arg in "$@"; do
   case "$arg" in
     --no-dns) DO_DNS=0 ;;
     --restart) DO_RESTART=1 ;;
     --uninstall) DO_UNINSTALL=1 ;;
-    --personal-instance) PERSONAL=1 ;;
-    -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
@@ -92,14 +81,6 @@ if [ "$DO_UNINSTALL" = 1 ]; then
   ok "units stopped. The tunnel \"$TUNNEL\" and its DNS record were left in place."
   exit 0
 fi
-
-# ---------------------------------------------------------------- 0. WhatsApp route
-# The PC twin must not come back on the owner's personal WhatsApp (A2Z go-live item 7): the same
-# check as vps/rollback.sh, before anything is written or started. In a subshell, because lib.sh's
-# names (NODE_BIN, say/ok/die, …) are not this script's.
-say "Checking bona-api's WhatsApp route"
-( . "$(dirname "${BASH_SOURCE[0]}")/vps/lib.sh" && pc_wa_preflight "$PERSONAL" ) || exit 1
-ok "bona-api will read the WhatsApp the site gives out"
 
 # ---------------------------------------------------------------- 1. checks
 say "Checking prerequisites"
