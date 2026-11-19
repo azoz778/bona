@@ -1690,6 +1690,10 @@ B5a. LOCK THE PC TWIN (on the PC, while Pages deploys; nothing public changes). 
          ls ~/.config/systemd/user/bona-api.service.d/LOCKED; systemctl --user show bona-api -p DropInPaths -p NeedDaemonReload -p ActiveState -p UnitFileState
          # → the LOCKED path, DropInPaths= naming …/bona-api.service.d/locked.conf,
          #   NeedDaemonReload=no, ActiveState=inactive, UnitFileState=disabled
+         # the tunnel twin gets the same lock (no dead connector on the live tunnel if someone starts it):
+         d2=~/.config/systemd/user/cloudflared-bona.service.d; mkdir -p "$d2" && printf '%s\n' '[Unit]' '# Locked with the bona-api twin (cutover runbook B5a).' 'AssertPathExists=!%h/.config/systemd/user/bona-api.service.d/LOCKED' > "$d2/locked.conf" && systemctl --user daemon-reload
+         systemctl --user show cloudflared-bona -p DropInPaths -p NeedDaemonReload -p ActiveState
+         # → DropInPaths= naming …/cloudflared-bona.service.d/locked.conf, NeedDaemonReload=no, ActiveState=inactive
 
      Anything else: fix the lock before B7. Undo is one command and only with the owner (R):
      `rm ~/.config/systemd/user/bona-api.service.d/LOCKED`.
@@ -1807,7 +1811,8 @@ C5. The PC bona-api twin stays locked (B5a); its env says abdulaziz-personal. Wh
     `install.sh` has no WhatsApp check (unlocked, it starts the twin on whatever the unit loads).
     An older checkout's rollback.sh and install.sh have no lock check (systemd still refuses the
     start, but an older rollback.sh stops the VPS first): never run them, or sync-secrets.sh, from
-    a checkout older than the merge.
+    a checkout older than the merge. On this PC `~/bona` IS such an older checkout (ed94e60, not
+    auto-pulled) until it is pulled to the merge commit; only ~/bona-publish follows main by itself.
 C6. The Evolution API key once leaked into the VPS Caddy log (approvals row 77, "Later"); the
     Bona instance now sits behind the same key.
 C7. Public `/health` publishes `poller.instance` (the instance NAME): today "abdulaziz-personal",
@@ -1818,7 +1823,10 @@ C7. Public `/health` publishes `poller.instance` (the instance NAME): today "abd
 After B7 the fall-back is ONLY the VPS: R1, the two env lines back + `ssh hermes-vps sudo systemctl
 restart bona-api` (minutes), with R2 for the site. The PC bona-api twin stays locked (B5a, C5):
 rollback.sh and install.sh refuse while it is, and systemd refuses to start it. Unlock
-(`rm ~/.config/systemd/user/bona-api.service.d/LOCKED`) only with the owner.
+(`rm ~/.config/systemd/user/bona-api.service.d/LOCKED`) only with the owner, and first check
+`systemctl --user show bona-api cloudflared-bona -p UnitFileState` says disabled for both (an old
+script may have enabled one while it was locked; if so, `systemctl --user disable bona-api
+cloudflared-bona` before the rm), or the twin starts on abdulaziz-personal at the next boot.
 
 R1. Env (minutes): restore the backup from B7, or edit the two lines back, then restart:
 
