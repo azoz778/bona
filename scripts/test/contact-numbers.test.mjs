@@ -61,6 +61,12 @@ test('the FAQ "How do I reach Bona?" answer gives the WhatsApp number and says c
   assert.match(en, /virtual assistant\. It is an AI, says so when it answers and records the call/);
   assert.match(ar, /بالذكاء الاصطناعي/);
   assert.match(ar, /وتسجّل المكالمة/);
+  // The AI line answers SIM calls only (~/bona-line line_state.py reads the cellular ring state); a
+  // WhatsApp call from the site's chat button rings WhatsApp Business on the Fold, unattended.
+  assert.match(en, /Phone calls to that number \(not WhatsApp calls\) are answered at any hour/);
+  assert.match(en, /WhatsApp calls do not reach the assistant, so please write to us there instead\./);
+  assert.match(ar, /المكالمات الهاتفية إلى هذا الرقم \(لا مكالمات واتساب\)/);
+  assert.match(ar, /ولا تصل مكالمات واتساب إلى المساعدة، فراسلنا كتابةً عبر واتساب بدلاً من ذلك\./);
   assert.doesNotMatch(en, /handled by the principal rather than passed down a call centre/, 'design §12: replaced now that calls reach the AI line');
   assert.doesNotMatch(ar, /لا عبر مركز اتصال/);
   assert.ok(ar.includes(`‎${site.whatsapp.display}`), 'the Arabic number keeps its left-to-right mark');

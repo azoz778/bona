@@ -262,6 +262,11 @@ test('the AI phone assistant section: who answers, the recording, where the voic
   assert.match(en, /up to 90 days/);
   assert.match(en, /no audio recording is kept/);
   assert.match(en, /never asks for ID numbers, bank or payment details/);
+  // Phone calls only: a WhatsApp call to the same number never reaches the AI line.
+  assert.ok(en.includes(`Phone calls to Bona’s number, ${site.whatsapp.display} (not WhatsApp calls), are answered at any hour`), en);
+  assert.match(en, /WhatsApp calls to that number do not reach the assistant; please write to us on WhatsApp instead\./);
+  assert.ok(ar.includes(`المكالمات الهاتفية الواردة إلى رقم بونا ${site.whatsapp.display} (لا مكالمات واتساب)`), ar);
+  assert.match(ar, /ولا تصل مكالمات واتساب إلى هذا الرقم إلى المساعدة، فراسلنا كتابةً عبر واتساب بدلاً من ذلك\./);
   assert.match(ar, /الذكاء الاصطناعي/);
   assert.match(ar, /مسجّلة/);
   assert.match(ar, /OpenAI/);
@@ -306,4 +311,19 @@ test('the Changes section flags the new WhatsApp number and the AI phone assista
   }
   assert.match(en, /“The AI phone assistant”/);
   assert.match(ar, /«المساعدة الهاتفية بالذكاء الاصطناعي»/);
+  assert.ok(en.includes(`phone calls to ${site.whatsapp.display} (not WhatsApp calls) are answered by an AI assistant`), en);
+  assert.ok(ar.includes(`المكالمات الهاتفية إلى الرقم ${site.whatsapp.display} (لا مكالمات واتساب)`), ar);
+});
+
+test('no English line says "calls to" the WhatsApp number without saying phone calls or WhatsApp calls', () => {
+  const faq = read('../../src/data/faq.json');
+  const texts = [...policy.sections.flatMap((x) => x.body.en), ...faq.items.flatMap((x) => x.a.en)];
+  const target = `(?:that number|this number|Bona’s number|${site.whatsapp.display.replace(/[+]/g, '\\+')})`;
+  for (const text of texts) {
+    // Every "calls to" says which kind: phone calls reach the AI line, WhatsApp calls do not. A
+    // sentence that opens with "Calls to …" has no word before it: that fails too.
+    for (const m of text.matchAll(new RegExp(`(?:(\\S+)\\s+)?calls to ${target}`, 'gi'))) {
+      assert.match(m[1] ?? '', /^(phone|WhatsApp)$/i, `"${m[0]}" must say phone calls or WhatsApp calls: ${text}`);
+    }
+  }
 });
