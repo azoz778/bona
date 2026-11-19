@@ -1654,15 +1654,24 @@ B2. Create the Evolution instance `bona` on the VPS with NO webhook, websocket, 
     Link by PAIRING CODE (no camera needed): `GET /instance/connect/bona?number=966576267694`
     (same curl form, print only the `pairingCode` field) returns the code. On the Fold: WhatsApp
     Business → ⋮ → Linked devices → Link a device → "Link with phone number instead" → type the
-    code (it expires in about a minute). Then `GET /instance/connectionState/bona` →
-    `"state":"open"`. One attempt; if it fails, write the manual steps for the owner instead of
-    retrying. The linked device may show as "TK-Lisa" (Evolution's CONFIG_SESSION_PHONE_CLIENT):
-    cosmetic; do not restart Evolution to change it.
+    code (it expires in about a minute). Then the LINK CHECK (prints only the state):
+
+        ssh hermes-vps 'set -a; . ~/.secrets/evolution-api.env; set +a; curl -s -H "apikey: $EVOLUTION_API_KEY" http://127.0.0.1:8085/instance/connectionState/bona | python3 -c "import json,sys; d=json.load(sys.stdin); print((d.get(\"instance\") or d).get(\"state\"))"'
+        # → open
+
+    One attempt; if it fails, write the manual steps for the owner instead of retrying. The
+    linked device may show as "TK-Lisa" (Evolution's CONFIG_SESSION_PHONE_CLIENT): cosmetic; do
+    not restart Evolution to change it.
+    HARD STOP: anything but `open` ends the cutover here. Do NOT do B3-B7: a merge would send every
+    WhatsApp click to a number bona-api does not read, and the env switch would route client reads, lead
+    notes and every login code (the owner's included) through an instance that is not connected.
+    Nothing public has changed yet; Dana can stay off (or R3) until the owner links it by hand.
 B3. If the merge day is not 19 Nov: one commit on the branch setting, to the merge day,
     `src/data/privacy.json` `updated` and the dated change line (EN "19 November 2026: …" and AR
     "19 نوفمبر 2026: …"), `src/data/faq.json` `updated`, and the 30-day cut-off in
     `scripts/test/privacy-policy.test.mjs` ('2026-12-19' → merge day + 30); CI green again.
-B4. The owner merges the PR. Note `<merge-sha>`.
+B4. Gate: run the B2 LINK CHECK again → `open`; anything else: stop, no merge (B2 HARD STOP).
+    Then the owner merges the PR. Note `<merge-sha>`.
 B5. Code first, env unchanged (the split is inert while BONA_WA_INSTANCE_JID is unset):
 
         ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh
@@ -1674,8 +1683,12 @@ B6. Wait for the Pages deploy: `curl -s https://bona-real-estate.com/contact/ | 
     > 0 and `curl -s https://bona-real-estate.com/contact/ | grep -c 'wa.me/966593296933'` = 0.
     Note the time.
 B7. Within 10 minutes of B6 (the new instance's first poll looks back 10 min,
-    `FIRST_RUN_LOOKBACK_MS`, wa-poller.mjs:87), switch the VPS env. The values are not secret but
-    the file is: never cat it. Works whether or not the file already has the lines:
+    `FIRST_RUN_LOOKBACK_MS`, wa-poller.mjs:87), switch the VPS env. Gate first: the B2 LINK CHECK
+    → `open`. Anything else: do NOT switch the env (bona-api keeps reading abdulaziz-personal and
+    the owner's codes keep working); the site already shows the new number, so either the link is
+    back within the hour (one attempt, by the owner on the Fold) or do R2 the same day. The values
+    are not secret but the file is: never cat it. Works whether or not the file already has the
+    lines:
 
         ssh hermes-vps 'f=~/.secrets/bona-services.env; cp -p "$f" "$f.bak-wa-$(date +%Y%m%d%H%M)" && for kv in BONA_WA_INSTANCE=bona BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net; do k=${kv%%=*}; if grep -q "^$k=" "$f"; then sed -i "s|^$k=.*|$kv|" "$f"; else printf "%s\n" "$kv" >> "$f"; fi; done && chmod 600 "$f" && grep -cE "^BONA_WA_INSTANCE=bona$|^BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net$" "$f"'
         # → 2   (note the .bak-wa-<stamp> name for R1)
