@@ -43,6 +43,11 @@ CLOUDFLARED_VERSION=2026.8.3
 CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e
 
 SECRET_FILES="retell.env evolution-api.env bona-services.env bona-marketing.env"
+# bona-services.env is not copied verbatim (2026-11-19): the PC copy keeps the owner's personal
+# WhatsApp instance for bona-intake, while the VPS reads Bona's own. For these keys the VPS's
+# own line wins; a verbatim copy would silently undo the move (A2Z go-live item 7).
+VPS_KEEP_FILE="bona-services.env"
+VPS_KEEP_KEYS="BONA_WA_INSTANCE BONA_WA_INSTANCE_JID"
 DATA_FILES="bona.db bona.db-wal bona.db-shm leads.jsonl chats.jsonl calls.jsonl"
 UNITS="bona-api.service cloudflared-bona.service bona-repo-sync.service bona-repo-sync.timer"
 # Stop order on the VPS: the tunnel connector first (no more public traffic), then the API, then the timer.
@@ -65,6 +70,30 @@ ok()   { printf '\033[1;32m ok \033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarn\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mfail\033[0m %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
+
+# The remote command that prints the VPS's own VPS_KEEP_KEYS lines of VPS_KEEP_FILE: nothing
+# when the file is missing or has none, a non-zero status when grep itself fails.
+vps_keep_grep() {
+  local alt; alt=$(printf '%s' "$VPS_KEEP_KEYS" | tr ' ' '|')
+  printf '%s' "f=~/.secrets/$VPS_KEEP_FILE; [ -e \"\$f\" ] || exit 0; grep -E '^[[:space:]]*(export[[:space:]]+)?($alt)=' \"\$f\"; [ \$? -le 1 ]"
+}
+
+# keep_vps_keys PC_FILE VPS_LINES OUT: OUT is PC_FILE, except that a VPS_KEEP_KEYS line the VPS
+# has (VPS_LINES) stands in place of the PC's line for that key, or is appended when the PC has
+# none; a kept key the VPS lacks keeps the PC's line. Prints nothing.
+# (FILENAME == vpsfile, not NR == FNR: with an empty VPS_LINES the classic idiom would read the
+# PC's lines as the VPS's.)
+keep_vps_keys() {
+  awk -v keys="$VPS_KEEP_KEYS" -v vpsfile="$2" '
+    function key(line,  k) { k = line; sub(/^[ \t]*(export[ \t]+)?/, "", k); if (k !~ /=/) return ""; sub(/[ \t]*=.*/, "", k); return k }
+    BEGIN { n = split(keys, list, " "); for (i = 1; i <= n; i++) want[list[i]] = 1 }
+    FILENAME == vpsfile { k = key($0); if (k in want) vps[k] = $0; next }
+    { k = key($0)
+      if ((k in want) && (k in vps)) { if (!(k in done)) { print vps[k]; done[k] = 1 }; next }
+      print }
+    END { for (i = 1; i <= n; i++) { k = list[i]; if ((k in vps) && !(k in done)) print vps[k] } }
+  ' "$2" "$1" > "$3"
+}
 
 # render TEMPLATE  → stdout, with every @PLACEHOLDER@ substituted; refuses to leave one behind.
 # Bash parameter substitution, not sed: a `|` or `&` in a value would break or corrupt a sed

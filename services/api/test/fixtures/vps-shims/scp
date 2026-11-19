@@ -6,6 +6,8 @@
 # SHIM_SCP_FAIL=1 → exit 1 without creating anything (a failed copy). A remote source whose file
 # name is listed in SHIM_REMOTE_MISSING (space-separated) also fails, the way scp does for a file
 # that is not there.
+# SHIM_SCP_CAPTURE=DIR (tests): a local → remote copy is also copied into DIR, under the remote file
+# name when the destination names one (host:dir/NAME), else under the source's name.
 set -u
 printf 'scp %s\n' "$*" >> "${SHIM_LOG:?SHIM_LOG must point at the log file}"
 [ "${SHIM_SCP_FAIL:-0}" = 1 ] && exit 1
@@ -21,7 +23,17 @@ while [ $# -gt 0 ]; do
 done
 [ "${#args[@]}" -ge 2 ] || exit 0
 dest=${args[${#args[@]}-1]}
-case "$dest" in *:*) exit 0 ;; esac   # remote destination: nothing to create locally
+case "$dest" in
+  *:*)   # remote destination: nothing to create locally, except the test's capture copy
+    if [ -n "${SHIM_SCP_CAPTURE:-}" ]; then
+      rpath=${dest#*:}
+      for src in "${args[@]:0:${#args[@]}-1}"; do
+        if [ -z "$rpath" ] || [ "${rpath%/}" != "$rpath" ]; then name=$(basename "$src"); else name=$(basename "$rpath"); fi
+        cp "$src" "$SHIM_SCP_CAPTURE/$name"
+      done
+    fi
+    exit 0 ;;
+esac
 for src in "${args[@]:0:${#args[@]}-1}"; do
   name=$(basename "${src#*:}")
   case "$src" in *:*) case " ${SHIM_REMOTE_MISSING:-} " in *" $name "*) echo "scp: $src: No such file or directory (shim)" >&2; exit 1 ;; esac ;; esac

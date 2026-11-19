@@ -480,6 +480,85 @@ test('sync-secrets.sh chmods the four named secret files on the VPS, not *.env',
   assert.ok(lines.some((l) => /^scp -q -p .*\/\.secrets\/retell\.env .* fake-vps:\.secrets\/$/.test(l)), lines.join('\n'));
 });
 
+// ---------------------------------------------------------------- sync-secrets keeps the VPS's WhatsApp lines (2026-11-19)
+const keepRun = (pc, vps) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'bona-keep-'));
+  writeFileSync(path.join(dir, 'pc'), pc);
+  writeFileSync(path.join(dir, 'vps'), vps);
+  const r = bash(['-c', '. ./lib.sh; keep_vps_keys "$1" "$2" "$3"', 'keep', path.join(dir, 'pc'), path.join(dir, 'vps'), path.join(dir, 'out')], { env: { HOME: dir } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout + r.stderr, '', 'prints nothing');
+  return readFileSync(path.join(dir, 'out'), 'utf8');
+};
+
+test('keep_vps_keys: the VPS line wins in place, other PC lines keep their order, a key only the VPS has is appended', () => {
+  const pc = 'A=1\nBONA_WA_INSTANCE=abdulaziz-personal\nBONA_OWNER_JID=owner\n# BONA_WA_INSTANCE=commented\nZ=9\n';
+  const vps = 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n';
+  assert.equal(keepRun(pc, vps), 'A=1\nBONA_WA_INSTANCE=bona\nBONA_OWNER_JID=owner\n# BONA_WA_INSTANCE=commented\nZ=9\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n');
+});
+
+test('keep_vps_keys: nothing on the VPS means the PC file as it is; a key the VPS lacks keeps the PC line; export is understood', () => {
+  const pc = 'A=1\nexport BONA_WA_INSTANCE=abdulaziz-personal\n';
+  assert.equal(keepRun(pc, ''), pc);
+  assert.equal(keepRun(pc, 'BONA_WA_INSTANCE_JID=x@s.whatsapp.net\n'), `${pc}BONA_WA_INSTANCE_JID=x@s.whatsapp.net\n`);
+  assert.equal(keepRun(pc, 'export BONA_WA_INSTANCE=bona\n'), 'A=1\nexport BONA_WA_INSTANCE=bona\n');
+});
+
+test('keep_vps_keys: a key the PC writes twice comes out once, as the VPS line; other keys are never touched', () => {
+  const pc = 'BONA_WA_INSTANCE=abdulaziz-personal\nBONA_WA_INSTANCE_X=keep\nBONA_WA_INSTANCE=again\n';
+  assert.equal(keepRun(pc, 'BONA_WA_INSTANCE=bona\nOTHER=vps-only\n'), 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_X=keep\n');
+});
+
+function syncHome() {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
+  mkdirSync(path.join(home, '.secrets'), { recursive: true });
+  mkdirSync(path.join(home, '.cloudflared'), { recursive: true });
+  for (const f of ['retell.env', 'evolution-api.env', 'bona-marketing.env']) writeFileSync(path.join(home, '.secrets', f), 'X=1\n');
+  writeFileSync(path.join(home, '.secrets', 'bona-services.env'), 'X=1\nBONA_WA_INSTANCE=abdulaziz-personal\n');
+  writeFileSync(path.join(home, '.cloudflared', '9022fbec-de4f-44b9-805e-8fff285d6263.json'), '{}');
+  const log = path.join(home, 'shim.log');
+  writeFileSync(log, '');
+  const capture = path.join(home, 'captured');
+  mkdirSync(capture);
+  return { home, log, capture };
+}
+
+test('sync-secrets.sh copies bona-services.env with the VPS\'s own WhatsApp lines, reads them before any copy, prints no value, leaves no temp file', () => {
+  const { home, log, capture } = syncHome();
+  const r = bash([path.join(VPS, 'sync-secrets.sh')], { env: {
+    PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_SSH: 'fake-vps', SHIM_SCP_CAPTURE: capture,
+    SHIM_VPS_KEEP_LINES: 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net',
+  } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(readFileSync(path.join(capture, 'bona-services.env'), 'utf8'), 'X=1\nBONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n');
+  assert.equal(readFileSync(path.join(capture, 'retell.env'), 'utf8'), 'X=1\n', 'the other files go verbatim');
+  assert.equal(readFileSync(path.join(home, '.secrets', 'bona-services.env'), 'utf8'), 'X=1\nBONA_WA_INSTANCE=abdulaziz-personal\n', 'the PC file is left as it was');
+  const lines = readFileSync(log, 'utf8').split('\n').filter(Boolean);
+  const readAt = lines.findIndex((l) => /^ssh fake-vps .*grep -E .*BONA_WA_INSTANCE\|BONA_WA_INSTANCE_JID/.test(l));
+  const firstScp = lines.findIndex((l) => /^scp /.test(l));
+  assert.ok(readAt >= 0 && readAt < firstScp, lines.join('\n'));
+  assert.doesNotMatch(r.stdout + r.stderr, /abdulaziz-personal|576267694|=bona/);
+  assert.deepEqual(readdirSync(path.join(home, '.secrets')).filter((f) => f.startsWith('.')), [], 'no temp file left behind');
+});
+
+test('sync-secrets.sh copies nothing when the VPS lines cannot be read', () => {
+  const { home, log } = syncHome();
+  const r = bash([path.join(VPS, 'sync-secrets.sh')], { env: {
+    PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_SSH: 'fake-vps', SHIM_VPS_KEEP_FAIL: '1',
+  } });
+  assert.notEqual(r.status, 0);
+  assert.ok(!readFileSync(log, 'utf8').split('\n').some((l) => /^scp /.test(l)), 'no scp after a failed read');
+  assert.deepEqual(readdirSync(path.join(home, '.secrets')).filter((f) => f.startsWith('.')), []);
+});
+
+test('sync-secrets.sh --dry-run names the kept keys and contacts nothing', () => {
+  const { home, log } = syncHome();
+  const r = bash([path.join(VPS, 'sync-secrets.sh'), '--dry-run'], { env: { PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_SSH: 'fake-vps' } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /BONA_WA_INSTANCE BONA_WA_INSTANCE_JID/);
+  assert.equal(readFileSync(log, 'utf8'), '');
+});
+
 // deploy.sh runs ON the VPS, so its systemctl calls go through `sudo -n` (system units); the sudo
 // shim logs the `sudo -n systemctl …` line and then execs the systemctl shim, which logs its own.
 const TIMER = {
