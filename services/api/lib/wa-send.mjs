@@ -1,5 +1,6 @@
 /**
- * Messages from the owner's WhatsApp to anyone other than the owner (2026-09-27 design §4.5).
+ * Messages from the WhatsApp instance (`BONA_WA_INSTANCE`; Bona's own number since 2026-11-19)
+ * to anyone other than the owner (2026-09-27 design §4.5).
  *
  * Phase 1 sent only login codes to team members. Phase 2 adds team members' replies to
  * clients (`reply`, below); Phase 4 will add Dana. There is still exactly one sender —
@@ -18,7 +19,7 @@
  *     send must name the pending outbox row she wrote first (`sendId`), or it is refused
  *     `bad_send_id`: a Dana row is never born without the `covers_ts` it answers.
  *   - the owner's Sending switch (`settings.sending_enabled`). It is bypassed only when
- *     the recipient IS the owner's own jid (`cfg.ownerJid`) AND the message is a login
+ *     the recipient IS the owner's jid (`BONA_OWNER_JID`) AND the message is a login
  *     `code` — `bypassSwitch` is a hint from the caller, never trusted on its own, because
  *     a caller that could bypass the switch for anyone else could use it to spam past the
  *     owner's own kill switch. Without this the owner could never get back in to switch
@@ -26,7 +27,8 @@
  *   - 20 a minute across every sender, 6 a minute to any one recipient and 30 a minute
  *     from any one team member, all asked before any is charged (see lib/ratelimit.mjs
  *     `peek`), and 500 in any 24 hours, counted from the outbox (below) so that a restart
- *     cannot hand out a fresh day. Messages to the owner's own jid skip the shared
+ *     cannot hand out a fresh day. Messages to the owner's jid and to the instance's own
+ *     number (`BONA_WA_INSTANCE_JID`, the same number while that is unset) skip the shared
  *     per-minute and daily budget (still capped per-recipient), so a busy day of
  *     team-member codes cannot lock the owner out of logging in.
  *   - `BONA_WA_NOTIFY=0` (`cfg.enabled`) was built to stop the lead note, and stops team
@@ -119,9 +121,13 @@ export function createSender({
   if (!team) throw new TypeError('createSender needs the team store (for the sending switch)');
   if (!inbox) throw new TypeError('createSender needs the inbox store (for the outbox and the daily cap)');
   const cfg = waConfig(env);
+  // The switch bypass is the owner's (BONA_OWNER_JID): his login code must always get through,
+  // or he could never switch sending back on. Outside the shared budget: his number and the
+  // instance's own (BONA_WA_INSTANCE_JID) — one number while that is unset, as before the split.
   const ownerDigits = bareDigits(cfg.ownerJid);
-  // The outbox holds bare jids, so the owner's is compared in that form too.
-  const ownerJid = ownerDigits ? `${ownerDigits}@s.whatsapp.net` : null;
+  const unbudgeted = new Set([ownerDigits, bareDigits(cfg.instanceJid)].filter(Boolean));
+  // The outbox holds bare jids, so these are compared in that form too.
+  const unbudgetedJids = [...unbudgeted].map((d) => `${d}@s.whatsapp.net`);
   const perMinute = createLimiter({ capacity: limits.perMinute ?? SEND_PER_MIN, perMs: 60_000, now });
   const perRecipient = createLimiter({ capacity: PER_RECIPIENT_PER_MIN, perMs: 60_000, now });
   // With the shipped 20/min across everyone this cannot bind; it is here so that raising
@@ -223,15 +229,16 @@ export function createSender({
     if (kind !== 'code' && !cfg.enabled) return refuse('disabled');
     if (!cfg.baseUrl || !cfg.apiKey) return refuse('evolution-not-configured');
 
-    const gates = isOwner
+    const free = unbudgeted.has(m[1]);
+    const gates = free
       ? [[perRecipient, `send:to:${m[1]}`]]
       : [[perMinute, 'send:minute'], [perRecipient, `send:to:${m[1]}`], ...(userId ? [[perUser, `send:user:${userId}`]] : [])];
     let dayFull = false;
-    if (!isOwner) {
+    if (!free) {
       const since = now() - DAY_MS;
       // The caller's own `pending` row is already in the count; it is this send, not an earlier one.
-      const own = givenRow && givenRow.created >= since && givenRow.jid !== ownerJid ? 1 : 0;
-      dayFull = inbox.countSentSince(since, { excludeJid: ownerJid }) - own >= SEND_PER_DAY;
+      const own = givenRow && givenRow.created >= since && !unbudgetedJids.includes(givenRow.jid) ? 1 : 0;
+      dayFull = inbox.countSentSince(since, { excludeJids: unbudgetedJids }) - own >= SEND_PER_DAY;
     }
     if (dayFull || gates.some(([limiter, key]) => !limiter.peek(key).ok)) {
       log({ level: 'warn', evt: 'wa.send.rate_limited', kind, limit: dayFull ? 'day' : 'minute' });

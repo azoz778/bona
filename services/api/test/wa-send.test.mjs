@@ -1283,3 +1283,46 @@ test('a chat that leaves the inbox while the reply is on its way gets no human-c
   assert.equal(h.s.getLead('LEAD-R').inbox_state, 'unsure');
   assert.equal(h.s.getLead('LEAD-R').last_human_out_ts, null);
 });
+
+/* ---------------- Bona's own number (BONA_WA_INSTANCE_JID, 2026-11-19) ---------------- */
+
+const BONA_JID = '966576267694@s.whatsapp.net';
+const SPLIT_ENV = { ...ENV, BONA_WA_INSTANCE: 'bona', BONA_WA_INSTANCE_JID: BONA_JID };
+
+test("split: the owner's personal number keeps its login-code bypass; the Bona number gets none", async () => {
+  const h = harness({ env: SPLIT_ENV });
+  h.team.setSetting('sending_enabled', '0');
+  assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true);
+  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code', bypassSwitch: true }), { ok: false, error: 'sending_disabled' });
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].url, 'http://evo.test/message/sendText/bona', 'sent from the Bona instance');
+  assert.equal(h.calls[0].body.number, '966593296933', "to the owner's personal phone");
+  h.s.close();
+});
+
+test('split: a full day stops everyone but the owner and the Bona number, both still capped per recipient', async () => {
+  const h = harness({ env: SPLIT_ENV });
+  seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true);
+  assert.equal((await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' })).ok, true);
+  for (let i = 1; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' })).ok, true);
+  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  h.s.close();
+});
+
+test('split: rows to the owner and to the Bona number do not count toward the 500', async () => {
+  const h = harness({ env: SPLIT_ENV });
+  seedOutbox(h, SEND_PER_DAY, { jid: OWNER_JID, kind: 'code' });
+  seedOutbox(h, SEND_PER_DAY, { jid: BONA_JID, kind: 'code' });
+  assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' })).ok, true);
+  h.s.close();
+});
+
+test('unset: only the owner is outside the shared day budget, as before the split', async () => {
+  const h = harness();
+  seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
+  assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true);
+  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  h.s.close();
+});

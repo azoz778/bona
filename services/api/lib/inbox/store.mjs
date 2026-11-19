@@ -305,14 +305,18 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
 
   /**
    * Sends that may have gone since `sinceTs` — the durable day cap (P2-4). A failed send
-   * never reached WhatsApp, so it does not count; an uncertain one may have. `excludeJid`
-   * leaves the owner's own chat out: messages to himself cost nothing.
+   * never reached WhatsApp, so it does not count; an uncertain one may have. `excludeJid` /
+   * `excludeJids` (at most two) leave out the chats outside the shared budget: the owner's
+   * and the instance's own (one jid while BONA_WA_INSTANCE_JID is unset).
    */
-  function countSentSince(sinceTs, { excludeJid = null } = {}) {
-    const ex = str(excludeJid);
+  function countSentSince(sinceTs, { excludeJid = null, excludeJids = [] } = {}) {
+    const ex = [...new Set([excludeJid, ...excludeJids].map(str).filter(Boolean))];
+    if (ex.length > 2) throw new TypeError('countSentSince: at most two excluded jids');
+    const [a = null, b = null] = ex;
     return prep(`SELECT COUNT(*) AS n FROM wa_outbox
-                 WHERE status IN ('pending','accepted','uncertain') AND created >= ? AND (? IS NULL OR jid != ?)`)
-      .get(num(sinceTs), ex, ex).n;
+                 WHERE status IN ('pending','accepted','uncertain') AND created >= ?
+                   AND (? IS NULL OR jid != ?) AND (? IS NULL OR jid != ?)`)
+      .get(num(sinceTs), a, a, b, b).n;
   }
 
   /**
