@@ -1545,19 +1545,36 @@ Conventions kept from the files: curly quotes ’ “ ” in English, «» in Ar
 - The AI line (`~/bona-line`, unit `hl-voice-agent-bona`) answers every caller (`CALL_ALLOW=*` since 2026-11-19 11:23), greets with the AI and recording notice (`bona_persona.py:37-48`), uses OpenAI Realtime, never asks for ID/bank/payment details and promises a principal's callback (`bona_persona.py:88-93`), and keeps no WAV or raw audio when the caller declines (`call_record.py:21,236-245`). It does not book calendar viewings yet; the text does not claim it does.
 - **Gate, not an owner question:** the "up to 90 days" audio promise (design §9 default) needs a purge on the bona-line side. Today call records stay in `~/bona-line/calls/` until the Phase 2 upload, which does not exist. The bona-line session must add a daily purge of audio older than 90 days before this text goes live (runbook A4). The oldest public call is of 2026-11-19, so the promise would first be broken on 2027-02-17.
 
-## Appendix B: Cutover runbook (Task 15 writes this to `/home/azoz778/a2z-golive/2026-11-19/bona-wa-cutover-runbook.md`)
+## Appendix B: Cutover runbook (a verbatim copy of `/home/azoz778/a2z-golive/2026-11-19/bona-wa-cutover-runbook.md`, which is outside the repo; review fixes land in both)
 
 ```markdown
 # Bona WhatsApp cutover: personal number → Bona's own number (+966 57 626 7694)
 
-Branch: `feat/wa-own-number` (plan `docs/superpowers/plans/2026-11-19-wa-own-number.md`).
+Branch: `feat/wa-own-number` in `/home/azoz778/bona-wt/wa-own-number`, on top of `origin/main`
+`ed94e60` (NOT pushed; `git log --oneline origin/main..feat/wa-own-number` lists the commits). Plan:
+`docs/superpowers/plans/2026-11-19-wa-own-number.md` (Appendix A = the privacy/FAQ candidate text;
+Appendix B = a copy of this runbook, kept identical).
 Goal: A2Z go-live checklist item 7, bona-api no longer reads Evolution `abdulaziz-personal`.
 Never paste a secret or an env value into a terminal log, a chat or this file.
 
+What the branch does (so the steps below make sense):
+- New env `BONA_WA_INSTANCE_JID` = the instance's own number. Unset or blank it falls back to
+  `BONA_OWNER_JID`, so the merged code behaves exactly as today until the VPS env lines change.
+- `BONA_OWNER_JID` stays the owner's personal number: lead notes and his login codes still go to
+  his personal phone (now SENT FROM the Bona number), the owner account seed, the Sending-switch
+  bypass for his own login code.
+- `/health` → `poller.ownNumber` = `"instance"` (set) or `"owner"` (fallback); never digits. The
+  same field is in the `wa.poll.init` start-up log line.
+- `sync-secrets.sh` keeps the VPS's own `BONA_WA_INSTANCE` / `BONA_WA_INSTANCE_JID` lines and copies
+  nothing when it cannot read them.
+- Site: `site.json` `whatsapp` → +966 57 626 7694 (`site.phone` stays +966 59 329 6933), all hand
+  copies, Dana's prompt and tool notes, privacy notice + FAQ (CANDIDATE text, owner OK first).
+
 ## A. Before the cutover day (nothing public changes)
 
-A1. The branch is reviewed by Claude and Codex, CI is green on the PR, and the owner has OK'd the
-    EN+AR privacy and FAQ text (plan Appendix A), with or without the partner sentence.
+A1. The branch is reviewed by Claude and Codex (owner rule: two models), CI is green on the PR,
+    and the owner has OK'd the EN+AR privacy and FAQ text (plan Appendix A), with or without the
+    optional partner sentence (Appendix D point 1).
 A2. WhatsApp Business on the Fold (Lebara SIM 0576267694), one attempt (slow-down rule):
     - verify by SMS only; deny WhatsApp the Phone and Call-log permissions first, so it cannot
       fall back to a flash call (the AI line answers every call);
@@ -1569,22 +1586,25 @@ A2. WhatsApp Business on the Fold (Lebara SIM 0576267694), one attempt (slow-dow
 A3. Warm-up (D4, ~3 days): the owner uses it by hand from a linked device on his phone. He
     messages the Bona number once from his personal WhatsApp and saves it as a contact (lead
     notes and his login codes will come from it); each team member does the same (their codes).
-A4. AI line privacy gate: the bona-line deletes call audio older than 90 days (confirm with the
-    session that runs ~/bona-line-wt/knowledge; not this branch). TK's Fold test calls are done (O3).
+A4. AI line privacy gate: the privacy text promises "audio kept up to 90 days". The bona-line must
+    delete call audio older than 90 days before that text goes live (confirm with the session that
+    runs ~/bona-line-wt/knowledge; not this branch). TK's Fold test calls are done (O3).
 A5. Lebara SIM: validity and credit on a reminder (a lapsed SIM can lose the WhatsApp account).
-A6. Click-to-WhatsApp ads: the owner opens Meta Ads Manager, filters Active, and checks for any
-    ad whose destination is WhatsApp. Such ads route to the personal number; plan to pause them
-    or switch the Page's WhatsApp number to 0576267694 inside the window (by hand; Meta sends a
-    code to the new WhatsApp, and ads may go back to review).
+A6. CLICK-TO-WHATSAPP ADS FIRST: the owner opens Meta Ads Manager, filters Active, and checks for
+    any ad whose destination is WhatsApp. Such ads route to the personal number; plan to pause
+    them or switch the Page's WhatsApp number to 0576267694 inside the window (by hand; Meta sends
+    a code to the new WhatsApp, and ads may go back to review). Do not start B until this is known.
 A7. Pick the window: not 20:30–21:45 Riyadh (the social publishers run then, and they check out
     origin/main before every run, so the merge changes their captions and cards at once).
 
 ## B. The cutover window (~30 min, one sitting)
 
-B1. Dana off: the owner switches "Dana on WhatsApp" off on the dashboard Team page. Check:
+B1. Dana off for the first days: the owner switches "Dana on WhatsApp" off on the dashboard Team
+    page. Check:
     `curl -s https://api.bona-real-estate.com/health | python3 -c 'import json,sys; print(json.load(sys.stdin)["dana"])'`
-    → `enabled: False`.
-B2. Create the instance on the VPS (Evolution v2; check the version first, the image is `latest`):
+    → `'enabled': False`. Note what it was, for R3.
+B2. Create the Evolution instance `bona` on the VPS with NO webhook, websocket, RabbitMQ or SQS
+    (Evolution v2; check the version first, the image is `latest`):
 
         ssh hermes-vps 'set -a; . ~/.secrets/evolution-api.env; set +a; curl -s -H "apikey: $EVOLUTION_API_KEY" http://127.0.0.1:8085/ | head -c 200; echo'
         ssh hermes-vps 'set -a; . ~/.secrets/evolution-api.env; set +a; curl -s -H "apikey: $EVOLUTION_API_KEY" http://127.0.0.1:8085/instance/fetchInstances | python3 -c "import json,sys; print([i.get(\"name\") or i.get(\"instance\",{}).get(\"instanceName\") for i in json.load(sys.stdin)])"'
@@ -1594,14 +1614,17 @@ B2. Create the instance on the VPS (Evolution v2; check the version first, the i
         for p in webhook websocket rabbitmq; do ssh hermes-vps "set -a; . ~/.secrets/evolution-api.env; set +a; curl -s -H \"apikey: \$EVOLUTION_API_KEY\" http://127.0.0.1:8085/$p/find/bona; echo"; done
         # expect null / enabled:false for all three
 
-    Link by pairing code (no camera): `GET /instance/connect/bona?number=966576267694` (same
-    curl form) returns `pairingCode`. On the Fold: WhatsApp Business → ⋮ → Linked devices → Link a
-    device → "Link with phone number instead" → type the code (it expires in about a minute).
-    Then `GET /instance/connectionState/bona` → `"state":"open"`. One attempt; if it fails, write
-    the manual steps for the owner instead of retrying. The linked device shows as "TK-Lisa"
-    (Evolution's CONFIG_SESSION_PHONE_CLIENT): cosmetic; do not restart Evolution to change it.
-B3. If the merge day is not 19 Nov: one commit on the branch setting `privacy.json` `updated`
-    and the dated change line to the merge day (EN and AR); CI green again.
+    Link by PAIRING CODE (no camera needed): `GET /instance/connect/bona?number=966576267694`
+    (same curl form, print only the `pairingCode` field) returns the code. On the Fold: WhatsApp
+    Business → ⋮ → Linked devices → Link a device → "Link with phone number instead" → type the
+    code (it expires in about a minute). Then `GET /instance/connectionState/bona` →
+    `"state":"open"`. One attempt; if it fails, write the manual steps for the owner instead of
+    retrying. The linked device may show as "TK-Lisa" (Evolution's CONFIG_SESSION_PHONE_CLIENT):
+    cosmetic; do not restart Evolution to change it.
+B3. If the merge day is not 19 Nov: one commit on the branch setting, to the merge day,
+    `src/data/privacy.json` `updated` and the dated change line (EN "19 November 2026: …" and AR
+    "19 نوفمبر 2026: …"), `src/data/faq.json` `updated`, and the 30-day cut-off in
+    `scripts/test/privacy-policy.test.mjs` ('2026-12-19' → merge day + 30); CI green again.
 B4. The owner merges the PR. Note `<merge-sha>`.
 B5. Code first, env unchanged (the split is inert while BONA_WA_INSTANCE_JID is unset):
 
@@ -1611,67 +1634,91 @@ B5. Code first, env unchanged (the split is inert while BONA_WA_INSTANCE_JID is 
         # → abdulaziz-personal owner
 
 B6. Wait for the Pages deploy: `curl -s https://bona-real-estate.com/contact/ | grep -c 966576267694`
-    > 0 and `… | grep -c 'wa.me/966593296933'` = 0. Note the time.
-B7. Within 10 minutes of B6 (the new instance's first poll looks back 10 min, wa-poller.mjs:87),
-    switch the VPS env (values are not secret, but the file is: never cat it):
+    > 0 and `curl -s https://bona-real-estate.com/contact/ | grep -c 'wa.me/966593296933'` = 0.
+    Note the time.
+B7. Within 10 minutes of B6 (the new instance's first poll looks back 10 min,
+    `FIRST_RUN_LOOKBACK_MS`, wa-poller.mjs:87), switch the VPS env. The values are not secret but
+    the file is: never cat it. Works whether or not the file already has the lines:
 
-        ssh hermes-vps 'f=~/.secrets/bona-services.env; cp -p "$f" "$f.bak-wa-$(date +%Y%m%d%H%M)" && sed -i "s/^BONA_WA_INSTANCE=.*/BONA_WA_INSTANCE=bona/" "$f" && { grep -q "^BONA_WA_INSTANCE_JID=" "$f" && sed -i "s/^BONA_WA_INSTANCE_JID=.*/BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net/" "$f" || echo "BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net" >> "$f"; } && chmod 600 "$f" && grep -cE "^BONA_WA_INSTANCE=bona$|^BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net$" "$f"'
-        # → 2
+        ssh hermes-vps 'f=~/.secrets/bona-services.env; cp -p "$f" "$f.bak-wa-$(date +%Y%m%d%H%M)" && for kv in BONA_WA_INSTANCE=bona BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net; do k=${kv%%=*}; if grep -q "^$k=" "$f"; then sed -i "s|^$k=.*|$kv|" "$f"; else printf "%s\n" "$kv" >> "$f"; fi; done && chmod 600 "$f" && grep -cE "^BONA_WA_INSTANCE=bona$|^BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net$" "$f"'
+        # → 2   (note the .bak-wa-<stamp> name for R1)
         ssh hermes-vps sudo systemctl restart bona-api
+        # note the restart time for B9
 
-    BONA_OWNER_JID stays as it is. Leave the PC's ~/.secrets/bona-services.env alone (bona-intake).
-B8. Dana's texts: on the PC, from a clean worktree at <merge-sha> (not ~/bona):
+    BONA_OWNER_JID stays as it is. Leave the PC's ~/.secrets/bona-services.env alone: bona-intake
+    on the PC needs `abdulaziz-personal` for the owner's PDF group. A later `sync-secrets.sh` from a
+    checkout with this branch keeps the VPS's two lines; never run it from an older checkout (C5).
+B8. Dana's texts and the Retell knowledge base re-crawl check: on the PC, from a clean worktree at
+    <merge-sha> (not ~/bona):
     `node services/api/retell/provision.mjs --dry-run`, then `node services/api/retell/provision.mjs`
-    (updates the prompts in place; ids unchanged, so no restart). Retell knowledge base: it
-    auto-refreshes from the live llms*.txt; within 24 h ask the site concierge "What is your
-    WhatsApp number?" and expect +966 57 626 7694. Still old after 24 h: `provision.mjs --rebuild-kb
-    --dry-run`, then decide (it replaces the knowledge base in a safe order).
-B9. Item 7 evidence (write the outputs into the A2Z checklist row 7):
+    (updates the prompts in place; ids unchanged, so no restart). It also tops up the PC env file
+    with missing defaults only; it never adds BONA_WA_INSTANCE_JID (tested).
+    Retell knowledge base: it auto-refreshes from the live llms*.txt; within 24 h ask the site
+    concierge "What is your WhatsApp number?" and expect +966 57 626 7694. Still the old number
+    after 24 h: `provision.mjs --rebuild-kb --dry-run`, then decide (it replaces the knowledge
+    base in a safe order).
+B9. ITEM 7 EVIDENCE (write the outputs into the A2Z checklist row 7):
 
         ssh hermes-vps 'curl -s http://127.0.0.1:4120/health' | python3 -c 'import json,sys; p=json.load(sys.stdin)["poller"]; print(p["instance"], p["configured"], p["ownNumber"], p["lagS"])'
-        # → bona True instance <small>
+        # → bona True instance <small number>
         ssh hermes-vps "sudo journalctl -u bona-api --since '<B7 restart time>' -o cat | grep -F '\"evt\":\"wa.poll.init\"'"
         # → one line with "instance":"bona" and "ownNumber":"instance"
         ssh hermes-vps "sudo journalctl -u bona-api --since '<B7 restart time>' -o cat | grep -c abdulaziz-personal"
+        # → 0  (no abdulaziz-personal reads in the journal: every findMessages/sendText URL names the instance)
+        ssh hermes-vps "sudo journalctl -u bona-api --since '<B7 restart time>' -o cat | grep -c wa.instance_jid_invalid"
         # → 0
         for u in / /ar/ /contact/ /llms.txt; do printf '%s ' $u; curl -s https://bona-real-estate.com$u | grep -c 'wa.me/966593296933'; done
         # → 0 each
 
-    Scope line for the evidence: "covers bona-api (poller, backfill reads, sender, notes).
+    Scope line for the evidence: "covers bona-api (poller, backfill reads, sender, notes, Dana).
     bona-intake on the PC still reads abdulaziz-personal for the owner's own Bona PDF group only
-    (group-filtered, cannot create leads); outside item 7 as written."
-B10. Functional checks: a non-team phone sends a site Ref line (copy one from a listing's WhatsApp
-     button) to 0576267694 → a lead appears and the owner's personal phone gets the note, sent from
-     the Bona number. The owner logs in to the dashboard with his personal number → the code comes
-     from the Bona number. A dashboard reply to that test lead arrives from the Bona number. Then
-     mark the test lead "Not a client".
+    (group-filtered findMessages, acts only on the owner's messages, cannot create leads); outside
+    item 7 as written."
+B10. Functional checks: a non-team phone sends a site Ref line (copy one from a listing's
+     WhatsApp button) to 0576267694 → a lead appears and the owner's personal phone gets the note,
+     sent from the Bona number. The owner logs in to the dashboard with his personal number → the
+     code comes from the Bona number. (Sending switch must be on for a team member's code; the
+     owner's own code passes it either way.) A dashboard reply to that test lead arrives from the
+     Bona number. Then mark the test lead "Not a client".
 B11. Owner by hand, same day: the FB Page / IG WhatsApp button and any click-to-WhatsApp ad
      routing → 0576267694 (A6). Later, slowly, from the checklist: TikTok, LinkedIn, Google
-     Business Profile, Snapchat, aqar.fm, the WhatsApp channel, the Zoho signature.
+     Business Profile, Snapchat, aqar.fm, the WhatsApp channel (`marketing/whatsapp-channel.md`
+     lives on the personal account), the Zoho signature. Repo checklists that still name the old
+     WhatsApp number for these profiles: `marketing/instagram-profile.md`,
+     `marketing/instagram-connect-checklist.md`, `marketing/instagram-access.md`,
+     `marketing/google-business-profile.md` (phone stays; WhatsApp button moves).
 
 ## C. After
 
 C1. Dana back on when the owner is ready (suggested: after 3 quiet days on the new number).
-C2. Brochures: the 21 published ones keep the old number until a re-render, which waits for the
-    owner's REGA O1 step. New intake brochures follow site.json once ~/bona is pulled to the
-    merged main (bona-intake runs from ~/bona); daily social posts follow it from the first run
-    after the merge.
+C2. Brochures: they print `site.json` `whatsapp` (rebrand_pdf.py `load_brand`). The 21 published
+    ones keep the old number until a re-render; re-render only at cutover and only when the owner
+    decides, together with REGA O1. New intake brochures follow site.json once ~/bona is pulled to
+    the merged main (bona-intake runs from ~/bona); daily social posts follow it from the first run
+    after the merge (Appendix D point 2: the WhatsApp number next to FAL differs from REGA's record
+    until Phase 3).
 C3. Chats still open on the personal number: the owner finishes them by hand from his phone;
     a dashboard reply to such a lead now comes from the Bona number.
 C4. Hermes memory (~/.hermes/memories/MEMORY.md lines about the dashboard code and Bona's
     WhatsApp) is out of date: update it in a Hermes session.
-C5. Never start the PC bona-api twin; never run sync-secrets.sh from a checkout older than the
-    merge (services/README.md, "The PC bona-api twin since the WhatsApp move").
+C5. Never start the PC bona-api twin as it is (its env says abdulaziz-personal); a PC rollback
+    needs the drop-in in services/README.md "The PC bona-api twin since the WhatsApp move". Never
+    run sync-secrets.sh from a checkout older than the merge.
 C6. The Evolution API key once leaked into the VPS Caddy log (approvals row 77, "Later"); the
     Bona instance now sits behind the same key.
+C7. Public `/health` publishes `poller.instance` (the instance NAME): today "abdulaziz-personal",
+    after the cutover "bona". The board on /dashboard/ no longer prints it (verify-integrations).
 
 ## R. Rollback
 
-R1. Env (minutes): restore the backup or edit the two lines back, then restart:
+R1. Env (minutes): restore the backup from B7, or edit the two lines back, then restart:
 
+        ssh hermes-vps 'f=~/.secrets/bona-services.env; cp -p "$f.bak-wa-<stamp>" "$f" && chmod 600 "$f"'
+        # or, without the backup:
         ssh hermes-vps 'f=~/.secrets/bona-services.env; sed -i "s/^BONA_WA_INSTANCE=.*/BONA_WA_INSTANCE=abdulaziz-personal/; /^BONA_WA_INSTANCE_JID=/d" "$f" && chmod 600 "$f"'
         ssh hermes-vps sudo systemctl restart bona-api
-        # /health poller: abdulaziz-personal owner
+        ssh hermes-vps 'curl -s http://127.0.0.1:4120/health' | python3 -c 'import json,sys; p=json.load(sys.stdin)["poller"]; print(p["instance"], p.get("ownNumber"))'
+        # → abdulaziz-personal owner
 
     The merged code may stay: with the line gone it behaves exactly as before. The poller resumes
     the abdulaziz-personal cursor from its last tick before the cutover and reads that gap
