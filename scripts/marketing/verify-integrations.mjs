@@ -283,7 +283,9 @@ export async function checkEvolution({ env, probe: send = probe }) {
   // and it is the owner's to fix when there is no key at all.
   if (res.status >= 200 && res.status < 300) {
     const v = res.json?.version ? ` v${res.json.version}` : '';
-    return row('evolution', 'live', `Evolution API answers HTTP ${res.status}${v} at ${base}; instance ${env.BONA_WA_INSTANCE ?? '(unset)'}`, { secrets: [key] });
+    // Set or not, never the name: the board is the public /dashboard/ (src/data/integrations.json),
+    // and the instance name says whose WhatsApp it is (2026-11-19).
+    return row('evolution', 'live', `Evolution API answers HTTP ${res.status}${v} at ${base}; instance ${present(env.BONA_WA_INSTANCE) ? 'set' : '(unset)'}`, { secrets: [key] });
   }
   if (res.status === 401 || res.status === 403) {
     return present(key)
