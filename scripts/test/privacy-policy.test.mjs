@@ -273,6 +273,13 @@ test('the AI phone assistant section: who answers, the recording, where the voic
   assert.match(ar, /خارج المملكة/);
   assert.match(ar, /تسعون يوماً/);
   assert.match(ar, /فلا يُحتفظ بأي تسجيل صوتي/);
+  // Declining keeps no audio, but the transcript and the details stay (~/bona-line call_record.py
+  // finish_audio deletes only the raw tracks and the WAV): the same paragraph says so.
+  const declineEn = s.body.en.find((p) => p.includes('do not want to be recorded'));
+  const declineAr = s.body.ar.find((p) => p.includes('لا ترغب في تسجيل المكالمة'));
+  assert.ok(declineEn && declineAr, 'the decline sentence in both languages');
+  assert.match(declineEn, /no audio recording is kept; it notes your details for a callback and ends the call\. The written transcript of that call and the details you give are still kept, as described below\./);
+  assert.match(declineAr, /فلا يُحتفظ بأي تسجيل صوتي لها، وتدوّن المساعدة بياناتك ليُعاوَد الاتصال بك ثم تُنهي المكالمة\. لكن النص المكتوب لتلك المكالمة والبيانات التي تذكرها يظلّان محفوظَين كما هو موضّح أدناه\./);
   assert.match(body(section('sharing'), 'en'), /OpenAI for the AI phone assistant/);
   assert.match(body(section('sharing'), 'ar'), /OpenAI للمساعدة الهاتفية/);
   // Its pointers lead to real headings, the same ones in both languages.
