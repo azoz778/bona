@@ -2711,3 +2711,63 @@ test('(u) a NULL-state lead whose message names a listing joins the inbox, and i
   assert.deepEqual(checks, []);
   h.cleanup();
 });
+
+/* ---------------- (z) Bona's own number: BONA_WA_INSTANCE_JID (2026-11-19, design §11) ---------------- */
+
+const BONA = '966576267694@s.whatsapp.net';
+const SPLIT = { BONA_WA_INSTANCE: 'bona', BONA_WA_INSTANCE_JID: BONA };
+
+test("(z) unset or blank BONA_WA_INSTANCE_JID: the owner's own chat is still the one never read (the rollback state)", async () => {
+  for (const env of [{}, { BONA_WA_INSTANCE_JID: '' }, { BONA_WA_INSTANCE_JID: '  ' }]) {
+    const h = harness({ env, windows: [[
+      msg({ id: 'O1', jid: OWNER, fromMe: true, text: 'Bona — new enquiry' }),
+      msg({ id: 'O2', jid: OWNER, fromMe: false, text: 'Ref BONA-W003 · K7Q2XR' }),
+    ]] });
+    const tally = await h.poller.tick();
+    assert.equal(tally.ignored, 2);
+    assert.equal(h.db.countLeads(), 0);
+    assert.equal(h.poller.status().ownNumber, 'owner');
+    h.cleanup();
+  }
+});
+
+test("(z) set: the Bona number's own chat is never read, and no lead ever carries the Bona number", async () => {
+  const h = harness({ env: SPLIT, windows: [[
+    msg({ id: 'B1', jid: BONA, fromMe: true, text: 'Ref BONA-W003 · K7Q2XR' }),
+    // A record we sent in a privacy-mode chat whose alt is our own number (key.senderPn).
+    msg({ id: 'B2', jid: '101010101010102@lid', jidAlt: BONA, fromMe: true, text: 'https://bona-real-estate.com/properties/bona-w003/' }),
+  ]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.ignored, 2);
+  assert.equal(h.db.countLeads(), 0);
+  const status = h.poller.status();
+  assert.equal(status.instance, 'bona');
+  assert.equal(status.ownNumber, 'instance');
+  assert.doesNotMatch(JSON.stringify(status), /576267694|593296933/, 'status never carries a number');
+  h.cleanup();
+});
+
+test("(z) set: the owner's personal chat on the Bona instance (our notes, his answers) is a team chat, never a lead", async () => {
+  const note = leadNote({
+    name: 'Sara', phone_e164: '966500000000', listing_id: 'BONA-W003', source: 'meta', medium: 'paid', ref: 'K7Q2XR', channel: 'whatsapp', created: NOW,
+  }, { siteUrl: 'https://bona-real-estate.com' });
+  let team = null;
+  const h = harness({ inbox: true, env: SPLIT, isExcluded: (digits) => team.isExcludedPhone(digits), windows: [[
+    msg({ id: 'P-NOTE', fromMe: true, jid: OWNER, pushName: null, ts: NOW - 90_000, text: note }),
+    msg({ id: 'P-IN', jid: OWNER, pushName: 'Abdulaziz', ts: NOW - 60_000, text: 'Ref BONA-W003 · K7Q2XR' }),
+  ]] });
+  team = h.team;
+  const tally = await h.poller.tick();
+  assert.equal(tally.ignored, 2);
+  assert.equal(h.db.countLeads(), 0);
+  assert.equal(h.sent.length, 0, 'no note about our own note');
+  h.cleanup();
+});
+
+test('(z) set: a client Ref line to the Bona number is a lead and the owner gets his note, as before', async () => {
+  const h = harness({ env: SPLIT, windows: [[msg({ id: 'C1', text: 'Hello\nRef BONA-W003 · K7Q2XR' })]] });
+  const tally = await h.poller.tick();
+  assert.equal(tally.created, 1);
+  assert.equal(h.sent.length, 1);
+  h.cleanup();
+});

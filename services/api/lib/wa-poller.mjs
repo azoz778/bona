@@ -7,10 +7,10 @@
  * visitor's session. This loop reads the owner's inbound messages, finds that code, and
  * turns the message into a lead that knows its campaign.
  *
- * Read-only, by owner decision. The instance is the owner's *personal* WhatsApp, shared
- * with another agent: we poll `POST /chat/findMessages` and we never set a webhook. The
- * only thing this module writes back to WhatsApp is the owner's own new-lead note, and
- * only for a lead it just created.
+ * Read-only, by owner decision. The instance (`BONA_WA_INSTANCE`) is Bona's own WhatsApp since
+ * 2026-11-19 (before that, the owner's personal one, shared with another agent): we poll
+ * `POST /chat/findMessages` and we never set a webhook. The only thing this module writes back
+ * to WhatsApp is the owner's new-lead note, and only for a lead it just created.
  *
  * **Matched-only storage** (owner decision). A message is kept only when one of these is
  * true, in this order:
@@ -360,7 +360,9 @@ export function createPoller({
   if (backfill != null && typeof backfill.history !== 'function') throw new TypeError('createPoller: backfill must be createBackfill() (it needs history)');
   const wa = waConfig(cfg.env ?? {});
   const instance = wa.instance;
-  const ownerDigits = bareJid(wa.ownerJid);
+  // The instance's own number (BONA_WA_INSTANCE_JID; unset = BONA_OWNER_JID, as before the
+  // split): its chat with itself is never read, and a sent record whose alt is it is ours.
+  const ownerDigits = bareJid(wa.instanceJid);
   const configured = Boolean(findMessages) || Boolean(wa.baseUrl && wa.apiKey);
   // Whether a team is wired at all — not whether it currently excludes anyone — because an
   // uncheckable lid-only chat is worth counting the moment team accounts exist, even before
@@ -1099,6 +1101,7 @@ export function createPoller({
     const lastRun = cursor?.last_run ?? null;
     return {
       instance,
+      ownNumber: wa.ownNumberFrom,
       configured,
       lastRun,
       lastTs: cursor?.last_ts ?? null,
