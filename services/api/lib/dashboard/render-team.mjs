@@ -69,7 +69,7 @@ export function teamPage({ me, users = [], never = [], sendingEnabled = true, re
 
   const body = `${fundsBanner(fundsOut)}${flash}
 <h2>People</h2>
-<p class="sub">Everyone here logs in with a 6-digit code sent to their own WhatsApp from your number, and sees the same dashboard you do. Only owners see this page.</p>
+<p class="sub">Everyone here logs in with a 6-digit code sent to their own WhatsApp from Bona's WhatsApp number, and sees the same dashboard you do. Only owners see this page.</p>
 ${scrollTable('<th>Name</th><th>WhatsApp</th><th>Role</th><th>Status</th><th>Last login</th><th></th>', people, 'Nobody yet.')}
 <form method="post" action="/v1/admin/team" class="stack" style="margin-top:14px">
   <input type="hidden" name="_dash" value="1">
@@ -90,15 +90,15 @@ ${scrollTable('<th>Number</th><th>Note</th><th></th>', nevers, 'The list is empt
   <button type="submit">Add to the list</button>
 </form>
 
-<h2 style="margin-top:28px">Sending from your WhatsApp</h2>
+<h2 style="margin-top:28px">Sending from Bona's WhatsApp</h2>
 <p class="sub">${sendingEnabled
-    ? 'On. The dashboard may send login codes to your team (and, later, replies to clients) from your number.'
-    : 'Off. Nothing is sent from your number except your own login code.'}</p>
+    ? "On. The dashboard may send login codes to your team (and, later, replies to clients) from Bona's WhatsApp number."
+    : "Off. Nothing is sent from Bona's WhatsApp number except your own login code."}</p>
 ${post('/v1/admin/settings', sendingEnabled ? 'Turn sending off' : 'Turn sending on', { sending_enabled: sendingEnabled ? '0' : '1' })}
 
 <h2 style="margin-top:28px">Replies to clients from the dashboard</h2>
 <p class="sub">${repliesOn
-    ? 'On. Everyone on the team can answer Bona inbox chats from the dashboard; the reply goes from your number (while sending above is on).'
+    ? "On. Everyone on the team can answer Bona inbox chats from the dashboard; the reply goes from Bona's WhatsApp number (while sending above is on)."
     : 'Off. Nobody can send a client a message from the dashboard yet; the team can still read the inbox, and login codes still go.'}</p>
 ${post('/v1/admin/settings', repliesOn ? 'Turn replies off' : 'Turn replies on', { inbox_replies: repliesOn ? '0' : '1' })}
 
