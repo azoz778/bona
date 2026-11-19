@@ -22,7 +22,7 @@ node scripts/instagram-post.mjs post-image --image-url <url> --caption-file mark
 ```
 Bio text, highlights, 9 launch posts and a 30-day calendar are in `marketing/`.
 
-## 3. WhatsApp Business profile (+966 59 329 6933)
+## 3. WhatsApp Business profile (+966 57 626 7694, Bona's own number on the Fold)
 Profile text, greeting and away messages are in `marketing/social-bios.md`. Every "Private enquiry" on the site opens a chat to this number with the property reference pre-filled.
 
 ## 4. Analytics, pixels and ad accounts — the checklists
@@ -91,7 +91,7 @@ Rules baked in: only PDFs *you* send are processed; prices are taken only if pri
 
 ## 9. Private dashboard — https://bona-api.azoz.uk/dashboard
 Runs inside `bona-api` on this PC; nothing personal is on the public site.
-- **Login**: open the URL → *Send code* → a 6-digit code arrives on your WhatsApp (+966 59 329 6933) within seconds → type it → you stay signed in for 30 days on that device (`BONA_DASH_COOKIE_DAYS`). Codes expire after 10 minutes, 5 wrong tries burn a code, 3 codes per 10 minutes per IP. *Logout* is in the nav.
+- **Login**: open the URL → *Send code* → a 6-digit code arrives on your WhatsApp (+966 59 329 6933), sent from Bona's number (+966 57 626 7694), within seconds → type it → you stay signed in for 30 days on that device (`BONA_DASH_COOKIE_DAYS`). Codes expire after 10 minutes, 5 wrong tries burn a code, 3 codes per 10 minutes per IP. *Logout* is in the nav.
 - **Overview** — the last 14 days: sessions, WhatsApp clicks, leads, viewings; **sources → leads** with first-touch and last-touch side by side; match quality (Ref code / phone / keyword / time-window / concierge / form); cost per lead per campaign once spend is entered.
 - **Leads** — the pipeline board by stage (new → contacted → qualified → viewing → offer → won / lost) with age and your response time; a lead's page is its whole journey (pages seen, clicks, messages, calls, stage changes, notes) with a stage form and a deal value.
 - **Listings** — per-listing funnel (views → gallery / tour / brochure → WhatsApp clicks → leads) and the REGA flags (§10).

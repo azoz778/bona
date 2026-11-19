@@ -1,8 +1,8 @@
 /**
  * Evolution API 2.3.7 (Baileys) — the READ half, for the WhatsApp poller and the Bona inbox.
  *
- * IMPORTANT: the instance this talks to (`abdulaziz-personal`) is the owner's
- * *personal* WhatsApp and is already consumed by another agent. This module only ever
+ * IMPORTANT: the instance this talks to (`BONA_WA_INSTANCE`: Bona's own WhatsApp since
+ * 2026-11-19; before that the owner's personal one, which another agent also uses). This module only ever
  * calls `POST /chat/findMessages/{instance}`. It never sets a webhook, a websocket or
  * a rabbitmq consumer — doing so would steal the other agent's events — and it never
  * sends: what the API service sends goes through `lib/wa-send.mjs` (login codes and,

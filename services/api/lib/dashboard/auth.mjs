@@ -4,7 +4,7 @@
  * Who may log in is the `users` table (lib/team.mjs): the owner, seeded from
  * `BONA_OWNER_JID`, and the people he adds on the Team page. A person types their phone
  * number; if it belongs to an active member, six digits go to that member's WhatsApp from
- * the owner's number (the owner's own code goes to his own chat, as it always did).
+ * the instance's number (Bona's WhatsApp; the owner's own code goes to his personal chat).
  * Possession of that phone IS the credential.
  *
  * Nothing readable is stored: `auth_challenges` holds `sha256(code)` and `sha256(nonce)`,
