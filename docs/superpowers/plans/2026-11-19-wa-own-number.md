@@ -1683,7 +1683,8 @@ B6. Wait for the Pages deploy: `curl -s https://bona-real-estate.com/contact/ | 
     > 0 and `curl -s https://bona-real-estate.com/contact/ | grep -c 'wa.me/966593296933'` = 0.
     Note the time.
 B7. Within 10 minutes of B6 (the new instance's first poll looks back 10 min,
-    `FIRST_RUN_LOOKBACK_MS`, wa-poller.mjs:87), switch the VPS env. Gate first: the B2 LINK CHECK
+    `FIRST_RUN_LOOKBACK_MS`, wa-poller.mjs:87), switch the VPS env. That keeps B9a short; it does
+    not make it safe on its own: Pages can be live before B6 sees it. Gate first: the B2 LINK CHECK
     → `open`. Anything else: do NOT switch the env (bona-api keeps reading abdulaziz-personal and
     the owner's codes keep working); the site already shows the new number, so either the link is
     back within the hour (one attempt, by the owner on the Fold) or do R2 the same day. The values
@@ -1724,6 +1725,33 @@ B9. ITEM 7 EVIDENCE (write the outputs into the A2Z checklist row 7):
     bona-intake on the PC still reads abdulaziz-personal for the owner's own Bona PDF group only
     (group-filtered findMessages, acts only on the owner's messages, cannot create leads); outside
     item 7 as written."
+B9a. RECONCILE what the first poll could not see. A new instance has no poll cursor, so
+     bona-api's first successful read on `bona` reaches back only 10 minutes (+2 min overlap). A
+     client message that reached the Bona number before that (Pages live before B6 saw it, or the
+     relink hour in B7) is never read: no lead, no note to the owner, nothing in the inbox. Once B9
+     shows a small `lagS`, on the PC (each command prints a time or counts, nothing personal):
+
+         # U = when the first successful poll began, at the latest: the start-up line, or the last
+         # failed poll after it (a UTC time)
+         ssh hermes-vps "sudo journalctl -u bona-api --since '<B7 restart time>' -o cat | grep -E '\"evt\":\"wa\.poll\.(init|failed)\"' | tail -n 1" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["ts"])'
+         FROM=$(date -u -d '<U> 10 minutes ago' +%FT%TZ); echo "$FROM"; TZ=Asia/Riyadh date -d "$FROM"
+         SINCE=$(date -u -d "$(ssh hermes-vps git -C /opt/bona log -1 --format=%cI <merge-sha>)" +%FT%TZ); echo "$SINCE"
+         # FROM before SINCE: the first poll reached back past the merge, nothing to reconcile. Else
+         # the client messages Evolution holds on bona from the merge to FROM:
+         ssh hermes-vps 'set -a; . ~/.secrets/evolution-api.env; set +a; curl -s -X POST http://127.0.0.1:8085/chat/findMessages/bona -H "apikey: $EVOLUTION_API_KEY" -H "Content-Type: application/json" -d "{\"where\":{\"messageTimestamp\":{\"gte\":\"'"$SINCE"'\",\"lte\":\"'"$FROM"'\"}},\"page\":1,\"offset\":1000}" | python3 -c "import json,sys; d=json.load(sys.stdin); b=d.get(\"messages\",d) if isinstance(d,dict) else d; r=b.get(\"records\",[]) if isinstance(b,dict) else b; k=[x.get(\"key\") or {} for x in r]; i=[j for j in k if not j.get(\"fromMe\") and not str(j.get(\"remoteJid\",\"\")).endswith((\"@g.us\",\"broadcast\",\"@newsletter\"))]; print(len(i), len({j.get(\"remoteJid\") for j in i}), len(r), b.get(\"total\") if isinstance(b,dict) else len(r))"'
+         # → <client messages> <chats> <records read> <total>; when the last two differ, ask again
+         #   with "page":2, 3, … and add the first two up
+
+     `0 0 …`: nothing was missed. Anything else: the owner, in WhatsApp Business on the Fold, takes
+     every chat with a client message older than FROM (the Riyadh time printed above) that the
+     dashboard Inbox, its Unsure tab included, does not show, and adds it with *Add chat by phone
+     number* (owner only: it creates or reuses the lead, `owner_added`, puts it in the Bona inbox
+     and pulls its last 30 days), then answers it there by hand (Dana is off since B1). Not the
+     owner's or a team member's own chat. A Ref line in such a chat stays in the thread; the lead
+     does not get its campaign. If the B7 link gate failed and the env was switched later, the
+     owner also goes through the Fold's chats from B6 to FROM whatever the count says: what reached
+     the number while the instance was not linked is on the Fold only. Write the count and the
+     chats added into the A2Z checklist row 7 (counts only).
 B10. Functional checks: a non-team phone sends a site Ref line (copy one from a listing's
      WhatsApp button) to 0576267694 → a lead appears and the owner's personal phone gets the note,
      sent from the Bona number. The owner logs in to the dashboard with his personal number → the
