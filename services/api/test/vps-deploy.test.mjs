@@ -435,6 +435,52 @@ for (const [kind, why] of [
   });
 }
 
+// ---- the PC installer (services/deploy/install.sh) is gated the same way (Codex review r1, P1)
+// It ran `systemctl --user enable --now bona-api` with no check: run to recover the PC twin after the
+// cutover, it would start bona-api on the owner's personal instance and undo item 7. It now runs
+// lib.sh pc_wa_preflight before it writes or starts anything. BONA_REPO_DIR is this checkout, so
+// past the gate it goes on to its own checks (the fake node then stops it: no version).
+const REPO_ROOT = path.resolve(HERE, '../../..');
+const runInstall = (args, scenario = {}) => runShimmed('../install.sh', args, { BONA_REPO_DIR: REPO_ROOT, TMPDIR: tmpdir(), ...scenario });
+const installUntouched = (r, why) => {
+  assert.notEqual(r.status, 0, `install.sh must refuse: ${why}\n${r.out}`);
+  assert.ok(r.lines.some((l) => CALL.pcWaShow.test(l)), `${why}: the route must have been looked up\n${r.lines.join('\n')}`);
+  assert.ok(!r.lines.some((l) => /^(node|cloudflared|ssh|scp) /.test(l)), `${why}: nothing run past the gate\n${r.lines.join('\n')}`);
+  assert.ok(!r.lines.some((l) => /^systemctl --user (start|restart|stop|enable|disable|daemon-reload)/.test(l)), `${why}: no unit touched\n${r.lines.join('\n')}`);
+  assert.match(r.out, /Nothing was stopped, copied or started/);
+};
+
+for (const [kind, why] of [['none', 'no drop-in'], ['personal', "the env file names the owner's personal instance"], ['show-fails', 'systemctl --user show failed']]) {
+  test(`install.sh: refuses before it writes or starts anything without the Bona drop-in (${why})`, () => {
+    for (const args of [[], ['--restart'], ['--no-dns']]) {
+      const r = runInstall(args, { PC_WA: kind });
+      installUntouched(r, `${why}, ${args.join(' ') || 'no flags'}`);
+      for (const s of ['bona-api.service.d/wa-own-number.conf', 'systemctl --user daemon-reload', '--personal-instance']) assert.ok(r.out.includes(s), `the refusal should mention ${s}\n${r.out}`);
+    }
+  });
+}
+
+test('install.sh: with the Bona drop-in in place the gate passes and the install goes on', () => {
+  const r = runInstall([], { PC_WA: 'dropin' });
+  assertOrdered(r.lines, CALL.pcWaShow, /^node /);
+  assert.ok(!r.out.includes('966576267694'), r.out);
+});
+
+test('install.sh --personal-instance: refused while the drop-in is loaded; with none, a warning and on', () => {
+  installUntouched(runInstall(['--personal-instance'], { PC_WA: 'dropin' }), 'the drop-in is still loaded');
+  const r = runInstall(['--personal-instance'], { PC_WA: 'none' });
+  assertOrdered(r.lines, CALL.pcWaShow, /^node /);
+  assert.match(r.out, /personal WhatsApp/);
+  assert.match(r.out, /item 7/);
+});
+
+test('install.sh --uninstall is not gated: stopping the units is always allowed', () => {
+  const r = runInstall(['--uninstall'], { PC_WA: 'none' });
+  assert.equal(r.status, 0, r.out);
+  assert.ok(!r.lines.some((l) => CALL.pcWaShow.test(l)), r.lines.join('\n'));
+  assert.ok(r.lines.some((l) => /^systemctl --user disable --now bona-api\.service$/.test(l)), r.lines.join('\n'));
+});
+
 test('rollback.sh: an unknown argument is a usage error and touches nothing', () => {
   const r = runShimmed('rollback.sh', ['--personal']);
   assert.notEqual(r.status, 0);
