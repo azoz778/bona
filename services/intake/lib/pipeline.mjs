@@ -134,64 +134,92 @@ function refusedFigureIn(segments, refused, published) {
   return null;
 }
 
-/** Words that make a four-digit figure money: PRICE_CONTEXT_RE's, and the words for payments, deposits, fees, rent. */
-const MONEY_WORD_RE = new RegExp(`${PRICE_CONTEXT_RE.source}|\\b(?:payments?|paid|pay|deposits?|instal{1,2}ments?|fees?|rent(?:al)?|booking)\\b|دفع|مقدم|عربون|قسط|أقساط|اقساط|إيجار|ايجار|رسوم|حجز`, 'i');
 /**
- * A money-sized figure (after westernise, with the measurements cut out): grouped thousands ("50,000"), five
- * digits or more, or a scaled amount ("1.2 million", "4.5m", "990k", "٣ ملايين"). A bare four-digit figure
- * ("handover 2027", "unit 1203") is money only beside a money word (MONEY_WORD_RE).
+ * A currency, by its mark or its name (r2 #4): a code only beside a figure ("SAR 750", "750 SR" — "Model SR-2"
+ * is a name), a name or a symbol anywhere ("riyals", "ريال", "ر.س", "$", "﷼").
+ */
+const CODE = '(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)';
+const CURRENCY_RE = new RegExp([
+  String.raw`\b${CODE}\b\s*\d|\d\s*${CODE}\b`,
+  String.raw`\b(?:riyals?|rials?|dirhams?|dollars?|euros?|sterling)\b`,
+  String.raw`ريال|ر\.\s?س|ر\.\s?ع|درهم|دولار|يورو|جنيه|دينار|[$€£﷼⃁]`,
+].join('|'), 'i');
+/** A payment: down payment, deposit, fee, instalment, service charge, دفعة, عربون, رسوم, قسط, مقدم, … */
+const PAYMENT_RE = new RegExp([
+  String.raw`\b(?:down\s*-?\s*payments?|payments?|paid|deposits?|fees?|instal{1,2}ments?|service\s+charges?)\b`,
+  String.raw`دفع|عربون|رسوم|قسط|أقساط|اقساط|تقسيط|مقدم`,
+].join('|'), 'i');
+/**
+ * A money-sized figure, once the measurements are cut out (withoutMeasures): thousands grouped by a comma, a
+ * dot, a space, a no-break or a thin space ("50,000", "50 000"); five digits or more; a scaled amount ("1.2
+ * million", "990k", "4.5m", "٣ ملايين"). A whole number written solid with "m" ("15m", "500m") is metres, not
+ * millions, here: a name or a nearby distance, never on its own a price.
  */
 const MONEY_FIGURE_RE = new RegExp([
-  String.raw`(?<![\d.,٫٬])\d{1,3}(?:[,٬.'’\u00a0\u202f]\d{3})+(?!\d)`,
+  String.raw`(?<![\d.,٫٬])\d{1,3}(?:[,٬.'’ \u00a0\u202f\u2009]\d{3})+(?!\d)`,
   String.raw`(?<![\d.,٫٬])\d{5,}`,
   String.raw`(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?\s*(?:million|mn|thousand|billion|bn|مليون|ملايين|مليار|ألف|الف|آلاف|الاف)(?![a-z])`,
-  String.raw`(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?(?:m|k)(?![a-z²\d])`,
+  String.raw`(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?k(?![a-z²\d])`,
+  String.raw`(?<![\d.,٫٬])\d+[.,٫]\d+m(?![a-z²\d])`,
 ].join('|'), 'i');
-const FOUR_DIGITS_RE = /(?<![\d.,٫٬])\d{4}(?!\d)/;
 
 /**
- * Does `text` state a money figure other than `own` (that model's own published price figures)? Sentence by
- * sentence: its own figures are blanked out (figureMatches), the measurements cut (withoutMeasures), and
- * what is left is looked at for a money-sized figure.
+ * Does `text` state money (r2 #4)? Sentence by sentence: a currency mark or name; a payment word beside ANY
+ * number ("Deposit 750", "10% down payment"); or a money-sized figure (MONEY_FIGURE_RE). Prices are published
+ * from the price fields only, so no free text may carry one — not even a model's own confirmed price, which a
+ * later `price <id> onrequest` would leave behind in it.
  */
-function statesOtherMoney(text, own) {
-  return String(text).split(SENTENCE_END).some((seg) => {
-    let t = westernise(seg);
-    for (const n of own) {
-      for (const { index, end } of figureMatches(t, n)) t = `${t.slice(0, index)}${' '.repeat(end - index)}${t.slice(end)}`;
-    }
-    const rest = withoutMeasures(t);
-    return MONEY_FIGURE_RE.test(rest) || (FOUR_DIGITS_RE.test(rest) && MONEY_WORD_RE.test(seg));
+export function statesMoney(text) {
+  return String(text ?? '').split(SENTENCE_END).some((seg) => {
+    const t = westernise(seg);
+    if (CURRENCY_RE.test(t)) return true;
+    if (PAYMENT_RE.test(t) && /\d/.test(t)) return true;
+    return MONEY_FIGURE_RE.test(withoutMeasures(t));
   });
 }
 
+/** A model NAME states money only by a currency or a payment word: "Villa 15m", "Plot 10000", "Penthouse 4,250" are names. */
+const nameStatesMoney = (text) => typeof text === 'string' && (CURRENCY_RE.test(westernise(text)) || PAYMENT_RE.test(text));
+
 /**
- * The model copy guard (Codex r1 #3): a money figure in a unit model's own text — its name, rooms or
- * availability — must be THAT model's own published price (or its Sakani price, `rent` = none), not
- * merely a figure published for another model, and not one nobody claimed ("Down payment 50,000").
- * Its rooms or availability that state one are dropped (null) here, in place; a name cannot be, so it is
- * returned. `models` are ai.models after the price checks, or the public models of an enrichment.
- * @returns {{ dropped: string[], name: string|null }}  the fields dropped, and the first name that states one
+ * The money guard over a reading's free text (r2 #4, Codex r1 #3): a unit model's rooms or availability that
+ * state money (statesMoney) are dropped (null), and so is every fact-list item (amenities / nearby /
+ * warranties) that does — in both languages, the lists being parallel — in place, on `holder` (the AI answer
+ * on a publish, the built enrichment on --enrich). A model name cannot be dropped: the first one that states
+ * money by a currency or a payment word (nameStatesMoney) is returned, and the run is refused.
+ * @returns {{ dropped: string[], name: string|null }}
  */
-export function dropOtherMoneyText(models, { rent = false } = {}) {
+export function dropMoneyText(holder) {
   const dropped = [];
   let name = null;
-  (Array.isArray(models) ? models : []).forEach((m, i) => {
+  (Array.isArray(holder?.models) ? holder.models : []).forEach((m, i) => {
     if (!m || typeof m !== 'object') return;
-    const sub = !rent && isFigure(m.price) && isFigure(m.subsidisedPrice) && m.subsidisedPrice < m.price ? m.subsidisedPrice : null;
-    const own = [m.price, sub].filter(isFigure);
-    const states = (texts) => texts.some((x) => typeof x === 'string' && x && statesOtherMoney(x, own));
-    if (name === null && states(pairText(m.name))) name = `models[${i}].name`;
-    if (states(listText(m.rooms))) { m.rooms = null; dropped.push(`models[${i}].rooms`); }
-    if (states(pairText(m.availability))) { m.availability = null; dropped.push(`models[${i}].availability`); }
+    if (name === null && pairText(m.name).some(nameStatesMoney)) name = `models[${i}].name`;
+    if (listText(m.rooms).some(statesMoney)) { m.rooms = null; dropped.push(`models[${i}].rooms`); }
+    if (pairText(m.availability).some(statesMoney)) { m.availability = null; dropped.push(`models[${i}].availability`); }
   });
+  for (const k of Object.keys(FACT_LISTS)) {
+    const list = holder?.[k];
+    if (!list || !Array.isArray(list.en) || !Array.isArray(list.ar)) continue;
+    const bad = new Set([...list.en.keys(), ...list.ar.keys()].filter((j) => statesMoney(list.en[j]) || statesMoney(list.ar[j])));
+    if (!bad.size) continue;
+    for (const j of [...bad].sort((x, y) => x - y)) dropped.push(`${k}[${j}]`);
+    holder[k] = { en: list.en.filter((_, j) => !bad.has(j)), ar: list.ar.filter((_, j) => !bad.has(j)) };
+  }
   return { dropped, name };
 }
 
-/** The warning for dropOtherMoneyText's dropped fields (none: null). */
-const otherMoneyWarning = (dropped) => (dropped.length
-  ? `${dropped.length} unit-model text field(s) stated a figure that is not that model's own confirmed price, so they were left off (${dropped.join(', ')})`
+/** The warning for dropMoneyText's dropped fields and items (none: null). */
+const moneyTextWarning = (dropped) => (dropped.length
+  ? `${dropped.length} text field(s) or list item(s) stated a price or a payment, which the site shows only in the price fields, so they were left off (${dropped.join(', ')})`
   : null);
+/** dropMoneyText's warning and code on the report. */
+const reportMoneyText = (report, dropped) => {
+  if (!dropped.length) return;
+  if (dropped.some((f) => f.startsWith('models[')) && !report.warningCodes.includes('model-price-not-printed')) report.warningCodes.push('model-price-not-printed');
+  report.warnings.push(moneyTextWarning(dropped));
+  log.warn('intake.text_money_dropped', { fields: dropped });
+};
 
 /**
  * The withdrawal a model's reading of the brochure falls under, or null: by the listing's own fields
@@ -956,17 +984,13 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       ? `${stated.where} states the price ${n}, which could not be confirmed on the brochure — send it again; the next reading may leave it out`
       : `${stated.where} states the price ${n}, which could not be confirmed on the brochure — resend with the price in the caption, or without it`, 'price');
   }
-  // …and per model (Codex r1 #3): a money figure in a unit model's text must be that model's own published
-  // price, not one published for another model or one nobody claimed ("Down payment 50,000").
-  const otherMoney = dropOtherMoneyText(ai.models, { rent: (caption.category || ai.listing?.category) === 'rent' });
-  if (otherMoney.name) {
-    throw new RejectError(`${otherMoney.name} states a figure that is not that model's own confirmed price — send it again; the next reading may leave it out`, 'price');
+  // …and no price or payment in a unit model's rooms or availability, or in a fact list, at all (r2 #4): those
+  // fields and items are dropped; a model name that states one refuses the run.
+  const money = dropMoneyText(ai);
+  if (money.name) {
+    throw new RejectError(`${money.name} states a price or a payment — prices go in the price fields only; send it again, the next reading may leave it out`, 'price');
   }
-  if (otherMoney.dropped.length) {
-    if (!report.warningCodes.includes('model-price-not-printed')) report.warningCodes.push('model-price-not-printed');
-    report.warnings.push(otherMoneyWarning(otherMoney.dropped));
-    log.warn('intake.model_text_money_dropped', { fields: otherMoney.dropped });
-  }
+  reportMoneyText(report, money.dropped);
 
   // --- 4b. map pin --------------------------------------------------------------
   // A brochure almost never prints coordinates, but it very often hides a Google Maps link
@@ -1215,16 +1239,13 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
     ? alignHeadline(structuredClone(existing.price), models) : null;
   const head = enrichHeadline(existing, models, aligned, { currencyMismatch: currencyDrop?.decision === 'currency-mismatch' });
   if (head.dropModelPrices) for (const m of models) { m.price = null; m.subsidisedPrice = null; }
-  // The model copy guard, over the models as they will be published (Codex r1 #3): a money figure in a
-  // model's rooms or availability that is not that model's own price drops that field; in a name, nothing changes.
-  const otherMoney = dropOtherMoneyText(models);
-  if (otherMoney.dropped.length) {
-    if (!report.warningCodes.includes('model-price-not-printed')) report.warningCodes.push('model-price-not-printed');
-    report.warnings.push(otherMoneyWarning(otherMoney.dropped));
-    log.warn('intake.model_text_money_dropped', { fields: otherMoney.dropped });
-  }
-  const moneyName = otherMoney.name
-    ? `${otherMoney.name} states a figure that is not that model's own confirmed price — nothing was changed; run --enrich again later, the next reading may leave it out`
+  // The money guard, over what the enrichment publishes (r2 #4): a model's rooms or availability, or a fact-list
+  // item, that states a price or a payment is dropped; a model name that does refuses the enrichment.
+  const money = dropMoneyText(built);
+  for (const k of Object.keys(FACT_LISTS)) if (built[k] && !(built[k].en.length || built[k].ar.length)) delete built[k];
+  reportMoneyText(report, money.dropped);
+  const moneyName = money.name
+    ? `${money.name} states a price or a payment — prices go in the price fields only; nothing was changed; run --enrich again later, the next reading may leave it out`
     : null;
   const priceChanged = !isDeepStrictEqual(head.price, existing.price);
   const compare = compareEnrichment(existing, built);
