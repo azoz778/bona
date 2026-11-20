@@ -188,9 +188,17 @@ export async function gitCommitPush(repo, message, { remote = 'origin', branch =
   const author = { GIT_AUTHOR_NAME: 'Bona intake', GIT_AUTHOR_EMAIL: 'intake@bona.azoz.uk', GIT_COMMITTER_NAME: 'Bona intake', GIT_COMMITTER_EMAIL: 'intake@bona.azoz.uk' };
   await must('git commit', await run('git', ['commit', '-m', message], { cwd: repo, env: author }));
   const sha = (await run('git', ['rev-parse', '--short', 'HEAD'], { cwd: repo })).out;
-  /** The job's own commit as HEAD holds it now (a rebase rewrites it). */
-  const head = async () => (await run('git', ['rev-parse', 'HEAD'], { cwd: repo })).out;
-  let ours = await head();
+  /** HEAD is in the remote-tracking branch: on the remote already, whoever committed it (r2 #7). */
+  const onRemote = async () => (await run('git', ['merge-base', '--is-ancestor', 'HEAD', `${remote}/${branch}`], { cwd: repo })).code === 0;
+  /**
+   * HEAD is the job's own commit — not on the remote, and carrying this job's author and message. A rebase
+   * rewrites it, or drops it when the remote already has the same change (r2 #7).
+   */
+  const headIsOurs = async () => {
+    if (await onRemote()) return false;
+    const [name, email, ...body] = (await run('git', ['log', '-1', '--format=%an%x1f%ae%x1f%B', 'HEAD'], { cwd: repo })).out.split('\x1f');
+    return name === author.GIT_AUTHOR_NAME && email === author.GIT_AUTHOR_EMAIL && body.join('\x1f').trim() === message.trim();
+  };
   let push = await run('git', ['push', remote, `HEAD:${branch}`], { cwd: repo });
   let failure = null;
   if (push.code !== 0) {
@@ -198,7 +206,11 @@ export async function gitCommitPush(repo, message, { remote = 'origin', branch =
     // committed, so a rebase is safe; then try once more.
     try {
       await gitPull(repo, { remote, branch });
-      ours = await head();
+      // The rebase dropped the job's commit: the remote already has that change. Nothing to push, nothing to undo.
+      if (await onRemote()) {
+        const upstream = (await run('git', ['rev-parse', '--short', 'HEAD'], { cwd: repo })).out;
+        return { committed: true, pushed: true, upstream: true, sha: upstream, staged: stagedPaths };
+      }
       push = await run('git', ['push', remote, `HEAD:${branch}`], { cwd: repo });
     } catch (err) {
       // A conflict leaves the rebase half done: abort it, so HEAD is the job's commit again (Codex r1 #7).
@@ -211,10 +223,10 @@ export async function gitCommitPush(repo, message, { remote = 'origin', branch =
     failure.detail = (push.err || push.out).slice(-600);
   }
   if (failure) {
-    // The commit never reached the remote: take it off HEAD — only when HEAD is still that commit — so the
-    // clone matches the remote again and no later job's push carries it (Codex r1 #7). Its files stay in
-    // the working tree, unstaged, for the caller's resetTree() to put back.
-    if ((await head()) === ours) {
+    // The commit never reached the remote: take it off HEAD — only when HEAD is still the job's own commit,
+    // never one the remote branch contains (r2 #7) — so the clone matches the remote again and no later job's
+    // push carries it (Codex r1 #7). Its files stay in the working tree, unstaged, for the caller's resetTree().
+    if (await headIsOurs()) {
       const undo = await run('git', ['reset', '-q', 'HEAD~1'], { cwd: repo });
       failure.uncommitted = undo.code === 0;
     }

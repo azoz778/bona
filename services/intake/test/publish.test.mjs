@@ -216,6 +216,28 @@ describe('gitCommitPush — a push that fails leaves no unpublished commit behin
   });
 });
 
+describe('gitCommitPush — a retry whose rebase drops the job\'s commit (r2 #7)', () => {
+  it('the remote already has the same patch and every push fails: the change is on the remote — nothing is reset', async () => {
+    // Someone else already pushed exactly this change.
+    const other = path.join(root, 'other');
+    git(root, 'clone', origin, other);
+    write(other, 'public/listings/first/01.jpg', 'first');
+    git(other, 'add', '-A');
+    git(other, 'commit', '-m', 'the same change, pushed first');
+    git(other, 'push', 'origin', 'main');
+    const upstream = git(origin, 'rev-parse', 'main');
+    // Fetching works, pushing does not (a transport error on every push).
+    git(clone, 'remote', 'set-url', '--push', 'origin', path.join(root, 'nowhere.git'));
+    write(clone, 'public/listings/first/01.jpg', 'first');
+    const res = await gitCommitPush(clone, 'intake: first (BONA-W001)', { remote: 'origin', branch: 'main', paths: ['public/listings/first'] });
+    assert.equal(res.pushed, true, 'the change is on the remote');
+    assert.equal(res.upstream, true);
+    assert.equal(git(clone, 'rev-parse', 'HEAD'), upstream, 'HEAD is the upstream commit — not reset off it');
+    assert.equal(git(clone, 'rev-parse', 'origin/main'), upstream);
+    assert.equal(await gitStatus(clone), '');
+  });
+});
+
 describe('resetTree — a failed job leaves the clone clean for the next one', () => {
   it('deletes the new listing and restores every tracked file', async () => {
     write(clone, 'public/listings/villa/01.jpg', 'x');
