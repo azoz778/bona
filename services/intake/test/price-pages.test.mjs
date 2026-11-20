@@ -2462,15 +2462,20 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
     } finally { r.cleanup(); }
   });
 
-  it('Codex r1 #8: a brochure that cannot be built when the published prices change commits nothing — the old PDF would show prices the listing no longer shows', async () => {
-    for (const price of [PRICED, ON_REQUEST]) {
-      // PRICED: the headline is kept, but the models gain prices the old brochure does not show; ON_REQUEST: the headline is adopted.
-      const r = await rig({ listing: reading(), brochureFail: true });
+  it('r2 #8 (Codex r1 #8): a brochure that cannot be built over an existing one commits nothing — the old PDF would contradict the new data', async () => {
+    const swapped = [
+      { name: { en: 'Nawras', ar: 'نموذج نورس' }, bedrooms: 3, bathrooms: 2, areaSqm: 105, rooms: null, availability: null, price: 319015, subsidisedPrice: 270425, floorPlan: null },
+      { name: { en: 'Lulu', ar: 'نموذج لؤلؤ' }, bedrooms: 2, bathrooms: 2, areaSqm: 88, rooms: null, availability: null, price: 419994, subsidisedPrice: 356024, floorPlan: null },
+    ];
+    // PRICED: the models gain prices; ON_REQUEST: the headline is adopted; `swapped`: the same amounts, A's and B's
+    // exchanged (the sorted amounts and the headline do not change); no price at all: the models and plans still do.
+    for (const [price, extra, modelConfirm] of [[PRICED, {}, null], [ON_REQUEST, {}, null], [PRICED, { models: swapped }, null], [PRICED, {}, []]]) {
+      const r = await rig({ listing: reading(), brochureFail: true, modelConfirm });
       try {
-        seed(r, { price });
+        seed(r, { price, extra });
         const raw = fs.readFileSync(inboxFile(r), 'utf8');
-        await assert.rejects(enrich(r), (err) => err.rolledBack === true
-          && /brochure could not be rebuilt/.test(err.message) && /prices/.test(err.message) && /nothing was changed/.test(err.message));
+        await assert.rejects(enrich(r, { force: true }), (err) => err.rolledBack === true
+          && /brochure could not be rebuilt/.test(err.message) && /old brochure/.test(err.message) && /nothing was changed/.test(err.message));
         assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
         assert.equal(fs.readFileSync(inboxFile(r), 'utf8'), raw);
         assert.equal(fs.readFileSync(path.join(pubDir(r), 'brochure.pdf'), 'utf8'), 'old brochure');
@@ -2478,19 +2483,20 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
     }
   });
 
-  it('a brochure that cannot be built keeps the enrichment, the old brochure, and says so — when no published price changes', async () => {
-    // Every model price refused: the models come without prices, the headline is the listing's own.
-    const r = await rig({ listing: reading(), brochureFail: true, modelConfirm: [] });
+  it('r2 #8: a brochure that cannot be built on a listing that has none: the enrichment goes up without one, and says so', async () => {
+    const r = await rig({ listing: reading(), brochureFail: true });
     try {
-      const before = seed(r);
+      seed(r, { extra: { brochureUrl: null } });
+      fs.rmSync(path.join(pubDir(r), 'brochure.pdf'));
+      git(r, 'add', '-A'); git(r, 'commit', '-qm', 'no brochure');
       const report = await enrich(r);
       assert.equal(report.brochure.ok, false);
       assert.ok(report.warnings.some((w) => /brochure could not be built/.test(w)), report.warnings.join(' | '));
       const after = saved(r);
-      assert.equal(after.models.length, 2);
-      assert.equal(after.brochureUrl, before.brochureUrl);
+      assert.deepEqual(after.models.map((m) => m.price), [419994, 319015]);
+      assert.equal(after.brochureUrl, null);
       assert.deepEqual(after._intake.warnings, ['map-unconfirmed', 'brochure-failed']);
-      assert.equal(fs.readFileSync(path.join(pubDir(r), 'brochure.pdf'), 'utf8'), 'old brochure');
+      assert.equal(fs.existsSync(path.join(pubDir(r), 'brochure.pdf')), false);
     } finally { r.cleanup(); }
   });
 

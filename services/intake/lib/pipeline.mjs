@@ -1305,10 +1305,9 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   }
 
   const merged = mergeEnrichment(existing, built, priceChanged ? { price: head.price } : {});
-  // The prices the listing publishes — its headline and every unit-model figure — differ from the ones its
-  // current brochure prints (Codex r1 #8).
-  const modelFigures = (l) => (Array.isArray(l?.models) ? l.models : []).flatMap((m) => [m?.price, m?.subsidisedPrice]).filter(isFigure).sort((a, b) => a - b);
-  const pricesChanged = priceChanged || !isDeepStrictEqual(modelFigures(existing), modelFigures(merged));
+  // The listing already has a brochure, printed from the data the enrichment replaces (r2 #8): if the new one
+  // cannot be built, nothing is committed — the old PDF would contradict the new data, whichever row moved.
+  const hadBrochure = Boolean(existing.brochureUrl) || fs.existsSync(brochureFileIn(publicDir));
   const problems = checkListing(merged, { minImages: cfg.minImages, maxImages: cfg.maxImages, withdrawals });
   if (dryRun) {
     report.stage = 'dry-run';
@@ -1341,8 +1340,8 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
 
     // The brochure prints the merged listing, out of the listing's own folder (its photos as they are
     // now, the new plans). Drawn in the work dir and moved in whole, so a half-written file is never
-    // served. A failure keeps the enrichment and the old brochure, and says so (as on a publish) — unless
-    // the published prices changed: then nothing is committed (Codex r1 #8).
+    // served. A failure on a listing that has a brochure commits nothing (r2 #8); one that has none keeps the
+    // enrichment without a brochure, and says so (as on a publish).
     report.stage = 'brochure';
     if (caption.noBrochure) {
       report.brochure = { skipped: 'nobrochure' };
@@ -1368,19 +1367,19 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
         log.info('intake.brochure_built', { slug, bytes: brochure.bytes, pages: brochure.pages, steps: brochure.steps });
       } else {
         log.warn('intake.brochure_failed', { slug, reason: brochure.reason, error: brochure.error, detail: brochure.detail });
-        // The old brochure prints the old prices: with the published prices changed it may not stay up beside
-        // the new listing, so nothing is committed (Codex r1 #8) — the catch below rolls every file back.
-        if (pricesChanged) {
-          throw new Error(`the Bona brochure could not be rebuilt${brochure.reason === 'too-large' ? ` (${brochure.error})` : ''}, and this enrichment `
-            + 'changes the prices the listing publishes — its old brochure would show prices the listing no longer shows, so nothing was changed; '
+        // The old brochure prints the old data: it may not stay up beside the new listing, so nothing is committed
+        // (Codex r1 #8, r2 #8) — the catch below rolls every file back. A listing with none gets the enrichment.
+        if (hadBrochure) {
+          throw new Error(`the Bona brochure could not be rebuilt${brochure.reason === 'too-large' ? ` (${brochure.error})` : ''}, and the listing's `
+            + 'old brochure would contradict the enriched listing (its models, prices and plans), so nothing was changed; '
             + 'run --enrich again once the brochure builds');
         }
         const code = brochure.reason === 'too-large' ? 'brochure-too-large' : 'brochure-failed';
         report.warningCodes.push(code);
         addWarningCode(merged, code);
         report.warnings.push(brochure.reason === 'too-large'
-          ? `${brochure.error} — the listing keeps its old brochure`
-          : 'the Bona-branded brochure could not be built, so the listing keeps its old one (the reason is in the journal)');
+          ? `${brochure.error} — the listing was enriched without a downloadable brochure`
+          : 'the Bona-branded brochure could not be built, so the listing was enriched without one (the reason is in the journal)');
       }
     }
 
