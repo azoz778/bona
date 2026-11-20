@@ -185,7 +185,7 @@ describe('validateAiResult', () => {
     const ai = { models: [{ name: { en: 'A, SAR 419,994', ar: 'نورس' } }], amenities: { en: ['SAR 319,015 club'], ar: ['نادٍ'] } };
     const bad = copyProblems(GOOD.listing, ai);
     assert.ok(bad.some((p) => /^models\[0\]\.name\.en.*models\[i\]\.price/.test(p)), bad.join('|'));
-    assert.ok(bad.some((p) => /^amenities\.en\[0\].*no price/.test(p) && !/listing\.price/.test(p)), bad.join('|'));
+    assert.ok(!bad.some((p) => /^amenities\.en\[0\]/.test(p)), `a fact-list price is dropped by the pipeline, not a contract failure (r3 #2): ${bad.join('|')}`);
   });
   it('refuses fact lists of different lengths', () => {
     const r = clone(); r.amenities = { en: ['Gym', 'Pool'], ar: ['نادٍ'] };
@@ -267,14 +267,22 @@ describe('validateAiResult', () => {
 });
 
 describe('copyProblems — owner rules', () => {
-  it('checks unit models and fact lists for phone numbers and prices', () => {
+  it('checks unit models and fact lists for phone numbers; a price is a contract failure only in a name (r3 #2)', () => {
     const ai = {
       models: [{ name: { en: 'Call +966 55 123 4567', ar: 'نورس' }, rooms: null, availability: null }],
       amenities: { en: ['Gym', 'Pool', 'SAR 319,015 clubhouse'], ar: ['أ', 'ب', 'ج'] },
     };
     const bad = copyProblems(GOOD.listing, ai);
     assert.ok(bad.some((p) => /^models\[0\]\.name\.en/.test(p)), bad.join('|'));
-    assert.ok(bad.some((p) => /^amenities\.en\[2\]/.test(p)), bad.join('|'));
+    assert.ok(!bad.some((p) => /^amenities\.en\[2\]/.test(p)), `the pipeline drops that item: ${bad.join('|')}`);
+  });
+  it('r3 #2: "Club fee SAR 1,500" in a fact list, a price in a model\'s rooms or availability: no contract failure (the pipeline drops them)', () => {
+    const ai = {
+      models: [{ name: { en: 'A', ar: 'نموذج' }, rooms: { en: ['Deposit SAR 750'], ar: ['عربون 750 ريال'] }, availability: { en: 'From SAR 319,015', ar: 'من 319,015 ريال' } }],
+      amenities: { en: ['Club fee SAR 1,500'], ar: ['رسوم النادي 1,500 ريال'] },
+      nearby: { en: ['Mall'], ar: ['مول'] }, warranties: { en: ['Price SAR 2,000 per year'], ar: ['السعر 2,000 ريال سنويا'] },
+    };
+    assert.deepEqual(copyProblems(GOOD.listing, ai), []);
   });
   const LEAKS = ['Call 0551234567', 'Call 920012345', 'Call 9200 12345', 'Call 800 1234567', 'Tel 012 345 6789', 'Tel 0112345678', 'see https://x.example/y', 'see www.example', 'visit acme.sa', 'visit acme.com', 'a@b.org', 'follow @acme_dev',
     // The same numbers in Arabic-Indic and Persian digits (rules.mjs asciiDigits runs before every rule).

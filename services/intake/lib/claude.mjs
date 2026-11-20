@@ -659,10 +659,10 @@ export function copyProblems(listing, ai = {}) {
   for (const [label, value] of fields) {
     if (!isStr(value)) continue;
     for (const hit of forbiddenHits(value, FORBIDDEN)) bad.push(`${label} mentions "${hit}"`);
-    if (PRICE_IN_COPY_RE.test(value)) {
-      const where = /^models\[/.test(label) ? 'prices go in models[i].price / subsidisedPrice only'
-        : /^(amenities|nearby|warranties)\./.test(label) ? 'state no price in this list'
-          : 'prices go in listing.price only';
+    // A model's rooms or availability, or a fact-list item, that states a price is DROPPED by the pipeline
+    // (pipeline.mjs dropMoneyText, r3 #2) — never a contract failure that would reject the whole brochure.
+    if (PRICE_IN_COPY_RE.test(value) && !/^(?:models\[\d+\]\.(?:rooms|availability)|amenities|nearby|warranties)\./.test(label)) {
+      const where = /^models\[/.test(label) ? 'prices go in models[i].price / subsidisedPrice only' : 'prices go in listing.price only';
       bad.push(`${label} states a price ("${value.match(PRICE_IN_COPY_RE)[0].trim()}") — ${where}`);
     }
     for (const w of HYPE_WORDS) if (new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(value)) bad.push(`${label} uses hype word "${w}"`);

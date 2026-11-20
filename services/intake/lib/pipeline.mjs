@@ -103,16 +103,15 @@ const pairText = (v) => [v?.en, v?.ar];
 const listText = (v) => ['en', 'ar'].flatMap((k) => (Array.isArray(v?.[k]) ? v[k] : []));
 
 /**
- * Every text a run publishes from the reading, cut into sentences, each `{ seg, where }`: the listing's
- * title, description and highlights (`listingCopy`, a publish — "the copy"), every unit model's name,
- * rooms and availability, and the fact lists (FACT_LISTS: amenities / nearby / warranties).
+ * The copy a run publishes from the reading, cut into sentences, each `{ seg, where }`: the listing's
+ * title, description and highlights (`listingCopy`, a publish — "the copy"). A unit model's rooms and
+ * availability and the fact lists are not here: any money in them is dropped first (dropMoneyText, r3 #2),
+ * and a model name stating a reading's price refuses the run there.
  */
 function publishedText(ai, { listingCopy = true } = {}) {
   const l = ai?.listing;
   const groups = [
     ['the copy', listingCopy ? [...pairText(l?.title), ...listText(l?.description), ...listText(l?.highlights)] : []],
-    ["a unit model's text", (Array.isArray(ai?.models) ? ai.models : []).flatMap((m) => [...pairText(m?.name), ...listText(m?.rooms), ...pairText(m?.availability)])],
-    ['a fact list', Object.keys(FACT_LISTS).flatMap((k) => listText(ai?.[k]))],
   ];
   return groups.flatMap(([where, texts]) => texts.filter((x) => typeof x === 'string' && x)
     .flatMap((x) => x.split(SENTENCE_END)).map((seg) => ({ seg, where })));
@@ -543,6 +542,17 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     report.warnings.push(`the model flagged ${ai.warnings.length} thing(s) to check by hand — they are in ai.json in the run's work dir`);
   }
 
+  // --- 3c. money in free text --------------------------------------------------
+  // No price or payment in a unit model's rooms or availability, or in a fact list, at all (r2 #4, r3 #1): those
+  // fields and items are dropped here, BEFORE any price check (r3 #2) — so the copy guard below sees only the
+  // listing's own copy, and a figure whose check could not finish cannot turn a retryable run into a refused
+  // one. A model name that states money refuses the run (it cannot be dropped).
+  const money = dropMoneyText(ai);
+  if (money.name) {
+    throw new RejectError(`${money.name} states a price or a payment — prices go in the price fields only; send it again, the next reading may leave it out`, enrich ? 'enrich' : 'price');
+  }
+  reportMoneyText(report, money.dropped);
+
   // --- 4. TAQEEM cross-check ---------------------------------------------------
   // A price may only be published when the number is really printed. The model is not
   // trusted to have read one: look it up in the text layer and in the caption, and for a
@@ -926,16 +936,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // the listing (enrichHeadline): the model's own headline and Sakani checks, the copy guard, the map
   // and the photo steps below are for a publish only. Its unit-model prices are checked above, the same.
   if (enrich) {
-    // The copy guard, over what an enrichment publishes: a figure taken away may not stay in a model's
-    // name, rooms or availability or in a fact list. What the listing shows as its price, and every
-    // model figure a second model confirmed, is published, not refused.
-    const shown = enrichTarget.listing.price;
-    const kept = [shown && !shown.onRequest ? shown.amount : null, shown?.subsidisedAmount, ...(Array.isArray(ai.models) ? ai.models : []).flatMap(figuresOf)];
-    const stated = refusedFigureIn(copySegments, rejectedPrices, kept);
-    if (stated) {
-      throw new RejectError(`${stated.where} states the price ${stated.n.toLocaleString('en-US')}, which could not be confirmed on the brochure — `
-        + `nothing was changed; run --enrich again later, the next reading may leave it out`, 'enrich');
-    }
+    // An enrichment publishes none of the listing copy, and the money in its models' text and fact lists was
+    // dropped before the checks (3c): there is no copy guard to run.
     return enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target: enrichTarget, started, currencyDrop, force: enrich.force });
   }
 
@@ -1000,9 +1002,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   }
 
   // A price the check took away must not survive in the words: the site prints `price`, but a
-  // figure in the title, description or highlights — or in a unit model's name, rooms or availability,
-  // or a fact list — would still be read as a price. The same matcher that looks for the number in the
-  // brochure looks for it in every published text, mention by mention (refusedFigureIn).
+  // figure in the title, description or highlights would still be read as a price (a model's rooms and
+  // availability and the fact lists lost theirs at 3c). The same matcher that looks for the number in the
+  // brochure looks for it in that copy, mention by mention (refusedFigureIn).
   // A figure that IS published — the headline, its Sakani price, a model price a second model saw
   // printed — is not a refused one, even when the same figure was refused for another model.
   const stated = refusedFigureIn(copySegments, rejectedPrices, caption.price
@@ -1014,13 +1016,6 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       ? `${stated.where} states the price ${n}, which could not be confirmed on the brochure — send it again; the next reading may leave it out`
       : `${stated.where} states the price ${n}, which could not be confirmed on the brochure — resend with the price in the caption, or without it`, 'price');
   }
-  // …and no price or payment in a unit model's rooms or availability, or in a fact list, at all (r2 #4): those
-  // fields and items are dropped; a model name that states one refuses the run.
-  const money = dropMoneyText(ai);
-  if (money.name) {
-    throw new RejectError(`${money.name} states a price or a payment — prices go in the price fields only; send it again, the next reading may leave it out`, 'price');
-  }
-  reportMoneyText(report, money.dropped);
 
   // --- 4b. map pin --------------------------------------------------------------
   // A brochure almost never prints coordinates, but it very often hides a Google Maps link
@@ -1274,14 +1269,6 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
     ? alignHeadline(structuredClone(existing.price), models) : null;
   const head = enrichHeadline(existing, models, aligned, { currencyMismatch: currencyDrop?.decision === 'currency-mismatch' });
   if (head.dropModelPrices) for (const m of models) { m.price = null; m.subsidisedPrice = null; }
-  // The money guard, over what the enrichment publishes (r2 #4): a model's rooms or availability, or a fact-list
-  // item, that states a price or a payment is dropped; a model name that does refuses the enrichment.
-  const money = dropMoneyText(built);
-  for (const k of Object.keys(FACT_LISTS)) if (built[k] && !(built[k].en.length || built[k].ar.length)) delete built[k];
-  reportMoneyText(report, money.dropped);
-  const moneyName = money.name
-    ? `${money.name} states a price or a payment — prices go in the price fields only; nothing was changed; run --enrich again later, the next reading may leave it out`
-    : null;
   const priceChanged = !isDeepStrictEqual(head.price, existing.price);
   const compare = compareEnrichment(existing, built);
   // Never write over a listing with less than it carries. An incomplete price check (a page that did
@@ -1300,7 +1287,7 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   const degraded = compare.losses.length && !force
     ? `${id} already carries more than this reading: ${compare.losses.join('; ')} — nothing was changed; re-run with --force if the new reading is right`
     : null;
-  const refuse = unchecked ?? head.refuse ?? moneyName ?? degraded;
+  const refuse = unchecked ?? head.refuse ?? degraded;
   report.enrich = {
     models: models.length,
     pricedModels: models.filter((m) => isFigure(m.price)).length,

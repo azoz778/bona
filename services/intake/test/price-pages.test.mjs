@@ -1070,33 +1070,25 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     } finally { sar.cleanup(); }
   });
 
-  it('a refused model price left bare in a model\'s availability refuses the run (probe: "Buildings G–P, 419,994 / 356,024")', async () => {
+  it('r3 #2: a refused model price, or a refused headline, left bare in a model\'s rooms / availability or a fact list is DROPPED before the copy guard — the run goes on', async () => {
     const a = withModels([model('Nawras', 419994, 356024, 3), model('Lulu', 319015, 270425, 3)]);
     a.models[0].availability = { en: 'Buildings G–P, 419,994 / 356,024', ar: 'المباني G–P، 419,994' };
+    a.models[0].rooms = { en: ['Maid room', 'Paid 419,994'], ar: ['غرفة خادمة', 'غرفة'] };
+    a.amenities = { en: ['Club fee SAR 1,500', 'Gym'], ar: ['رسوم النادي 1,500 ريال', 'نادٍ'] };
     const r = await rig({ listing: a, modelConfirm: [319015, 270425, 356024] });
     try {
-      await assert.rejects(r.run(), (err) => err.stage === 'price' && /^a unit model's text states the price 419,994, which could not be confirmed/.test(err.reason));
+      const report = await r.run();
+      assert.deepEqual(report.listingPreview.models.map((m) => [m.price, m.availability, m.rooms]), [[null, null, null], [319015, null, null]]);
+      assert.deepEqual(report.listingPreview.amenities, { en: ['Gym'], ar: ['نادٍ'] }, '"Club fee SAR 1,500" no longer fails the AI contract: it is dropped');
     } finally { r.cleanup(); }
-  });
-
-  it('a refused figure in a model name or its rooms refuses the run too', async () => {
-    for (const put of [(m) => { m.name = { en: 'Nawras 419,994', ar: 'نورس' }; }, (m) => { m.rooms = { en: ['Maid room', 'Paid 419,994'], ar: ['غرفة خادمة', 'غرفة'] }; }]) {
-      const a = withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 3)]);
-      put(a.models[0]);
-      const r = await rig({ listing: a, modelConfirm: [319015] });
-      try {
-        await assert.rejects(r.run(), (err) => err.stage === 'price' && /a unit model's text states the price 419,994/.test(err.reason));
-      } finally { r.cleanup(); }
-    }
-  });
-
-  it('a refused headline figure left bare in a fact list refuses the run (probe: "Down payment 50,000")', async () => {
-    const a = answer({ price: { amount: 50000, currency: 'SAR', from: false, period: null, onRequest: false } });
-    a.amenities = { en: ['Down payment 50,000'], ar: ['دفعة أولى 50,000'] };
-    const r = await rig({ listing: a });
+    const b = answer({ price: { amount: 50000, currency: 'SAR', from: false, period: null, onRequest: false } });
+    b.amenities = { en: ['Down payment 50,000', 'Pool'], ar: ['دفعة أولى 50,000', 'مسبح'] };
+    const t = await rig({ listing: b });
     try {
-      await assert.rejects(r.run(), (err) => err.stage === 'price' && /^a fact list states the price 50,000, which could not be confirmed/.test(err.reason));
-    } finally { r.cleanup(); }
+      const report = await t.run();
+      assert.equal(report.listingPreview.price.onRequest, true);
+      assert.deepEqual(report.listingPreview.amenities, { en: ['Pool'], ar: ['مسبح'] });
+    } finally { t.cleanup(); }
   });
 
   it('r2 #4: even a CONFIRMED model figure is not published in its availability — prices live in the price fields only', async () => {
@@ -2743,40 +2735,36 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
     } finally { r.cleanup(); }
   });
 
-  it('a refused model price left bare in a model\'s availability refuses the enrichment, and nothing is changed', async () => {
+  it('r3 #2: on --enrich a figure in a model\'s text or a fact list is dropped first — a refused one, an unchecked one, one under the owner\'s price', async () => {
+    // Refused on its page: dropped, the enrichment goes on.
     const a = reading();
     a.models[0].availability = { en: 'Buildings G–P, 419,994 / 356,024', ar: 'المباني G–P، 419,994' };
+    a.amenities = { en: ['Down payment 50,000', 'Health club'], ar: ['دفعة أولى 50,000', 'نادٍ صحي'] };
     const r = await rig({ listing: a, modelConfirm: [319015, 270425, 356024] });
     try {
       seed(r);
-      await assert.rejects(enrich(r), (err) => err.stage === 'enrich'
-        && /^a unit model's text states the price 419,994, which could not be confirmed on the brochure — nothing was changed/.test(err.reason));
-      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
-      assert.equal(r.calls().filter((c) => c.tool === 'brochure').length, 0);
+      await enrich(r, { force: true });
+      assert.deepEqual(saved(r).models.map((m) => [m.price, m.availability]), [[null, null], [319015, null]]);
+      assert.deepEqual(saved(r).amenities, { en: ['Health club'], ar: ['نادٍ صحي'] });
     } finally { r.cleanup(); }
-  });
-
-  it('a refused model price left bare in a fact list refuses the enrichment (probe: "Down payment 50,000")', async () => {
-    const a = reading();
-    a.models.push({ name: { en: 'Studio', ar: 'نموذج استوديو' }, bedrooms: 0, bathrooms: 1, areaSqm: 40, rooms: null, availability: null, price: 50000, subsidisedPrice: null, evidence: { page: 3, quote: '50000' }, floorPlan: null });
-    a.amenities = { en: ['Down payment 50,000'], ar: ['دفعة أولى 50,000'] };
-    const r = await rig({ listing: a, modelConfirm: { 2: { price: false } } });
+    // Its check timed out: the copy guard does not turn the retryable refusal into a "rejected" one (Codex r3 #3).
+    const t = await rig({ listing: structuredClone(a), modelConfirmFail: true });
     try {
-      seed(r, { price: { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 } });
-      await assert.rejects(enrich(r), (err) => err.stage === 'enrich' && /^a fact list states the price 50,000/.test(err.reason));
-      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
-    } finally { r.cleanup(); }
-  });
-
-  it('under the owner\'s own price the model figures are never checked, so one left in a model\'s text refuses the enrichment', async () => {
-    const a = reading();
-    a.models[0].availability = { en: 'Buildings G–P, 419,994', ar: 'المباني G–P، 419,994' };
-    const r = await rig({ listing: a });
+      seed(t);
+      const err = await enrich(t).then(() => null, (e) => e);
+      assert.equal(err?.retryable, true, String(err?.reason ?? err));
+      assert.match(String(err?.reason), /could not be completed/);
+    } finally { t.cleanup(); }
+    // Under the owner's own price nothing is checked: the figure goes all the same.
+    const o = reading();
+    o.models[0].availability = { en: 'Buildings G–P, 419,994', ar: 'المباني G–P، 419,994' };
+    const u = await rig({ listing: o });
     try {
-      seed(r, { price: { amount: 300000, currency: 'SAR', from: false, period: null, onRequest: false }, intake: { edits: ['price'] } });
-      await assert.rejects(enrich(r), (err) => err.stage === 'enrich' && /a unit model's text states the price 419,994/.test(err.reason));
-      assert.equal(r.calls().filter((c) => c.tool === 'claude-model-confirm').length, 0);
-    } finally { r.cleanup(); }
+      seed(u, { price: { amount: 300000, currency: 'SAR', from: false, period: null, onRequest: false }, intake: { edits: ['price'] } });
+      await enrich(u);
+      assert.equal(u.calls().filter((c) => c.tool === 'claude-model-confirm').length, 0);
+      assert.deepEqual(saved(u).models.map((m) => m.availability), [null, null]);
+    } finally { u.cleanup(); }
   });
 
   it('the reading\'s own copy is not looked at by an enrichment (it publishes none of it)', async () => {
