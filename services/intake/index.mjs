@@ -768,10 +768,12 @@ async function handleCommand({ group, command }) {
       if (!found) return reply(jid, msg.notFound(command.id));
       const res = await publishEdit(
         jid, command.id,
-        () => ({ listing: edits.removeListing(cfg.repo, command.id) }),
+        // A record or folder that is a symlink is refused, not removed through (r3 #9).
+        () => { const removed = edits.removeListing(cfg.repo, command.id); return removed?.error ? removed : { listing: removed }; },
         (r) => `intake: remove ${r.listing.title.en} (${command.id})`,
         (r) => msg.removed(command.id, r.listing.title.en),
       );
+      if (res?.error) return reply(jid, `✋ ${res.error}`);
       if (res) state.forgetPublished((info) => info.id === command.id);
       return undefined;
     }

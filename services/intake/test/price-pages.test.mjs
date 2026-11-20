@@ -2618,6 +2618,25 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
     }
   });
 
+  it('r3 #9: an inbox record that is a committed symlink is refused before anything is written — --enrich and --replace', async () => {
+    for (const meta of [{ enrich: { id: 'BONA-W023', slug: SLUG } }, { replace: true, id: 'BONA-W023', slug: SLUG }]) {
+      for (const dryRun of [false, true]) {
+        const r = await rig({ listing: reading() });
+        try {
+          seed(r);
+          const outside = path.join(r.repo, '..', 'outside-record.json');
+          fs.renameSync(inboxFile(r), outside);
+          fs.symlinkSync(outside, inboxFile(r));
+          git(r, 'add', '-A'); git(r, 'commit', '-qm', 'record moved by hand');
+          const before = fs.readFileSync(outside, 'utf8');
+          const err = await processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: {}, workDir: path.join(r.repo, '..', 'work'), dryRun, meta }).then(() => null, (e) => e);
+          assert.equal(fs.readFileSync(outside, 'utf8'), before, `${Object.keys(meta)[0]} dryRun ${dryRun}`);
+          assert.match(String(err?.message), /symbolic link/, `${Object.keys(meta)[0]} dryRun ${dryRun}`);
+        } finally { r.cleanup(); }
+      }
+    }
+  });
+
   it('r2 #6: a symlink at the brochure\'s temp name is not written through', async () => {
     const r = await rig({ listing: reading() });
     try {

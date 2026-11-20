@@ -6,7 +6,7 @@ import path from 'node:path';
 import { licenceProblems, loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 import { brochureFileIn, brochureUrlFor, buildBrandedBrochure } from './brochure.mjs';
 import { log } from './log.mjs';
-import { WARNING_CODES, addWarningCode, findInbox, isSlug, listingDirProblem } from './listing.mjs';
+import { WARNING_CODES, addWarningCode, findInbox, isSlug, listingDirProblem, recordFileProblem } from './listing.mjs';
 import { removeListingImages } from './images.mjs';
 import { MAX_VIDEOS, writeListingVideo } from './video.mjs';
 
@@ -21,6 +21,15 @@ function markEdited(listing, what) {
   const edits = new Set(Array.isArray(listing._intake.edits) ? listing._intake.edits : []);
   edits.add(what);
   listing._intake.edits = [...edits];
+}
+
+/**
+ * `{ error }` when this listing's inbox record — or, with `dir`, its public/listings/<slug>/ folder — may not
+ * be written (a symbolic link, or outside the repo: r2 #6, r3 #9), else null. Checked before anything is written.
+ */
+function editRefusal(repo, found, { dir = false } = {}) {
+  const problem = recordFileProblem(repo, found.file) ?? (dir ? listingDirProblem(repo, found.listing.slug) : null);
+  return problem ? { error: `${found.listing.id ?? 'the listing'}: ${problem} — nothing was changed` } : null;
 }
 
 function save(file, listing) {
@@ -46,6 +55,8 @@ function withdrawnRefusal(repo, listing) {
 export function removeListing(repo, id) {
   const found = findInbox(repo, id);
   if (!found) return null;
+  const blocked = editRefusal(repo, found, { dir: true });
+  if (blocked) return blocked;
   fs.rmSync(found.file, { force: true });
   removeListingImages(path.join(repo, 'public'), found.listing.slug);
   return found.listing;
@@ -58,7 +69,7 @@ export function removeListing(repo, id) {
 export function setHero(repo, id, n) {
   const found = findInbox(repo, id);
   if (!found) return null;
-  const refused = withdrawnRefusal(repo, found.listing);
+  const refused = withdrawnRefusal(repo, found.listing) ?? editRefusal(repo, found, { dir: true });
   if (refused) return refused;
   const images = found.listing.images;
   if (!Number.isInteger(n) || n < 1 || n > images.length) {
@@ -82,7 +93,7 @@ export function setHero(repo, id, n) {
 export function setPrice(repo, id, { amount, currency, onRequest }) {
   const found = findInbox(repo, id);
   if (!found) return null;
-  const refused = withdrawnRefusal(repo, found.listing);
+  const refused = withdrawnRefusal(repo, found.listing) ?? editRefusal(repo, found);
   if (refused) return refused;
   const p = found.listing.price;
   if (onRequest) { p.onRequest = true; p.amount = null; p.from = false; }
@@ -115,11 +126,12 @@ export function setPrice(repo, id, { amount, currency, onRequest }) {
  *   | {error:string} | null>}
  */
 export async function setPriceWithBrochure(repo, id, args, { cfg = {}, workDir, spawnImpl } = {}) {
-  const before = findInbox(repo, id)?.listing ?? null;
-  // The brochure is rebuilt — or deleted — in the listing's folder: refused, price and all, when that folder
-  // is not a real one inside the repo (r2 #6).
-  const dirProblem = before ? listingDirProblem(repo, before.slug) : null;
-  if (dirProblem) return { error: `${id}: ${dirProblem} — nothing was changed` };
+  const found = findInbox(repo, id);
+  const before = found?.listing ?? null;
+  // The brochure is rebuilt — or deleted — in the listing's folder, and the record rewritten: refused, price and
+  // all, when either is not a real one inside the repo (r2 #6, r3 #9).
+  const blocked = found ? editRefusal(repo, found, { dir: true }) : null;
+  if (blocked) return blocked;
   const res = setPrice(repo, id, args);
   if (!res || res.error) return res;
   const { listing } = res;
@@ -251,7 +263,7 @@ function applyLicence(repo, id, patch, clearKeys) {
   const want = String(id).toUpperCase();
   const found = findInbox(repo, want);
   if (found) {
-    const refused = withdrawnRefusal(repo, found.listing);
+    const refused = withdrawnRefusal(repo, found.listing) ?? editRefusal(repo, found);
     if (refused) return refused;
     const licence = nextLicence(found.listing.licence, patch, clearKeys);
     const problems = licenceProblems(licence);
@@ -284,7 +296,7 @@ export function setWafi(repo, id, { wafiNumber, clear = false } = {}) {
 export function setStatus(repo, id, status) {
   const found = findInbox(repo, id);
   if (!found) return null;
-  const refused = withdrawnRefusal(repo, found.listing);
+  const refused = withdrawnRefusal(repo, found.listing) ?? editRefusal(repo, found);
   if (refused) return refused;
   if (!['available', 'reserved', 'sold'].includes(status)) return { error: `unknown status "${status}"` };
   found.listing.status = status;
@@ -294,6 +306,8 @@ export function setStatus(repo, id, status) {
 export function setHidden(repo, id, hidden) {
   const found = findInbox(repo, id);
   if (!found) return null;
+  const blocked = editRefusal(repo, found);
+  if (blocked) return blocked;
   if (!hidden) {
     const refused = withdrawnRefusal(repo, found.listing);
     if (refused) return refused;
@@ -347,7 +361,7 @@ export const videoSrc = (v) => (typeof v === 'string' ? v : v?.src ?? '');
 export function addVideo(repo, id, media) {
   const found = findInbox(repo, id);
   if (!found) return null;
-  const refused = withdrawnRefusal(repo, found.listing);
+  const refused = withdrawnRefusal(repo, found.listing) ?? editRefusal(repo, found, { dir: true });
   if (refused) return refused;
   const { listing } = found;
   const source = typeof media === 'string' ? { file: media } : (media || {});
@@ -394,9 +408,9 @@ export async function rebuildBrochure(repo, id, { cfg = {}, workDir, spawnImpl }
   if (refused) return refused;
   const { listing } = found;
   // Before the slug is joined into a path: the brochure is written into that folder (Codex r1 #6a), which
-  // must be a real folder inside the repo (r2 #6).
+  // must be a real folder inside the repo (r2 #6), and the record must be a real file in it (r3 #9).
   if (!isSlug(listing.slug)) return { error: `${id}'s record has slug ${JSON.stringify(listing.slug)}, which is not a valid slug — nothing was built; fix the record first` };
-  const dirProblem = listingDirProblem(repo, listing.slug);
+  const dirProblem = listingDirProblem(repo, listing.slug) ?? recordFileProblem(repo, found.file);
   if (dirProblem) return { error: `${id}: ${dirProblem} — nothing was built` };
   const filesDir = path.join(repo, 'public', 'listings', listing.slug);
   let built;

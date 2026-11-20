@@ -1409,3 +1409,70 @@ describe('run-once --enrich: enrichMetaFor, mergeEnrichment, enrichHeadline', ()
     });
   });
 });
+
+describe('r3 #9: an inbox record that is a symlink, or a listing folder that is one — no edit writes through it', () => {
+  const slug = 'link-villa-test';
+  let tmp;
+  const record = () => path.join(tmp, 'repo', 'scripts', 'curate', 'inbox', `${slug}.json`);
+  const folder = () => path.join(tmp, 'repo', 'public', 'listings', slug);
+  const setup = ({ linkRecord = false, linkFolder = false } = {}) => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-link-'));
+    const repo = path.join(tmp, 'repo');
+    const l = {
+      id: 'BONA-W001', slug, status: 'available', hidden: false, title: { en: 'Link Villa', ar: 'فيلا' },
+      price: { amount: 1000000, currency: 'SAR', from: false, period: null, onRequest: false }, brochureUrl: null, videos: [],
+      images: [1, 2, 3, 4].map((n) => ({ src: `/listings/${slug}/0${n}.jpg`, thumb: null, alt: { en: 'x', ar: 'س' } })),
+      _intake: { images: [1, 2, 3, 4].map((n) => ({ n, room: 'view' })) },
+    };
+    writeInboxListing(repo, l);
+    fs.mkdirSync(folder(), { recursive: true });
+    for (const n of [1, 2, 3, 4]) fs.writeFileSync(path.join(folder(), `0${n}.jpg`), 'x');
+    if (linkRecord) {
+      fs.renameSync(record(), path.join(tmp, 'outside.json'));
+      fs.symlinkSync(path.join(tmp, 'outside.json'), record());
+    }
+    if (linkFolder) {
+      fs.renameSync(folder(), path.join(tmp, 'outside-folder'));
+      fs.symlinkSync(path.join(tmp, 'outside-folder'), folder());
+    }
+    return repo;
+  };
+  const snapshot = () => fs.readdirSync(tmp, { recursive: true }).sort().map((f) => {
+    const p = path.join(tmp, String(f));
+    return fs.lstatSync(p).isFile() ? `${f}:${fs.readFileSync(p, 'utf8')}` : String(f);
+  }).join('\n');
+  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  it('the record is a symlink: hero, price, status, hide, video, brochure, remove refuse — nothing changes', async () => {
+    const repo = setup({ linkRecord: true });
+    const clip = path.join(tmp, 'clip.mp4');
+    fs.writeFileSync(clip, 'mp4');
+    const before = snapshot();
+    const results = [
+      edits.setHero(repo, 'BONA-W001', 2), edits.setPrice(repo, 'BONA-W001', { amount: 5, currency: 'SAR' }),
+      await edits.setPriceWithBrochure(repo, 'BONA-W001', { onRequest: true }, { cfg: {}, workDir: path.join(tmp, 'w') }),
+      edits.setStatus(repo, 'BONA-W001', 'sold'), edits.setHidden(repo, 'BONA-W001', true), edits.addVideo(repo, 'BONA-W001', { file: clip }),
+      await edits.rebuildBrochure(repo, 'BONA-W001', { cfg: {}, workDir: path.join(tmp, 'w') }), edits.removeListing(repo, 'BONA-W001'),
+      edits.setLicence(repo, 'BONA-W001', { adNumber: '7200123456', adExpiry: '2027-01-01' }),
+    ];
+    for (const [i, r] of results.entries()) assert.match(String(r?.error), /symbolic link/, `call ${i}`);
+    assert.equal(snapshot(), before);
+  });
+
+  it('the listing folder is a symlink: hero, video and remove refuse — nothing changes', () => {
+    const repo = setup({ linkFolder: true });
+    const clip = path.join(tmp, 'clip.mp4');
+    fs.writeFileSync(clip, 'mp4');
+    const before = snapshot();
+    for (const r of [edits.setHero(repo, 'BONA-W001', 2), edits.addVideo(repo, 'BONA-W001', { file: clip }), edits.removeListing(repo, 'BONA-W001')]) {
+      assert.match(String(r?.error), /symbolic link/);
+    }
+    assert.equal(snapshot(), before);
+  });
+
+  it('index.mjs answers a refused `remove` instead of committing it', () => {
+    const index = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'index.mjs'), 'utf8');
+    const removeCase = index.slice(index.indexOf("case 'remove': {"), index.indexOf("case 'hero': {"));
+    assert.match(removeCase, /res\?\.error/);
+  });
+});

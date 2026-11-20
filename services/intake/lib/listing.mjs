@@ -26,6 +26,22 @@ export const isSlug = (slug) => typeof slug === 'string' && SLUG_RE.test(slug);
  * link, or resolves outside the repo — a write there would land outside the checkout, where git cannot
  * roll it back. A folder that does not exist yet is fine (it is created as a real one).
  */
+/**
+ * Why a listing's inbox record `file` may NOT be written, or null when it may (r3 #9): it is a symbolic link, or
+ * its folder resolves outside the repo — git could restore only the link, not what it points at.
+ */
+export function recordFileProblem(repo, file) {
+  let root;
+  try { root = fs.realpathSync(repo); } catch { return `the repo ${repo} cannot be read`; }
+  const rel = path.relative(repo, file);
+  let st = null;
+  try { st = fs.lstatSync(file); } catch { /* not written yet */ }
+  if (st?.isSymbolicLink()) return `${rel} is a symbolic link`;
+  let dir;
+  try { dir = fs.realpathSync(path.dirname(file)); } catch { return null; }   // created later, inside the repo
+  return dir === root || dir.startsWith(`${root}${path.sep}`) ? null : `${rel} resolves outside the repo`;
+}
+
 export function listingDirProblem(repo, slug) {
   if (!isSlug(slug)) return `the slug ${JSON.stringify(slug)} is not a valid slug (lowercase-hyphenated)`;
   let root;

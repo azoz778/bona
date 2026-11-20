@@ -35,7 +35,7 @@ import { buildContactSheets } from './contact-sheet.mjs';
 import { buildPrompt, confirmModelPrices, confirmPriceEvidence, runListingAi } from './claude.mjs';
 import { floorPlanTargets, removeListingImages, writeFloorPlans, writeListingImages } from './images.mjs';
 import {
-  addWarningCode, buildListing, checkListing, enrichHeadline, enrichMetaFor, findByPdfSha, findInbox, inboxIds, isSlug, listingDirProblem, mergeEnrichment,
+  addWarningCode, buildListing, checkListing, enrichHeadline, enrichMetaFor, findByPdfSha, findInbox, inboxIds, isSlug, listingDirProblem, mergeEnrichment, recordFileProblem,
   modelsAndFacts, nextListingId, orderedPicks, readIndex, seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex,
   writeInboxListing,
 } from './listing.mjs';
@@ -299,6 +299,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     if (dirProblem) throw new Error(`replace ${meta.id}: ${dirProblem} — nothing was touched`);
     const current = findInbox(cfg.repo, meta.id);
     if (!current || current.listing.slug !== meta.slug) throw new Error(`${meta.id} is not in the inbox under ${meta.slug} — nothing to replace`);
+    const recordProblem = recordFileProblem(cfg.repo, current.file);
+    if (recordProblem) throw new Error(`replace ${meta.id}: ${recordProblem} — nothing was touched`);
     // The old photos are deleted before the new ones are copied in, and a failed run is rolled
     // back from git: so the listing as it stands must BE in git, unchanged, or it is lost.
     if (!dryRun && !(await committedUnchanged(cfg.repo, [path.join('public', 'listings', meta.slug), path.relative(cfg.repo, current.file)]))) {
@@ -335,6 +337,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     const { existing } = enrichMetaFor(cfg.repo, enrich.id).enrich;
     enrichTarget = findInbox(cfg.repo, enrich.id);
     if (!enrichTarget || existing.slug !== enrich.slug) throw new Error(`${enrich.id} is not in the inbox under ${enrich.slug} — nothing to enrich`);
+    // The record is rewritten in place: never through a symlink (r3 #9).
+    const recordProblem = recordFileProblem(cfg.repo, enrichTarget.file);
+    if (recordProblem) throw new Error(`enrich ${enrich.id}: ${recordProblem} — nothing was touched`);
     if (existing._intake.pdfSha256 !== report.sha256) {
       throw new RejectError(`this PDF is not the one ${existing.id} was published from (it has sha ${report.sha256.slice(0, 12)}…, the listing records ${existing._intake.pdfSha256.slice(0, 12)}…) — nothing was changed`, 'enrich');
     }
@@ -1177,7 +1182,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
 
   // --- 7. promote into the repo, then rebuild ----------------------------------
   report.stage = 'promote';
-  const dirProblem = listingDirProblem(cfg.repo, slug);
+  const dirProblem = listingDirProblem(cfg.repo, slug) ?? recordFileProblem(cfg.repo, path.join(cfg.repo, 'scripts', 'curate', 'inbox', `${slug}.json`));
   if (dirProblem) {
     fs.rmSync(stageDir, { recursive: true, force: true });   // nothing reached the repo
     throw new Error(`${dirProblem} — nothing was written to the repo`);
