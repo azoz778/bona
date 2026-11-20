@@ -274,6 +274,19 @@ describe('TAQEEM currency — a figure printed in another currency is not that p
     }
   });
 
+  it('r2 #1: another currency\'s mark a line away still makes the figure not bare — a text layer that split "AED" from its figure is not SAR', () => {
+    for (const t of ['1,250,000\nAED', 'AED\n1,250,000', 'A 1,250,000\n$', '£\n1,250,000', 'Price\n1,250,000\r\nAED', 'AED:\n1,250,000']) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR'), false, JSON.stringify(t));
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: false }), false, `${JSON.stringify(t)} (abroad)`);
+    }
+    // The asked currency's own mark a line away is no mark of the figure: a bare figure where bare ones count, else nothing.
+    assert.equal(printedInCurrency('SAR\n1,250,000', 1250000, 'SAR'), true);
+    assert.equal(printedInCurrency('1,250,000\nSAR', 1250000, 'SAR'), true);
+    assert.equal(printedInCurrency('1,250,000\nSAR', 1250000, 'SAR', { bareCounts: false }), false);
+    // …and the split AED stays AED's.
+    assert.equal(printedInCurrency('1,250,000\nAED', 1250000, 'AED', { bareCounts: false }), false, 'AED a line away is not beside the figure either');
+  });
+
   it('a bare figure counts only when bare figures may (a property in the country of that currency) — and one marked occurrence is enough', () => {
     assert.equal(printedInCurrency('Price 1,250,000', 1250000, 'SAR'), true);
     assert.equal(printedInCurrency('Price 1,250,000', 1250000, 'SAR', { bareCounts: false }), false);

@@ -109,8 +109,14 @@ const MARKS = [
  * check's "beside the figure" (claude.mjs currencyRule) is the same rule.
  */
 const GAP = '(?:[^\\S\\n\\r\\v\\f\\u0085\\u2028\\u2029]|[:：\\-–—=])*';
-const MARK_BEFORE = MARKS.map(([src, cs]) => [new RegExp(`(?:${src})${GAP}$`, 'i'), cs]);
-const MARK_AFTER = MARKS.map(([src, cs]) => [new RegExp(`^(?:[.,٫]\\d{1,2})?${GAP}(?:\\/-)?${GAP}(?:${src})`, 'i'), cs]);
+/** …and across a line break: a mark the text layer split from its figure. It never makes the figure THIS currency's (r2 #1). */
+const GAP_ANY_LINE = '[\\s:：\\-–—=]*';
+const markTables = (gap) => ({
+  before: MARKS.map(([src, cs]) => [new RegExp(`(?:${src})${gap}$`, 'i'), cs]),
+  after: MARKS.map(([src, cs]) => [new RegExp(`^(?:[.,٫]\\d{1,2})?${gap}(?:\\/-)?${gap}(?:${src})`, 'i'), cs]),
+});
+const ON_LINE = markTables(GAP);
+const ACROSS_LINES = markTables(GAP_ANY_LINE);
 const marksIn = (slice, table) => {
   const folded = slice.normalize('NFKC');
   const hit = table.find(([re]) => re.test(folded));
@@ -149,10 +155,13 @@ export function printedInCurrency(text, amount, currency, { bareCounts = true, h
   const riyal = riyalOf(home);
   for (const re of figurePatterns(amount, 'g')) {
     for (const m of t.matchAll(re)) {
-      const before = marksIn(t.slice(Math.max(0, m.index - 24), m.index), MARK_BEFORE);
-      const after = marksIn(t.slice(m.index + m[0].length, m.index + m[0].length + 32), MARK_AFTER);
-      const marks = [...before, ...after].map((c) => (c === RIYAL ? riyal : c));
-      if (marks.includes(currency) || (bareCounts && marks.length === 0)) return true;
+      const head = t.slice(Math.max(0, m.index - 24), m.index);
+      const tail = t.slice(m.index + m[0].length, m.index + m[0].length + 32);
+      const marksBy = ({ before, after }) => [...marksIn(head, before), ...marksIn(tail, after)].map((c) => (c === RIYAL ? riyal : c));
+      // THIS currency's mark counts only on the figure's own line; ANY other currency's mark, even one a line
+      // away ("AED" / "1,250,000" split by the text layer), means the figure is not a bare one (r2 #1).
+      if (marksBy(ON_LINE).includes(currency)) return true;
+      if (bareCounts && marksBy(ACROSS_LINES).every((c) => c === currency)) return true;
     }
   }
   return false;
