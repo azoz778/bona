@@ -6,7 +6,7 @@ import path from 'node:path';
 import { licenceProblems, loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 import { brochureFileIn, brochureUrlFor, buildBrandedBrochure } from './brochure.mjs';
 import { log } from './log.mjs';
-import { WARNING_CODES, addWarningCode, findInbox, isSlug } from './listing.mjs';
+import { WARNING_CODES, addWarningCode, findInbox, isSlug, listingDirProblem } from './listing.mjs';
 import { removeListingImages } from './images.mjs';
 import { MAX_VIDEOS, writeListingVideo } from './video.mjs';
 
@@ -116,6 +116,10 @@ export function setPrice(repo, id, { amount, currency, onRequest }) {
  */
 export async function setPriceWithBrochure(repo, id, args, { cfg = {}, workDir, spawnImpl } = {}) {
   const before = findInbox(repo, id)?.listing ?? null;
+  // The brochure is rebuilt — or deleted — in the listing's folder: refused, price and all, when that folder
+  // is not a real one inside the repo (r2 #6).
+  const dirProblem = before ? listingDirProblem(repo, before.slug) : null;
+  if (dirProblem) return { error: `${id}: ${dirProblem} — nothing was changed` };
   const res = setPrice(repo, id, args);
   if (!res || res.error) return res;
   const { listing } = res;
@@ -388,8 +392,11 @@ export async function rebuildBrochure(repo, id, { cfg = {}, workDir, spawnImpl }
   const refused = withdrawnRefusal(repo, found.listing);
   if (refused) return refused;
   const { listing } = found;
-  // Before the slug is joined into a path: the brochure is written into that folder (Codex r1 #6a).
+  // Before the slug is joined into a path: the brochure is written into that folder (Codex r1 #6a), which
+  // must be a real folder inside the repo (r2 #6).
   if (!isSlug(listing.slug)) return { error: `${id}'s record has slug ${JSON.stringify(listing.slug)}, which is not a valid slug — nothing was built; fix the record first` };
+  const dirProblem = listingDirProblem(repo, listing.slug);
+  if (dirProblem) return { error: `${id}: ${dirProblem} — nothing was built` };
   const filesDir = path.join(repo, 'public', 'listings', listing.slug);
   const built = await buildBrandedBrochure({
     listing, filesDir, outPath: brochureFileIn(filesDir), workDir,

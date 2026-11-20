@@ -35,7 +35,7 @@ import { buildContactSheets } from './contact-sheet.mjs';
 import { buildPrompt, confirmModelPrices, confirmPriceEvidence, runListingAi } from './claude.mjs';
 import { floorPlanTargets, removeListingImages, writeFloorPlans, writeListingImages } from './images.mjs';
 import {
-  addWarningCode, buildListing, checkListing, enrichHeadline, enrichMetaFor, findByPdfSha, findInbox, inboxIds, isSlug, mergeEnrichment,
+  addWarningCode, buildListing, checkListing, enrichHeadline, enrichMetaFor, findByPdfSha, findInbox, inboxIds, isSlug, listingDirProblem, mergeEnrichment,
   modelsAndFacts, nextListingId, orderedPicks, readIndex, seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex,
   writeInboxListing,
 } from './listing.mjs';
@@ -267,6 +267,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // the intake itself (2026-11-17: W023's prices were on pages the first run could not read).
   if (meta.replace) {
     if (!meta.id || !meta.slug) throw new Error('replace needs the id and slug of the listing it replaces');
+    // Before the slug is joined into a path: its folder is deleted and rewritten (r2 #6).
+    const dirProblem = listingDirProblem(cfg.repo, meta.slug);
+    if (dirProblem) throw new Error(`replace ${meta.id}: ${dirProblem} — nothing was touched`);
     const current = findInbox(cfg.repo, meta.id);
     if (!current || current.listing.slug !== meta.slug) throw new Error(`${meta.id} is not in the inbox under ${meta.slug} — nothing to replace`);
     // The old photos are deleted before the new ones are copied in, and a failed run is rolled
@@ -295,8 +298,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   if (enrich) {
     if (meta.replace) throw new Error('--enrich and --replace do not go together');
     if (!enrich.id || !enrich.slug) throw new Error('enrich needs the id and slug of the listing it enriches');
-    // Before the slug is joined into any path — the staging folder is deleted even on a dry run (Codex r1 #6a).
+    // Before the slug is joined into any path — the staging folder is deleted even on a dry run (Codex r1 #6a) —
+    // and before a file is written or deleted in a listing folder that is a symlink or outside the repo (r2 #6).
     if (!isSlug(enrich.slug)) throw new Error(`enrich: ${JSON.stringify(enrich.slug)} is not a valid slug (lowercase-hyphenated) — nothing was touched`);
+    const dirProblem = listingDirProblem(cfg.repo, enrich.slug);
+    if (dirProblem) throw new Error(`enrich ${enrich.id}: ${dirProblem} — nothing was touched`);
     if (caption.price) throw new Error('--enrich takes no caption price: the headline is decided from the listing (`price <id> …` changes it)');
     // enrichMetaFor()'s refusals again, on the listing as it stands now: unknown, withdrawn, withheld, hidden, no PDF hash.
     const { existing } = enrichMetaFor(cfg.repo, enrich.id).enrich;
@@ -1136,6 +1142,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
 
   // --- 7. promote into the repo, then rebuild ----------------------------------
   report.stage = 'promote';
+  const dirProblem = listingDirProblem(cfg.repo, slug);
+  if (dirProblem) {
+    fs.rmSync(stageDir, { recursive: true, force: true });   // nothing reached the repo
+    throw new Error(`${dirProblem} — nothing was written to the repo`);
+  }
   const publicDir = path.join(cfg.repo, 'public', 'listings', slug);
   const listingDirs = [path.join('public', 'listings', slug)];
   try {
@@ -1344,7 +1355,9 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
       report.brochure = brochure;
       if (brochure.ok) {
         const tmp = path.join(publicDir, `.${BROCHURE_FILE}.tmp`);
-        fs.copyFileSync(out, tmp);
+        // Whatever is at the temp name — a symlink too — goes first, and the copy creates a new file (r2 #6).
+        fs.rmSync(tmp, { force: true });
+        fs.copyFileSync(out, tmp, fs.constants.COPYFILE_EXCL);
         fs.renameSync(tmp, brochureFileIn(publicDir));
         merged.brochureUrl = brochureUrlFor(cfg.site, slug);
         // As `brochure <id>`: a stale "could not build" note does not outlive a brochure that built.

@@ -417,6 +417,25 @@ describe('`price <id>` rebuilds the brochure in the same edit — never a PDF wi
     assert.equal(res.brochure.removed, true);
   });
 
+  it('r2 #6: a listing folder that is a symlink: `price` and `brochure` change nothing, inside the repo or out', async () => {
+    seed();
+    const outside = path.join(dir, 'outside-folder');
+    fs.renameSync(path.dirname(pdf()), outside);
+    fs.symlinkSync(outside, path.dirname(pdf()));
+    const raw = fs.readFileSync(path.join(repo, 'scripts', 'curate', 'inbox', `${SLUG}.json`), 'utf8');
+    for (const fail of [false, true]) {
+      const { spawnImpl, calls } = fakeSpawn(fail ? { result: { ok: false, reason: 'error', error: 'boom' }, code: 1 } : {});
+      const res = await setPrice({ onRequest: true }, spawnImpl);
+      assert.match(res.error, /symbolic link/);
+      assert.equal(calls.length, 0);
+      assert.equal(fs.readFileSync(path.join(outside, 'brochure.pdf'), 'utf8'), 'old brochure: from SAR 319,015', 'not removed, not rewritten');
+      assert.equal(fs.readFileSync(path.join(repo, 'scripts', 'curate', 'inbox', `${SLUG}.json`), 'utf8'), raw, 'the price is not changed either');
+      const rb = await edits.rebuildBrochure(repo, 'BONA-W007', { cfg: { intakeDir: dir, site: 'https://bona.azoz.uk', maxBrochureMb: 25 }, workDir: path.join(dir, 'work'), spawnImpl });
+      assert.match(rb.error, /symbolic link/);
+      assert.equal(calls.length, 0);
+    }
+  });
+
   it('a listing with no brochure gets none: nothing is built', async () => {
     seed({ brochure: false });
     const { spawnImpl, calls } = fakeSpawn();

@@ -11,7 +11,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { hasSubsidyWording, pageNeedsPriceRender, pricePagesToRender, MAX_PRICE_PAGES } from '../lib/price-pages.mjs';
 import { execFileSync } from 'node:child_process';
-import { checkListing } from '../lib/listing.mjs';
+import { checkListing, replaceMetaFor, writeInboxListing } from '../lib/listing.mjs';
 import { processPdf } from '../lib/pipeline.mjs';
 import { classifyRun, planBackfill } from '../lib/backfill.mjs';
 
@@ -2529,6 +2529,66 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       await assert.rejects(enrich(r), /uncommitted changes \(or is not in git\)/);
       assert.equal(fs.existsSync(path.join(r.repo, '..', 'bin', 'calls.jsonl')), false);
     } finally { r.cleanup(); }
+  });
+
+  it('r2 #6: a listing folder that is a committed symlink is refused before any file is touched — a dry run too', async () => {
+    for (const dryRun of [false, true]) {
+      const r = await rig({ listing: reading() });
+      try {
+        seed(r);
+        // The folder moved out of the repo and a symlink committed in its place.
+        const outside = path.join(r.repo, '..', 'outside-folder');
+        fs.renameSync(pubDir(r), outside);
+        fs.symlinkSync(outside, pubDir(r));
+        git(r, 'add', '-A'); git(r, 'commit', '-qm', 'folder moved by hand');
+        const before = fs.readdirSync(outside).sort();
+        const err = await enrich(r, { dryRun }).then(() => null, (e) => e);
+        assert.deepEqual(fs.readdirSync(outside).sort(), before, `dryRun ${dryRun}: nothing outside the repo is deleted or written`);
+        assert.equal(fs.readFileSync(path.join(outside, 'brochure.pdf'), 'utf8'), 'old brochure');
+        assert.match(String(err?.message), /symbolic link/);
+        assert.equal(fs.existsSync(path.join(r.repo, '..', 'bin', 'calls.jsonl')), false, 'refused before the model is paid');
+      } finally { r.cleanup(); }
+    }
+  });
+
+  it('r2 #6: a symlink at the brochure\'s temp name is not written through', async () => {
+    const r = await rig({ listing: reading() });
+    try {
+      seed(r);
+      const target = path.join(r.repo, '..', 'elsewhere.pdf');
+      fs.writeFileSync(target, 'not the brochure');
+      fs.symlinkSync(target, path.join(pubDir(r), '.brochure.pdf.tmp'));
+      git(r, 'add', '-A'); git(r, 'commit', '-qm', 'a stray link');
+      await enrich(r);
+      assert.equal(fs.readFileSync(target, 'utf8'), 'not the brochure');
+      assert.equal(fs.lstatSync(path.join(pubDir(r), 'brochure.pdf')).isSymbolicLink(), false);
+      assert.equal(fs.readFileSync(path.join(pubDir(r), 'brochure.pdf'), 'utf8'), '%PDF-1.7 fake brochure\n');
+    } finally { r.cleanup(); }
+  });
+
+  it('r2 #6: --replace checks the slug and the listing folder too, before anything is read or written', async () => {
+    for (const [setup, re] of [
+      [(r) => { const l = JSON.parse(fs.readFileSync(inboxFile(r), 'utf8')); fs.writeFileSync(inboxFile(r), `${JSON.stringify({ ...l, slug: '../../outside' }, null, 2)}\n`); return '../../outside'; }, /not a valid slug/],
+      [(r) => { const out = path.join(r.repo, '..', 'outside-folder'); fs.renameSync(pubDir(r), out); fs.symlinkSync(out, pubDir(r)); return SLUG; }, /symbolic link/],
+    ]) {
+      const r = await rig({ listing: reading() });
+      try {
+        seed(r);
+        const slug = setup(r);
+        const err = await processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: {}, workDir: path.join(r.repo, '..', 'work'), dryRun: true, meta: { replace: true, id: 'BONA-W023', slug } })
+          .then(() => null, (e) => e);
+        assert.match(String(err?.message), re);
+        assert.equal(fs.existsSync(path.join(r.repo, '..', 'bin', 'calls.jsonl')), false);
+      } finally { r.cleanup(); }
+    }
+    assert.throws(() => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-replace-slug-'));
+      try {
+        const f = writeInboxListing(dir, { id: 'BONA-W050', slug: 'x', title: { en: 'X', ar: 'س' }, _intake: {} });
+        fs.writeFileSync(f, `${JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), slug: 'a/b' }, null, 2)}\n`);
+        replaceMetaFor(dir, 'BONA-W050');
+      } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    }, /not a valid slug/);
   });
 
   it('Codex r1 #6a: an inbox record whose slug is not a slug is refused before any file is touched — a dry run too', async () => {

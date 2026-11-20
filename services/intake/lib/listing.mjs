@@ -19,6 +19,27 @@ export const INDEX_FILE = '_index.json';
 export const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 /** `slug` is one (SLUG_RE). */
 export const isSlug = (slug) => typeof slug === 'string' && SLUG_RE.test(slug);
+
+/**
+ * Why files may NOT be written or deleted under public/listings/<slug>/ of `repo`, or null when they may
+ * (r2 #6): the slug is not one (isSlug); or `public`, `public/listings` or the listing folder is a symbolic
+ * link, or resolves outside the repo — a write there would land outside the checkout, where git cannot
+ * roll it back. A folder that does not exist yet is fine (it is created as a real one).
+ */
+export function listingDirProblem(repo, slug) {
+  if (!isSlug(slug)) return `the slug ${JSON.stringify(slug)} is not a valid slug (lowercase-hyphenated)`;
+  let root;
+  try { root = fs.realpathSync(repo); } catch { return `the repo ${repo} cannot be read`; }
+  for (const rel of ['public', path.join('public', 'listings'), path.join('public', 'listings', slug)]) {
+    const abs = path.join(repo, rel);
+    let st;
+    try { st = fs.lstatSync(abs); } catch { continue; }
+    if (st.isSymbolicLink()) return `${rel} is a symbolic link`;
+    const real = fs.realpathSync(abs);
+    if (real !== root && !real.startsWith(`${root}${path.sep}`)) return `${rel} resolves outside the repo`;
+  }
+  return null;
+}
 export const RESERVED_SLUGS = new Set(['houses', 'apartments', 'land', 'buildings', 'for-sale', 'for-rent', 'off-plan', 'international', 'index']);
 
 const AR_DIACRITICS = /[ً-ٰٟ]/g;
@@ -413,6 +434,8 @@ export function replaceMetaFor(repo, id) {
   const found = findInbox(repo, id);
   if (!found) throw new Error(`--replace ${id}: no inbox listing with that id`);
   const l = found.listing;
+  // Before the slug becomes a path: a replacement deletes the listing's folder (r2 #6).
+  if (!isSlug(l.slug)) throw new Error(`--replace ${l.id}: its record's slug ${JSON.stringify(l.slug)} is not a valid slug (lowercase-hyphenated) — fix the record first`);
   const blockers = [];
   const extra = Object.keys(l).filter((k) => !REBUILT_KEYS.has(k));
   if (extra.length) blockers.push(`hand-added field(s) ${extra.join(', ')}`);
