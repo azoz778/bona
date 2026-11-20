@@ -382,7 +382,8 @@ export function addVideo(repo, id, media) {
  * the download was cleaned out of `$BONA_DATA`.
  *
  * This is the command to reach for after `price`, `hero` or a title fix — the brochure prints
- * those, so it goes stale when they change.
+ * those, so it goes stale when they change. `workDir` is the build's own scratch folder: it is
+ * removed when the build is done, unless BONA_DEBUG is set.
  *
  * @returns {Promise<{listing:object,brochure:object}|{error:string}|null>}
  */
@@ -398,12 +399,19 @@ export async function rebuildBrochure(repo, id, { cfg = {}, workDir, spawnImpl }
   const dirProblem = listingDirProblem(repo, listing.slug);
   if (dirProblem) return { error: `${id}: ${dirProblem} — nothing was built` };
   const filesDir = path.join(repo, 'public', 'listings', listing.slug);
-  const built = await buildBrandedBrochure({
-    listing, filesDir, outPath: brochureFileIn(filesDir), workDir,
-    // The site.json printed is the one in the repo being published, whatever cfg.repo says.
-    cfg: { ...cfg, repo },
-    spawnImpl,   // undefined -> the real spawn (buildBrandedBrochure's default)
-  });
+  let built;
+  try {
+    built = await buildBrandedBrochure({
+      listing, filesDir, outPath: brochureFileIn(filesDir), workDir,
+      // The site.json printed is the one in the repo being published, whatever cfg.repo says.
+      cfg: { ...cfg, repo },
+      spawnImpl,   // undefined -> the real spawn (buildBrandedBrochure's default)
+    });
+  } finally {
+    // The build's own scratch (its listing JSON and prepared images): gone once it is done, worked or not,
+    // unless BONA_DEBUG asks to look at it (r2 #11).
+    if (workDir && !process.env.BONA_DEBUG) fs.rmSync(workDir, { recursive: true, force: true });
+  }
   if (!built.ok) {
     log.warn('edit.brochure_failed', { id, reason: built.reason, error: built.error, detail: built.detail });
     return { error: built.reason === 'too-large' ? built.error : `the branded brochure could not be built for ${id} — the reason is in the journal` };

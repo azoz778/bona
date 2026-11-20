@@ -47,7 +47,11 @@ const LISTING = {
 function fakeSpawn({ result = { ok: true, bytes: 3041976, pages: 17, steps: ['measure', 'render', 'write'] }, code = 0, stdout = null, stderr = '', error = null, hang = false, writeOut = true } = {}) {
   const calls = [];
   const spawnImpl = (cmd, args, opts) => {
-    calls.push({ cmd, args, opts });
+    // The listing JSON as it was handed over: the build's work dir may be gone once it returns (r2 #11).
+    const listingJson = args[args.indexOf(SCRIPT) + 1];
+    let listing = null;
+    try { listing = JSON.parse(fs.readFileSync(listingJson, 'utf8')); } catch { /* not every call writes one */ }
+    calls.push({ cmd, args, opts, listing });
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -323,7 +327,7 @@ describe('rebuildBrochure (`brochure <id>`) — from the repo\'s own files, no s
     assert.equal(a.out, path.join(slugDir, 'brochure.pdf'));
     assert.equal(a.siteJson, path.join(repo, 'src', 'data', 'site.json'), 'the repo being published, not whatever cfg.repo says');
     assert.ok(fs.existsSync(path.join(slugDir, 'brochure.pdf')));
-    const sent = JSON.parse(fs.readFileSync(a.listingJson, 'utf8'));
+    const sent = calls[0].listing;
     assert.equal('_intake' in sent, false);
 
     assert.equal(res.listing.brochureUrl, 'https://bona.azoz.uk/listings/garden-villa-al-rawdah/brochure.pdf');
@@ -385,7 +389,7 @@ describe('`price <id>` rebuilds the brochure in the same edit — never a PDF wi
     const { spawnImpl, calls } = fakeSpawn();
     const res = await setPrice({ amount: 350000, currency: 'SAR' }, spawnImpl);
     assert.equal(calls.length, 1);
-    const sent = JSON.parse(fs.readFileSync(argsOf(calls[0]).listingJson, 'utf8'));
+    const sent = calls[0].listing;
     assert.deepEqual([sent.price.amount, sent.models[0].price], [350000, null], 'the brochure prints the new price, and no model price');
     assert.equal(fs.readFileSync(pdf(), 'utf8'), '%PDF-1.7 fake brochure\n');
     assert.equal(res.brochure.rebuilt, true);
@@ -444,6 +448,39 @@ describe('`price <id>` rebuilds the brochure in the same edit — never a PDF wi
     assert.equal(res.brochure, null);
     assert.equal(fs.existsSync(pdf()), false);
     assert.equal(saved().price.amount, 350000);
+  });
+});
+
+describe('r2 #11: a rebuild\'s work dir does not outlive the build, unless BONA_DEBUG', () => {
+  let dir;
+  afterEach(() => { delete process.env.BONA_DEBUG; fs.rmSync(dir, { recursive: true, force: true }); });
+  const setup = () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-rebuild-work-'));
+    const repo = path.join(dir, 'repo');
+    writeInboxListing(repo, { ...LISTING, _intake: { ...LISTING._intake, warnings: [] } });
+    fs.mkdirSync(path.join(repo, 'public', 'listings', LISTING.slug), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'public', 'listings', LISTING.slug, '01.jpg'), 'jpg');
+    const workDir = path.join(dir, 'intake', 'brochure', `${LISTING.id}-1`);
+    const build = (spawnImpl) => edits.rebuildBrochure(repo, LISTING.id, { cfg: { intakeDir: dir, site: 'https://bona.azoz.uk', maxBrochureMb: 25 }, workDir, spawnImpl });
+    return { workDir, build };
+  };
+
+  it('removed after a build that worked, and after one that failed', async () => {
+    for (const opts of [{}, { result: { ok: false, reason: 'error', error: 'boom' }, code: 1 }]) {
+      const { workDir, build } = setup();
+      const { spawnImpl, calls } = fakeSpawn(opts);
+      await build(spawnImpl);
+      assert.equal(calls.length, 1);
+      assert.equal(fs.existsSync(workDir), false, JSON.stringify(opts));
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('kept with BONA_DEBUG set', async () => {
+    process.env.BONA_DEBUG = '1';
+    const { workDir, build } = setup();
+    await build(fakeSpawn().spawnImpl);
+    assert.equal(fs.existsSync(path.join(workDir, 'brochure-listing.json')), true);
   });
 });
 
