@@ -188,17 +188,37 @@ export async function gitCommitPush(repo, message, { remote = 'origin', branch =
   const author = { GIT_AUTHOR_NAME: 'Bona intake', GIT_AUTHOR_EMAIL: 'intake@bona.azoz.uk', GIT_COMMITTER_NAME: 'Bona intake', GIT_COMMITTER_EMAIL: 'intake@bona.azoz.uk' };
   await must('git commit', await run('git', ['commit', '-m', message], { cwd: repo, env: author }));
   const sha = (await run('git', ['rev-parse', '--short', 'HEAD'], { cwd: repo })).out;
+  /** The job's own commit as HEAD holds it now (a rebase rewrites it). */
+  const head = async () => (await run('git', ['rev-parse', 'HEAD'], { cwd: repo })).out;
+  let ours = await head();
   let push = await run('git', ['push', remote, `HEAD:${branch}`], { cwd: repo });
+  let failure = null;
   if (push.code !== 0) {
     // Someone else pushed while we were working — the tree is clean now that we have
     // committed, so a rebase is safe; then try once more.
-    await gitPull(repo, { remote, branch });
-    push = await run('git', ['push', remote, `HEAD:${branch}`], { cwd: repo });
+    try {
+      await gitPull(repo, { remote, branch });
+      ours = await head();
+      push = await run('git', ['push', remote, `HEAD:${branch}`], { cwd: repo });
+    } catch (err) {
+      // A conflict leaves the rebase half done: abort it, so HEAD is the job's commit again (Codex r1 #7).
+      await run('git', ['rebase', '--abort'], { cwd: repo });
+      failure = err;
+    }
   }
-  if (push.code !== 0) {
-    const err = new Error('git push failed — see the journal');
-    err.detail = (push.err || push.out).slice(-600);
-    throw err;
+  if (!failure && push.code !== 0) {
+    failure = new Error('git push failed — see the journal');
+    failure.detail = (push.err || push.out).slice(-600);
+  }
+  if (failure) {
+    // The commit never reached the remote: take it off HEAD — only when HEAD is still that commit — so the
+    // clone matches the remote again and no later job's push carries it (Codex r1 #7). Its files stay in
+    // the working tree, unstaged, for the caller's resetTree() to put back.
+    if ((await head()) === ours) {
+      const undo = await run('git', ['reset', '-q', 'HEAD~1'], { cwd: repo });
+      failure.uncommitted = undo.code === 0;
+    }
+    throw failure;
   }
   return { committed: true, pushed: true, sha, staged: stagedPaths };
 }
