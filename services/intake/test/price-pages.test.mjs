@@ -1073,6 +1073,46 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     } finally { r.cleanup(); }
   });
 
+  it('Codex r1 #3: a money figure in a model\'s text that is not THAT model\'s own confirmed price drops that text, with a warning', async () => {
+    // "Down payment 50,000": never claimed as a price, so neither check looked at it.
+    const a = withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 3)]);
+    a.models[1].availability = { en: 'Down payment 50,000', ar: 'دفعة أولى 50,000' };
+    a.models[1].rooms = { en: ['Maid room', 'Deposit 5000'], ar: ['غرفة خادمة', 'عربون ٥٠٠٠'] };
+    a.models[0].availability = { en: 'Buildings G–P, handover 2027, 419,994', ar: 'المباني G–P، 419,994' };
+    a.models[0].rooms = { en: ['Living room 4.2 x 5.1 m', 'Terrace 1,200 sq ft'], ar: ['صالة', 'شرفة'] };
+    const r = await rig({ listing: a });
+    try {
+      const report = await r.run();
+      const [nawras, lulu] = report.listingPreview.models;
+      assert.equal(lulu.price, 319015);
+      assert.equal(lulu.availability, null, '"Down payment 50,000" is not Lulu\'s price');
+      assert.equal(lulu.rooms, null, '"Deposit 5000" is not Lulu\'s price');
+      assert.deepEqual(nawras.availability, a.models[0].availability, 'its own confirmed price, a year and nothing else: kept');
+      assert.deepEqual(nawras.rooms, a.models[0].rooms, 'measurements are not money');
+      assert.ok(report.warnings.some((w) => /models\[1\]\.availability/.test(w) && /models\[1\]\.rooms/.test(w) && /own confirmed price/.test(w)), report.warnings.join(' | '));
+      assert.ok(report.warningCodes.includes('model-price-not-printed'));
+      assert.deepEqual(checkListing(report.listingPreview), []);
+    } finally { r.cleanup(); }
+    // The same figure claimed for two models, confirmed for A and refused for B: B's text loses it, A's keeps it.
+    const s = withModels([model('A', 419994, null, 3), model('B', 419994, null, 3)]);
+    s.models[0].availability = { en: 'Buildings G–P, 419,994', ar: 'المباني G–P، 419,994' };
+    s.models[1].availability = { en: 'Buildings Q–Z, 419,994', ar: 'المباني Q–Z، 419,994' };
+    const t = await rig({ listing: s, modelConfirm: { 1: { price: false } } });
+    try {
+      const report = await t.run();
+      assert.deepEqual(report.listingPreview.models.map((m) => m.price), [419994, null]);
+      assert.deepEqual(report.listingPreview.models[0].availability, s.models[0].availability);
+      assert.equal(report.listingPreview.models[1].availability, null, 'confirmed for A is not confirmed for B');
+    } finally { t.cleanup(); }
+    // A model's name cannot be dropped: a figure in it that is not its own confirmed price refuses the run.
+    const n = withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 3)]);
+    n.models[1].name = { en: 'Lulu — down payment 50,000', ar: 'نموذج لؤلؤ' };
+    const u = await rig({ listing: n });
+    try {
+      await assert.rejects(u.run(), (err) => err.stage === 'price' && /^models\[1\]\.name states a figure that is not that model's own confirmed price/.test(err.reason));
+    } finally { u.cleanup(); }
+  });
+
   it('a single villa (no project) with one priced model: the model keeps its price, the headline is checked as its own — never "from"', async () => {
     const own = { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false };
     const a = { ...answer({ price: own, priceEvidence: { page: 3, quote: '4,500,000' } }), models: [model('Villa', 4400000, null, 3)] };
@@ -2398,6 +2438,34 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.deepEqual(after.models.map((m) => m.price), [419994, 319015]);
       assert.deepEqual(checkListing(after), []);
     } finally { r.cleanup(); }
+  });
+
+  it('Codex r1 #3: on --enrich too, a money figure in a model\'s text that is not THAT model\'s own confirmed price drops that text', async () => {
+    const a = reading();
+    a.models[1].availability = { en: 'Down payment 50,000', ar: 'دفعة أولى 50,000' };
+    const r = await rig({ listing: a });
+    try {
+      seed(r);
+      const report = await enrich(r);
+      const after = saved(r);
+      assert.deepEqual(after.models.map((m) => m.price), [419994, 319015]);
+      assert.equal(after.models[1].availability, null);
+      assert.ok(report.warnings.some((w) => /models\[1\]\.availability/.test(w)), report.warnings.join(' | '));
+      assert.deepEqual(checkListing(after), []);
+    } finally { r.cleanup(); }
+    // Shared amount: Nawras read at Lulu's 319,015, refused for Nawras, confirmed for Lulu — Nawras's text loses it.
+    const b = reading();
+    b.models[0] = { ...b.models[0], price: 319015, subsidisedPrice: null, availability: { en: 'Buildings G–P, 319,015', ar: 'المباني G–P، 319,015' } };
+    b.models[1].availability = { en: 'Buildings Q–Z, 319,015', ar: 'المباني Q–Z، 319,015' };
+    const s = await rig({ listing: b, modelConfirm: { 0: { price: false } } });
+    try {
+      seed(s);
+      await enrich(s, { force: true });
+      const after = saved(s);
+      assert.deepEqual(after.models.map((m) => m.price), [null, 319015]);
+      assert.equal(after.models[0].availability, null, 'confirmed for Lulu is not confirmed for Nawras');
+      assert.deepEqual(after.models[1].availability, b.models[1].availability);
+    } finally { s.cleanup(); }
   });
 
   it('a refused model price left bare in a model\'s availability refuses the enrichment, and nothing is changed', async () => {
