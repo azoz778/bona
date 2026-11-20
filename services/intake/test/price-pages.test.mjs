@@ -217,6 +217,11 @@ if (prompt.includes('For each numbered model')) {
     process.stdout.write(JSON.stringify({ is_error: true, api_error_status: 429, result: "You've hit your session limit" }));
     process.exit(1);
   }
+  // confirmFail: true — the call fails for a reason of its own (a timeout, a crash): not a quota.
+  if (cfg.confirmFail === true) {
+    process.stdout.write(JSON.stringify({ is_error: true, api_error_status: null, result: 'boom' }));
+    process.exit(1);
+  }
   answer = { confirmed: ((subsidised ? cfg.confirmSub : null) ?? cfg.confirm ?? []).includes(amount) && inCurrency(page, currency) };
   if (cfg.facts) {
     // A whole development: a model's price counts as the property's; otherwise only a price for the whole listing.
@@ -1304,7 +1309,9 @@ describe('processPdf: unit-model prices — failures, bounds and the headline fa
     } finally { r.cleanup(); }
   });
 
-  it('after a quota error, a headline found in the text layer stays and the Sakani price says "try again later"', async () => {
+  it('after a quota error, a headline that IS the unchecked model figure is not taken off the text layer — "try again later" (r2 #2)', async () => {
+    // Before r2 #2 this headline was published off the text layer ("مشروع سكني من 319,015 ريال"): the model
+    // check that would have tied 319,015 to a row never ran, so the text layer cannot say whose price it is.
     const PAD = ' — شقة سكنية بمساحة واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات';
     const pageText = [`مشروع سكني من 319,015 ريال${PAD}`, `السعر لمستفيدي الدعم 270,425 ريال\nالسعر لغير مستفيدي الدعم 319,015 ريال\n${PAD}`];
     const r = await rig({
@@ -1314,12 +1321,44 @@ describe('processPdf: unit-model prices — failures, bounds and the headline fa
     });
     try {
       const report = await r.run();
-      assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 0);
-      assert.equal(report.listingPreview.price.amount, 319015, 'printed in the text layer: no call needed');
+      assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 0, 'no call after the quota error');
+      assert.equal(report.priceEvidence.inText, false);
+      assert.equal(report.priceEvidence.unchecked, true);
+      assert.equal(report.listingPreview.price.onRequest, true);
       assert.equal(report.listingPreview.price.subsidisedAmount ?? null, null);
-      assert.ok(report.warningCodes.includes('subsidised-price-not-printed'));
-      assert.ok(report.warnings.some((w) => /Sakani\) price could not be checked/.test(w) && /try again later/.test(w)), report.warnings.join(' | '));
+      assert.ok(report.warnings.some((w) => /^the price could not be checked/.test(w) && /try again later/.test(w)), report.warnings.join(' | '));
+      assert.ok(!report.warnings.some((w) => /was not printed in the brochure/.test(w)), 'the brochure is not blamed');
     } finally { r.cleanup(); }
+  });
+
+  it('r2 #2: a model check that timed out leaves its figure to a page check as the whole development\'s price — never the text layer', async () => {
+    const project = () => withModels([model('A', 1250000, null, 3), model('B', 1500000, null, 3)], { price: { amount: 1250000, currency: 'SAR', from: true, period: null, onRequest: false }, priceEvidence: { page: 3, quote: '1,250,000' } });
+    const pageText = ['Palm Compound', 'x', 'A 1,250,000\nB 1,500,000', 'y', 'z'];
+    const headline = (r) => r.calls().filter((c) => c.tool === 'claude-confirm').map((c) => [c.amount, c.whole]);
+    // The page does not print it as the development's own price: on request.
+    const no = await rig({ pageText, listing: project(), modelConfirmFail: true });
+    try {
+      const report = await no.run();
+      assert.deepEqual(report.modelPrices.incomplete.sort(), [1250000, 1500000]);
+      assert.equal(report.priceEvidence.inText, false, 'the bare "A 1,250,000" in the text layer is a row, not the headline');
+      assert.deepEqual(headline(no), [[1250000, true]]);
+      assert.equal(report.listingPreview.price.onRequest, true);
+    } finally { no.cleanup(); }
+    // It does: published, "from".
+    const ok = await rig({ pageText, listing: project(), modelConfirmFail: true, confirm: [1250000] });
+    try {
+      assert.deepEqual((await ok.run()).listingPreview.price, { amount: 1250000, currency: 'SAR', from: true, period: null, onRequest: false });
+    } finally { ok.cleanup(); }
+    // The page check cannot run either (its call fails too): "try again later", not "not printed".
+    const down = await rig({ pageText, listing: project(), modelConfirmFail: true, confirmFail: true });
+    try {
+      const report = await down.run();
+      assert.equal(report.listingPreview.price.onRequest, true);
+      assert.equal(report.priceEvidence.unchecked, true);
+      const w = report.warnings.find((x) => /price on request/.test(x)) ?? '';
+      assert.match(w, /could not be checked/);
+      assert.match(w, /try again later/);
+    } finally { down.cleanup(); }
   });
 
   it('(c) a cited page past the end of the PDF: refused without a render or a call', async () => {

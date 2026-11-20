@@ -522,7 +522,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
    * second model — on a rendered page. Evidence the model forgot is looked for in the rendered
    * pages' text, so a price it read from the text layer is still checked on its page. After a quota
    * error no call is made: `unchecked: true`, never confirmed. `uncheckedWhy` says why: 'quota', or
-   * 'render' — a whole-property check whose page could not be rendered (printedWhole).
+   * 'render' — a whole-property check whose page could not be rendered (printedWhole) — or 'call', one whose
+   * second-model call failed (a timeout, a crash: printedWhole, r2 #2).
    */
   const printed = async (amount, evidence, { subsidised = false, whole = false } = {}) => {
     // In the text: printed IN the price's currency, or bare where bare figures are in it (printedInCurrency).
@@ -589,6 +590,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       return { ...out, unchecked: true, uncheckedWhy: 'quota' };
     }
     let unrendered = null;
+    let failedCall = null;
     for (const n of pages) {
       if (!(await renderForWholeCheck(n))) {
         unrendered ??= n;
@@ -599,15 +601,19 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       out.confirmed = check.confirmed;
       if (check.fatal) return { ...out, unchecked: true, uncheckedWhy: 'quota' };
       if (check.confirmed) return out;
+      if (check.error) failedCall ??= n;
     }
     if (unrendered !== null) {
       log.info('intake.price_evidence_skipped', { page: unrendered, subsidised, whole: true, reason: 'render' });
       return { ...out, unchecked: true, uncheckedWhy: 'render' };
     }
+    // A call that failed (a timeout, a crash) did not look at the page: not "not printed" (r2 #2).
+    if (failedCall !== null) return { ...out, unchecked: true, uncheckedWhy: 'call' };
     return out;
   };
   /** Why printed() could not check a figure, in words for the owner. */
-  const uncheckedWhy = (ev) => (ev?.uncheckedWhy === 'render' ? 'its page could not be rendered for the check' : 'the AI quota ran out');
+  const uncheckedWhy = (ev) => (ev?.uncheckedWhy === 'render' ? 'its page could not be rendered for the check'
+    : ev?.uncheckedWhy === 'call' ? 'the check of its page failed' : 'the AI quota ran out');
   // Pages rendered for a whole-property check that failed: not tried twice in one run.
   const unrenderable = new Set();
   const pageCount = Number(extraction.pages);
@@ -882,11 +888,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   }
   if (!headlineFromModels && !caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
     // Codex r1 #1: the text layer cannot tie a figure to one unit model or one unit. A headline that IS a
-    // model figure the page check refused (looked at and not found — not one whose check could not be done:
-    // `incomplete`), and the headline of one specific unit read with unit models beside it, are settled only
-    // on a page, as the whole listing's own price — else "on request".
-    const times = (list, n) => (Array.isArray(list) ? list.filter((x) => x === n).length : 0);
-    const refusedAsModel = times(report.modelPrices?.refused, price.amount) > times(report.modelPrices?.incomplete, price.amount);
+    // model figure the page check refused — looked at and not found, or whose check could not be done
+    // (`incomplete`: a timeout, a render, a quota — r2 #2) — and the headline of one specific unit read with
+    // unit models beside it, are settled only on a page, as the whole listing's own price — else "on
+    // request", and "try again later" when that check cannot run either.
+    const refusedAsModel = (report.modelPrices?.refused ?? []).includes(price.amount);
     const unitAmongModels = Boolean(ai.listing?.unit) && Array.isArray(ai.models) && ai.models.length > 0;
     const pageOnly = ownPriceOnly || refusedAsModel || unitAmongModels;
     report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: pageOnly });
