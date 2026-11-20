@@ -609,13 +609,15 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
    * 'render' — a whole-property check whose page could not be rendered (printedWhole) — or 'call', one whose
    * second-model call failed (a timeout, a crash: printedWhole, r2 #2).
    */
-  const printed = async (amount, evidence, { subsidised = false, whole = false } = {}) => {
+  const printed = async (amount, evidence, { subsidised = false, whole = false, pageCheck = false } = {}) => {
     // In the text: printed IN the price's currency, or bare where bare figures are in it (printedInCurrency).
     // "£1,250,000" is a price in pounds, never "1,250,000 SAR". `whole`: the figure must be the whole
     // property's price — which the text layer cannot tell from a floor's or a model's, so only a page can.
-    const out = { inText: subsidised || whole ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency, home: local }), confirmed: null };
+    // `pageCheck`: only a page settles it, the same way, without the whole-property wording — a rental's headline,
+    // whose period the text layer cannot tell (r3 #4).
+    const out = { inText: subsidised || whole || pageCheck ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency, home: local }), confirmed: null };
     if (out.inText) return out;
-    if (whole) return printedWhole(amount, evidence, { subsidised, out });
+    if (whole || pageCheck) return printedWhole(amount, evidence, { subsidised, out, whole });
     if (!pageImages.length) return out;
     // The model's citation when it names a rendered page; otherwise the rendered page whose text
     // carries the number. Either way the second model looks at the page before anything counts.
@@ -667,7 +669,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
    * another page confirms it, unchecked ("try again later"), never "the brochure does not print it". So is a
    * check after a quota error, rendered page or not (final review M5): nothing more can be looked at.
    */
-  const printedWhole = async (amount, evidence, { subsidised, out }) => {
+  const printedWhole = async (amount, evidence, { subsidised, out, whole = true }) => {
     const pages = wholeCheckPages(amount, evidence);
     if (!pages.length) return out;
     if (quotaHit) {
@@ -682,7 +684,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         continue;
       }
       const page = pageImages.find((p) => p.page === n);
-      const check = await askPage(page, amount, n === evidence?.page ? evidence.quote : String(amount), { subsidised, whole: true, inferred: n !== evidence?.page });
+      const check = await askPage(page, amount, n === evidence?.page ? evidence.quote : String(amount), { subsidised, whole, inferred: n !== evidence?.page });
       out.confirmed = check.confirmed;
       if (check.fatal) return { ...out, unchecked: true, uncheckedWhy: 'quota' };
       if (check.confirmed) return out;
@@ -968,7 +970,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     const refusedAsModel = (report.modelPrices?.refused ?? []).includes(price.amount);
     const unitAmongModels = Boolean(ai.listing?.unit) && Array.isArray(ai.models) && ai.models.length > 0;
     const pageOnly = ownPriceOnly || refusedAsModel || unitAmongModels;
-    report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: pageOnly });
+    // A rental's headline (a caption period, a period read, a rent listing) is settled only on a page, FOR its
+    // period — with unit models or without (r3 #4). An ordinary sale without models keeps the text layer.
+    const rentHeadline = Boolean(caption.period || readingPeriod || listingPeriod);
+    report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: pageOnly, pageCheck: rentHeadline });
     const fromWords = ownPriceOnly ? startingFromWords() : null;
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
       log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency, unchecked: report.priceEvidence.unchecked === true, why: report.priceEvidence.uncheckedWhy ?? null, whole: pageOnly });

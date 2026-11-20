@@ -1129,6 +1129,33 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     } finally { y.cleanup(); }
   });
 
+  it('r3 #4: a rental\'s headline is never settled by the text layer — with or without unit models, it needs the page, for the period', async () => {
+    const textPages = (p3) => [`Overview\n${'A residential compound for rent. '.repeat(4)}`, 'Location', p3, 'Specification', 'Contact'];
+    const rental = (models = []) => {
+      const a = withModels(models, { price: { amount: 60000, currency: 'SAR', from: false, period: 'year', onRequest: false }, priceEvidence: { page: 3, quote: 'SAR 60,000' } });
+      a.listing.category = 'rent';
+      return a;
+    };
+    const yearly = { 3: [{ fig: 60000, mark: 'SAR', kind: 'whole', per: 'year' }] };
+    const run = (r, caption) => processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption, workDir: path.join(r.repo, '..', 'work'), dryRun: true });
+    for (const models of [[], [{ ...model('Studio', null, null, null), price: null }]]) {
+      // Caption "rent per month"; the brochure prints SAR 60,000 a year, in its text layer too: never SAR 60,000 a month.
+      const r = await rig({ listing: rental(models), pageText: textPages('Annual rent SAR 60,000'), facts: yearly });
+      try {
+        const report = await run(r, { category: 'rent', period: 'month', text: '' });
+        assert.equal(report.priceEvidence.inText, false, `${models.length} model(s): the text layer cannot say which period`);
+        assert.equal(report.listingPreview.price.onRequest, true, `${models.length} model(s)`);
+      } finally { r.cleanup(); }
+      // No caption: the reading's own period (a year) is the one checked — and published.
+      const y = await rig({ listing: rental(models), pageText: textPages('Annual rent SAR 60,000'), facts: yearly });
+      try {
+        const report = await run(y, {});
+        assert.deepEqual(report.listingPreview.price, { amount: 60000, currency: 'SAR', from: false, period: 'year', onRequest: false });
+        assert.ok(y.calls().some((c) => c.tool === 'claude-confirm' && c.amount === 60000), 'a page check, not the text layer');
+      } finally { y.cleanup(); }
+    }
+  });
+
   it('r2 #3: caption "rent per month", the brochure prints only SAR 60,000 a year — no monthly headline', async () => {
     const a = withModels([model('Villa', 60000, null, 3)], { price: { amount: 60000, currency: 'SAR', from: true, period: 'year', onRequest: false }, priceEvidence: { page: 3, quote: 'SAR 60,000 per year' } });
     a.listing.category = 'rent';
