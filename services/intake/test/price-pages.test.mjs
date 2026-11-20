@@ -226,7 +226,10 @@ if (prompt.includes('For each numbered model')) {
   if (cfg.facts) {
     // A whole development: a model's price counts as the property's; otherwise only a price for the whole listing.
     const project = /unit models counts as the property/.test(prompt);
-    answer = { confirmed: facts(page).some((e) => !!e.sub === subsidised && e.fig === amount && factIn(e, currency) && (e.kind === 'whole' || (project && e.kind === 'model'))) };
+    // r2 #3: the rent period the prompt asks the headline to be printed for (none = not asked: any counts).
+    const per = (prompt.match(/The price is the rent per (month|year)/) || [])[1] ?? null;
+    answer = { confirmed: facts(page).some((e) => !!e.sub === subsidised && e.fig === amount && factIn(e, currency) && (e.kind === 'whole' || (project && e.kind === 'model'))
+      && (!per || !e.per || e.per === per)) };
   }
 } else {
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-listing', prompt }) + '\\n');
@@ -1106,6 +1109,25 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       assert.deepEqual(report.listingPreview.models.map((m) => m.price), [null, 60000]);
       assert.deepEqual(report.listingPreview.price, { amount: 60000, currency: 'SAR', from: true, period: 'year', onRequest: false });
     } finally { y.cleanup(); }
+  });
+
+  it('r2 #3: caption "rent per month", the brochure prints only SAR 60,000 a year — no monthly headline', async () => {
+    const a = withModels([model('Villa', 60000, null, 3)], { price: { amount: 60000, currency: 'SAR', from: true, period: 'year', onRequest: false }, priceEvidence: { page: 3, quote: 'SAR 60,000 per year' } });
+    a.listing.category = 'rent';
+    const facts = { 3: [{ fig: 60000, mark: 'SAR', kind: 'model', model: 'Villa', per: 'year' }, { fig: 60000, mark: 'SAR', kind: 'whole', per: 'year' }] };
+    const r = await rig({ listing: a, facts });
+    try {
+      const report = await processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: { category: 'rent', period: 'month', text: '' }, workDir: path.join(r.repo, '..', 'work'), dryRun: true });
+      assert.deepEqual(report.listingPreview.models.map((m) => m.price), [null], 'the row is a year\'s rent');
+      assert.equal(report.listingPreview.price.onRequest, true, 'never "SAR 60,000 / month"');
+      assert.equal(report.listingPreview.price.period, 'month');
+    } finally { r.cleanup(); }
+    // Printed per month too: published per month.
+    const m = await rig({ listing: structuredClone(a), facts: { 3: [...facts[3], { fig: 60000, mark: 'SAR', kind: 'whole', per: 'month' }] } });
+    try {
+      const report = await processPdf({ pdfPath: m.pdfPath, cfg: m.cfg, caption: { category: 'rent', period: 'month', text: '' }, workDir: path.join(m.repo, '..', 'work'), dryRun: true });
+      assert.deepEqual(report.listingPreview.price, { amount: 60000, currency: 'SAR', from: true, period: 'month', onRequest: false });
+    } finally { m.cleanup(); }
   });
 
   it('Codex r1 #3: a money figure in a model\'s text that is not THAT model\'s own confirmed price drops that text, with a warning', async () => {

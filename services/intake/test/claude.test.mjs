@@ -818,6 +818,15 @@ describe('confirmPriceEvidence', () => {
     await riyalRules((o) => confirmPriceEvidence({ ...opts, ...o }));
   });
 
+  it('r2 #3: a rental\'s headline is checked for the listing\'s period — a figure printed per another period does not count', async () => {
+    const f = fakeSpawn([{ envelope: envelope({ confirmed: false }) }, { envelope: envelope({ confirmed: false }) }]);
+    await confirmPriceEvidence({ ...opts, period: 'month', spawnImpl: f.spawnImpl });
+    assert.match(f.calls[0].prompt, /The price is the rent per month/);
+    assert.match(f.calls[0].prompt, /printed as a rent per another period[\s\S]*?does NOT count/);
+    await confirmPriceEvidence({ ...opts, spawnImpl: f.spawnImpl });
+    assert.doesNotMatch(f.calls[1].prompt, /rent per/, 'a sale has no period');
+  });
+
   it('`whole` with `project` (Codex r1 #1a): only the development\'s own price counts, not a model\'s row — and no "a model\'s price counts" allowance', async () => {
     const f = fakeSpawn([{ envelope: envelope({ confirmed: false }) }]);
     await confirmPriceEvidence({ ...opts, whole: true, project: true, spawnImpl: f.spawnImpl });

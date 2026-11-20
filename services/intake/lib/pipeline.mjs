@@ -510,6 +510,15 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // The country's own currency, printed by the site or not: on its pages a bare "ريال" / ﷼ is ITS riyal —
   // an Omani "190,000 ريال" is 190,000 OMR, never 190,000 SAR (price.mjs riyalOf, claude.mjs currencyRule).
   const local = countryCurrency(country);
+  // The rent period the prices are published for (Codex r1 #2, r2 #3) — the site and the brochure print the
+  // headline and every model row with the listing's period: on an enrichment the listing's own; on a publish
+  // what buildListing() gives it (the owner's caption period, else the reading's, else a year). A sale has
+  // none. Every figure a second model checks is confirmed FOR that period, the headline's too, and an
+  // enrichment whose reading has another period keeps no model price.
+  const readingPeriod = price?.period ?? null;
+  const listingPeriod = enrichTarget
+    ? (enrichTarget.listing.price?.period ?? null)
+    : (caption.category || ai.listing?.category) === 'rent' ? (caption.period || readingPeriod || 'year') : null;
   // The "a price for one of its unit models counts" allowance is for a whole development quoted
   // "from" its cheapest model — never for one specific unit, and never for a price not marked `from`.
   const wholeDevelopment = Boolean(ai.listing?.project) && !ai.listing?.unit && price?.from === true;
@@ -565,6 +574,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       whole,
       subject: ai.listing?.title?.en,
       unit: ai.listing?.unit ?? null,
+      period: listingPeriod,
       bin: cfg.claudeBin,
       model: cfg.claudeModel,
       cwd: workDir,
@@ -692,14 +702,6 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // own currency (the site prints every model price in `price.currency`) — the models keep no price, and
   // none is checked: no figure is checked that will not be published. A figure the copy states is then
   // an unconfirmed one (the guard below).
-  // The rent period the model figures are published for (Codex r1 #2) — the site and the brochure print every
-  // model row with the listing's period: on an enrichment the listing's own; on a publish what buildListing()
-  // gives it (the owner's caption period, else the reading's, else a year). A sale has none. Every figure is
-  // confirmed FOR that period, and an enrichment whose reading has another period keeps no model price.
-  const readingPeriod = price?.period ?? null;
-  const listingPeriod = enrichTarget
-    ? (enrichTarget.listing.price?.period ?? null)
-    : (caption.category || ai.listing?.category) === 'rent' ? (caption.period || readingPeriod || 'year') : null;
   let currencyDrop = null;
   let readingCurrency = null;
   if (modelFigures.length && !caption.price && !ownerPriceEdit) {
