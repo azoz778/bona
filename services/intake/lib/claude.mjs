@@ -527,7 +527,7 @@ const oneLine = (v) => String(v ?? '').replace(/[\s\u0085\u2028\u2029]+/g, ' ').
  * @param {{pageImage:string, items:Array<{i:number,name:{en?:string,ar?:string},price:number|null,subsidisedPrice:number|null}>,
  *          currency:string, bareCounts?:boolean, home?:string|null}} input
  * @returns {Promise<{answers:Array<{i:number,price:boolean,subsidisedPrice:boolean}>, error:string|null, fatal:boolean}>}
- *   well-formed answers only; on a failed call no answers, the error message, and `fatal` when it
+ *   one answer per record about a model asked about (a malformed record: a "no" to both figures); on a failed call no answers, the error message, and `fatal` when it
  *   was a quota or session limit (runClaudeOnce) — the caller then stops sending pages
  */
 export async function confirmModelPrices({
@@ -570,10 +570,12 @@ export async function confirmModelPrices({
   const asked = new Set(items.map((it) => it.i));
   try {
     const { result } = await runClaudeOnce({ prompt, cwd, model, bin, addDirs, settingsPath, timeoutMs, spawnImpl, expect: 'array' });
+    // Every record about a model asked about is kept: a malformed one (a key missing or not a boolean)
+    // as a "no" to both figures, so it cannot be dropped before the agreement check (Codex r1 #4).
+    const wellFormed = (a) => typeof a.price === 'boolean' && typeof a.subsidisedPrice === 'boolean';
     const answers = Array.isArray(result)
-      ? result.filter((a) => a && typeof a === 'object' && Number.isInteger(a.i) && asked.has(a.i)
-        && typeof a.price === 'boolean' && typeof a.subsidisedPrice === 'boolean')
-        .map((a) => ({ i: a.i, price: a.price, subsidisedPrice: a.subsidisedPrice }))
+      ? result.filter((a) => a && typeof a === 'object' && Number.isInteger(a.i) && asked.has(a.i))
+        .map((a) => (wellFormed(a) ? { i: a.i, price: a.price, subsidisedPrice: a.subsidisedPrice } : { i: a.i, price: false, subsidisedPrice: false }))
       : [];
     return { answers, error: null, fatal: false };
   } catch (err) {

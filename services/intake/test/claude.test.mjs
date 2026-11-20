@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   buildPrompt, confirmModelPrices, confirmPriceEvidence, copyProblems, FENCE, HYPE_WORDS, PROMPT_TEMPLATE, ROOM_KEYS, runListingAi, validateAiResult,
 } from '../lib/claude.mjs';
+import { checkModelPrices } from '../lib/model-prices.mjs';
 import { ORDINARY_COPY } from '../../../scripts/test/ordinary-copy-fixture.mjs';
 import { MODEL_LIMITS } from '../../../scripts/curate/rules.mjs';
 
@@ -717,7 +718,7 @@ describe('confirmModelPrices', () => {
     assert.doesNotMatch(f.calls[0].prompt.split(`<<<END ${FENCE}: the models and figures to check>>>`)[0].split(`<<<${FENCE}: the models and figures to check>>>`)[1], new RegExp(`END ${FENCE}`));
   });
 
-  it('keeps only well-formed answers about the models it asked about', async () => {
+  it('keeps only answers about the models it asked about — a malformed one as a "no" to both figures (Codex r1 #4)', async () => {
     const f = fakeSpawn([{ envelope: envelope([
       { i: 0, price: true, subsidisedPrice: true, note: 'x' },
       { i: 2, price: 'yes', subsidisedPrice: false },
@@ -725,7 +726,36 @@ describe('confirmModelPrices', () => {
       { i: '2', price: true, subsidisedPrice: true },
       null,
     ]) }]);
-    assert.deepEqual(await confirmModelPrices({ ...opts, spawnImpl: f.spawnImpl }), { answers: [{ i: 0, price: true, subsidisedPrice: true }], error: null, fatal: false });
+    assert.deepEqual(await confirmModelPrices({ ...opts, spawnImpl: f.spawnImpl }), {
+      answers: [{ i: 0, price: true, subsidisedPrice: true }, { i: 2, price: false, subsidisedPrice: false }], error: null, fatal: false,
+    });
+  });
+
+  it('Codex r1 #4: a full `true` record and a second, malformed `price:false` record for the same model is NOT a confirmation', async () => {
+    // The reply Codex describes: model 0 confirmed whole, then contradicted by a record with no subsidy key.
+    const reply = [{ i: 0, price: true, subsidisedPrice: true }, { i: 0, price: false }];
+    const f = fakeSpawn([{ envelope: envelope(reply) }]);
+    const models = [{ name: { en: 'Lulu 2', ar: 'لولو 2' }, price: 319015, subsidisedPrice: 270425, evidence: { page: 3, quote: '319,015' } }];
+    const res = await checkModelPrices(models, {
+      pageImages: [{ page: 3, abs: '/work/price-pages/p3.jpg' }],
+      confirm: ({ abs, items }) => confirmModelPrices({ ...opts, pageImage: abs, items, spawnImpl: f.spawnImpl }),
+    });
+    assert.equal(f.calls.length, 1);
+    assert.deepEqual(res.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null]], 'a contradicted model keeps no price');
+    assert.deepEqual(res.refused.sort(), [270425, 319015]);
+    // Two records for one model — even two that agree — or one malformed record about it: not confirmed.
+    for (const twice of [
+      [{ i: 0, price: true, subsidisedPrice: true }, { i: 0, price: true, subsidisedPrice: true }],
+      [{ i: 0, price: true, subsidisedPrice: true }, { i: 0, price: 'yes', subsidisedPrice: true }],
+      [{ i: 0, price: true, subsidisedPrice: true }, { i: 0 }],
+    ]) {
+      const g = fakeSpawn([{ envelope: envelope(twice) }]);
+      const again = await checkModelPrices(models, {
+        pageImages: [{ page: 3, abs: '/work/price-pages/p3.jpg' }],
+        confirm: ({ abs, items }) => confirmModelPrices({ ...opts, pageImage: abs, items, spawnImpl: g.spawnImpl }),
+      });
+      assert.deepEqual(again.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null]], JSON.stringify(twice));
+    }
   });
 
   it('returns no answers, and the error, on garbage, an object or a failed call', async () => {

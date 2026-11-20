@@ -106,12 +106,12 @@ export function pagesToRenderFor(models, renderedPages = [], pageCount = Infinit
 }
 
 /**
- * Is figure `key` of item `i` confirmed? Only by a well-formed `true`, and only when every answer
- * the model gave about that item agrees: a missing answer, a non-boolean or a contradiction is a no.
+ * Is figure `key` of item `i` confirmed? Only by ONE well-formed `true`: a missing answer, a non-boolean,
+ * or more than one record about that item — agreeing or not — is a no (Codex r1 #4).
  */
 function confirmed(answers, i, key) {
   const mine = answers.filter((a) => a && typeof a === 'object' && a.i === i);
-  return mine.length > 0 && mine.every((a) => a[key] === true);
+  return mine.length === 1 && mine[0][key] === true;
 }
 
 /**
