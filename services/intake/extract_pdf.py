@@ -501,7 +501,7 @@ def main() -> int:
         print(json.dumps({"ok": True, "pages": pages, "mode": "views", "views": views}, ensure_ascii=False))
         return 0
 
-    seen: set[str] = set()
+    seen: dict[str, int] = {}      # sha256 -> candidate index
     candidates = []
     embedded_total = 0
 
@@ -510,8 +510,13 @@ def main() -> int:
             flattened: bool = False) -> None:
         digest = hashlib.sha256(data).hexdigest()
         if digest in seen:
+            # The same bitmap drawn again: it keeps its LARGEST coverage. A whole-page picture first seen as a
+            # small preview is still a whole page, and never a floor plan (claude.mjs, r3 #6).
+            first = candidates[seen[digest]]
+            if coverage is not None and (first["coverage"] is None or coverage > first["coverage"]):
+                first["coverage"] = coverage
             return
-        seen.add(digest)
+        seen[digest] = len(candidates)
         idx = len(candidates)
         name = f"{idx:03d}.{ext}"
         path = os.path.join(img_dir, name)

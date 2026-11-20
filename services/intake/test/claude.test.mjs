@@ -401,6 +401,15 @@ describe('buildPrompt', () => {
   };
   const sheets = [{ file: '/tmp/x/sheets/contact-sheet-1.jpg', from: 0, to: 1 }];
 
+  it('r3 #6: shows each candidate\'s page coverage, and tells the model a bitmap covering most of its page is never a floor plan', () => {
+    const ex = { ...extraction, candidates: [{ ...extraction.candidates[0], coverage: 0.9086 }, { ...extraction.candidates[1], coverage: 0.19 }, { index: 2, abs: '/tmp/x/002.jpg', width: 900, height: 700, page: 3, source: 'embedded', coverage: null }] };
+    const prompt = buildPrompt({ extraction: ex, sheets, caption: {} });
+    assert.match(prompt, /- #0 {2}\/tmp\/x\/000\.jpg {2}\(1600x1067, page 1, embedded, covers 91% of its page\)/);
+    assert.match(prompt, /- #1 {2}\/tmp\/x\/001\.jpg {2}\(900x1200, page 2, embedded, covers 19% of its page\)/);
+    assert.match(prompt, /- #2 {2}\/tmp\/x\/002\.jpg {2}\(900x700, page 3, embedded\)/, 'no coverage known: none shown');
+    assert.match(prompt, /never a floor plan, and neither is a candidate that covers 85% of its page or more/);
+  });
+
   it('fills every placeholder', () => {
     const p = buildPrompt({ extraction, sheets, caption: { text: 'rent', category: 'rent', period: 'year' } });
     assert.ok(!/\{\{[A-Z_]+\}\}/.test(p), `unfilled placeholder in prompt: ${/\{\{[A-Z_]+\}\}/.exec(p)}`);

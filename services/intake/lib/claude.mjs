@@ -105,8 +105,10 @@ export function buildPrompt({ extraction, sheets, caption, pageImages = [], page
   if (!c.price) captionLines.push('- No price in the caption: use the price printed in the PDF, or onRequest if there is none.');
 
   const meta = Object.entries(extraction.meta || {}).map(([k, v]) => `- ${k}: ${v}`).join('\n') || '(none)';
+  // Each candidate's page coverage, when known: one covering most of its page is never a floor plan (r3 #6).
+  const covers = (x) => (typeof x.coverage === 'number' && Number.isFinite(x.coverage) ? `, covers ${Math.round(x.coverage * 100)}% of its page` : '');
   const candidateList = extraction.candidates
-    .map((x) => `- #${x.index}  ${x.abs}  (${x.width}x${x.height}, page ${x.page}, ${x.source})`)
+    .map((x) => `- #${x.index}  ${x.abs}  (${x.width}x${x.height}, page ${x.page}, ${x.source}${covers(x)})`)
     .join('\n') || '(no image candidates were extracted)';
   const pageText = (extraction.pageText || [])
     .map((t, i) => `### page ${i + 1}\n${t || '(no text)'}`)
