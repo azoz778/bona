@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { FACT_LISTS, INTAKE_ID_RE, isFigure, withdrawnAdvertising } from '../../../scripts/curate/rules.mjs';
 import { sha256File } from './edits.mjs';
+import { isSlug } from './listing.mjs';
 
 /** What a plan row can say. `enrich` needs the developer's PDF; `brochure-only` does not. */
 export const ACTIONS = Object.freeze(['enrich', 'brochure-only', 'skip']);
@@ -97,6 +98,7 @@ export function planBackfill(listings, { findPdf, withdrawals = [], only = null,
     else if (l.status === 'withdrawn') row.reason = 'its record says withdrawn';
     else if (l.hidden) row.reason = 'hidden — not on the site';
     else if (!row.slug) row.reason = 'the record has no slug';
+    else if (!isSlug(row.slug)) row.reason = `the record's slug ${JSON.stringify(row.slug)} is not a valid slug (lowercase-hyphenated) — fix the record first`;
     else if (enriched && !includeEnriched) row.reason = `already enriched (${enriched}) — --include-enriched to enrich it again`;
     else {
       const sha = typeof l._intake?.pdfSha256 === 'string' && l._intake.pdfSha256 ? l._intake.pdfSha256 : null;

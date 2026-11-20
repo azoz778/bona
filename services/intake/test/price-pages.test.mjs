@@ -2445,6 +2445,26 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
     } finally { r.cleanup(); }
   });
 
+  it('Codex r1 #6a: an inbox record whose slug is not a slug is refused before any file is touched — a dry run too', async () => {
+    for (const dryRun of [true, false]) {
+      const r = await rig({ listing: reading() });
+      try {
+        const bad = '../../outside';
+        seed(r, { extra: { slug: bad } });
+        // What a recursive delete of the work dir's enrich/<slug> would reach: <tmp>/outside.
+        const outside = path.join(r.repo, '..', 'outside');
+        fs.mkdirSync(outside, { recursive: true });
+        fs.writeFileSync(path.join(outside, 'canary.txt'), 'keep me');
+        const err = await processPdf({
+          pdfPath: r.pdfPath, cfg: r.cfg, caption: {}, workDir: path.join(r.repo, '..', 'work'), dryRun, meta: { enrich: { id: 'BONA-W023', slug: bad } },
+        }).then(() => null, (e) => e);
+        assert.equal(fs.existsSync(path.join(outside, 'canary.txt')), true, `dryRun ${dryRun}: nothing outside the work dir is deleted`);
+        assert.match(String(err?.message), /slug/);
+        assert.equal(fs.existsSync(path.join(r.repo, '..', 'bin', 'calls.jsonl')), false, 'refused before the model is paid');
+      } finally { r.cleanup(); }
+    }
+  });
+
   it('a hidden listing is refused', async () => {
     const r = await rig({ listing: reading() });
     try {

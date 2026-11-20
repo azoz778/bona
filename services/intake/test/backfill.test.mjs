@@ -103,6 +103,15 @@ describe('planBackfill', () => {
     assert.equal(empty[0].action, 'enrich');
   });
 
+  it('Codex r1 #6a: a record whose slug is not a slug is skipped — never enriched or rebuilt', () => {
+    for (const slug of ['../../outside', 'a/b', 'Upper-Case', 'trailing-', '.']) {
+      const [row] = planBackfill([listing('BONA-W010', { slug }), listing('BONA-W002', { slug })].slice(0, 1), { findPdf });
+      assert.equal(row.action, 'skip', slug);
+      assert.match(row.reason, /not a valid slug/, slug);
+      assert.equal(row.pdf, null);
+    }
+  });
+
   it('P6c: a listing that carries amenities, nearby or warranties (and no models) is already enriched too', () => {
     const facts = (k, en = ['Gym'], ar = ['نادٍ رياضي']) => ({ [k]: { en, ar } });
     const list = [

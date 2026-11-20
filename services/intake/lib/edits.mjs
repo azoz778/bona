@@ -6,7 +6,7 @@ import path from 'node:path';
 import { licenceProblems, loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 import { brochureFileIn, brochureUrlFor, buildBrandedBrochure } from './brochure.mjs';
 import { log } from './log.mjs';
-import { WARNING_CODES, findInbox } from './listing.mjs';
+import { WARNING_CODES, findInbox, isSlug } from './listing.mjs';
 import { removeListingImages } from './images.mjs';
 import { MAX_VIDEOS, writeListingVideo } from './video.mjs';
 
@@ -357,6 +357,8 @@ export async function rebuildBrochure(repo, id, { cfg = {}, workDir, spawnImpl }
   const refused = withdrawnRefusal(repo, found.listing);
   if (refused) return refused;
   const { listing } = found;
+  // Before the slug is joined into a path: the brochure is written into that folder (Codex r1 #6a).
+  if (!isSlug(listing.slug)) return { error: `${id}'s record has slug ${JSON.stringify(listing.slug)}, which is not a valid slug — nothing was built; fix the record first` };
   const filesDir = path.join(repo, 'public', 'listings', listing.slug);
   const built = await buildBrandedBrochure({
     listing, filesDir, outPath: brochureFileIn(filesDir), workDir,

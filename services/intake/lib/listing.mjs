@@ -11,6 +11,14 @@ import { isFigure } from './model-prices.mjs';
 
 export const INBOX_DIR = path.join('scripts', 'curate', 'inbox');
 export const INDEX_FILE = '_index.json';
+/**
+ * A listing slug, the site's rule (validate.mjs, checkListing): lowercase-hyphenated — so never a path that
+ * climbs out of public/listings/ ("../x", "a/b"). Checked before a slug read from a record is joined into
+ * a path (Codex r1 #6a).
+ */
+export const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+/** `slug` is one (SLUG_RE). */
+export const isSlug = (slug) => typeof slug === 'string' && SLUG_RE.test(slug);
 export const RESERVED_SLUGS = new Set(['houses', 'apartments', 'land', 'buildings', 'for-sale', 'for-rent', 'off-plan', 'international', 'index']);
 
 const AR_DIACRITICS = /[ً-ٰٟ]/g;
@@ -325,7 +333,7 @@ export function checkListing(listing, { minImages = 4, maxImages = 10, withdrawa
   const isStr = (v) => typeof v === 'string' && v.trim().length > 0;
   const isPair = (v) => v && isStr(v.en) && isStr(v.ar) && ARABIC.test(v.ar);
   if (!INTAKE_ID_RE.test(listing.id || '')) e.push(`id must match BONA-W### (got ${listing.id})`);
-  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(listing.slug || '')) e.push(`slug must be lowercase-hyphenated (got ${listing.slug})`);
+  if (!isSlug(listing.slug)) e.push(`slug must be lowercase-hyphenated (got ${listing.slug})`);
   if (RESERVED_SLUGS.has(listing.slug)) e.push(`slug "${listing.slug}" collides with a section route`);
   if (!isPair(listing.title)) e.push('title.en/ar required');
   if (!Array.isArray(listing.images) || listing.images.length < minImages) {
@@ -449,6 +457,8 @@ export function enrichMetaFor(repo, id) {
   if (typeof l._intake?.pdfSha256 !== 'string' || !l._intake.pdfSha256) {
     throw new Error(`--enrich ${l.id}: it records no source PDF (_intake.pdfSha256), so no brochure can be matched to it`);
   }
+  // Before the slug is joined into a path (Codex r1 #6a): a dry run deletes its staging folder too.
+  if (!isSlug(l.slug)) throw new Error(`--enrich ${l.id}: its record's slug ${JSON.stringify(l.slug)} is not a valid slug (lowercase-hyphenated) — fix the record first`);
   return { enrich: { id: l.id, slug: l.slug, existing: l } };
 }
 

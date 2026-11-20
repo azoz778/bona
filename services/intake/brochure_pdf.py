@@ -1553,7 +1553,9 @@ def build(argv):
     files_dir = pathlib.Path(a.files_dir)
     if not files_dir.is_dir():
         raise BrochureError(f"files-dir not found: {files_dir}")
-    out = pathlib.Path(a.out).resolve()
+    # Absolute, but NOT resolved (Codex r1 #6b): an `out` that is a symlink is replaced by the new file, never
+    # written through to whatever it points at — outside the listing folder, where git cannot restore it.
+    out = pathlib.Path(os.path.abspath(a.out))
     out.parent.mkdir(parents=True, exist_ok=True)
     max_bytes = int(a.max_mb * MB)
     work = pathlib.Path(a.work).resolve() if a.work else default_work()
@@ -1571,6 +1573,7 @@ def build(argv):
                 b.scale = scale
                 doc = b.render(b.compose(secs))
                 steps.append(f"scale-{scale}")
+            tmp.unlink(missing_ok=True)         # a leftover at the temp name (a link too) is never written through
             doc.write_pdf(str(tmp))
             size = tmp.stat().st_size
             if size <= max_bytes:

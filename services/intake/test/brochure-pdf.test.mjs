@@ -427,6 +427,14 @@ describe('brochure_pdf.py — the TK-system Bona brochure', { skip: !UV && 'uv n
           fs.symlinkSync(path.join(dir, 'outside.jpg'), path.join(files, '09.jpg'));
         },
       }),
+      // Codex r1 #6b: the existing brochure.pdf is a symlink to a writable file elsewhere.
+      prepare('outlink', singleListing(), {
+        setup: ({ dir }) => {
+          fs.mkdirSync(path.join(dir, 'elsewhere'), { recursive: true });
+          fs.writeFileSync(path.join(dir, 'elsewhere', 'target.pdf'), 'a file outside the listing folder');
+          fs.symlinkSync(path.join(dir, 'elsewhere', 'target.pdf'), path.join(dir, 'brochure.pdf'));
+        },
+      }),
     ];
     const unitDir = path.join(base, '_unit');
     fs.mkdirSync(unitDir, { recursive: true });
@@ -700,6 +708,15 @@ describe('brochure_pdf.py — the TK-system Bona brochure', { skip: !UV && 'uv n
 
     it('a file in files-dir that links outside it is refused', () => {
       failed('symlink', /outside files-dir/);
+    });
+
+    it('Codex r1 #6b: an output path that is a symlink is replaced, never written through — the file it pointed at is untouched', () => {
+      const r = okRun('outlink');
+      const dir = path.dirname(r.out);
+      assert.equal(fs.readFileSync(path.join(dir, 'elsewhere', 'target.pdf'), 'utf8'), 'a file outside the listing folder');
+      assert.equal(fs.lstatSync(r.out).isSymbolicLink(), false, 'brochure.pdf is now a file of its own');
+      assert.equal(r.json.out, r.out, 'the path asked for, not the one the link pointed at');
+      assert.ok(fs.readFileSync(r.out).subarray(0, 5).toString() === '%PDF-');
     });
 
     it('the WeasyPrint fetcher loads only from its own folders', () => {

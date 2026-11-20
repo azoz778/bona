@@ -35,7 +35,7 @@ import { buildContactSheets } from './contact-sheet.mjs';
 import { buildPrompt, confirmModelPrices, confirmPriceEvidence, runListingAi } from './claude.mjs';
 import { floorPlanTargets, removeListingImages, writeFloorPlans, writeListingImages } from './images.mjs';
 import {
-  addWarningCode, buildListing, checkListing, enrichHeadline, enrichMetaFor, findByPdfSha, findInbox, inboxIds, mergeEnrichment,
+  addWarningCode, buildListing, checkListing, enrichHeadline, enrichMetaFor, findByPdfSha, findInbox, inboxIds, isSlug, mergeEnrichment,
   modelsAndFacts, nextListingId, orderedPicks, readIndex, seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex,
   writeInboxListing,
 } from './listing.mjs';
@@ -267,6 +267,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   if (enrich) {
     if (meta.replace) throw new Error('--enrich and --replace do not go together');
     if (!enrich.id || !enrich.slug) throw new Error('enrich needs the id and slug of the listing it enriches');
+    // Before the slug is joined into any path — the staging folder is deleted even on a dry run (Codex r1 #6a).
+    if (!isSlug(enrich.slug)) throw new Error(`enrich: ${JSON.stringify(enrich.slug)} is not a valid slug (lowercase-hyphenated) — nothing was touched`);
     if (caption.price) throw new Error('--enrich takes no caption price: the headline is decided from the listing (`price <id> …` changes it)');
     // enrichMetaFor()'s refusals again, on the listing as it stands now: unknown, withdrawn, withheld, hidden, no PDF hash.
     const { existing } = enrichMetaFor(cfg.repo, enrich.id).enrich;

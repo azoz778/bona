@@ -332,6 +332,26 @@ describe('rebuildBrochure (`brochure <id>`) — from the repo\'s own files, no s
     assert.deepEqual(saved._intake.warnings, [], 'the stale brochure-failed note is cleared');
     assert.equal(saved._intake.pdfSha256, 'abc', 'the bookkeeping stays in the repo');
   });
+
+  it('Codex r1 #6a: a record whose slug is not a slug is refused before any file is touched', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-rebuild-slug-'));
+    try {
+      const repo2 = path.join(dir, 'repo');
+      const file = writeInboxListing(repo2, { ...LISTING, id: 'BONA-W008', slug: 'x' });
+      // A hand-edited record: its slug climbs out of public/listings/.
+      fs.writeFileSync(file, `${JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), slug: '../../outside' }, null, 2)}\n`);
+      const outside = path.join(dir, 'outside');
+      fs.mkdirSync(outside, { recursive: true });
+      fs.writeFileSync(path.join(outside, '01.jpg'), 'jpg');
+      const before_ = fs.readFileSync(file, 'utf8');
+      const { spawnImpl, calls } = fakeSpawn();
+      const res = await edits.rebuildBrochure(repo2, 'BONA-W008', { cfg: { intakeDir: dir, site: 'https://bona.azoz.uk', maxBrochureMb: 25 }, workDir: path.join(dir, 'work'), spawnImpl });
+      assert.match(res.error, /slug/);
+      assert.equal(calls.length, 0, 'nothing spawned');
+      assert.equal(fs.existsSync(path.join(outside, 'brochure.pdf')), false, 'nothing written outside public/listings/');
+      assert.equal(fs.readFileSync(file, 'utf8'), before_);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
 });
 
 // The sha lookup stays: the backfill (plan Task 9) uses it to find which listings can be re-run
