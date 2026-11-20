@@ -338,8 +338,8 @@ export function validateAiResult(result, { candidateCount = 0, candidates = null
         if (m.floorPlan !== null && m.floorPlan !== undefined) {
           const img = Number.isInteger(m.floorPlan) && Array.isArray(result.images) ? result.images.find((x) => x?.index === m.floorPlan) : null;
           if (!img || img.exclude !== true) e.push(`${at}.floorPlan must be the index of a candidate image marked exclude: true`);
-          else if (Array.isArray(candidates) && candidates.find((c) => c?.index === m.floorPlan)?.source === 'render') {
-            e.push(`${at}.floorPlan #${m.floorPlan} is a rendered whole page, not a floor-plan image — use null`);
+          else if (Array.isArray(candidates) && wholePage(candidates.find((c) => c?.index === m.floorPlan))) {
+            e.push(`${at}.floorPlan #${m.floorPlan} is a whole page (rendered, or one bitmap covering most of its page), not a floor-plan image — use null`);
           } else if (plans.has(m.floorPlan)) e.push(`${at}.floorPlan ${m.floorPlan} is already used by another model`);
           else plans.add(m.floorPlan);
         }
@@ -440,6 +440,15 @@ function currencyRule(currency, bareCounts, home = null) {
       : 'Neither does a figure whose currency the page does not show.',
   ];
 }
+
+/**
+ * At least this much of its page covered by one bitmap: a page exported as one picture (photo-regions.mjs
+ * PAGE_COVERAGE, the same line; extract_pdf.py placement_coverage). Its pixels carry the page's logos, phone
+ * numbers and prices, so it is never published as a floor plan (r2 #5). W023's real plans cover 0.19–0.28.
+ */
+const WHOLE_PAGE_COVERAGE = 0.85;
+/** A candidate that is a whole page: a page render, or a bitmap covering WHOLE_PAGE_COVERAGE of its page or more. */
+const wholePage = (c) => Boolean(c) && (c.source === 'render' || (typeof c.coverage === 'number' && c.coverage >= WHOLE_PAGE_COVERAGE));
 
 /**
  * A rental's period (Codex r1 #2, r2 #3): the figure counts only as the rent per `period` ('month' | 'year');

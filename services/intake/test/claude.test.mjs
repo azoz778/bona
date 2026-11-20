@@ -169,6 +169,18 @@ describe('validateAiResult', () => {
     candidates[1].source = 'embedded';
     assert.deepEqual(validateAiResult(r, { candidateCount: 2, candidates }), []);
   });
+  it('r2 #5: refuses a floor plan whose bitmap covers 85% of its page or more (a page exported as one picture), keeps W023\'s real plans', () => {
+    const r = withModels(MODEL);
+    for (const coverage of [0.85, 0.9, 1]) {
+      const candidates = [{ index: 0, source: 'embedded', coverage: 0.4 }, { index: 1, source: 'embedded', coverage }];
+      assert.ok(validateAiResult(r, { candidateCount: 2, candidates }).some((p) => /models\[0\]\.floorPlan.*whole page/.test(p)), String(coverage));
+    }
+    // W023's plans cover 0.19–0.28 of their pages; no coverage known: as before.
+    for (const coverage of [0.19, 0.28, 0.84, null, undefined]) {
+      const candidates = [{ index: 0, source: 'embedded', coverage: 0.4 }, { index: 1, source: 'embedded', coverage }];
+      assert.deepEqual(validateAiResult(r, { candidateCount: 2, candidates }), [], String(coverage));
+    }
+  });
   it('points prices to the right field', () => {
     const ai = { models: [{ name: { en: 'A, SAR 419,994', ar: 'نورس' } }], amenities: { en: ['SAR 319,015 club'], ar: ['نادٍ'] } };
     const bad = copyProblems(GOOD.listing, ai);
