@@ -2641,6 +2641,33 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
     } finally { r.cleanup(); }
   });
 
+  it('r2 #10: --enrich drops model prices for the period only on a rental whose reading names another period', async () => {
+    const calls = (r) => r.calls().filter((c) => c.tool === 'claude-model-confirm');
+    // A rental listed per month, a reading that names no period: the prices are checked per month and kept.
+    const a = reading();
+    a.listing.category = 'rent';
+    for (const m of a.models) m.subsidisedPrice = null;
+    a.listing.price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+    const monthly = { amount: 319015, currency: 'SAR', from: true, period: 'month', onRequest: false };
+    const r = await rig({ listing: a });
+    try {
+      seed(r, { price: monthly, extra: { category: 'rent' } });
+      await enrich(r);
+      assert.deepEqual(calls(r).map((c) => c.period), ['month']);
+      assert.deepEqual(saved(r).models.map((m) => m.price), [419994, 319015]);
+    } finally { r.cleanup(); }
+    // A sale whose reading carries a stray period: not a rental, nothing to compare — kept, and no period asked.
+    const b = reading();
+    b.listing.price = { amount: 319015, currency: 'SAR', from: true, period: 'year', onRequest: false };
+    const s = await rig({ listing: b });
+    try {
+      seed(s);
+      await enrich(s);
+      assert.deepEqual(calls(s).map((c) => c.period), [null]);
+      assert.deepEqual(saved(s).models.map((m) => m.price), [419994, 319015]);
+    } finally { s.cleanup(); }
+  });
+
   it('Codex r1 #2: --enrich of a rental — a reading whose period is not the listing\'s refuses the model prices (warn); the listing\'s period is the one checked', async () => {
     const rental = (period) => {
       const a = reading();

@@ -551,7 +551,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // enrichment whose reading has another period keeps no model price.
   const readingPeriod = price?.period ?? null;
   const listingPeriod = enrichTarget
-    ? (enrichTarget.listing.price?.period ?? null)
+    ? (enrichTarget.listing.category === 'rent' ? (enrichTarget.listing.price?.period ?? null) : null)
     : (caption.category || ai.listing?.category) === 'rent' ? (caption.period || readingPeriod || 'year') : null;
   // The "a price for one of its unit models counts" allowance is for a whole development quoted
   // "from" its cheapest model — never for one specific unit, and never for a price not marked `from`.
@@ -744,7 +744,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     const currency = { reading: price?.currency ?? null, established: readingCurrency !== null, listing: listingCurrency };
     if (enrich && (readingCurrency === null || readingCurrency !== listingCurrency)) currencyDrop = { decision: 'currency-mismatch', currency };
     else if (!enrich && readingCurrency === null) currencyDrop = { decision: 'currency-unconfirmed', currency };
-    else if (enrich && readingPeriod !== listingPeriod) currencyDrop = { decision: 'period-mismatch', currency, period: { reading: readingPeriod, listing: listingPeriod } };
+    // Only a rental's period, and only when the reading names another one (r2 #10): a reading with no period is
+    // checked for the listing's, and a sale's stray period means nothing.
+    else if (enrich && listingPeriod && readingPeriod && readingPeriod !== listingPeriod) {
+      currencyDrop = { decision: 'period-mismatch', currency, period: { reading: readingPeriod, listing: listingPeriod } };
+    }
   }
   // The owner's own figure — his caption price, or the price he set by WhatsApp on a listing being enriched.
   const ownerAmount = caption.price ? caption.price.amount : ownerPriceEdit ? (enrichTarget.listing.price?.amount ?? null) : null;
