@@ -1263,14 +1263,14 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   // Never write over a listing with less than it carries. An incomplete price check (a page that did
   // not render, a failed call, a quota) is ours, not the brochure's: when the listing already carries
   // model prices it could lose, nothing changes — try again later; a listing with none to lose gets the
-  // models without the unchecked prices (the warning above says "try again later"), as a publish would —
-  // except after a quota error (Codex r1 #9): then nothing changes either, so the run ends as "quota" and
-  // the backfill's resume enriches the listing again from scratch, instead of finding it "already enriched"
-  // by the plans and fact lists a cut-short run would have committed.
+  // model prices it could lose, nothing changes — try again later; and so on a first enrichment too, whatever
+  // cut the check short (a quota: Codex r1 #9; a page that did not render, a failed call: r2 #9) — nothing is
+  // committed and the run is retryable, so the backfill enriches the listing again from scratch instead of
+  // finding it "already enriched" by the plans and fact lists a cut-short run would have committed.
   // A reading with fewer models, fewer confirmed model prices, fewer floor plans or a fact list fewer is
   // refused unless --force says it is right (the brochure really changed, or the old reading was wrong).
   const mp = report.modelPrices;
-  const unchecked = mp && (mp.fatal || (compare.before.prices > 0 && (mp.incomplete?.length ?? 0) > 0))
+  const unchecked = mp && (mp.fatal || (mp.incomplete?.length ?? 0) > 0)
     ? `${mp.fatal ? 'the AI quota ran out during the unit-model price check' : `the check of ${mp.incomplete.length} unit-model price(s) could not be completed (page${mp.incompletePages.length === 1 ? '' : 's'} ${mp.incompletePages.join(', ')})`} — nothing was changed; try again later`
     : null;
   const degraded = compare.losses.length && !force
@@ -1300,7 +1300,12 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   });
   if (refuse) {
     fs.rmSync(stageDir, { recursive: true, force: true });
-    if (!dryRun) throw new RejectError(refuse, 'enrich');
+    if (!dryRun) {
+      const err = new RejectError(refuse, 'enrich');
+      // An unfinished check is ours, not the listing's: run-once reports it as a failure to retry (r2 #9).
+      if (refuse === unchecked) err.retryable = true;
+      throw err;
+    }
     report.blocked = refuse;
   }
 

@@ -2860,30 +2860,33 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.equal(err?.stage, 'enrich');
       assert.match(String(err?.reason), /^the AI quota ran out during the unit-model price check — nothing was changed; try again later$/);
       // The backfill reads that as a quota stop, and its resume plans the listing again — not "already enriched".
-      assert.equal(classifyRun({ code: 1, output: `REJECTED at "enrich": ${err.reason}\nNothing was written to the repo.\n` }).outcome, 'quota');
+      assert.equal(classifyRun({ code: 1, output: `FAILED: ${err.reason}\n` }).outcome, 'quota');
       const [row] = planBackfill([saved(r)], { findPdf: () => r.pdfPath });
       assert.equal(row.action, 'enrich', row.reason);
       assert.match((await enrich(r, { dryRun: true })).blocked, /quota/);
     } finally { r.cleanup(); }
   });
 
-  it('P6b: a first-time enrichment with an incomplete price check loses nothing — the models go up without the unchecked prices, "try again later"', async () => {
-    // A failed call, not a quota (that one commits nothing: Codex r1 #9 above).
-    for (const fail of [true]) {
-      const r = await rig({ listing: reading(), modelConfirmFail: fail });
-      try {
-        const before = seed(r, { price: { ...ON_REQUEST } });
-        const report = await enrich(r, { force: false });
-        assert.equal(report.ok, true, String(fail));
-        assert.equal(report.enrich.refuse, null);
-        assert.equal(report.enrich.headline, 'no-model-prices');
-        const after = saved(r);
-        assert.deepEqual(after.price, before.price, 'still on request');
-        assert.deepEqual(after.models.map((m) => [m.name.en, m.price, m.subsidisedPrice]), [['Nawras', null, null], ['Lulu', null, null]]);
-        assert.ok(report.warnings.some((w) => /could not be completed \(page 3\), so they were left off for now — try again later/.test(w)), report.warnings.join(' | '));
-        assert.deepEqual(checkListing(after), []);
-      } finally { r.cleanup(); }
-    }
+  it('P6b (r2 #9): a first-time enrichment whose price check failed for any reason commits nothing and exits retryable — the backfill reruns it', async () => {
+    const r = await rig({ listing: reading(), modelConfirmFail: true });
+    try {
+      seed(r, { price: { ...ON_REQUEST } });
+      const raw = fs.readFileSync(inboxFile(r), 'utf8');
+      const err = await enrich(r).then(() => null, (e) => e);
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '', 'no plan, fact list or brochure written');
+      assert.equal(fs.readFileSync(inboxFile(r), 'utf8'), raw);
+      assert.equal(err?.stage, 'enrich');
+      assert.equal(err?.retryable, true);
+      assert.match(String(err?.reason), /^the check of 4 unit-model price\(s\) could not be completed \(page 3\) — nothing was changed; try again later$/);
+      // run-once prints a retryable refusal as FAILED: the backfill stops there (or, with --continue-on-error, lists
+      // it under "retry the failed ones"), and its resume plans the listing again — not "already enriched".
+      assert.equal(classifyRun({ code: 1, output: `FAILED: ${err.reason}\n` }).outcome, 'failed');
+      const runOnce = fs.readFileSync(path.join(REPO, 'services', 'intake', 'run-once.mjs'), 'utf8');
+      assert.match(runOnce, /err instanceof RejectError && !err\.retryable/);
+      const [row] = planBackfill([saved(r)], { findPdf: () => r.pdfPath });
+      assert.equal(row.action, 'enrich', row.reason);
+      assert.match((await enrich(r, { dryRun: true })).blocked, /try again later/);
+    } finally { r.cleanup(); }
   });
 
   const ABROAD = {

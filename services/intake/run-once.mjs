@@ -268,7 +268,9 @@ async function main() {
     say(`work dir: ${work}`);
     process.exit(0);
   } catch (err) {
-    if (err instanceof RejectError) {
+    // A retryable refusal (an --enrich whose price check could not finish, r2 #9) is a failure to run again,
+    // not a verdict on the listing: FAILED, so the backfill stops on it and its resume runs it again.
+    if (err instanceof RejectError && !err.retryable) {
       say('');
       say(`REJECTED at "${err.stage}": ${err.reason}`);
       say('Nothing was written to the repo.');
@@ -276,6 +278,7 @@ async function main() {
       process.exit(1);
     }
     say(`FAILED: ${err.message}`);
+    if (err.retryable) say('Nothing was written to the repo — run it again later.');
     if (err.detail) say(err.detail);
     if (err.rolledBack) say('The repo was rolled back — nothing of this run is left in it.');
     if (process.env.BONA_DEBUG) say(err.stack);
