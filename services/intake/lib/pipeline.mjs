@@ -676,10 +676,16 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
    */
   const printedWhole = async (amount, evidence, { subsidised, out, whole = true }) => {
     const pages = wholeCheckPages(amount, evidence);
-    if (!pages.length) return out;
+    // A quota first, page or no page (r3 #10): nothing more can be looked at — "try again later".
     if (quotaHit) {
-      log.info('intake.price_evidence_skipped', { page: pages[0], subsidised, whole: true, reason: 'quota' });
+      log.info('intake.price_evidence_skipped', { page: pages[0] ?? null, subsidised, whole, reason: 'quota' });
       return { ...out, unchecked: true, uncheckedWhy: 'quota' };
+    }
+    if (!pages.length) {
+      // No page to pick, and the model check that would have looked at the figure's page did not finish: that
+      // check failed, not the brochure (r3 #10).
+      if ((report.modelPrices?.incomplete ?? []).includes(amount)) return { ...out, unchecked: true, uncheckedWhy: 'call' };
+      return out;
     }
     let unrendered = null;
     let failedCall = null;

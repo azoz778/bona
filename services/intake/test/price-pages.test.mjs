@@ -1421,6 +1421,25 @@ describe('processPdf: unit-model prices — failures, bounds and the headline fa
     } finally { r.cleanup(); }
   });
 
+  it('r3 #10: a headline no page text carries, whose model check did not finish: "try again later", never "not printed"', async () => {
+    // The figure is printed only as an image on page 3 (no text layer for it), the model cites page 3, the headline
+    // cites nothing: the whole-property check has no page to pick — the model check that would have looked failed.
+    const listing = () => withModels([model('A', 1250000, null, 3), model('B', 1500000, null, 3)], { price: { amount: 1250000, currency: 'SAR', from: true, period: null, onRequest: false } });
+    const pageText = ['Palm Compound', 'x', 'Unit types', 'y', 'z'];
+    for (const fail of ['quota', true]) {
+      const r = await rig({ pageText, listing: listing(), modelConfirmFail: fail });
+      try {
+        const report = await r.run();
+        assert.equal(report.listingPreview.price.onRequest, true, String(fail));
+        assert.equal(report.priceEvidence.unchecked, true, String(fail));
+        const w = report.warnings.find((x) => /price on request/.test(x)) ?? '';
+        assert.match(w, /could not be checked/, String(fail));
+        assert.match(w, /try again later/, String(fail));
+        assert.doesNotMatch(w, /was not printed/, String(fail));
+      } finally { r.cleanup(); }
+    }
+  });
+
   it('r2 #2: a model check that timed out leaves its figure to a page check as the whole development\'s price — never the text layer', async () => {
     const project = () => withModels([model('A', 1250000, null, 3), model('B', 1500000, null, 3)], { price: { amount: 1250000, currency: 'SAR', from: true, period: null, onRequest: false }, priceEvidence: { page: 3, quote: '1,250,000' } });
     const pageText = ['Palm Compound', 'x', 'A 1,250,000\nB 1,500,000', 'y', 'z'];
