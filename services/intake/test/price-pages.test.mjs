@@ -13,6 +13,7 @@ import { hasSubsidyWording, pageNeedsPriceRender, pricePagesToRender, MAX_PRICE_
 import { execFileSync } from 'node:child_process';
 import { checkListing } from '../lib/listing.mjs';
 import { processPdf } from '../lib/pipeline.mjs';
+import { classifyRun, planBackfill } from '../lib/backfill.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -2723,8 +2724,27 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
     }
   });
 
+  it('Codex r1 #9: a first-time enrichment whose price check hit the quota commits nothing and says "quota" — so the backfill\'s resume runs it again from scratch', async () => {
+    const r = await rig({ listing: reading(), modelConfirmFail: 'quota' });
+    try {
+      seed(r, { price: { ...ON_REQUEST } });
+      const raw = fs.readFileSync(inboxFile(r), 'utf8');
+      const err = await enrich(r).then(() => null, (e) => e);
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '', 'no plan, fact list or brochure written');
+      assert.equal(fs.readFileSync(inboxFile(r), 'utf8'), raw);
+      assert.equal(err?.stage, 'enrich');
+      assert.match(String(err?.reason), /^the AI quota ran out during the unit-model price check — nothing was changed; try again later$/);
+      // The backfill reads that as a quota stop, and its resume plans the listing again — not "already enriched".
+      assert.equal(classifyRun({ code: 1, output: `REJECTED at "enrich": ${err.reason}\nNothing was written to the repo.\n` }).outcome, 'quota');
+      const [row] = planBackfill([saved(r)], { findPdf: () => r.pdfPath });
+      assert.equal(row.action, 'enrich', row.reason);
+      assert.match((await enrich(r, { dryRun: true })).blocked, /quota/);
+    } finally { r.cleanup(); }
+  });
+
   it('P6b: a first-time enrichment with an incomplete price check loses nothing — the models go up without the unchecked prices, "try again later"', async () => {
-    for (const fail of [true, 'quota']) {
+    // A failed call, not a quota (that one commits nothing: Codex r1 #9 above).
+    for (const fail of [true]) {
       const r = await rig({ listing: reading(), modelConfirmFail: fail });
       try {
         const before = seed(r, { price: { ...ON_REQUEST } });
