@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { hasSubsidyWording, pageNeedsPriceRender, pricePagesToRender, MAX_PRICE_PAGES } from '../lib/price-pages.mjs';
 import { execFileSync } from 'node:child_process';
 import { checkListing, replaceMetaFor, writeInboxListing } from '../lib/listing.mjs';
-import { processPdf } from '../lib/pipeline.mjs';
+import { processPdf, statesMoney } from '../lib/pipeline.mjs';
 import { classifyRun, planBackfill } from '../lib/backfill.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -87,6 +87,30 @@ describe('pageNeedsPriceRender', () => {
     assert.equal(hasSubsidyWording('Price for Sakani beneficiaries'), true);
     assert.equal(hasSubsidyWording('مجمع سكني متكامل'), false, '"residential" alone is not subsidy wording');
   });
+});
+
+// r3 #1 — THE money rule for free text (unit-model rooms / availability, amenities / nearby / warranties items).
+// One table: every MONEY case is dropped from the site and the brochure, every NOT MONEY case survives. Change the
+// rule only by changing this table.
+describe('r3 #1: the free-text money rule (statesMoney) — the whole contract in one table', () => {
+  const MONEY = [
+    'Price 4500', 'Monthly rent 4500', 'Annual rent 9500', 'Booking 5000', 'Starting from 4500', 'Rent 8500 per month',
+    'السعر 4500', 'إيجار شهري 4500', 'حجز 5000', 'Down payment 50 000', 'Deposit 750', 'Club fee SAR 1,500',
+    // the same rules, other spellings
+    'بسعر 4500', 'الإيجار 4500', 'دفعة مقدمة 5000', 'عربون 750', 'رسوم الخدمة 25 للمتر', 'أقساط 1200', 'Service charge 25 per sqm',
+    'Booking fee 500, refundable', 'Cost 3000', '1,500 riyals', '$ 750', 'Buildings G–P, 419,994', 'Down payment 50\u00a0000', 'Down payment 50\u202f000',
+    'from 4.5m', '1.2 million', '3 ملايين', '5 آلاف', 'Parking for 1,200 cars',
+  ];
+  const NOT_MONEY = [
+    'Handover starts 2027', 'No maintenance fees for 2 years', 'ضمان 10 سنوات … مقدم من المطور', 'خدمات مقدمة … 24 ساعة',
+    'رسومات هندسية', 'Area 15,000 sq. m', '3 bedrooms, 2 bathrooms', 'A 5k jogging track',
+    // the same rules, other spellings
+    'Area 15,000 sq m', 'Plot 1,200 m²', '120 sqm', 'المساحة 1,500 م²', '15 km to the airport', 'Villa 15m frontage', 'Beach 500m away',
+    'King Abdulaziz Airport — 15 minutes', 'Mall — 1.2 million visitors a year', 'Structure — 10 years', 'خدمة 24 ساعة',
+    'Gym', 'رسومات معمارية لكل نموذج', 'Living room 4.2 x 5.1 m', 'Built in 1998',
+  ];
+  it('MONEY', () => { for (const t of MONEY) assert.equal(statesMoney(t), true, t); });
+  it('NOT MONEY', () => { for (const t of NOT_MONEY) assert.equal(statesMoney(t), false, t); });
 });
 
 describe('pricePagesToRender', () => {

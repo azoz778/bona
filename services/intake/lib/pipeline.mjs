@@ -97,7 +97,8 @@ export const sha256File = (file) => crypto.createHash('sha256').update(fs.readFi
 /** Every string in a model answer's listing (title, project, copy, highlights, …), for the name check. */
 const stringsIn = (v) => (typeof v === 'string' ? [v] : v && typeof v === 'object' ? Object.values(v).flatMap(stringsIn) : []);
 
-const SENTENCE_END = /[.!?؟؛;\n]+(?=\s|$)/;
+/** A sentence ends at . ! ? ; and a line break — not at the dot of "sq." ("15,000 sq. m" is one measurement: r3 #1). */
+const SENTENCE_END = /(?<!\bsq)[.!?؟؛;\n]+(?=\s|$)/i;
 const pairText = (v) => [v?.en, v?.ar];
 const listText = (v) => ['en', 'ar'].flatMap((k) => (Array.isArray(v?.[k]) ? v[k] : []));
 
@@ -134,52 +135,71 @@ function refusedFigureIn(segments, refused, published) {
   return null;
 }
 
+/** A currency's code, name or symbol (r3 #1). */
+const CUR = String.raw`(?:\b(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP|riyals?|rials?|dirhams?|dollars?|euros?|pounds?|sterling)\b|ريال|ر\.\s?س|ر\.\s?ع|درهم|دولار|يورو|جنيه|دينار|[$€£﷼\u20c1])`;
+/** A currency next to a figure: "SAR 1,500", "1,500 riyals", "$ 750", "750 SR". */
+const CURRENCY_BY_FIGURE_RE = new RegExp(String.raw`${CUR}\s*[:\-–—=]?\s*\d|\d(?:[.,٫]\d{1,2})?\s*(?:\/-\s*)?${CUR}`, 'i');
+/** A currency's name or symbol anywhere, or its code by a figure — what a model NAME may not carry (r2 #4). */
+const NAME_CURRENCY_RE = new RegExp(String.raw`\b(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)\b\s*\d|\d\s*\b(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)\b|\b(?:riyals?|rials?|dirhams?|dollars?|euros?|sterling)\b|ريال|ر\.\s?س|ر\.\s?ع|درهم|دولار|يورو|جنيه|دينار|[$€£﷼\u20c1]`, 'i');
 /**
- * A currency, by its mark or its name (r2 #4): a code only beside a figure ("SAR 750", "750 SR" — "Model SR-2"
- * is a name), a name or a symbol anywhere ("riyals", "ريال", "ر.س", "$", "﷼").
+ * Arabic words as whole words, with the clitics و / ف, ب / ل / لل and ال in front: "السعر", "بسعر", "للإيجار"
+ * — never inside another word ("رسوم" is not in "رسومات").
  */
-const CODE = '(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)';
-const CURRENCY_RE = new RegExp([
-  String.raw`\b${CODE}\b\s*\d|\d\s*${CODE}\b`,
-  String.raw`\b(?:riyals?|rials?|dirhams?|dollars?|euros?|sterling)\b`,
-  String.raw`ريال|ر\.\s?س|ر\.\s?ع|درهم|دولار|يورو|جنيه|دينار|[$€£﷼⃁]`,
+const arabicWords = (words) => String.raw`(?<![\u0600-\u06ff])[وف]?(?:لل|[بل])?(?:ال)?(?:${words})(?![\u0600-\u06ff])`;
+/** A payment (r3 #1): what a model NAME may not carry, and, with any number, money in free text. "مقدم" alone is not one. */
+const PAYMENT_EN = String.raw`\b(?:down\s*-?\s*payments?|payments?|pay|pays|paid|deposits?|fees?|instal{1,2}ments?|service\s+charges?)\b`;
+const PAYMENT_AR = arabicWords('دفع|دفعة|دفعات|عربون|رسوم|قسط|أقساط|اقساط');
+const PAYMENT_RE = new RegExp(`${PAYMENT_EN}|${PAYMENT_AR}`, 'i');
+/** A price word or a payment: with ANY number in the same clause, the clause states money (r3 #1). */
+const PRICE_WORD_RE = new RegExp([
+  String.raw`\b(?:prices?|priced|pricing|rents?|rental|rentals|booking|book|costs?)\b`, arabicWords('سعر|أسعار|اسعار|إيجار|ايجار|حجز'), PAYMENT_EN, PAYMENT_AR,
 ].join('|'), 'i');
-/** A payment: down payment, deposit, fee, instalment, service charge, دفعة, عربون, رسوم, قسط, مقدم, … */
-const PAYMENT_RE = new RegExp([
-  String.raw`\b(?:down\s*-?\s*payments?|payments?|paid|deposits?|fees?|instal{1,2}ments?|service\s+charges?)\b`,
-  String.raw`دفع|عربون|رسوم|قسط|أقساط|اقساط|تقسيط|مقدم`,
-].join('|'), 'i');
+/** "starting / starts / from / يبدأ / ابتداء": money beside a figure of four digits or more (r3 #1). */
+const FROM_WORD_RE = new RegExp(String.raw`\b(?:starting|starts?|from)\b|` + arabicWords('يبدأ|تبدأ|ابتداء|ابتداءً|إبتداء|ابتداءا'), 'i');
+/** A figure of four digits or more, ungrouped. */
+const FOUR_PLUS_RE = /(?<![\d.,٫٬])\d{4,}/;
 /**
- * A money-sized figure, once the measurements are cut out (withoutMeasures): thousands grouped by a comma, a
- * dot, a space, a no-break or a thin space ("50,000", "50 000"); five digits or more; a scaled amount ("1.2
- * million", "990k", "4.5m", "٣ ملايين"). A whole number written solid with "m" ("15m", "500m") is metres, not
- * millions, here: a name or a nearby distance, never on its own a price.
+ * A money-sized figure: thousands grouped by a comma, a dot, a space, a no-break or a thin space ("50,000",
+ * "50 000"); five digits or more; a scaled amount ("4.5m", "1.2 million", "مليون", "ألف", "990k"). A whole number
+ * written solid with "m" ("15m", "500m") is metres here, never millions; "5k" beside a distance word is a distance.
  */
-const MONEY_FIGURE_RE = new RegExp([
-  String.raw`(?<![\d.,٫٬])\d{1,3}(?:[,٬.'’ \u00a0\u202f\u2009]\d{3})+(?!\d)`,
-  String.raw`(?<![\d.,٫٬])\d{5,}`,
+const GROUPED_RE = /(?<![\d.,٫٬])\d{1,3}(?:[,٬.'’ \u00a0\u202f\u2009]\d{3})+(?!\d)/;
+const SCALED_RE = new RegExp([
   String.raw`(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?\s*(?:million|mn|thousand|billion|bn|مليون|ملايين|مليار|ألف|الف|آلاف|الاف)(?![a-z])`,
-  String.raw`(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?k(?![a-z²\d])`,
   String.raw`(?<![\d.,٫٬])\d+[.,٫]\d+m(?![a-z²\d])`,
 ].join('|'), 'i');
+const SOLID_K_RE = /(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?k(?![a-z²\d])/i;
+const DISTANCE_WORD_RE = /\b(?:run|runs|running|jog|jogging|walk|walking|track|trail|race|route|loop|path|cycling|cycle)\b|ممشى|مضمار|مسار|جري/i;
+/** Cut out before the test (r3 #1): a duration right after its number, and a year 1900–2099 standing alone. */
+const DURATION_G = /(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?\s*(?:years?|yrs?|months?|weeks?|days?|hours?|hrs?|minutes?|mins?|سنة|سنوات|سنين|عام|أعوام|اعوام|شهر|شهور|أشهر|اشهر|أسبوع|أسابيع|يوم|أيام|ايام|ساعة|ساعات|دقيقة|دقائق)(?![a-z\u0600-\u06ff])/gi;
+const YEAR_G = /(?<![\d.,٫٬])(?:19|20)\d{2}(?![\d]|[.,٫٬]\d)/g;
+/** Clauses: sentences, and the parts a comma or a semicolon sets apart ("Booking fee 500, refundable"). */
+const CLAUSE_END = new RegExp(`${SENTENCE_END.source}|[,،](?=\\s)`, 'i');
 
 /**
- * Does `text` state money (r2 #4)? Sentence by sentence: a currency mark or name; a payment word beside ANY
- * number ("Deposit 750", "10% down payment"); or a money-sized figure (MONEY_FIGURE_RE). Prices are published
- * from the price fields only, so no free text may carry one — not even a model's own confirmed price, which a
- * later `price <id> onrequest` would leave behind in it.
+ * Does `text` state money? THE rule for free text — a unit model's rooms and availability, every amenities /
+ * nearby / warranties item (r3 #1; its whole contract is one table in price-pages.test.mjs). Clause by clause,
+ * once measurements (withoutMeasures), durations ("2 years", "24 ساعة") and lone years ("2027") are cut out:
+ *   - a currency next to a figure ("Club fee SAR 1,500");
+ *   - a price or payment word with ANY number ("Price 4500", "Rent 8500 per month", "Deposit 750", "حجز 5000");
+ *   - "starting / from / يبدأ / ابتداء" with a figure of four digits or more ("Starting from 4500");
+ *   - grouped thousands ("Down payment 50 000", "Parking for 1,200 cars" — a count, dropped all the same:
+ *     TAQEEM first), five digits or more, or a scaled amount ("4.5m", "1.2 million").
+ * Prices are published from the price fields only, so no free text may carry one.
  */
 export function statesMoney(text) {
-  return String(text ?? '').split(SENTENCE_END).some((seg) => {
-    const t = westernise(seg);
-    if (CURRENCY_RE.test(t)) return true;
-    if (PAYMENT_RE.test(t) && /\d/.test(t)) return true;
-    return MONEY_FIGURE_RE.test(withoutMeasures(t));
+  return String(text ?? '').split(CLAUSE_END).some((clause) => {
+    const t = withoutMeasures(westernise(clause)).replace(DURATION_G, ' ').replace(YEAR_G, ' ');
+    if (CURRENCY_BY_FIGURE_RE.test(t)) return true;
+    if (PRICE_WORD_RE.test(t) && /\d/.test(t)) return true;
+    if (FROM_WORD_RE.test(t) && FOUR_PLUS_RE.test(t)) return true;
+    if (GROUPED_RE.test(t) || /(?<![\d.,٫٬])\d{5,}/.test(t) || SCALED_RE.test(t)) return true;
+    return SOLID_K_RE.test(t) && !DISTANCE_WORD_RE.test(t);
   });
 }
 
 /** A model NAME states money only by a currency or a payment word: "Villa 15m", "Plot 10000", "Penthouse 4,250" are names. */
-const nameStatesMoney = (text) => typeof text === 'string' && (CURRENCY_RE.test(westernise(text)) || PAYMENT_RE.test(text));
+const nameStatesMoney = (text) => typeof text === 'string' && (NAME_CURRENCY_RE.test(westernise(text)) || PAYMENT_RE.test(text));
 
 /**
  * The money guard over a reading's free text (r2 #4, Codex r1 #3): a unit model's rooms or availability that
