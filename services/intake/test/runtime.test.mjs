@@ -259,6 +259,21 @@ describe('TAQEEM currency — a figure printed in another currency is not that p
     assert.equal(printedInCurrency('Flat A £1,250,000\nFlat B £2,000,000', 1250000, 'SAR'), false, 'P1: a Hampstead price table');
   });
 
+  it('Codex r1 #1b: a currency mark counts only beside the figure, on its own line — not one a line away', () => {
+    for (const t of ['AED 1,250,000\nSAR prices on request', 'AED 1,250,000\r\nSAR prices on request', 'SAR prices on request\nAED 1,250,000',
+      '1,250,000 AED\nSAR', 'SAR\n1,250,000 AED', '£1,250,000\u2028SAR', 'AED 1,250,000\u2029ر.س']) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR'), false, JSON.stringify(t));
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: false }), false, `${JSON.stringify(t)} (abroad)`);
+    }
+    // A mark on the line above a bare figure is no mark of it: the figure is bare, which counts only where bare figures may.
+    assert.equal(printedInCurrency('SAR\n1,250,000', 1250000, 'SAR', { bareCounts: false }), false);
+    assert.equal(printedInCurrency('$\n250,000', 250000, 'USD', { bareCounts: false }), false);
+    // Beside it, on the same line, it still counts — spaces, a colon or a dash between.
+    for (const t of ['AED 1,250,000\nSAR 1,250,000', 'Price: SAR — 1,250,000\nnext line', 'first line\n1,250,000 SAR']) {
+      assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: false }), true, JSON.stringify(t));
+    }
+  });
+
   it('a bare figure counts only when bare figures may (a property in the country of that currency) — and one marked occurrence is enough', () => {
     assert.equal(printedInCurrency('Price 1,250,000', 1250000, 'SAR'), true);
     assert.equal(printedInCurrency('Price 1,250,000', 1250000, 'SAR', { bareCounts: false }), false);

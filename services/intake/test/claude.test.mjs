@@ -807,6 +807,16 @@ describe('confirmPriceEvidence', () => {
     await riyalRules((o) => confirmPriceEvidence({ ...opts, ...o }));
   });
 
+  it('`whole` with `project` (Codex r1 #1a): only the development\'s own price counts, not a model\'s row — and no "a model\'s price counts" allowance', async () => {
+    const f = fakeSpawn([{ envelope: envelope({ confirmed: false }) }]);
+    await confirmPriceEvidence({ ...opts, whole: true, project: true, spawnImpl: f.spawnImpl });
+    const { prompt } = f.calls[0];
+    assert.match(prompt, /whole development sold as several unit models: only a price printed for the whole property counts/);
+    assert.match(prompt, /only in one unit model's row does NOT count/);
+    assert.doesNotMatch(prompt, /unit models counts as the property's price/);
+    assert.doesNotMatch(prompt, /ONE property, not a whole development/);
+  });
+
   it('`whole`: only a price printed for the whole property counts — not a floor\'s, a part\'s or a layout\'s (a single property, review 2026-11-17)', async () => {
     const f = fakeSpawn([{ envelope: envelope({ confirmed: false }) }, { envelope: envelope({ confirmed: false }) }]);
     await confirmPriceEvidence({ ...opts, whole: true, spawnImpl: f.spawnImpl });

@@ -808,10 +808,18 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     if (!check.inText && !check.confirmed) rejectedPrices.push(price.amount);
   }
   if (!headlineFromModels && !caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
-    report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: ownPriceOnly });
+    // Codex r1 #1: the text layer cannot tie a figure to one unit model or one unit. A headline that IS a
+    // model figure the page check refused (looked at and not found — not one whose check could not be done:
+    // `incomplete`), and the headline of one specific unit read with unit models beside it, are settled only
+    // on a page, as the whole listing's own price — else "on request".
+    const times = (list, n) => (Array.isArray(list) ? list.filter((x) => x === n).length : 0);
+    const refusedAsModel = times(report.modelPrices?.refused, price.amount) > times(report.modelPrices?.incomplete, price.amount);
+    const unitAmongModels = Boolean(ai.listing?.unit) && Array.isArray(ai.models) && ai.models.length > 0;
+    const pageOnly = ownPriceOnly || refusedAsModel || unitAmongModels;
+    report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: pageOnly });
     const fromWords = ownPriceOnly ? startingFromWords() : null;
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
-      log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency, unchecked: report.priceEvidence.unchecked === true, why: report.priceEvidence.uncheckedWhy ?? null, whole: ownPriceOnly });
+      log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency, unchecked: report.priceEvidence.unchecked === true, why: report.priceEvidence.uncheckedWhy ?? null, whole: pageOnly });
       rejectedPrices.push(price.amount);
       price.amount = null;
       price.onRequest = true;

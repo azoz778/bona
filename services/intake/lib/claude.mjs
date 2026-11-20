@@ -458,7 +458,9 @@ function currencyRule(currency, bareCounts, home = null) {
  *   - `project`: a whole development quoted "from" its cheapest model — a price printed for one of its
  *     unit models counts as the property's.
  *   - `whole`: ONE property (a single property, or one unit, whose headline was its lowest model price) —
- *     only a price printed for the whole property counts, not a floor's, a part's or a layout's.
+ *     only a price printed for the whole property counts, not a floor's, a part's or a layout's. With
+ *     `project` (a development whose headline is a model figure its own check refused): only the
+ *     development's own price counts, not one model's row — and the `project` allowance is not given.
  *   - `unit`: one specific unit — a price printed for another unit or model does not count.
  * @returns {Promise<{confirmed:boolean, error?:string, fatal?:boolean}>} on a failed call: not
  *   confirmed, the error message, and `fatal` when it was a quota or session limit (runClaudeOnce) —
@@ -482,11 +484,18 @@ export async function confirmPriceEvidence({
     'A number you have to compute, infer or assume does not count. A price for a different unit',
     'on the same page does not count unless the page makes clear it is this property\'s price.',
     ...(CURRENCIES.includes(currency) ? currencyRule(currency, bareCounts, home) : []),
-    ...(project
+    ...(project && !whole
       ? ['The listing is a whole development sold as several unit models: a price printed for one of its',
         'unit models counts as the property\'s price.']
       : []),
-    ...(whole
+    // `project` and `whole` (Codex r1 #1a): a development whose figure a unit model's own check refused —
+    // only the development's own price counts, never a model's row.
+    ...(whole && project
+      ? ['The listing is a whole development sold as several unit models: only a price printed for the whole property counts —',
+        'the development\'s own price, such as its "starting from" price. A price printed only in one unit model\'s row does NOT count,',
+        'and neither does a total you have to add up.']
+      : []),
+    ...(whole && !project
       ? ['The listing is ONE property, not a whole development: only a price printed for the whole property counts.',
         'A price printed for one of its floors, parts, phases or layouts does NOT count, and neither does a total you have to add up.']
       : []),

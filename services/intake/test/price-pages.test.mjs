@@ -1781,17 +1781,37 @@ describe('processPdf: a single property is never "From" its cheapest model', { t
       assert.equal(headlineCalls(one).length, 0);
       assert.deepEqual(report.listingPreview.price, { amount: 4400000, currency: 'SAR', from: false, period: null, onRequest: false });
     } finally { one.cleanup(); }
-    // One specific unit of a project, `from` not set, priced like its model: the unit's own price, as before.
+    // One specific unit of a project, `from` not set, priced like its model (Codex r1 #1c): the text layer cannot tie
+    // "A SAR 2,000,000" to unit 12, so only a page that prints it as the unit's own price settles it — a row labelled
+    // only "A" does not: on request.
     const unit = villa({ amount: 2000000, from: false, quote: 'SAR 2,000,000', models: [model('A', 2000000, 3), model('B', 2500000, 3)] });
     unit.listing.project = { name: { en: 'Palm Compound', ar: 'مجمع النخيل' }, developer: { en: 'Palm', ar: 'النخيل' } };
     unit.listing.unit = { unitRef: '12', block: null, floor: null };
     const u = await rig({ listing: unit, pageText: textPages('A SAR 2,000,000\nB SAR 2,500,000'), facts: { 3: [{ fig: 2000000, mark: 'SAR', kind: 'model', model: 'A' }, { fig: 2500000, mark: 'SAR', kind: 'model', model: 'B' }] } });
     try {
       const report = await u.run();
-      assert.equal(report.priceEvidence.inText, true);
-      assert.deepEqual(headlineCalls(u).length, 0);
-      assert.deepEqual(report.listingPreview.price, { amount: 2000000, currency: 'SAR', from: false, period: null, onRequest: false });
+      assert.equal(report.priceEvidence.inText, false, 'the text layer cannot say "SAR 2,000,000" is unit 12\'s');
+      assert.deepEqual(headlineCalls(u).map((c) => [c.amount, c.whole, c.page]), [[2000000, true, 3]]);
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST);
+      assert.deepEqual(report.listingPreview.models.map((m) => m.price), [2000000, 2500000], 'the models keep their confirmed prices');
     } finally { u.cleanup(); }
+    // The page prints it as unit 12's own price: published, as the unit's own (no `from`).
+    const u12 = await rig({ listing: structuredClone(unit), pageText: textPages('A SAR 2,000,000\nB SAR 2,500,000\nUnit 12: SAR 2,000,000'),
+      facts: { 3: [{ fig: 2000000, mark: 'SAR', kind: 'model', model: 'A' }, { fig: 2500000, mark: 'SAR', kind: 'model', model: 'B' }, { fig: 2000000, mark: 'SAR', kind: 'whole' }] } });
+    try {
+      const report = await u12.run();
+      assert.deepEqual(report.listingPreview.price, { amount: 2000000, currency: 'SAR', from: false, period: null, onRequest: false });
+    } finally { u12.cleanup(); }
+    // A unit with no models: its own price off the text layer, as before (pre-existing behaviour, PR #68).
+    const plain = structuredClone(unit);
+    plain.models = [];
+    const p = await rig({ listing: plain, pageText: textPages('Unit 12 SAR 2,000,000') });
+    try {
+      const report = await p.run();
+      assert.equal(report.priceEvidence.inText, true);
+      assert.equal(headlineCalls(p).length, 0);
+      assert.deepEqual(report.listingPreview.price, { amount: 2000000, currency: 'SAR', from: false, period: null, onRequest: false });
+    } finally { p.cleanup(); }
     // The printed total, no `from`, floors as models: not the lowest model price, so its own check, off the text layer.
     const total = await rig({ listing: villa({ amount: 4500000, from: false, quote: 'Total SAR 4,500,000', models: [model('Ground floor', 2000000, 3), model('First floor', 2500000, 3)] }),
       pageText: textPages(floorText), facts: floorFacts() });
@@ -1800,6 +1820,49 @@ describe('processPdf: a single property is never "From" its cheapest model', { t
       assert.equal(report.priceEvidence.inText, true);
       assert.deepEqual(report.listingPreview.price, { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false });
     } finally { total.cleanup(); }
+  });
+
+  it('Codex r1 #1a: a development whose model prices the page check refused never gets that figure back as its headline off the text layer', async () => {
+    const project = { name: { en: 'Palm Compound', ar: 'مجمع النخيل' }, developer: { en: 'Palm', ar: 'النخيل' } };
+    const reading = () => {
+      const a = villa({ amount: 1250000, from: true, quote: '1,250,000', models: [model('A', 1250000, 3), model('B', 1500000, 3)] });
+      a.listing.project = project;
+      return a;
+    };
+    // The page prints the rows in dirhams; the text layer has the figures bare (the mark is an image), so a Saudi
+    // property's bare figure would pass the text-layer shortcut. The model check refused both in SAR.
+    const aed = { 3: [{ fig: 1250000, mark: 'AED', kind: 'model', model: 'A' }, { fig: 1500000, mark: 'AED', kind: 'model', model: 'B' }] };
+    const r = await rig({ listing: reading(), pageText: textPages('A 1,250,000\nB 1,500,000'), facts: aed });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.modelPrices.refused.sort(), [1250000, 1500000]);
+      assert.equal(report.priceEvidence.inText, false, 'a refused model figure is never settled by the text layer');
+      assert.deepEqual(headlineCalls(r).map((c) => [c.amount, c.whole, c.page]), [[1250000, true, 3]], 'asked as the whole development\'s own price');
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST);
+      assert.ok(report.warningCodes.includes('price-not-printed'));
+    } finally { r.cleanup(); }
+    // The Codex example as printed: "AED 1,250,000" and, a line on, "SAR prices on request".
+    const c = await rig({ listing: reading(), pageText: textPages('A AED 1,250,000\nB AED 1,500,000\nSAR prices on request'), facts: aed });
+    try {
+      const report = await c.run();
+      assert.equal(report.priceEvidence.inText, false);
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST);
+    } finally { c.cleanup(); }
+    // A row the model check refused (it read the figure for the wrong model) is not the development's own price either.
+    const wrongRow = { 3: [{ fig: 1250000, mark: 'SAR', kind: 'model', model: 'C' }, { fig: 1500000, mark: 'SAR', kind: 'model', model: 'D' }] };
+    const w = await rig({ listing: reading(), pageText: textPages('C SAR 1,250,000\nD SAR 1,500,000'), facts: wrongRow });
+    try {
+      const report = await w.run();
+      assert.deepEqual(report.listingPreview.price, ON_REQUEST);
+    } finally { w.cleanup(); }
+    // The page does print it as the development's own "from" price: published, `from`.
+    const ok = await rig({ listing: reading(), pageText: textPages('Starting from SAR 1,250,000\nC SAR 1,250,000\nD SAR 1,500,000'),
+      facts: { 3: [...wrongRow[3], { fig: 1250000, mark: 'SAR', kind: 'whole' }] } });
+    try {
+      const report = await ok.run();
+      assert.deepEqual(report.listingPreview.price, { amount: 1250000, currency: 'SAR', from: true, period: null, onRequest: false });
+      assert.deepEqual(report.listingPreview.models.map((m) => m.price), [null, null]);
+    } finally { ok.cleanup(); }
   });
 
   it('S2r: a whole-property check whose page was not rendered renders it, like the model check; a render that fails is "try again later", not "not printed"', async () => {

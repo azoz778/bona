@@ -103,7 +103,12 @@ const MARKS = [
   ['\\b(?:QAR|KWD|BHD|EGP|JOD|TRY|CHF|CAD|AUD|INR|PKR|CNY|JPY|RUB|BGN|HRK)\\b|(?<![A-Za-z])[A-Z]{1,3}\\$|\\bTL\\b|₺|دينار|لير[ةه]'
     + `|${abbr('د', 'ك')}|(?<![\\u0400-\\u04ff])лв(?![\\u0400-\\u04ff])|(?-i:\\bkn\\b)`, ['OTHER']],
 ];
-const GAP = '[\\s:：\\-–—=]*';
+/**
+ * What may stand between a figure and its mark: spaces, a colon, a dash, "=" — on the same line. A mark a
+ * line away is no mark of this figure ("AED 1,250,000" / "SAR prices on request": Codex r1 #1b); the page
+ * check's "beside the figure" (claude.mjs currencyRule) is the same rule.
+ */
+const GAP = '(?:[^\\S\\n\\r\\v\\f\\u0085\\u2028\\u2029]|[:：\\-–—=])*';
 const MARK_BEFORE = MARKS.map(([src, cs]) => [new RegExp(`(?:${src})${GAP}$`, 'i'), cs]);
 const MARK_AFTER = MARKS.map(([src, cs]) => [new RegExp(`^(?:[.,٫]\\d{1,2})?${GAP}(?:\\/-)?${GAP}(?:${src})`, 'i'), cs]);
 const marksIn = (slice, table) => {
