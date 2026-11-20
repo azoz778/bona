@@ -274,6 +274,20 @@ describe('TAQEEM currency — a figure printed in another currency is not that p
     }
   });
 
+  it('r3 #5: a mark directly beside a figure (only spaces between) decides its currency — other marks on the line do not count for it', () => {
+    const t = '$ 1,250,000 SAR 4,687,500';
+    assert.equal(printedInCurrency(t, 1250000, 'SAR'), false, '1,250,000 is the dollar figure');
+    assert.equal(printedInCurrency(t, 1250000, 'SAR', { bareCounts: false }), false);
+    assert.equal(printedInCurrency(t, 1250000, 'USD', { bareCounts: false }), true);
+    assert.equal(printedInCurrency(t, 4687500, 'SAR', { bareCounts: false }), true);
+    assert.equal(printedInCurrency(t, 4687500, 'USD', { bareCounts: false }), false);
+    // Written the other way round, and with the marks after the figures.
+    assert.equal(printedInCurrency('SAR 4,687,500 $ 1,250,000', 4687500, 'SAR', { bareCounts: false }), true);
+    assert.equal(printedInCurrency('SAR 4,687,500 $ 1,250,000', 1250000, 'SAR'), false);
+    assert.equal(printedInCurrency('1,250,000 USD / 4,687,500 SAR', 1250000, 'SAR'), false);
+    assert.equal(printedInCurrency('1,250,000 USD / 4,687,500 SAR', 4687500, 'SAR', { bareCounts: false }), true);
+  });
+
   it('r2 #1: another currency\'s mark a line away still makes the figure not bare — a text layer that split "AED" from its figure is not SAR', () => {
     for (const t of ['1,250,000\nAED', 'AED\n1,250,000', 'A 1,250,000\n$', '£\n1,250,000', 'Price\n1,250,000\r\nAED', 'AED:\n1,250,000']) {
       assert.equal(printedInCurrency(t, 1250000, 'SAR'), false, JSON.stringify(t));

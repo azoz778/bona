@@ -117,6 +117,8 @@ const markTables = (gap) => ({
 });
 const ON_LINE = markTables(GAP);
 const ACROSS_LINES = markTables(GAP_ANY_LINE);
+/** Directly beside the figure: only spaces between (r3 #5). Such a mark decides the figure's currency. */
+const ADJACENT = markTables('[ \t\u00a0\u202f\u2009]*');
 const marksIn = (slice, table) => {
   const folded = slice.normalize('NFKC');
   const hit = table.find(([re]) => re.test(folded));
@@ -158,6 +160,13 @@ export function printedInCurrency(text, amount, currency, { bareCounts = true, h
       const head = t.slice(Math.max(0, m.index - 24), m.index);
       const tail = t.slice(m.index + m[0].length, m.index + m[0].length + 32);
       const marksBy = ({ before, after }) => [...marksIn(head, before), ...marksIn(tail, after)].map((c) => (c === RIYAL ? riyal : c));
+      // A mark directly beside the figure decides it — the one before first ("$ 1,250,000 SAR 4,687,500": the SAR
+      // is 4,687,500's), else the one after; other marks on the line do not count for it (r3 #5).
+      const own = [marksIn(head, ADJACENT.before), marksIn(tail, ADJACENT.after)].find((cs) => cs.length);
+      if (own) {
+        if (own.map((c) => (c === RIYAL ? riyal : c)).includes(currency)) return true;
+        continue;
+      }
       // THIS currency's mark counts only on the figure's own line; ANY other currency's mark, even one a line
       // away ("AED" / "1,250,000" split by the text layer), means the figure is not a bare one (r2 #1).
       if (marksBy(ON_LINE).includes(currency)) return true;
