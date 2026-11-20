@@ -199,6 +199,8 @@ export async function gitCommitPush(repo, message, { remote = 'origin', branch =
     const [name, email, ...body] = (await run('git', ['log', '-1', '--format=%an%x1f%ae%x1f%B', 'HEAD'], { cwd: repo })).out.split('\x1f');
     return name === author.GIT_AUTHOR_NAME && email === author.GIT_AUTHOR_EMAIL && body.join('\x1f').trim() === message.trim();
   };
+  /** The job's own commit, as committed — its content is what a dropped rebase must find on the remote (r3 #8). */
+  const committedSha = (await run('git', ['rev-parse', 'HEAD'], { cwd: repo })).out;
   let push = await run('git', ['push', remote, `HEAD:${branch}`], { cwd: repo });
   let failure = null;
   if (push.code !== 0) {
@@ -206,10 +208,16 @@ export async function gitCommitPush(repo, message, { remote = 'origin', branch =
     // committed, so a rebase is safe; then try once more.
     try {
       await gitPull(repo, { remote, branch });
-      // The rebase dropped the job's commit: the remote already has that change. Nothing to push, nothing to undo.
+      // The rebase dropped the job's commit: the remote's history already has that patch. It is published only
+      // when the remote still holds its content (r3 #8: upstream may have applied the same change and reverted
+      // it) — else the job failed, and nothing is reset off the remote's commits.
       if (await onRemote()) {
-        const upstream = (await run('git', ['rev-parse', '--short', 'HEAD'], { cwd: repo })).out;
-        return { committed: true, pushed: true, upstream: true, sha: upstream, staged: stagedPaths };
+        const same = (await run('git', ['diff', '--quiet', committedSha, 'HEAD', '--', ...stagedPaths], { cwd: repo })).code === 0;
+        if (same) {
+          const upstream = (await run('git', ['rev-parse', '--short', 'HEAD'], { cwd: repo })).out;
+          return { committed: true, pushed: true, upstream: true, sha: upstream, staged: stagedPaths };
+        }
+        throw Object.assign(new Error('git push failed — the remote had this change and reverted it, so it was not published — see the journal'), { upstreamReverted: true });
       }
       push = await run('git', ['push', remote, `HEAD:${branch}`], { cwd: repo });
     } catch (err) {

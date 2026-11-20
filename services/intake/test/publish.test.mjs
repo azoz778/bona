@@ -238,6 +238,27 @@ describe('gitCommitPush — a retry whose rebase drops the job\'s commit (r2 #7)
   });
 });
 
+describe('gitCommitPush — the remote applied the same change and reverted it (r3 #8)', () => {
+  it('the retry rebase drops the job\'s commit, but the remote no longer has its content: not published, nothing reset', async () => {
+    const other = path.join(root, 'other');
+    git(root, 'clone', origin, other);
+    write(other, 'public/listings/first/01.jpg', 'first');
+    git(other, 'add', '-A');
+    git(other, 'commit', '-m', 'the same change');
+    git(other, 'revert', '--no-edit', 'HEAD');
+    git(other, 'push', 'origin', 'main');
+    const upstream = git(origin, 'rev-parse', 'main');
+    write(clone, 'public/listings/first/01.jpg', 'first');
+    await assert.rejects(
+      () => gitCommitPush(clone, 'intake: first (BONA-W001)', { remote: 'origin', branch: 'main', paths: ['public/listings/first'] }),
+      /not published/,
+    );
+    assert.equal(git(origin, 'rev-parse', 'main'), upstream, 'the remote is untouched');
+    assert.equal(git(clone, 'rev-parse', 'HEAD'), upstream, 'the local branch keeps the upstream commits — nothing reset off them');
+    assert.equal(await resetTree(clone, { dirs: ['public/listings/first'] }), true);
+  });
+});
+
 describe('resetTree — a failed job leaves the clone clean for the next one', () => {
   it('deletes the new listing and restores every tracked file', async () => {
     write(clone, 'public/listings/villa/01.jpg', 'x');
