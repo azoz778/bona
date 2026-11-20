@@ -6,7 +6,7 @@ import path from 'node:path';
 import { licenceProblems, loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 import { brochureFileIn, brochureUrlFor, buildBrandedBrochure } from './brochure.mjs';
 import { log } from './log.mjs';
-import { WARNING_CODES, findInbox, isSlug } from './listing.mjs';
+import { WARNING_CODES, addWarningCode, findInbox, isSlug } from './listing.mjs';
 import { removeListingImages } from './images.mjs';
 import { MAX_VIDEOS, writeListingVideo } from './video.mjs';
 
@@ -101,6 +101,37 @@ export function setPrice(repo, id, { amount, currency, onRequest }) {
   }
   markEdited(found.listing, 'price');
   return { listing: save(found.file, found.listing), modelPricesCleared };
+}
+
+/**
+ * The `price` command as the bot runs it (Codex r1 #8): setPrice(), then the Bona brochure drawn again
+ * from the listing as it now is, in the same edit (and so the same commit) — the brochure prints the
+ * price and the unit-model table, so the old PDF would go on showing a price the listing no longer
+ * shows. Only a listing that has a brochure gets one. When the build fails and the price changed, the
+ * stale brochure is taken off the listing (its file deleted, `brochureUrl` null, `brochure-failed`) —
+ * never left up — and `brochure` says so for the reply.
+ * @returns {Promise<{listing:object, modelPricesCleared:number,
+ *   brochure: null | {rebuilt:true, bytes?:number, pages?:number} | {rebuilt:false, removed:boolean, error:string|null}}
+ *   | {error:string} | null>}
+ */
+export async function setPriceWithBrochure(repo, id, args, { cfg = {}, workDir, spawnImpl } = {}) {
+  const before = findInbox(repo, id)?.listing ?? null;
+  const res = setPrice(repo, id, args);
+  if (!res || res.error) return res;
+  const { listing } = res;
+  const file = isSlug(listing.slug) ? brochureFileIn(path.join(repo, 'public', 'listings', listing.slug)) : null;
+  if (!listing.brochureUrl && !(file && fs.existsSync(file))) return { ...res, brochure: null };
+  const built = await rebuildBrochure(repo, id, { cfg, workDir, spawnImpl });
+  if (built && !built.error) {
+    return { listing: built.listing, modelPricesCleared: res.modelPricesCleared, brochure: { rebuilt: true, bytes: built.brochure?.bytes, pages: built.brochure?.pages } };
+  }
+  const changed = res.modelPricesCleared > 0 || JSON.stringify(before?.price ?? null) !== JSON.stringify(listing.price);
+  if (!changed) return { ...res, brochure: { rebuilt: false, removed: false, error: built?.error ?? null } };
+  if (file) fs.rmSync(file, { force: true });
+  listing.brochureUrl = null;
+  addWarningCode(listing, 'brochure-failed');
+  log.warn('edit.brochure_removed', { id, why: 'price changed and the brochure could not be rebuilt', error: built?.error ?? null });
+  return { listing: save(findInbox(repo, id).file, listing), modelPricesCleared: res.modelPricesCleared, brochure: { rebuilt: false, removed: true, error: built?.error ?? null } };
 }
 
 // ---- REGA advertising licences ------------------------------------------------------------

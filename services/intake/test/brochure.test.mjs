@@ -12,7 +12,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, describe, it } from 'node:test';
+import { after, afterEach, before, describe, it } from 'node:test';
 import {
   DEFAULT_BROCHURE_PY_CMD, SCRIPT, brochureFileIn, brochurePyArgv, brochureRepoPath, brochureUrlFor,
   buildBrandedBrochure, findSourcePdf, publicListing,
@@ -20,6 +20,7 @@ import {
 import * as edits from '../lib/edits.mjs';
 import { loadConfig } from '../lib/env.mjs';
 import { writeInboxListing } from '../lib/listing.mjs';
+import * as msg from '../lib/messages.mjs';
 import { ALLOWED_PATHS } from '../lib/publish.mjs';
 
 const LISTING = {
@@ -351,6 +352,79 @@ describe('rebuildBrochure (`brochure <id>`) — from the repo\'s own files, no s
       assert.equal(fs.existsSync(path.join(outside, 'brochure.pdf')), false, 'nothing written outside public/listings/');
       assert.equal(fs.readFileSync(file, 'utf8'), before_);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('`price <id>` rebuilds the brochure in the same edit — never a PDF with a price the listing no longer shows (Codex r1 #8)', () => {
+  let dir;
+  let repo;
+  const SLUG = LISTING.slug;
+  const pdf = () => path.join(repo, 'public', 'listings', SLUG, 'brochure.pdf');
+  const saved = () => JSON.parse(fs.readFileSync(path.join(repo, 'scripts', 'curate', 'inbox', `${SLUG}.json`), 'utf8'));
+  const setPrice = (args, spawnImpl) => edits.setPriceWithBrochure(repo, 'BONA-W007', args, {
+    cfg: { intakeDir: dir, site: 'https://bona.azoz.uk', maxBrochureMb: 25 }, workDir: path.join(dir, 'work'), spawnImpl,
+  });
+  const seed = ({ brochure = true } = {}) => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-brochure-'));
+    repo = path.join(dir, 'repo');
+    writeInboxListing(repo, {
+      ...LISTING,
+      price: { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 },
+      models: [{ name: { en: 'Lulu', ar: 'لؤلؤ' }, bedrooms: 2, bathrooms: 2, areaSqm: 88, rooms: null, availability: null, price: 319015, subsidisedPrice: 270425, floorPlan: null }],
+      brochureUrl: brochure ? `https://bona.azoz.uk/listings/${SLUG}/brochure.pdf` : null,
+      _intake: { ...LISTING._intake, warnings: [] },
+    });
+    fs.mkdirSync(path.dirname(pdf()), { recursive: true });
+    fs.writeFileSync(path.join(path.dirname(pdf()), '01.jpg'), 'jpg');
+    if (brochure) fs.writeFileSync(pdf(), 'old brochure: from SAR 319,015');
+  };
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('a new price: the brochure is drawn again from the listing as it now is', async () => {
+    seed();
+    const { spawnImpl, calls } = fakeSpawn();
+    const res = await setPrice({ amount: 350000, currency: 'SAR' }, spawnImpl);
+    assert.equal(calls.length, 1);
+    const sent = JSON.parse(fs.readFileSync(argsOf(calls[0]).listingJson, 'utf8'));
+    assert.deepEqual([sent.price.amount, sent.models[0].price], [350000, null], 'the brochure prints the new price, and no model price');
+    assert.equal(fs.readFileSync(pdf(), 'utf8'), '%PDF-1.7 fake brochure\n');
+    assert.equal(res.brochure.rebuilt, true);
+    assert.equal(saved().price.amount, 350000);
+    assert.match(msg.priceChange(res.listing.price, { modelPricesCleared: res.modelPricesCleared, brochure: res.brochure }), /brochure rebuilt/i);
+  });
+
+  it('on request, and the build fails: the stale brochure is taken off the listing, and the reply says so', async () => {
+    seed();
+    const { spawnImpl } = fakeSpawn({ result: { ok: false, reason: 'error', error: 'layout does not fit' }, code: 1 });
+    const res = await setPrice({ onRequest: true }, spawnImpl);
+    assert.equal(fs.existsSync(pdf()), false, 'no PDF still showing SAR 319,015');
+    const l = saved();
+    assert.equal(l.price.onRequest, true);
+    assert.equal(l.brochureUrl, null);
+    assert.ok(l._intake.warnings.includes('brochure-failed'));
+    assert.equal(res.brochure.removed, true);
+    const reply = msg.priceChange(res.listing.price, { onRequest: true, modelPricesCleared: res.modelPricesCleared, brochure: res.brochure });
+    assert.match(reply, /brochure could not be rebuilt/i);
+    assert.match(reply, /taken off/i);
+  });
+
+  it('a new amount and the build fails: the old brochure (another price) goes too', async () => {
+    seed();
+    const { spawnImpl } = fakeSpawn({ result: { ok: false, reason: 'error', error: 'boom' }, code: 1 });
+    const res = await setPrice({ amount: 500000, currency: 'SAR' }, spawnImpl);
+    assert.equal(fs.existsSync(pdf()), false);
+    assert.equal(saved().brochureUrl, null);
+    assert.equal(res.brochure.removed, true);
+  });
+
+  it('a listing with no brochure gets none: nothing is built', async () => {
+    seed({ brochure: false });
+    const { spawnImpl, calls } = fakeSpawn();
+    const res = await setPrice({ amount: 350000, currency: 'SAR' }, spawnImpl);
+    assert.equal(calls.length, 0);
+    assert.equal(res.brochure, null);
+    assert.equal(fs.existsSync(pdf()), false);
+    assert.equal(saved().price.amount, 350000);
   });
 });
 

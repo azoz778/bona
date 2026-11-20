@@ -790,11 +790,13 @@ async function handleCommand({ group, command }) {
     case 'price': {
       const found = edits.locate(cfg.repo, command.id);
       if (!found) return reply(jid, msg.notFound(command.id));
+      // The brochure prints the price: it is drawn again in the same commit, or taken off (Codex r1 #8).
+      const workDir = path.join(cfg.intakeDir, 'brochure', `${command.id}-${Date.now()}`);
       const res = await publishEdit(
         jid, command.id,
-        () => edits.setPrice(cfg.repo, command.id, command),
+        () => edits.setPriceWithBrochure(cfg.repo, command.id, command, { cfg, workDir }),
         () => `intake: price (${command.id})`,
-        (r) => msg.updated(command.id, msg.priceChange(r.listing.price, { onRequest: command.onRequest, modelPricesCleared: r.modelPricesCleared }), r.listing),
+        (r) => msg.updated(command.id, msg.priceChange(r.listing.price, { onRequest: command.onRequest, modelPricesCleared: r.modelPricesCleared, brochure: r.brochure, id: command.id }), r.listing),
       );
       if (res?.error) return reply(jid, `✋ ${res.error}`);
       return undefined;

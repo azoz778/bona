@@ -767,7 +767,10 @@ describe('inbox + edits', () => {
     assert.equal(msg.priceChange({ currency: 'SAR', amount: null }, { onRequest: true, modelPricesCleared: 2 }), 'Price on request — 2 unit-model prices removed; the table now shows On request');
     const index = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'index.mjs'), 'utf8');
     const priceCase = index.slice(index.indexOf("case 'price': {"), index.indexOf("case 'brochure': {"));
-    assert.match(priceCase, /msg\.priceChange\(r\.listing\.price, \{ onRequest: command\.onRequest, modelPricesCleared: r\.modelPricesCleared \}\)/, 'index.mjs replies with it');
+    assert.match(priceCase, /msg\.priceChange\(r\.listing\.price, \{ onRequest: command\.onRequest, modelPricesCleared: r\.modelPricesCleared, brochure: r\.brochure, id: command\.id \}\)/, 'index.mjs replies with it');
+    // Codex r1 #8: the command rebuilds the brochure in the same edit (and commit), never setPrice alone.
+    assert.match(priceCase, /edits\.setPriceWithBrochure\(cfg\.repo, command\.id, command, \{ cfg, workDir \}\)/);
+    assert.doesNotMatch(priceCase, /edits\.setPrice\(/);
   });
 
   it('status and hidden are persisted', () => {

@@ -170,12 +170,19 @@ export const removed = (id, title) => `🗑️ Removed *${title}* (${id}). It co
 export const updated = (id, what, listing) => `✏️ ${what} — *${listing.title.en}* (${id})\n${commandsFor(id)}`;
 /**
  * What the `price` command did, for updated(): the new price, and — when the listing's unit models
- * carried prices — that the owner's figure took them off (edits.mjs setPrice `modelPricesCleared`).
+ * carried prices — that the owner's figure took them off (edits.mjs setPrice `modelPricesCleared`);
+ * and what happened to the brochure (edits.mjs setPriceWithBrochure `brochure`, Codex r1 #8).
  */
-export function priceChange(price, { onRequest = false, modelPricesCleared = 0 } = {}) {
+export function priceChange(price, { onRequest = false, modelPricesCleared = 0, brochure = null, id = '<id>' } = {}) {
   const head = onRequest ? 'Price on request' : `Price set to ${price.currency} ${price.amount.toLocaleString('en-US')}`;
-  if (!(modelPricesCleared > 0)) return head;
-  return `${head} — ${modelPricesCleared} unit-model price${modelPricesCleared === 1 ? '' : 's'} removed; the table now shows On request`;
+  const models = modelPricesCleared > 0
+    ? ` — ${modelPricesCleared} unit-model price${modelPricesCleared === 1 ? '' : 's'} removed; the table now shows On request`
+    : '';
+  const pdf = !brochure ? ''
+    : brochure.rebuilt ? '\n📄 Brochure rebuilt with the new price'
+      : brochure.removed ? `\n⚠️ The brochure could not be rebuilt, so it was taken off the listing (it showed the old price) — send \`brochure ${id}\` to try again`
+        : '\n⚠️ The brochure could not be rebuilt (the reason is in the journal)';
+  return `${head}${models}${pdf}`;
 }
 
 /** A clip with no id in its caption and no brochure near it in time — recognized, not silently dropped. */
