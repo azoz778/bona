@@ -1176,6 +1176,24 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     } finally { r.cleanup(); }
   });
 
+  it('r3 #3: a model NAME that carries a price the reading carries — a model price, a Sakani price, the headline — refuses the run', async () => {
+    for (const [i, name] of [[0, 'Nawras 419,994'], [1, 'Lulu 270425'], [1, 'Type ٣١٩٬٠١٥']]) {
+      const a = withModels([model('Nawras', 419994, 356024, 3), model('Lulu', 319015, 270425, 3)], { price: { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 } });
+      a.models[i].name = { en: name, ar: 'نموذج' };
+      const r = await rig({ listing: a });
+      try {
+        await assert.rejects(r.run(), (err) => err.stage === 'price' && new RegExp(`^models\\[${i}\\]\\.name states`).test(err.reason), name);
+        assert.equal(r.calls().filter((c) => c.tool === 'claude-model-confirm').length, 0, 'refused before a check is paid for');
+      } finally { r.cleanup(); }
+    }
+    // A figure no price of the reading has is a name: "Plot 10000", "Penthouse 4,250", "Villa 15m".
+    const ok = withModels([model('Plot 10000', 419994, null, 3), model('Penthouse 4,250', 319015, null, 3), model('Villa 15m', null, null, null)]);
+    const r = await rig({ listing: ok });
+    try {
+      assert.deepEqual((await r.run()).listingPreview.models.map((m) => m.name.en), ['Plot 10000', 'Penthouse 4,250', 'Villa 15m']);
+    } finally { r.cleanup(); }
+  });
+
   it('r2 #4: a model NAME refuses the run only for a currency or a payment word — "Villa 15m", "Plot 10000", "Penthouse 4,250" are names', async () => {
     const a = withModels([model('Villa 15m', 419994, null, 3), model('Type A 12m frontage', 319015, null, 3), model('Plot 10000', null, null, null), model('Penthouse 4,250', null, null, null)]);
     const r = await rig({ listing: a });

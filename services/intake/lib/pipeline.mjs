@@ -197,23 +197,31 @@ export function statesMoney(text) {
   });
 }
 
-/** A model NAME states money only by a currency or a payment word: "Villa 15m", "Plot 10000", "Penthouse 4,250" are names. */
-const nameStatesMoney = (text) => typeof text === 'string' && (NAME_CURRENCY_RE.test(westernise(text)) || PAYMENT_RE.test(text));
+/** The figures written in `text`, as numbers: "419,994" → 419994, "٣١٩٬٠١٥" → 319015, "Villa 15m" → 15. */
+const figuresIn = (text) => (westernise(text).match(/\d{1,3}(?:[,٬.'’ \u00a0\u202f\u2009]\d{3})+(?!\d)|\d+/g) ?? []).map((x) => Number(x.replace(/\D/g, '')));
+/**
+ * A model NAME states money by a currency or a payment word, or by a figure equal to a price the reading carries
+ * (`figures`: its model prices, Sakani prices and headline — r3 #3). "Villa 15m", "Plot 10000", "Penthouse 4,250"
+ * are names.
+ */
+const nameStatesMoney = (text, figures = []) => typeof text === 'string'
+  && (NAME_CURRENCY_RE.test(westernise(text)) || PAYMENT_RE.test(text) || figuresIn(text).some((n) => figures.includes(n)));
 
 /**
  * The money guard over a reading's free text (r2 #4, Codex r1 #3): a unit model's rooms or availability that
  * state money (statesMoney) are dropped (null), and so is every fact-list item (amenities / nearby /
- * warranties) that does — in both languages, the lists being parallel — in place, on `holder` (the AI answer
- * on a publish, the built enrichment on --enrich). A model name cannot be dropped: the first one that states
- * money by a currency or a payment word (nameStatesMoney) is returned, and the run is refused.
+ * warranties) that does — in both languages, the lists being parallel — in place, on `holder` (the AI answer,
+ * right after the reading: 3c). A model name cannot be dropped: the first one that states money (nameStatesMoney:
+ * a currency or payment word, or one of `figures` — the prices the reading carries, r3 #3) is returned, and the
+ * run is refused.
  * @returns {{ dropped: string[], name: string|null }}
  */
-export function dropMoneyText(holder) {
+export function dropMoneyText(holder, { figures = [] } = {}) {
   const dropped = [];
   let name = null;
   (Array.isArray(holder?.models) ? holder.models : []).forEach((m, i) => {
     if (!m || typeof m !== 'object') return;
-    if (name === null && pairText(m.name).some(nameStatesMoney)) name = `models[${i}].name`;
+    if (name === null && pairText(m.name).some((t) => nameStatesMoney(t, figures))) name = `models[${i}].name`;
     if (listText(m.rooms).some(statesMoney)) { m.rooms = null; dropped.push(`models[${i}].rooms`); }
     if (pairText(m.availability).some(statesMoney)) { m.availability = null; dropped.push(`models[${i}].availability`); }
   });
@@ -547,7 +555,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // fields and items are dropped here, BEFORE any price check (r3 #2) — so the copy guard below sees only the
   // listing's own copy, and a figure whose check could not finish cannot turn a retryable run into a refused
   // one. A model name that states money refuses the run (it cannot be dropped).
-  const money = dropMoneyText(ai);
+  // Every price the reading carries — model and Sakani prices, the headline — as read, before any check.
+  const readingFigures = [...(Array.isArray(ai.models) ? ai.models : []).flatMap((m) => [m?.price, m?.subsidisedPrice]),
+    ai.listing?.price?.amount, ai.listing?.price?.subsidisedAmount].filter(isFigure);
+  const money = dropMoneyText(ai, { figures: readingFigures });
   if (money.name) {
     throw new RejectError(`${money.name} states a price or a payment — prices go in the price fields only; send it again, the next reading may leave it out`, enrich ? 'enrich' : 'price');
   }
