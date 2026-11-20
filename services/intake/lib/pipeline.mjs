@@ -1358,6 +1358,7 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   // The listing already has a brochure, printed from the data the enrichment replaces (r2 #8): if the new one
   // cannot be built, nothing is committed — the old PDF would contradict the new data, whichever row moved.
   const hadBrochure = Boolean(existing.brochureUrl) || fs.existsSync(brochureFileIn(publicDir));
+  report.enrich.hadBrochure = hadBrochure;
   const problems = checkListing(merged, { minImages: cfg.minImages, maxImages: cfg.maxImages, withdrawals });
   if (dryRun) {
     report.stage = 'dry-run';

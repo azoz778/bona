@@ -30,6 +30,7 @@ import { loadConfig } from './lib/env.mjs';
 import { parseCaption } from './lib/commands.mjs';
 import { withLock } from './lib/lock.mjs';
 import { say } from './lib/log.mjs';
+import * as msg from './lib/messages.mjs';
 import { enrichMetaFor, replaceMetaFor } from './lib/listing.mjs';
 import { processPdf, RejectError } from './lib/pipeline.mjs';
 import { assertCleanTree, gitCommitPush, gitPull, gitStatus, resetTree } from './lib/publish.mjs';
@@ -100,7 +101,7 @@ function printEnrichReport(r) {
   if (r.dryRun) say('DRY RUN — nothing written.');
   else {
     say(`Wrote  ${r.file}`);
-    say(`       brochure ${r.brochure?.ok ? 'rebuilt' : r.brochure?.skipped ? 'skipped (#nobrochure)' : 'NOT rebuilt — the old one stays'}`);
+    say(`       brochure ${msg.enrichBrochureLine(r)}`);
     say(`       ${r.rebuild.validate.split('\n').pop()}`);
     say(r.push?.pushed ? `Pushed ${r.push.sha} — live in a few minutes at ${r.url}` : `Not pushed. Live URL ${r.url}`);
   }

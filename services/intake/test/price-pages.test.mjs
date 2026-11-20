@@ -14,6 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { checkListing, replaceMetaFor, writeInboxListing } from '../lib/listing.mjs';
 import { processPdf, statesMoney } from '../lib/pipeline.mjs';
 import { classifyRun, planBackfill } from '../lib/backfill.mjs';
+import * as msg from '../lib/messages.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -2577,6 +2578,8 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.equal(after.brochureUrl, null);
       assert.deepEqual(after._intake.warnings, ['map-unconfirmed', 'brochure-failed']);
       assert.equal(fs.existsSync(path.join(pubDir(r), 'brochure.pdf')), false);
+      assert.equal(report.enrich.hadBrochure, false);
+      assert.match(msg.enrichBrochureLine(report), /no brochure/, 'the CLI says it has none (r3 #11)');
     } finally { r.cleanup(); }
   });
 

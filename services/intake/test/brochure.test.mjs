@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, afterEach, before, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_BROCHURE_PY_CMD, SCRIPT, brochureFileIn, brochurePyArgv, brochureRepoPath, brochureUrlFor,
   buildBrandedBrochure, findSourcePdf, publicListing,
@@ -481,6 +482,19 @@ describe('r2 #11: a rebuild\'s work dir does not outlive the build, unless BONA_
     const { workDir, build } = setup();
     await build(fakeSpawn().spawnImpl);
     assert.equal(fs.existsSync(path.join(workDir, 'brochure-listing.json')), true);
+  });
+});
+
+describe('r3 #11: the --enrich report\'s brochure line', () => {
+  it('a listing that had no brochure, whose build failed, is said to have none — never "the old one stays"', () => {
+    const line = msg.enrichBrochureLine({ brochure: { ok: false, reason: 'error' }, enrich: { hadBrochure: false } });
+    assert.match(line, /no brochure/);
+    assert.doesNotMatch(line, /old one/);
+    assert.equal(msg.enrichBrochureLine({ brochure: { ok: true }, enrich: { hadBrochure: true } }), 'rebuilt');
+    assert.match(msg.enrichBrochureLine({ brochure: { skipped: 'nobrochure' }, enrich: { hadBrochure: true } }), /skipped/);
+    const runOnce = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'run-once.mjs'), 'utf8');
+    assert.match(runOnce, /brochure \$\{msg\.enrichBrochureLine\(r\)\}/);
+    assert.doesNotMatch(runOnce, /the old one stays/);
   });
 });
 

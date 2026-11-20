@@ -238,3 +238,16 @@ export function statusReport({ listings, groups, lastError, queueLength }) {
   if (lastError) lines.push('', `Last error: ${lastError.message}`);
   return lines.join('\n');
 }
+
+/**
+ * The brochure line of the `run-once --enrich` report (r3 #11). A run whose build failed is committed only when
+ * the listing had no brochure (r2 #8: over an old one nothing is committed), so it has none now.
+ */
+export function enrichBrochureLine(report) {
+  const b = report?.brochure;
+  if (b?.ok) return 'rebuilt';
+  if (b?.skipped) return 'skipped (#nobrochure)';
+  return report?.enrich?.hadBrochure
+    ? 'NOT rebuilt — nothing was committed over the old one'
+    : 'NOT built — the listing has no brochure (the reason is in the warnings above)';
+}
