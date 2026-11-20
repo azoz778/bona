@@ -1297,7 +1297,14 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   // A reading with fewer models, fewer confirmed model prices, fewer floor plans or a fact list fewer is
   // refused unless --force says it is right (the brochure really changed, or the old reading was wrong).
   const mp = report.modelPrices;
-  const unchecked = mp && (mp.fatal || (mp.incomplete?.length ?? 0) > 0)
+  // The way out of a check that keeps failing (r3 #7): --force accepts a FIRST enrichment (no model price to
+  // lose) whose check could not finish for a reason that is not a quota — published without those prices.
+  const incompleteCount = mp?.incomplete?.length ?? 0;
+  const forcedUnchecked = Boolean(mp) && !mp.fatal && incompleteCount > 0 && force && compare.before.prices === 0;
+  if (forcedUnchecked) {
+    report.warnings.push(`--force: published without the ${incompleteCount} unit-model price(s) whose check could not be completed (page${mp.incompletePages.length === 1 ? '' : 's'} ${mp.incompletePages.join(', ')}) — run --enrich again later to add them`);
+  }
+  const unchecked = mp && (mp.fatal || (incompleteCount > 0 && !forcedUnchecked))
     ? `${mp.fatal ? 'the AI quota ran out during the unit-model price check' : `the check of ${mp.incomplete.length} unit-model price(s) could not be completed (page${mp.incompletePages.length === 1 ? '' : 's'} ${mp.incompletePages.join(', ')})`} — nothing was changed; try again later`
     : null;
   const degraded = compare.losses.length && !force

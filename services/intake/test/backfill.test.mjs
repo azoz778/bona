@@ -275,6 +275,17 @@ describe('classifyRun / summarizeRun', () => {
     assert.match(r.line, /^REFUSED: --enrich BONA-W023: .*SAR 350,000/);
   });
 
+  it('r3 #7: a brochure too large to build is a permanent refusal of that listing — skipped, the backfill goes on', () => {
+    const out = 'FAILED: the Bona brochure could not be rebuilt (the brochure is over the 25 MB limit even with its photos scaled down), and the listing\'s old brochure would contradict the enriched listing (its models, prices and plans), so nothing was changed; run --enrich again once the brochure builds\nwork dir: /w';
+    const r = classifyRun({ code: 1, output: out });
+    assert.equal(r.outcome, 'refused');
+    assert.equal(stopsBackfill(r.outcome), false);
+    assert.equal(classifyRun({ code: 1, output: 'FAILED: the brochure is too large\n' }).outcome, 'refused');
+    // A quota stays a quota (retryable), and any other failure a failure.
+    assert.equal(classifyRun({ code: 1, output: 'FAILED: the AI quota ran out during the unit-model price check — nothing was changed; try again later\n' }).outcome, 'quota');
+    assert.equal(classifyRun({ code: 1, output: 'FAILED: the check of 4 unit-model price(s) could not be completed (page 3) — nothing was changed; try again later\n' }).outcome, 'failed');
+  });
+
   it('a dirty clone is a failure: every later job would hit it too', () => {
     assert.equal(classifyRun({ code: 1, output: 'FAILED: --enrich BONA-W023: /x has uncommitted changes, which --enrich will not discard' }).outcome, 'failed');
   });

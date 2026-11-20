@@ -186,7 +186,8 @@ const clip = (s, n = 220) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
  *   quota    — QUOTA_RE anywhere in the output, whatever the exit code: stop
  *   rejected — `REJECTED at "<stage>": …` (exit 1), or a dry run that says `WOULD BE REJECTED — …`
  *   refused  — `FAILED: --enrich <id>: …`, run-once's own refusal of that one listing (not in the
- *              inbox, withdrawn, hidden, a headline that disagrees with the models, …)
+ *              inbox, withdrawn, hidden, a headline that disagrees with the models, …), or a brochure
+ *              too large to build ("MB limit", r3 #7): skipped, the backfill goes on
  *   failed   — any other FAILED, any other non-zero exit, and the one refusal that is not about the
  *              listing: the clone has uncommitted changes (every later job would hit it too)
  *   ok       — exit 0
@@ -206,7 +207,8 @@ export function classifyRun({ code, signal = null, output = '' }) {
   const failed = /^FAILED:\s*(.*)$/m.exec(text);
   if (failed && code !== 0) {
     const msg = failed[1].trim();
-    const refused = /^--enrich\s+BONA-W\d+:/i.test(msg) && !/uncommitted changes/i.test(msg);
+    // A brochure too large to build is a fact about that listing, not a broken run: skipped, the backfill goes on (r3 #7).
+    const refused = (/^--enrich\s+BONA-W\d+:/i.test(msg) && !/uncommitted changes/i.test(msg)) || /MB limit|too large/i.test(msg);
     return { outcome: refused ? 'refused' : 'failed', line: clip(`${refused ? 'REFUSED' : 'FAILED'}: ${msg}`) };
   }
   if (code !== 0) return { outcome: 'failed', line: clip(`exit ${code}: ${lastLines(text).join(' | ') || 'no output'}`) };

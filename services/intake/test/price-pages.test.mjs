@@ -2951,6 +2951,26 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
     } finally { r.cleanup(); }
   });
 
+  it('r3 #7: --force accepts a first enrichment whose check failed for a reason that is not a quota — without those prices, and says so', async () => {
+    const r = await rig({ listing: reading(), modelConfirmFail: true });
+    try {
+      seed(r, { price: { ...ON_REQUEST } });
+      const report = await enrich(r, { force: true });
+      assert.equal(report.ok, true);
+      assert.deepEqual(saved(r).models.map((m) => [m.name.en, m.price]), [['Nawras', null], ['Lulu', null]]);
+      assert.ok(report.warnings.some((w) => /--force/.test(w) && /without/.test(w) && /4 unit-model price/.test(w)), report.warnings.join(' | '));
+    } finally { r.cleanup(); }
+    // A quota stays "try again later", --force or not; and so does a listing with model prices to lose.
+    for (const [fail, extra] of [['quota', {}], [true, { models: prior(2) }]]) {
+      const q = await rig({ listing: reading(), modelConfirmFail: fail });
+      try {
+        seed(q, { price: { ...ON_REQUEST }, extra });
+        const err = await enrich(q, { force: true }).then(() => null, (e) => e);
+        assert.equal(err?.retryable, true, String(fail));
+      } finally { q.cleanup(); }
+    }
+  });
+
   it('P6b (r2 #9): a first-time enrichment whose price check failed for any reason commits nothing and exits retryable — the backfill reruns it', async () => {
     const r = await rig({ listing: reading(), modelConfirmFail: true });
     try {
