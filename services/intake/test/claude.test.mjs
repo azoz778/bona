@@ -691,6 +691,17 @@ describe('confirmModelPrices', () => {
     await riyalRules((o) => confirmModelPrices({ ...opts, ...o }));
   });
 
+  it('Codex r1 #2: a rental\'s figures are checked for the listing\'s period — one printed per another period does not count', async () => {
+    const f = fakeSpawn([{ envelope: envelope([]) }, { envelope: envelope([]) }, { envelope: envelope([]) }]);
+    await confirmModelPrices({ ...opts, period: 'month', spawnImpl: f.spawnImpl });
+    assert.match(f.calls[0].prompt, /Every figure is a rent per month/);
+    assert.match(f.calls[0].prompt, /printed as a rent per another period[\s\S]*?does NOT count/);
+    await confirmModelPrices({ ...opts, period: 'year', spawnImpl: f.spawnImpl });
+    assert.match(f.calls[1].prompt, /Every figure is a rent per year/);
+    await confirmModelPrices({ ...opts, spawnImpl: f.spawnImpl });
+    assert.doesNotMatch(f.calls[2].prompt, /a rent per/, 'a sale has no period');
+  });
+
   it('without a currency the site prints there is nothing to check the figures in: no call, an error', async () => {
     for (const currency of [undefined, null, 'GBP', 'sar', '']) {
       const f = fakeSpawn([{ envelope: envelope([{ i: 0, price: true, subsidisedPrice: true }]) }]);

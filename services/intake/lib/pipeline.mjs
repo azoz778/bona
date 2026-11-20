@@ -684,6 +684,14 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // own currency (the site prints every model price in `price.currency`) — the models keep no price, and
   // none is checked: no figure is checked that will not be published. A figure the copy states is then
   // an unconfirmed one (the guard below).
+  // The rent period the model figures are published for (Codex r1 #2) — the site and the brochure print every
+  // model row with the listing's period: on an enrichment the listing's own; on a publish what buildListing()
+  // gives it (the owner's caption period, else the reading's, else a year). A sale has none. Every figure is
+  // confirmed FOR that period, and an enrichment whose reading has another period keeps no model price.
+  const readingPeriod = price?.period ?? null;
+  const listingPeriod = enrichTarget
+    ? (enrichTarget.listing.price?.period ?? null)
+    : (caption.category || ai.listing?.category) === 'rent' ? (caption.period || readingPeriod || 'year') : null;
   let currencyDrop = null;
   let readingCurrency = null;
   if (modelFigures.length && !caption.price && !ownerPriceEdit) {
@@ -692,6 +700,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     const currency = { reading: price?.currency ?? null, established: readingCurrency !== null, listing: listingCurrency };
     if (enrich && (readingCurrency === null || readingCurrency !== listingCurrency)) currencyDrop = { decision: 'currency-mismatch', currency };
     else if (!enrich && readingCurrency === null) currencyDrop = { decision: 'currency-unconfirmed', currency };
+    else if (enrich && readingPeriod !== listingPeriod) currencyDrop = { decision: 'period-mismatch', currency, period: { reading: readingPeriod, listing: listingPeriod } };
   }
   // The owner's own figure — his caption price, or the price he set by WhatsApp on a listing being enriched.
   const ownerAmount = caption.price ? caption.price.amount : ownerPriceEdit ? (enrichTarget.listing.price?.amount ?? null) : null;
@@ -715,9 +724,12 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       const why = home === null
         ? `the property is in ${country ?? 'no recorded country'}, whose own currency the site does not print: there the models are priced only in ${ABROAD_CURRENCIES.join(' or ')}, beside a price the reading read itself — this reading has ${currency.reading ?? 'no currency'}${ownAmount ? '' : ' and no price of its own'}`
         : `${currency.reading ?? 'none'} is only the default — the reading has no price of its own, and it is not the currency of the country the property is in`;
-      report.warnings.push(decision === 'currency-mismatch'
-        ? `the brochure's unit-model prices are not in the listing's currency (${currency.listing ?? 'none'}): ${currency.established ? `they read as ${currency.reading}` : `the reading established no currency (${why})`}, so the models were published without prices`
-        : `the unit-model prices were left off: their currency could not be established from the brochure (${why}) — the models show without them`);
+      const per = (p) => (p ? `per ${p}` : 'with no rent period');
+      report.warnings.push(decision === 'period-mismatch'
+        ? `the brochure's unit-model prices read as ${per(currencyDrop.period.reading)}, but the listing's price is ${per(currencyDrop.period.listing)}, so the models were published without prices — a figure is never shown for another period`
+        : decision === 'currency-mismatch'
+          ? `the brochure's unit-model prices are not in the listing's currency (${currency.listing ?? 'none'}): ${currency.established ? `they read as ${currency.reading}` : `the reading established no currency (${why})`}, so the models were published without prices`
+          : `the unit-model prices were left off: their currency could not be established from the brochure (${why}) — the models show without them`);
     }
   } else if (modelFigures.length) {
     const mp = await checkModelPrices(ai.models, {
@@ -754,10 +766,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       },
       confirm: async ({ page, abs, items }) => {
         // IN the currency the reading established, the figures printed in another one refused; a bare
-        // figure counts only in the property's own country's currency.
+        // figure counts only in the property's own country's currency. A rental's: FOR the listing's period.
         const res = await confirmModelPrices({
-          pageImage: abs, items, currency: readingCurrency, bareCounts: readingCurrency !== null && readingCurrency === home, home: local, bin: cfg.claudeBin, model: cfg.claudeModel,
-          cwd: workDir, addDirs: [workDir], settingsPath: confinement.file,
+          pageImage: abs, items, currency: readingCurrency, bareCounts: readingCurrency !== null && readingCurrency === home, home: local, period: listingPeriod,
+          bin: cfg.claudeBin, model: cfg.claudeModel, cwd: workDir, addDirs: [workDir], settingsPath: confinement.file,
         });
         log.info('intake.model_price_evidence', { page, models: items.length, answers: res.answers.length, error: res.error, fatal: res.fatal });
         return res;

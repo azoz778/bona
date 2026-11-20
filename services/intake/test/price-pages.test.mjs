@@ -178,7 +178,9 @@ if (prompt.includes('For each numbered model')) {
   const fenced = prompt.split('<<<BONA-UNTRUSTED-DATA: the models and figures to check>>>')[1].split('<<<END ')[0];
   const items = fenced.split('\\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l))
     .map(({ i, price, subsidisedPrice }) => ({ i, price, subsidisedPrice }));
-  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-model-confirm', page, items, currency, bare: /may be taken as/.test(prompt) }) + '\\n');
+  // The rent period the prompt asks the figures to be printed for (Codex r1 #2), or null: not asked, any counts.
+  const per = (prompt.match(/Every figure is a rent per (month|year)/) || [])[1] ?? null;
+  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-model-confirm', page, items, currency, period: per, bare: /may be taken as/.test(prompt) }) + '\\n');
   // modelConfirmDelayMs: the call takes this long, and records when it ran (the concurrency test).
   if (cfg.modelConfirmDelayMs) {
     const t0 = Date.now();
@@ -198,7 +200,8 @@ if (prompt.includes('For each numbered model')) {
   if (!inCurrency(page, currency)) answer = answer.map((a) => ({ ...a, price: false, subsidisedPrice: false }));
   if (cfg.facts) {
     const names = Object.fromEntries(fenced.split('\\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l)).map((it) => [it.i, String(it.name).split(' / ')[0]]));
-    const on = (it, sub, fig) => facts(page).some((e) => !!e.sub === sub && e.fig === fig && e.model === names[it.i] && factIn(e, currency));
+    // e.per: the rent period printed for the figure ('month' | 'year'; none = the page shows none).
+    const on = (it, sub, fig) => facts(page).some((e) => !!e.sub === sub && e.fig === fig && e.model === names[it.i] && factIn(e, currency) && (!per || !e.per || e.per === per));
     answer = items.map((it) => ({ i: it.i, price: on(it, false, it.price), subsidisedPrice: on(it, true, it.subsidisedPrice) }));
   }
 } else if (prompt.includes('VISIBLY PRINT')) {
@@ -1071,6 +1074,32 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       const report = await r.run();
       assert.equal(report.listingPreview.models[0].availability.en, 'Buildings G–P, 419,994 / 356,024');
     } finally { r.cleanup(); }
+  });
+
+  it('Codex r1 #2: a rental\'s model figure printed per another period is refused — the listing\'s period is the one confirmed', async () => {
+    const reading = (period) => {
+      const a = withModels([model('Studio', 5000, null, 3), model('Villa', 60000, null, 3)], { price: { amount: 5000, currency: 'SAR', from: true, period, onRequest: false } });
+      a.listing.category = 'rent';
+      return a;
+    };
+    // One layout at SAR 5,000 a month, another at SAR 60,000 a year, on one page.
+    const facts = { 3: [{ fig: 5000, mark: 'SAR', kind: 'model', model: 'Studio', per: 'month' }, { fig: 60000, mark: 'SAR', kind: 'model', model: 'Villa', per: 'year' }] };
+    const r = await rig({ listing: reading('month'), facts });
+    try {
+      const report = await r.run();
+      assert.deepEqual(modelCalls(r).map((c) => c.period), ['month']);
+      assert.deepEqual(report.listingPreview.models.map((m) => m.price), [5000, null], 'SAR 60,000 a year is never published as SAR 60,000 a month');
+      assert.deepEqual(report.listingPreview.price, { amount: 5000, currency: 'SAR', from: true, period: 'month', onRequest: false });
+      assert.deepEqual(checkListing(report.listingPreview), []);
+    } finally { r.cleanup(); }
+    // The owner's caption says yearly: the listing is published per year, so that is the period checked.
+    const y = await rig({ listing: reading('month'), facts });
+    try {
+      const report = await processPdf({ pdfPath: y.pdfPath, cfg: y.cfg, caption: { category: 'rent', period: 'year', text: '' }, workDir: path.join(y.repo, '..', 'work'), dryRun: true });
+      assert.deepEqual(modelCalls(y).map((c) => c.period), ['year']);
+      assert.deepEqual(report.listingPreview.models.map((m) => m.price), [null, 60000]);
+      assert.deepEqual(report.listingPreview.price, { amount: 60000, currency: 'SAR', from: true, period: 'year', onRequest: false });
+    } finally { y.cleanup(); }
   });
 
   it('Codex r1 #3: a money figure in a model\'s text that is not THAT model\'s own confirmed price drops that text, with a warning', async () => {
@@ -2438,6 +2467,38 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.deepEqual(after.models.map((m) => m.price), [419994, 319015]);
       assert.deepEqual(checkListing(after), []);
     } finally { r.cleanup(); }
+  });
+
+  it('Codex r1 #2: --enrich of a rental — a reading whose period is not the listing\'s refuses the model prices (warn); the listing\'s period is the one checked', async () => {
+    const rental = (period) => {
+      const a = reading();
+      a.listing.category = 'rent';
+      a.listing.price = { amount: 319015, currency: 'SAR', from: true, period, onRequest: false };
+      for (const m of a.models) m.subsidisedPrice = null;
+      return a;
+    };
+    const monthly = { amount: 319015, currency: 'SAR', from: true, period: 'month', onRequest: false };
+    const calls = (r) => r.calls().filter((c) => c.tool === 'claude-model-confirm');
+    const r = await rig({ listing: rental('year') });
+    try {
+      seed(r, { price: monthly, extra: { category: 'rent' } });
+      const report = await enrich(r);
+      const after = saved(r);
+      assert.equal(calls(r).length, 0, 'figures of another period are not checked: they are not published');
+      assert.deepEqual(after.models.map((m) => m.price), [null, null]);
+      assert.deepEqual(after.price, monthly, 'the listing keeps its own price and period');
+      assert.ok(report.warnings.some((w) => /per year/.test(w) && /per month/.test(w)), report.warnings.join(' | '));
+      assert.ok(report.warningCodes.includes('model-price-not-printed'));
+    } finally { r.cleanup(); }
+    // The same period: checked FOR that period, and kept.
+    const same = await rig({ listing: rental('month') });
+    try {
+      seed(same, { price: monthly, extra: { category: 'rent' } });
+      await enrich(same);
+      assert.deepEqual(calls(same).map((c) => c.period), ['month']);
+      assert.deepEqual(saved(same).models.map((m) => m.price), [419994, 319015]);
+      assert.deepEqual(saved(same).price, monthly);
+    } finally { same.cleanup(); }
   });
 
   it('Codex r1 #3: on --enrich too, a money figure in a model\'s text that is not THAT model\'s own confirmed price drops that text', async () => {
