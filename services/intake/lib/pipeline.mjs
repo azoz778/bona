@@ -136,16 +136,18 @@ function refusedFigureIn(segments, refused, published) {
 }
 
 /** A currency's code, name or symbol (r3 #1). */
-const CUR = String.raw`(?:\b(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP|riyals?|rials?|dirhams?|dollars?|euros?|pounds?|sterling)\b|ريال|ر\.\s?س|ر\.\s?ع|درهم|دولار|يورو|جنيه|دينار|[$€£﷼\u20c1])`;
-/** A currency next to a figure: "SAR 1,500", "1,500 riyals", "$ 750", "750 SR". */
+const CUR = String.raw`(?:(?<![A-Za-z])(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP|riyals?|rials?|dirhams?|dollars?|euros?|pounds?|sterling)(?![A-Za-z])|ريال|ر\.\s?س|ر\.\s?ع|درهم|دولار|يورو|جنيه|دينار|[$€£﷼\u20c1])`;
+/** A currency next to a figure: "SAR 1,500", "1,500 riyals", "$ 750", "750 SR", "4500SAR" (r5 #1: a code glued to its figure). */
 const CURRENCY_BY_FIGURE_RE = new RegExp(String.raw`${CUR}\s*[:\-–—=]?\s*\d|\d(?:[.,٫]\d{1,2})?\s*(?:\/-\s*)?${CUR}`, 'i');
 /** A currency's name or symbol anywhere, or its code by a figure — what a model NAME may not carry (r2 #4). */
 const NAME_CURRENCY_RE = new RegExp(String.raw`\b(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)\b\s*\d|\d\s*\b(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)\b|\b(?:riyals?|rials?|dirhams?|dollars?|euros?|sterling)\b|ريال|ر\.\s?س|ر\.\s?ع|درهم|دولار|يورو|جنيه|دينار|[$€£﷼\u20c1]`, 'i');
 /**
- * Arabic words as whole words, with the clitics و / ف, ب / ل / لل and ال in front: "السعر", "بسعر", "للإيجار"
- * — never inside another word ("رسوم" is not in "رسومات").
+ * Arabic words as whole words, with the clitics و / ف, ب / ل / لل and ال in front (a tatweel may follow one:
+ * "فـحجز"): "السعر", "بسعر", "للإيجار" — never inside another word ("رسوم" is not in "رسومات"). Only a LETTER
+ * before or after continues the word: Arabic punctuation (، ؛ ؟ ٪) ends it, like a space (r5 #1).
  */
-const arabicWords = (words) => String.raw`(?<![\u0600-\u06ff])[وف]?(?:لل|[بل])?(?:ال)?(?:${words})(?![\u0600-\u06ff])`;
+const AR_LETTER = String.raw`[\u0621-\u064a\u066e-\u06d3\u06d5\u06fa-\u06ff]`;
+const arabicWords = (words) => String.raw`(?<!${AR_LETTER})[وف]?\u0640?(?:لل|[بل])?\u0640?(?:ال)?(?:${words})(?!${AR_LETTER})`;
 /** A payment (r3 #1): what a model NAME may not carry, and, with any number, money in free text. "مقدم" alone is not one. */
 const PAYMENT_EN = String.raw`\b(?:down\s*-?\s*payments?|payments?|pay|pays|paid|deposits?|fees?|instal{1,2}ments?|service\s+charges?)\b`;
 const PAYMENT_AR = arabicWords('دفع|دفعة|دفعات|عربون|رسوم|قسط|أقساط|اقساط');
@@ -173,13 +175,12 @@ const DISTANCE_WORD_RE = /\b(?:run|runs|running|jog|jogging|walk|walking|track|t
 /** Cut out before the test (r3 #1): a duration right after its number, and a year 1900–2099 standing alone. */
 const DURATION_G = /(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?\s*(?:years?|yrs?|months?|weeks?|days?|hours?|hrs?|minutes?|mins?|سنة|سنوات|سنين|عام|أعوام|اعوام|شهر|شهور|أشهر|اشهر|أسبوع|أسابيع|يوم|أيام|ايام|ساعة|ساعات|دقيقة|دقائق)(?![a-z\u0600-\u06ff])/gi;
 const YEAR_G = /(?<![\d.,٫٬])(?:19|20)\d{2}(?![\d]|[.,٫٬]\d)/g;
-/** Clauses: sentences, and the parts a comma or a semicolon sets apart ("Booking fee 500, refundable"). */
-const CLAUSE_END = new RegExp(`${SENTENCE_END.source}|[,،](?=\\s)`, 'i');
 
 /**
  * Does `text` state money? THE rule for free text — a unit model's rooms and availability, every amenities /
- * nearby / warranties item (r3 #1; its whole contract is one table in price-pages.test.mjs). Clause by clause,
- * once measurements (withoutMeasures), durations ("2 years", "24 ساعة") and lone years ("2027") are cut out:
+ * nearby / warranties item (r3 #1, r5 #1; its whole contract is one table in price-pages.test.mjs). Sentence by
+ * sentence, once measurements (withoutMeasures) and durations ("2 years", "24 ساعة") are cut out (a lone year,
+ * "2027", only from the "from" test):
  *   - a currency next to a figure ("Club fee SAR 1,500");
  *   - a price or payment word with ANY number ("Price 4500", "Rent 8500 per month", "Deposit 750", "حجز 5000");
  *   - "starting / from / يبدأ / ابتداء" with a figure of four digits or more ("Starting from 4500");
@@ -188,11 +189,13 @@ const CLAUSE_END = new RegExp(`${SENTENCE_END.source}|[,،](?=\\s)`, 'i');
  * Prices are published from the price fields only, so no free text may carry one.
  */
 export function statesMoney(text) {
-  return String(text ?? '').split(CLAUSE_END).some((clause) => {
-    const t = withoutMeasures(westernise(clause)).replace(DURATION_G, ' ').replace(YEAR_G, ' ');
+  // Sentences only — a comma never sets a figure apart from its word ("Deposit, 750": r5 #1).
+  return String(text ?? '').split(SENTENCE_END).some((clause) => {
+    const t = withoutMeasures(westernise(clause)).replace(DURATION_G, ' ');
     if (CURRENCY_BY_FIGURE_RE.test(t)) return true;
     if (PRICE_WORD_RE.test(t) && /\d/.test(t)) return true;
-    if (FROM_WORD_RE.test(t) && FOUR_PLUS_RE.test(t)) return true;
+    // A lone year is cut from the "from" test only ("Handover starts 2027"), never before the others ("SAR 2000").
+    if (FROM_WORD_RE.test(t) && FOUR_PLUS_RE.test(t.replace(YEAR_G, ' '))) return true;
     if (GROUPED_RE.test(t) || /(?<![\d.,٫٬])\d{5,}/.test(t) || SCALED_RE.test(t)) return true;
     return SOLID_K_RE.test(t) && !DISTANCE_WORD_RE.test(t);
   });

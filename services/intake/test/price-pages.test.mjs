@@ -101,6 +101,12 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     'بسعر 4500', 'الإيجار 4500', 'دفعة مقدمة 5000', 'عربون 750', 'رسوم الخدمة 25 للمتر', 'أقساط 1200', 'Service charge 25 per sqm',
     'Booking fee 500, refundable', 'Cost 3000', '1,500 riyals', '$ 750', 'Buildings G–P, 419,994', 'Down payment 50\u00a0000', 'Down payment 50\u202f000',
     'from 4.5m', '1.2 million', '3 ملايين', '5 آلاف', 'Parking for 1,200 cars',
+    // r5 #1: a year-like figure is cut only from the "from" test; a comma never splits a clause; a code glued to its
+    // figure; Arabic words end at a letter, not at Arabic punctuation; the فـ clitic.
+    'SAR 2000', '2000 ريال', 'Monthly rent: SAR 1900', 'Rent 2000 SAR/month', 'رسوم الخدمة 2000 ريال', 'Booking amount 2000 riyals',
+    'Price 2000', 'Down payment 2000', 'عربون 2000',
+    'Down payment, 4500', 'Deposit, 750', 'عربون، 5000', 'Monthly installments, 3500',
+    '4500SAR', '4500SR', 'فـحجز 5000', 'Club fee SAR 2000',
   ];
   const NOT_MONEY = [
     'Handover starts 2027', 'No maintenance fees for 2 years', 'ضمان 10 سنوات … مقدم من المطور', 'خدمات مقدمة … 24 ساعة',
