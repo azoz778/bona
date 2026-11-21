@@ -201,6 +201,12 @@ export function statesMoney(text) {
   });
 }
 
+/**
+ * Does `text` state one of `figures` (the prices the reading carries) in any form the price matcher knows —
+ * "4500", "4,500", "4.5k", "4.5m" (priceAppearsIn), measurements cut out first (r5 #2, r5 #3)?
+ */
+const statesFigure = (text, figures) => figures.length > 0 && typeof text === 'string'
+  && figures.some((n) => priceAppearsIn(withoutMeasures(westernise(text)), n));
 /** The figures written in `text`, as numbers: "419,994" → 419994, "٣١٩٬٠١٥" → 319015, "Villa 15m" → 15. */
 const figuresIn = (text) => (westernise(text).match(/\d{1,3}(?:[,٬.'’ \u00a0\u202f\u2009]\d{3})+(?!\d)|\d+/g) ?? []).map((x) => Number(x.replace(/\D/g, '')));
 /**
@@ -223,16 +229,18 @@ const nameStatesMoney = (text, figures = []) => typeof text === 'string'
 export function dropMoneyText(holder, { figures = [] } = {}) {
   const dropped = [];
   let name = null;
+  // Money by the rule (statesMoney), or one of the reading's own price figures in any form (r5 #2).
+  const money = (t) => typeof t === 'string' && (statesMoney(t) || statesFigure(t, figures));
   (Array.isArray(holder?.models) ? holder.models : []).forEach((m, i) => {
     if (!m || typeof m !== 'object') return;
     if (name === null && pairText(m.name).some((t) => nameStatesMoney(t, figures))) name = `models[${i}].name`;
-    if (listText(m.rooms).some(statesMoney)) { m.rooms = null; dropped.push(`models[${i}].rooms`); }
-    if (pairText(m.availability).some(statesMoney)) { m.availability = null; dropped.push(`models[${i}].availability`); }
+    if (listText(m.rooms).some(money)) { m.rooms = null; dropped.push(`models[${i}].rooms`); }
+    if (pairText(m.availability).some(money)) { m.availability = null; dropped.push(`models[${i}].availability`); }
   });
   for (const k of Object.keys(FACT_LISTS)) {
     const list = holder?.[k];
     if (!list || !Array.isArray(list.en) || !Array.isArray(list.ar)) continue;
-    const bad = new Set([...list.en.keys(), ...list.ar.keys()].filter((j) => statesMoney(list.en[j]) || statesMoney(list.ar[j])));
+    const bad = new Set([...list.en.keys(), ...list.ar.keys()].filter((j) => money(list.en[j]) || money(list.ar[j])));
     if (!bad.size) continue;
     for (const j of [...bad].sort((x, y) => x - y)) dropped.push(`${k}[${j}]`);
     holder[k] = { en: list.en.filter((_, j) => !bad.has(j)), ar: list.ar.filter((_, j) => !bad.has(j)) };

@@ -1231,6 +1231,19 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     } finally { r.cleanup(); }
   });
 
+  it('r5 #2: a model\'s text or a fact item that states one of the reading\'s own price figures is dropped — the price matcher\'s forms, which statesMoney alone lets through', async () => {
+    const a = withModels([model('Studio', 4500, null, 3), model('Loft', 6000, null, 3)]);
+    a.models[0].availability = { en: 'Floors 1–3, 4500 per month', ar: 'الأدوار 1–3' };
+    a.models[1].rooms = { en: ['Terrace', 'Maid room 6000'], ar: ['شرفة', 'غرفة'] };
+    a.amenities = { en: ['Gym', 'Club 4500 a year'], ar: ['نادٍ', 'نادي'] };
+    const r = await rig({ listing: a, modelConfirm: [6000] });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.listingPreview.models.map((m) => [m.availability, m.rooms]), [[null, null], [null, null]]);
+      assert.deepEqual(report.listingPreview.amenities, { en: ['Gym'], ar: ['نادٍ'] });
+    } finally { r.cleanup(); }
+  });
+
   it('r3 #3: a model NAME that carries a price the reading carries — a model price, a Sakani price, the headline — refuses the run', async () => {
     for (const [i, name] of [[0, 'Nawras 419,994'], [1, 'Lulu 270425'], [1, 'Type ٣١٩٬٠١٥']]) {
       const a = withModels([model('Nawras', 419994, 356024, 3), model('Lulu', 319015, 270425, 3)], { price: { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 } });
