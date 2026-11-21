@@ -966,7 +966,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // Returns the words that earned it, for the warning — or null.
   const startingFromWords = () => (readFrom && !ai.listing?.project && Array.isArray(ai.models) && ai.models.length === 1
     && report.priceEvidence?.confirmed === true ? fromWordingOf(ai.priceEvidence?.quote, price.amount) : null);
-  // --- 4c. the floor-plan contact check (r4, owner decision 2026-11-21) ------------------
+  // --- 4c. the floor-plan contact check (r4, owner decision 2026-11-21) — defined here, run after the price
+  // checks: before enrichListing on --enrich, after the duplicate check on a publish (r5 #4) -------------
   // A plan cut from a developer's PDF can carry the developer's phone, website, QR code, logo or a price table
   // in its pixels. Every plan the run would publish is looked at by a second model — the same pixels, at the same
   // size (writeFloorPlans into the work dir), up to 12 per call, 2 calls at a time (plan-check.mjs) — before any
@@ -1009,14 +1010,15 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         + 'so the listing goes up without them for now — try again later with `run-once --enrich <id>`');
     }
   };
-  await checkFloorPlans();
 
   // An enrichment publishes none of the model's copy, map pin or photos, and decides its headline from
   // the listing (enrichHeadline): the model's own headline and Sakani checks, the copy guard, the map
   // and the photo steps below are for a publish only. Its unit-model prices are checked above, the same.
   if (enrich) {
     // An enrichment publishes none of the listing copy, and the money in its models' text and fact lists was
-    // dropped before the checks (3c): there is no copy guard to run.
+    // dropped before the checks (3c): there is no copy guard to run. Its plans are checked here, after its
+    // (model) price checks, before anything is staged (r5 #4).
+    await checkFloorPlans();
     return enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target: enrichTarget, started, currencyDrop, force: enrich.force });
   }
 
@@ -1147,6 +1149,12 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       throw err;
     }
   }
+
+  // The floor-plan contact check (4c) runs here on a publish: after EVERY price check (models, headline,
+  // Sakani) — so its quota or failure can never change a price — and after the copy guard, the photo gate and
+  // the duplicate check, so no call is spent on a run that fails those (r5 #4). A dry run that would not
+  // publish spends none either.
+  if (!report.blocked) await checkFloorPlans();
 
   const index = readIndex(cfg.repo);
   const id = meta.id || nextListingId(index, inboxIds(cfg.repo));

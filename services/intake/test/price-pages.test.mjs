@@ -2488,6 +2488,53 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
     } finally { r.cleanup(); }
   });
 
+  it('r5 #4: the plan check comes after every price check — its quota never costs a headline or a Sakani price', async () => {
+    // A rental headline that needs its page check (r3 #4), then a plan check that hits the quota.
+    const rent = withPlans(2);
+    rent.listing.category = 'rent';
+    rent.listing.price = { amount: 60000, currency: 'SAR', from: false, period: 'year', onRequest: false };
+    rent.priceEvidence = { page: 3, quote: 'SAR 60,000' };
+    const pageText = ['Overview', 'Location', 'Annual rent SAR 60,000', 'Specification', 'Contact'];
+    const r = await rig({ listing: rent, candidateCount: 8, pageText, facts: { 3: [{ fig: 60000, mark: 'SAR', kind: 'whole', per: 'year' }] }, planCheck: 'quota' });
+    try {
+      const report = await r.run();
+      assert.deepEqual(report.listingPreview.price, { amount: 60000, currency: 'SAR', from: false, period: 'year', onRequest: false });
+      assert.deepEqual(plansOf(report), [null, null], 'the plans are left out, unchecked');
+      assert.equal(report.planCheck.fatal, true);
+    } finally { r.cleanup(); }
+    // A Sakani price confirmed on its page, then a plan check that hits the quota.
+    const sale = withPlans(2);
+    sale.listing.price = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
+    sale.priceEvidence = { page: 3, quote: '319,015' };
+    sale.subsidisedPriceEvidence = { page: 3, quote: '270,425' };
+    const t = await rig({ listing: sale, candidateCount: 8, confirm: [319015, 270425], planCheck: 'quota' });
+    try {
+      const report = await t.run();
+      assert.deepEqual(report.listingPreview.price, { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 });
+      assert.deepEqual(plansOf(report), [null, null]);
+    } finally { t.cleanup(); }
+    // The price checks hit the quota first: no plan call at all, the plans are unchecked.
+    const q = await rig({ listing: structuredClone(sale), candidateCount: 8, confirmFail: 'quota' });
+    try {
+      const report = await q.run();
+      assert.equal(planCalls(q).length, 0);
+      assert.deepEqual(report.planCheck.unchecked.sort(), [0, 1]);
+    } finally { q.cleanup(); }
+  });
+
+  it('r5 #4: no plan call is spent on a publish the photo gate or the duplicate check refuses', async () => {
+    const few = withPlans(2);
+    for (const im of few.images.slice(0, 6)) { im.exclude = true; im.rank = null; im.hero = false; }
+    const r = await rig({ listing: few, candidateCount: 8 });
+    try {
+      await assert.rejects(r.publish(), (err) => err.stage === 'images');
+      assert.equal(planCalls(r).length, 0);
+      const dry = await r.run();
+      assert.ok(dry.blocked);
+      assert.equal(planCalls(r).length, 0, 'a dry run that would not publish spends no plan call either');
+    } finally { r.cleanup(); }
+  });
+
   it('no plans: no call', async () => {
     const a = withPlans(2);
     for (const m of a.models) m.floorPlan = null;
