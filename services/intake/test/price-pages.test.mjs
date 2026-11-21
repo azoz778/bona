@@ -141,7 +141,7 @@ const put = (rel) => { const abs = path.join(outDir, rel); fs.mkdirSync(path.dir
 fs.appendFileSync(new URL('./calls.jsonl', import.meta.url), JSON.stringify({ tool: 'py-' + mode, pages, dir: opt('--page-dir') }) + '\\n');
 let out;
 if (mode === 'extract') {
-  const candidates = Array.from({ length: 6 }, (_, index) => {
+  const candidates = Array.from({ length: cfg.candidateCount ?? 6 }, (_, index) => {
     const file = 'images/c' + String(index).padStart(3, '0') + '.jpg';
     // cfg.broken: candidates written as bytes no decoder reads (a truncated or hostile image).
     const abs = (cfg.broken ?? []).includes(index) ? (put(file), fs.writeFileSync(path.join(outDir, file), 'not an image'), path.join(outDir, file)) : put(file);
@@ -196,7 +196,28 @@ const factIn = (e, asked) => {
   return shown === null ? /may be taken as/.test(prompt) : marksOf(asked).some((t) => t === shown || t.endsWith(' ' + shown));
 };
 let answer;
-if (prompt.includes('For each numbered model')) {
+let rawResult = null;
+if (prompt.includes('the floor-plan images to check>>>')) {
+  // r4: the floor-plan contact check — one JSON line per image. cfg.planCheck: null = every plan clean;
+  // 'quota' / true = the call fails (a quota, or another error); { 'plan-03': 'phone' } = that plan shows it.
+  // cfg.planReply: 'duplicate' / 'malformed' = the first image's record comes twice / malformed.
+  const fenced = prompt.split('<<<BONA-UNTRUSTED-DATA: the floor-plan images to check>>>')[1].split('<<<END ')[0];
+  const images = fenced.split('\\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
+  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-plan-check', files: images.map((im) => im.file.split('/').pop()) }) + '\\n');
+  if (cfg.planCheck === 'quota' || cfg.planCheck === true) {
+    const quota = cfg.planCheck === 'quota';
+    process.stdout.write(JSON.stringify({ is_error: true, api_error_status: quota ? 429 : null, result: quota ? "You've hit your session limit" : 'boom' }));
+    process.exit(1);
+  }
+  const dirty = (cfg.planCheck && typeof cfg.planCheck === 'object') ? cfg.planCheck : {};
+  const lines = images.map((im) => {
+    const base = im.file.split('/').pop().replace(/\\.jpg$/, '');
+    return JSON.stringify({ index: im.index, clean: !dirty[base], found: dirty[base] ?? '' });
+  });
+  if (cfg.planReply === 'duplicate') lines.push(lines[0]);
+  if (cfg.planReply === 'malformed') lines[0] = JSON.stringify({ index: 0, clean: 'yes', found: '' });
+  rawResult = lines.join('\\n');
+} else if (prompt.includes('For each numbered model')) {
   // The unit-model check (claude.mjs confirmModelPrices): one call per page, every model on it,
   // one JSON line per model inside the fence.
   const page = Number((prompt.match(/\\/p(\\d+)\\.jpg/) || [])[1]);
@@ -260,7 +281,7 @@ if (prompt.includes('For each numbered model')) {
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-listing', prompt }) + '\\n');
   answer = cfg.listing;
 }
-process.stdout.write(JSON.stringify({ is_error: false, result: JSON.stringify(answer), total_cost_usd: 0, duration_ms: 1, num_turns: 1, session_id: 'fake' }));
+process.stdout.write(JSON.stringify({ is_error: false, result: rawResult ?? JSON.stringify(answer), total_cost_usd: 0, duration_ms: 1, num_turns: 1, session_id: 'fake' }));
 `;
 
 // A stand-in for brochure_pdf.py, run through the real spawn (cfg.brochurePyCmd = [node, this]):
@@ -307,14 +328,14 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, u
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, printedIn = 'SAR', facts = null, cfgExtra = {}, build = '' }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, printedIn = 'SAR', facts = null, cfgExtra = {}, build = '', candidateCount = 6, planCheck = null, planReply = null }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail, printedIn, facts }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail, printedIn, facts, candidateCount, planCheck, planReply }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   fs.writeFileSync(path.join(bin, 'fake-brochure.mjs'), FAKE_BROCHURE);
@@ -2362,6 +2383,91 @@ describe('processPdf: unit models and their floor plans reach the repo', { timeo
   });
 });
 
+// r4 (owner decision 2026-11-21): every floor plan a run would publish is checked by a second model for a phone, an
+// email, a website, a social handle, a QR code, a logo / brand name or a price, before any plan file reaches the repo.
+describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, () => {
+  const ON_REQUEST = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+  /** A W023-shaped reading: `n` unit models, each with its own floor plan (candidates 6…6+n-1, excluded from the gallery). */
+  const withPlans = (n) => {
+    const a = { ...answer({ price: ON_REQUEST }), models: Array.from({ length: n }, (_, k) => ({
+      name: { en: `Type ${String.fromCharCode(65 + k)}`, ar: `نموذج ${k + 1}` }, bedrooms: 2, bathrooms: 2, areaSqm: 100 + k, rooms: null, availability: null,
+      price: null, subsidisedPrice: null, evidence: null, floorPlan: 6 + k,
+    })) };
+    for (let k = 0; k < n; k += 1) a.images.push({ index: 6 + k, room: 'view', rank: null, hero: false, exclude: true, reason: 'floor plan', focus: null });
+    return a;
+  };
+  const planCalls = (r) => r.calls().filter((c) => c.tool === 'claude-plan-check');
+  const plansOf = (report) => report.listingPreview.models.map((m) => m.floorPlan?.src ?? null);
+
+  it('a W023-shaped brochure: 8 plans, one call, 8 clean answers — all 8 kept, and the reply says so', async () => {
+    const r = await rig({ listing: withPlans(8), candidateCount: 14 });
+    try {
+      const report = await r.run();
+      assert.equal(planCalls(r).length, 1, 'one call for all the plans, a dry run too');
+      assert.deepEqual(planCalls(r)[0].files, Array.from({ length: 8 }, (_, k) => `plan-0${k + 1}.jpg`));
+      assert.equal(plansOf(report).filter(Boolean).length, 8);
+      assert.deepEqual([report.planCheck.plans, report.planCheck.leftOut.length, report.planCheck.unchecked.length], [8, 0, 0]);
+      assert.equal(msg.planCheckLine(report.planCheck), '8 floor plans · 0 left out by the contact check');
+    } finally { r.cleanup(); }
+  });
+
+  it('a reply that flags one plan drops only that plan, and the warning names the model and what it shows', async () => {
+    const r = await rig({ listing: withPlans(3), candidateCount: 9, planCheck: { 'plan-02': 'phone, logo' } });
+    try {
+      const report = await r.run();
+      assert.deepEqual(plansOf(report).map(Boolean), [true, false, true]);
+      assert.ok(report.warnings.some((w) => /Type B/.test(w) && /a phone number/.test(w) && /a logo or brand name/.test(w)), report.warnings.join(' | '));
+      assert.equal(msg.planCheckLine(report.planCheck), '3 floor plans · 1 left out by the contact check');
+      assert.equal(report.blocked, undefined, 'never blocks the listing');
+    } finally { r.cleanup(); }
+  });
+
+  it('a duplicate or malformed record drops that plan', async () => {
+    for (const planReply of ['duplicate', 'malformed']) {
+      const r = await rig({ listing: withPlans(2), candidateCount: 8, planReply });
+      try {
+        assert.deepEqual(plansOf(await r.run()).map(Boolean), [false, true], planReply);
+      } finally { r.cleanup(); }
+    }
+  });
+
+  it('a quota (or a failed call) on publish: the listing goes up WITHOUT plans, "try again later"', async () => {
+    for (const planCheck of ['quota', true]) {
+      const r = await rig({ listing: withPlans(2), candidateCount: 8, planCheck });
+      try {
+        const report = await r.publish();
+        assert.equal(report.ok, true);
+        assert.deepEqual(report.listing.models.map((m) => m.floorPlan), [null, null]);
+        const files = fs.readdirSync(path.join(r.repo, 'public', 'listings', report.slug));
+        assert.ok(!files.some((f) => f.startsWith('plan-')), files.join(' '));
+        assert.ok(report.warnings.some((w) => /2 floor plan\(s\) could not be checked/.test(w) && /try again later/.test(w)), report.warnings.join(' | '));
+        assert.match(msg.planCheckLine(report.planCheck), /2 not checked — try again later/);
+      } finally { r.cleanup(); }
+    }
+  });
+
+  it('a live publish never stages a flagged plan', async () => {
+    const r = await rig({ listing: withPlans(2), candidateCount: 8, planCheck: { 'plan-01': 'qr' } });
+    try {
+      const report = await r.publish();
+      const files = fs.readdirSync(path.join(r.repo, 'public', 'listings', report.slug)).filter((f) => f.startsWith('plan-'));
+      assert.deepEqual(files.sort(), ['plan-02-thumb.webp', 'plan-02.jpg']);
+      assert.deepEqual(report.listing.models.map((m) => m.floorPlan?.src ?? null), [null, `/listings/${report.slug}/plan-02.jpg`]);
+    } finally { r.cleanup(); }
+  });
+
+  it('no plans: no call', async () => {
+    const a = withPlans(2);
+    for (const m of a.models) m.floorPlan = null;
+    const r = await rig({ listing: a, candidateCount: 8 });
+    try {
+      const report = await r.run();
+      assert.equal(planCalls(r).length, 0);
+      assert.equal(report.planCheck ?? null, null);
+    } finally { r.cleanup(); }
+  });
+});
+
 describe('processPdf --enrich: unit models + brochure on a published listing, nothing else touched', { timeout: 120000 }, () => {
   const SLUG = 'jeddah-heights-residential-community-jeddah';
   const ON_REQUEST = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
@@ -2472,8 +2578,9 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       const status = git(r, 'status', '--porcelain', '--untracked-files=all').split('\n').filter(Boolean).map((l) => l.slice(3));
       assert.ok(status.length > 0);
       for (const p of status) assert.match(p, new RegExp(`^(public/listings/${SLUG}/|scripts/curate/inbox/${SLUG}\\.json$)`), p);
-      // No headline check and no photo-region call: the copy and photos are not published.
-      assert.deepEqual(r.calls().filter((c) => c.tool.startsWith('claude')).map((c) => c.tool), ['claude-listing', 'claude-model-confirm']);
+      // No headline check and no photo-region call: the copy and photos are not published. The new plan is
+      // checked for contact details (r4) before it reaches the repo.
+      assert.deepEqual(r.calls().filter((c) => c.tool.startsWith('claude')).map((c) => c.tool), ['claude-listing', 'claude-model-confirm', 'claude-plan-check']);
     } finally { r.cleanup(); }
   });
 
@@ -2989,6 +3096,63 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       const [row] = planBackfill([saved(r)], { findPdf: () => r.pdfPath });
       assert.equal(row.action, 'enrich', row.reason);
       assert.match((await enrich(r, { dryRun: true })).blocked, /quota/);
+    } finally { r.cleanup(); }
+  });
+
+  it('r4: a plan check cut short on a first enrichment commits nothing and is retryable; --force (not a quota) takes the models without plans', async () => {
+    for (const planCheck of ['quota', true]) {
+      const r = await rig({ listing: reading(), planCheck });
+      try {
+        seed(r, { price: { ...ON_REQUEST } });
+        const raw = fs.readFileSync(inboxFile(r), 'utf8');
+        const err = await enrich(r).then(() => null, (e) => e);
+        assert.equal(err?.retryable, true, String(planCheck));
+        assert.match(String(err?.reason), /floor-plan contact check/);
+        assert.match(String(err?.reason), planCheck === 'quota' ? /quota/ : /could not be completed/);
+        assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '', 'nothing committed');
+        assert.equal(fs.readFileSync(inboxFile(r), 'utf8'), raw);
+        assert.match((await enrich(r, { dryRun: true })).blocked, /floor-plan contact check/, 'a dry run asks too, and shows it');
+      } finally { r.cleanup(); }
+    }
+    // --force, the check failed (not a quota), the listing has no plan to lose: the models go up without plans.
+    const f = await rig({ listing: reading(), planCheck: true });
+    try {
+      seed(f, { price: { ...ON_REQUEST } });
+      fs.rmSync(path.join(pubDir(f), 'plan-03.jpg')); fs.rmSync(path.join(pubDir(f), 'plan-03-thumb.webp'));
+      git(f, 'add', '-A'); git(f, 'commit', '-qm', 'no plan yet');
+      const report = await enrich(f, { force: true });
+      assert.equal(report.ok, true);
+      assert.deepEqual(saved(f).models.map((m) => m.floorPlan), [null, null]);
+      assert.ok(report.warnings.some((w) => /--force/.test(w) && /floor plan/.test(w)), report.warnings.join(' | '));
+    } finally { f.cleanup(); }
+    // A quota, --force or not: retryable.
+    const q = await rig({ listing: reading(), planCheck: 'quota' });
+    try {
+      seed(q, { price: { ...ON_REQUEST } });
+      assert.equal((await enrich(q, { force: true }).then(() => null, (e) => e))?.retryable, true);
+    } finally { q.cleanup(); }
+  });
+
+  it('r4: a re-enrichment whose plans cannot be checked keeps the never-degrade rule — refused, --force or not', async () => {
+    const r = await rig({ listing: reading(), planCheck: true });
+    try {
+      const plan = { src: `/listings/${SLUG}/plan-03.jpg`, thumb: `/listings/${SLUG}/plan-03-thumb.webp` };
+      seed(r, { price: { ...ON_REQUEST }, extra: { models: [{ ...prior(1, { priced: false })[0], floorPlan: plan }] } });
+      const err = await enrich(r, { force: true }).then(() => null, (e) => e);
+      assert.equal(err?.retryable, true);
+      assert.equal(fs.readFileSync(path.join(pubDir(r), 'plan-03.jpg'), 'utf8'), 'old plan');
+    } finally { r.cleanup(); }
+  });
+
+  it('r4: a plan the contact check flags is left out of the enrichment, the rest goes up', async () => {
+    const r = await rig({ listing: reading(), planCheck: { 'plan-01': 'website' } });
+    try {
+      seed(r);
+      const report = await enrich(r);
+      assert.deepEqual(saved(r).models.map((m) => m.floorPlan), [null, null]);
+      assert.ok(!fs.readdirSync(pubDir(r)).some((f) => f.startsWith('plan-')));
+      assert.ok(report.warnings.some((w) => /Nawras/.test(w) && /a website/.test(w)), report.warnings.join(' | '));
+      assert.equal(msg.planCheckLine(report.planCheck), '1 floor plan · 1 left out by the contact check');
     } finally { r.cleanup(); }
   });
 

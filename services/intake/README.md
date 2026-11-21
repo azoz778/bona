@@ -29,6 +29,13 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    page image by a second model, one call per page (2 at a time, `BONA_MODEL_PRICE_CONCURRENCY`), at most `BONA_MAX_MODEL_PRICE_PAGES`
    pages (12); a price that is not confirmed is dropped, never taken from the text layer.
 3. **Floor plans**: each model's plan is cut from the PDF and saved as `plan-NN.jpg` (flattened on white).
+   Before any plan file reaches the repo, a second model checks every plan image (at its published 1600 px
+   size, 12 per call, 2 calls at a time; a dry run too) for a phone number, email, website, social handle, QR
+   code, logo / brand name or price (`lib/plan-check.mjs`, r4). A flagged plan, or one without exactly one
+   well-formed "clean" answer, is left out (its model shows no plan; the listing is never blocked). A check that
+   cannot finish publishes without those plans ("try again later"); on `--enrich` it commits nothing
+   (retryable; `--force` takes the models without plans on a first enrichment, not after a quota).
+   `brochure <id>` and `price <id>` reuse the checked plan files and make no call.
 4. **Site section**: the listing page shows "Residences & prices" from `models`.
 5. **Brochure** (`brochure_pdf.py`): one bilingual (English + Arabic) A4 PDF drawn from scratch in the
    TK design system, from the published listing, its photos and plans. WeasyPrint is pinned to 70.0 and

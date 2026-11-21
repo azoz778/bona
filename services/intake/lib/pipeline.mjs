@@ -32,7 +32,7 @@ import { BROCHURE_FILE, brochureFileIn, brochureUrlFor, buildBrandedBrochure } f
 import { classifyPdf } from './classify.mjs';
 import { writeConfinement } from './confine.mjs';
 import { buildContactSheets } from './contact-sheet.mjs';
-import { buildPrompt, confirmModelPrices, confirmPriceEvidence, runListingAi } from './claude.mjs';
+import { askPlanContacts, buildPrompt, confirmModelPrices, confirmPriceEvidence, runListingAi } from './claude.mjs';
 import { floorPlanTargets, removeListingImages, writeFloorPlans, writeListingImages } from './images.mjs';
 import {
   addWarningCode, buildListing, checkListing, enrichHeadline, enrichMetaFor, findByPdfSha, findInbox, inboxIds, isSlug, listingDirProblem, mergeEnrichment, recordFileProblem,
@@ -40,6 +40,7 @@ import {
   writeInboxListing,
 } from './listing.mjs';
 import { log } from './log.mjs';
+import { checkPlanImages } from './plan-check.mjs';
 import { ABROAD_CURRENCIES, alignHeadline, checkModelPrices, countryCurrency, homeCurrency, isFigure, modelPriceCurrency } from './model-prices.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
@@ -956,6 +957,51 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // Returns the words that earned it, for the warning — or null.
   const startingFromWords = () => (readFrom && !ai.listing?.project && Array.isArray(ai.models) && ai.models.length === 1
     && report.priceEvidence?.confirmed === true ? fromWordingOf(ai.priceEvidence?.quote, price.amount) : null);
+  // --- 4c. the floor-plan contact check (r4, owner decision 2026-11-21) ------------------
+  // A plan cut from a developer's PDF can carry the developer's phone, website, QR code, logo or a price table
+  // in its pixels. Every plan the run would publish is looked at by a second model — the same pixels, at the same
+  // size (writeFloorPlans into the work dir), up to 12 per call, 2 calls at a time (plan-check.mjs) — before any
+  // plan file reaches the repo; a dry run asks too. A plan is kept only on one well-formed "clean" answer: one
+  // that shows a contact, a logo or a price is left out (its model shows no plan; the listing is never blocked),
+  // and one that could not be checked (a quota, a failed call) is left out "for now" — on an enrichment that is
+  // an unfinished check (enrichListing). Nothing after a quota error.
+  const PLAN_WORDS = { phone: 'a phone number', email: 'an email address', website: 'a website', social: 'a social-media handle', qr: 'a QR code', logo: 'a logo or brand name', price: 'a price' };
+  const modelName = (i) => String(ai.models?.[i]?.name?.en ?? `model ${i + 1}`).replace(/\s+/g, ' ').trim().slice(0, 60);
+  const checkFloorPlans = async () => {
+    const models = Array.isArray(ai.models) ? ai.models : [];
+    if (!floorPlanTargets(extraction.candidates, models, 'plan-check').some((t) => t.cand)) return;
+    report.stage = 'plan-check';
+    const dir = path.join(workDir, 'plan-check');
+    fs.rmSync(dir, { recursive: true, force: true });
+    const written = await writeFloorPlans(extraction.candidates, models, dir, 'plan-check');
+    const ask = async (images) => {
+      if (quotaHit) return { reply: '', error: 'the AI quota ran out', fatal: true };
+      const res = await askPlanContacts({
+        images, bin: cfg.claudeBin, model: cfg.claudeModel, cwd: workDir, addDirs: [workDir], settingsPath: confinement.file,
+      });
+      log.info('intake.plan_check', { plans: images.length, error: res.error, fatal: res.fatal });
+      if (res.fatal) quotaHit = true;
+      return res;
+    };
+    const res = await checkPlanImages(written.map((p) => ({ model: p.model, file: p.file })), { ask });
+    for (const { model } of res.dirty) models[model].floorPlan = null;
+    for (const model of res.unchecked) models[model].floorPlan = null;
+    report.planCheck = {
+      plans: written.length, clean: res.clean.length, calls: res.calls, fatal: res.fatal, errors: res.errors,
+      leftOut: res.dirty.map(({ model, found }) => ({ model, found })), unchecked: res.unchecked,
+    };
+    log.info('intake.plan_checked', { plans: written.length, clean: res.clean.length, leftOut: res.dirty.length, unchecked: res.unchecked.length, fatal: res.fatal });
+    for (const { model, found } of res.dirty) {
+      const what = found.length ? found.map((w) => PLAN_WORDS[w]).join(', ') : 'contact or brand details (or the check gave no clear answer)';
+      report.warnings.push(`the floor plan of ${modelName(model)} was left out: it shows ${what} (the floor-plan contact check)`);
+    }
+    if (res.unchecked.length && !enrich) {
+      report.warnings.push(`${res.unchecked.length} floor plan(s) could not be checked for contact details (${res.fatal ? 'the AI quota ran out' : 'the check failed'}), `
+        + 'so the listing goes up without them for now — try again later with `run-once --enrich <id>`');
+    }
+  };
+  await checkFloorPlans();
+
   // An enrichment publishes none of the model's copy, map pin or photos, and decides its headline from
   // the listing (enrichHeadline): the model's own headline and Sakani checks, the copy guard, the map
   // and the photo steps below are for a publish only. Its unit-model prices are checked above, the same.
@@ -1315,9 +1361,19 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   if (forcedUnchecked) {
     report.warnings.push(`--force: published without the ${incompleteCount} unit-model price(s) whose check could not be completed (page${mp.incompletePages.length === 1 ? '' : 's'} ${mp.incompletePages.join(', ')}) — run --enrich again later to add them`);
   }
-  const unchecked = mp && (mp.fatal || (incompleteCount > 0 && !forcedUnchecked))
+  const priceUnchecked = mp && (mp.fatal || (incompleteCount > 0 && !forcedUnchecked))
     ? `${mp.fatal ? 'the AI quota ran out during the unit-model price check' : `the check of ${mp.incomplete.length} unit-model price(s) could not be completed (page${mp.incompletePages.length === 1 ? '' : 's'} ${mp.incompletePages.join(', ')})`} — nothing was changed; try again later`
     : null;
+  // The floor-plan contact check (r4) is a check like the price check: one cut short commits nothing (retryable).
+  // --force takes the models without those plans only on a first enrichment (no plan to lose) and not after a quota.
+  const pc = report.planCheck;
+  const plansUnchecked = pc?.unchecked?.length ?? 0;
+  const forcedPlans = plansUnchecked > 0 && !pc.fatal && force && compare.before.plans === 0;
+  if (forcedPlans) report.warnings.push(`--force: published without the ${plansUnchecked} floor plan(s) the contact check could not complete — run --enrich again later to add them`);
+  const planUnchecked = plansUnchecked > 0 && !forcedPlans
+    ? `${pc.fatal ? 'the AI quota ran out during the floor-plan contact check' : `the floor-plan contact check of ${plansUnchecked} plan(s) could not be completed`} — nothing was changed; try again later`
+    : null;
+  const unchecked = priceUnchecked ?? planUnchecked;
   const degraded = compare.losses.length && !force
     ? `${id} already carries more than this reading: ${compare.losses.join('; ')} — nothing was changed; re-run with --force if the new reading is right`
     : null;

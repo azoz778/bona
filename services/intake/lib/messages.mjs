@@ -53,6 +53,8 @@ export function published(report) {
   if (models.length) {
     lines.push(`🏢 ${models.length} unit model${models.length === 1 ? '' : 's'}${plans ? ` · ${plans} floor plan${plans === 1 ? '' : 's'}` : ''}`);
   }
+  const checked = planCheckLine(report.planCheck);
+  if (checked) lines.push(`🔎 ${checked}`);
   if (l.hidden) lines.push('_Hidden: it is in the repo but not on the site (`show ' + l.id + '` publishes it)._');
   const warn = (report.warnings || []).filter(Boolean).slice(0, 3);
   if (warn.length) lines.push('', ...warn.map((w) => `⚠️ ${w}`));
@@ -73,6 +75,8 @@ export function dryRunSummary(report) {
     '',
     `${report.picks.length} photos would be published, cover: ${report.picks[0] ? (ROOMS[report.picks[0].room]?.en ?? report.picks[0].room) : '—'}`,
   ];
+  const checked = planCheckLine(report.planCheck);
+  if (checked) lines.push(`🔎 ${checked}`);
   if (report.blocked) lines.push('', `❌ It would NOT publish: ${report.blocked}`);
   const warn = (report.warnings || []).filter(Boolean).slice(0, 3);
   if (warn.length) lines.push('', ...warn.map((w) => `⚠️ ${w}`));
@@ -250,4 +254,16 @@ export function enrichBrochureLine(report) {
   return report?.enrich?.hadBrochure
     ? 'NOT rebuilt — nothing was committed over the old one'
     : 'NOT built — the listing has no brochure (the reason is in the warnings above)';
+}
+
+/**
+ * The floor-plan contact check in one line (r4): "8 floor plans · 0 left out by the contact check", and how many
+ * could not be checked. null when the run had no plan to check.
+ */
+export function planCheckLine(planCheck) {
+  if (!planCheck || !(planCheck.plans > 0)) return null;
+  const n = planCheck.plans;
+  const unchecked = planCheck.unchecked?.length ?? 0;
+  return `${n} floor plan${n === 1 ? '' : 's'} · ${planCheck.leftOut?.length ?? 0} left out by the contact check`
+    + `${unchecked ? ` · ${unchecked} not checked — try again later` : ''}`;
 }

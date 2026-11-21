@@ -173,3 +173,4 @@ ones are optional) and the old brochures can be rebuilt with the previous code.
 - **Arabic bracket font fix**: Amiri is restricted with `unicode-range` so brackets and digits do not fall into the wrong font.
 - **Copy rules extended**: Saudi phone formats (including Arabic-Indic digits), URLs, emails, handles and domains are all rejected from generated copy.
 - **Off-plan photos are labelled "Illustrative"**.
+- **Floor-plan contact check (owner, 2026-11-21)**: every plan image is checked by a second model for a phone, email, website, social handle, QR code, logo / brand name or price before it reaches the repo; a flagged or unclear plan is left out (never blocking the listing), and a check that cannot finish publishes without plans (retryable on `--enrich`).

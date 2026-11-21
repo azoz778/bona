@@ -92,6 +92,7 @@ function printEnrichReport(r) {
   if (e.priceChanged) say(`           after  ${plain(e.price)}`);
   if (e.refuse) say(`           ${e.refuse}`);
   say(`Plans      ${e.plans.length ? e.plans.join(' ') : 'none'}${e.removedPlans.length ? `  (removing ${e.removedPlans.join(' ')})` : ''}`);
+  if (msg.planCheckLine(r.planCheck)) say(`           ${msg.planCheckLine(r.planCheck)}`);
   if (r.warnings?.length) {
     say('');
     for (const w of r.warnings) say(`  ! ${w}`);
@@ -146,6 +147,7 @@ function printReport(r) {
     say(`  ${im.n === 1 ? 'HERO' : `  ${String(im.n).padStart(2)}`}  #${String(im.candidate).padStart(2)}  ${String(im.room).padEnd(14)} ${im.src}`);
     if (im.reason) say(`        ${im.reason}`);
   }
+  if (msg.planCheckLine(r.planCheck)) say(`  plans  ${msg.planCheckLine(r.planCheck)}`);
   if (r.excluded?.length) {
     say('');
     say('  excluded:');
