@@ -222,7 +222,8 @@ if (prompt.includes('the floor-plan images to check>>>')) {
   });
   if (cfg.planReply === 'duplicate') lines.push(lines[0]);
   if (cfg.planReply === 'malformed') lines[0] = JSON.stringify({ index: 0, clean: 'yes', found: '' });
-  rawResult = lines.join('\\n');
+  if (cfg.planReply === 'missing') lines.shift();
+  rawResult = cfg.planReply === 'prose' ? 'All the plans look fine to me.' : lines.join('\\n');
 } else if (prompt.includes('For each numbered model')) {
   // The unit-model check (claude.mjs confirmModelPrices): one call per page, every model on it,
   // one JSON line per model inside the fence.
@@ -2461,6 +2462,25 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
         assert.deepEqual(plansOf(await r.run()).map(Boolean), [false, true], planReply);
       } finally { r.cleanup(); }
     }
+  });
+
+  it('r5 #5: a reply that says nothing about a plan leaves it unchecked ("try again later"), never "contact details"', async () => {
+    for (const [planReply, plans] of [['prose', [false, false]], ['missing', [false, true]]]) {
+      const r = await rig({ listing: withPlans(2), candidateCount: 8, planReply });
+      try {
+        const report = await r.run();
+        assert.deepEqual(plansOf(report).map(Boolean), plans, planReply);
+        assert.ok(report.warnings.some((w) => /could not be checked/.test(w) && /try again later/.test(w)), report.warnings.join(' | '));
+        assert.ok(!report.warnings.some((w) => /contact or brand details|shows/.test(w)), report.warnings.join(' | '));
+      } finally { r.cleanup(); }
+    }
+    // A duplicate or malformed record: left out, worded as no clear answer — not as a flagged plan.
+    const d = await rig({ listing: withPlans(2), candidateCount: 8, planReply: 'duplicate' });
+    try {
+      const report = await d.run();
+      assert.ok(report.warnings.some((w) => /no clear answer/.test(w) && /Type A/.test(w)), report.warnings.join(' | '));
+      assert.ok(!report.warnings.some((w) => /shows/.test(w)), report.warnings.join(' | '));
+    } finally { d.cleanup(); }
   });
 
   it('a quota (or a failed call) on publish: the listing goes up WITHOUT plans, "try again later"', async () => {

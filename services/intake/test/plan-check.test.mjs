@@ -7,21 +7,31 @@ import { checkPlanImages, parsePlanReply, PLAN_CHECK_BATCH, PLAN_CHECK_CONCURREN
 
 const line = (o) => JSON.stringify(o);
 
-describe('parsePlanReply / planVerdicts — strict, like the model-price check (r1 #4)', () => {
-  it('one well-formed `clean: true` per index asked is clean; anything else is not', () => {
+describe('parsePlanReply / planVerdicts — the r5 #5 rule', () => {
+  it('per index asked: one record; clean only with `clean: true` and an empty `found`; a duplicate or a malformed one is not clean; a missing one is unchecked', () => {
     const reply = [
+      'Here are my answers:',                                                               // prose: ignored
       line({ index: 0, clean: true, found: '' }),
       line({ index: 1, clean: false, found: 'phone, logo' }),
       line({ index: 2, clean: true, found: '' }), line({ index: 2, clean: true, found: '' }), // duplicate
       line({ index: 3, clean: 'yes', found: '' }),                                          // malformed
-      line({ index: 4, clean: true }),                                                      // no `found`
+      line({ index: 4, clean: true }),                                                      // `found` absent: clean
+      line({ index: 6, clean: true, found: null }),                                         // `found` null: clean
+      line({ index: 7, clean: true, found: 'qr' }),                                         // clean, but it found one: NOT clean
       line({ index: 9, clean: true, found: '' }),                                           // not asked
+      '{"index":8,"clean":tru',                                                             // broken: ignored → 8 missing
       // index 5: no answer at all
     ].join('\n');
-    const v = planVerdicts(parsePlanReply(reply), [0, 1, 2, 3, 4, 5]);
-    assert.deepEqual(v.get(0), { clean: true, found: [] });
-    assert.deepEqual(v.get(1), { clean: false, found: ['phone', 'logo'] });
-    for (const i of [2, 3, 4, 5]) assert.equal(v.get(i).clean, false, `index ${i}`);
+    const v = planVerdicts(parsePlanReply(reply), [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    assert.deepEqual(v.get(0), { state: 'clean', flagged: false, found: [] });
+    assert.deepEqual(v.get(1), { state: 'dirty', flagged: true, found: ['phone', 'logo'] });
+    assert.deepEqual(v.get(2), { state: 'dirty', flagged: false, found: [] }, 'a duplicate');
+    assert.deepEqual(v.get(3), { state: 'dirty', flagged: false, found: [] }, 'malformed');
+    assert.equal(v.get(4).state, 'clean');
+    assert.equal(v.get(6).state, 'clean');
+    assert.deepEqual(v.get(7), { state: 'dirty', flagged: true, found: ['qr'] });
+    assert.equal(v.get(5).state, 'unchecked');
+    assert.equal(v.get(8).state, 'unchecked');
     assert.equal(v.has(9), false);
   });
 
@@ -29,20 +39,12 @@ describe('parsePlanReply / planVerdicts — strict, like the model-price check (
     const v = planVerdicts(parsePlanReply(line({ index: 0, clean: false, found: 'phone 0551234567, Call us! www.x.sa' })), [0]);
     assert.deepEqual(v.get(0).found, ['phone']);
     const w = planVerdicts(parsePlanReply(line({ index: 0, clean: false, found: 'something odd' })), [0]);
-    assert.deepEqual(w.get(0), { clean: false, found: [] });
+    assert.deepEqual(w.get(0), { state: 'dirty', flagged: true, found: [] });
   });
 
-  it('a reply that is not JSON lines (prose, a broken line) makes no image clean', () => {
-    for (const reply of ['All clean!', `${line({ index: 0, clean: true, found: '' })}\n{"index":1,"clean":tru`, '']) {
-      const v = planVerdicts(parsePlanReply(reply), [0, 1]);
-      assert.equal(v.get(0).clean, false, reply);
-      assert.equal(v.get(1).clean, false, reply);
-    }
-  });
-
-  it('a JSON array of the same records is read the same way', () => {
-    const v = planVerdicts(parsePlanReply(`\`\`\`json\n[${line({ index: 0, clean: true, found: '' })},\n${line({ index: 1, clean: false, found: 'qr' })}]\n\`\`\``), [0, 1]);
-    assert.deepEqual([v.get(0).clean, v.get(1).found], [true, ['qr']]);
+  it('JSON-object lines are read anywhere — fenced, inside an array, among prose', () => {
+    const v = planVerdicts(parsePlanReply(`Sure.\n\`\`\`json\n[${line({ index: 0, clean: true, found: '' })},\n${line({ index: 1, clean: false, found: 'qr' })}]\n\`\`\`\nDone.`), [0, 1]);
+    assert.deepEqual([v.get(0).state, v.get(1).found], ['clean', ['qr']]);
   });
 });
 
@@ -66,7 +68,7 @@ describe('checkPlanImages — batches of 12, two at a time, nothing new after a 
     const ask = async (images) => ({ reply: images.map((im) => line({ index: im.index, clean: im.index !== 2, found: im.index === 2 ? 'phone' : '' })).join('\n'), error: null, fatal: false });
     const res = await checkPlanImages(plans(4), { ask });
     assert.deepEqual(res.clean, [0, 1, 3]);
-    assert.deepEqual(res.dirty, [{ model: 2, found: ['phone'] }]);
+    assert.deepEqual(res.dirty, [{ model: 2, found: ['phone'], flagged: true }]);
   });
 
   it('25 plans: three calls of at most 12, at most two at once', async () => {
@@ -86,6 +88,17 @@ describe('checkPlanImages — batches of 12, two at a time, nothing new after a 
     assert.deepEqual(sizes.sort((a, b) => b - a), [12, 12, 1]);
     assert.ok(most <= 2, `at most two at once, saw ${most}`);
     assert.equal(res.clean.length, 25);
+  });
+
+  it('r5 #5: a reply with no record for any plan asked is a failed call — every plan unchecked (retryable), never dirty', async () => {
+    for (const reply of ['All plans look clean.', '', line({ index: 7, clean: true, found: '' }), '{"index":0,"clean":tru']) {
+      const res = await checkPlanImages(plans(2), { ask: async () => ({ reply, error: null, fatal: false }) });
+      assert.deepEqual([res.clean, res.dirty, res.unchecked], [[], [], [0, 1]], JSON.stringify(reply));
+      assert.match(res.errors.join(' '), /no answer/);
+    }
+    // One answered, one missing: the missing one is unchecked.
+    const half = await checkPlanImages(plans(2), { ask: async () => ({ reply: line({ index: 0, clean: true, found: '' }), error: null, fatal: false }) });
+    assert.deepEqual([half.clean, half.unchecked], [[0], [1]]);
   });
 
   it('a failed call leaves its plans unchecked; a quota stops every later call and says so', async () => {

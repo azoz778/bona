@@ -1001,9 +1001,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       leftOut: res.dirty.map(({ model, found }) => ({ model, found })), unchecked: res.unchecked,
     };
     log.info('intake.plan_checked', { plans: written.length, clean: res.clean.length, leftOut: res.dirty.length, unchecked: res.unchecked.length, fatal: res.fatal });
-    for (const { model, found } of res.dirty) {
-      const what = found.length ? found.map((w) => PLAN_WORDS[w]).join(', ') : 'contact or brand details (or the check gave no clear answer)';
-      report.warnings.push(`the floor plan of ${modelName(model)} was left out: it shows ${what} (the floor-plan contact check)`);
+    for (const { model, found, flagged } of res.dirty) {
+      // "shows …" only for a plan really flagged; a duplicate or malformed answer is no clear answer (r5 #5).
+      const what = !flagged ? 'the contact check gave no clear answer about it'
+        : `it shows ${found.length ? found.map((w) => PLAN_WORDS[w]).join(', ') : 'contact or brand details'}`;
+      report.warnings.push(`the floor plan of ${modelName(model)} was left out: ${what} (the floor-plan contact check)`);
     }
     if (res.unchecked.length && !enrich) {
       report.warnings.push(`${res.unchecked.length} floor plan(s) could not be checked for contact details (${res.fatal ? 'the AI quota ran out' : 'the check failed'}), `
