@@ -1244,6 +1244,19 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     } finally { r.cleanup(); }
   });
 
+  it('r5 #3: a model NAME carrying a reading price in its scaled form ("Penthouse 4.5m" against 4,500,000) refuses the run; "Villa 15m" does not', async () => {
+    const a = withModels([model('Penthouse 4.5m', 4500000, null, 3), model('Villa 15m', 6000000, null, 3)]);
+    const r = await rig({ listing: a });
+    try {
+      await assert.rejects(r.run(), (err) => err.stage === 'price' && /^models\[0\]\.name states/.test(err.reason));
+    } finally { r.cleanup(); }
+    const b = withModels([model('Penthouse', 4500000, null, 3), model('Villa 15m', 6000000, null, 3)]);
+    const t = await rig({ listing: b });
+    try {
+      assert.deepEqual((await t.run()).listingPreview.models.map((m) => m.name.en), ['Penthouse', 'Villa 15m']);
+    } finally { t.cleanup(); }
+  });
+
   it('r3 #3: a model NAME that carries a price the reading carries — a model price, a Sakani price, the headline — refuses the run', async () => {
     for (const [i, name] of [[0, 'Nawras 419,994'], [1, 'Lulu 270425'], [1, 'Type ٣١٩٬٠١٥']]) {
       const a = withModels([model('Nawras', 419994, 356024, 3), model('Lulu', 319015, 270425, 3)], { price: { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 } });

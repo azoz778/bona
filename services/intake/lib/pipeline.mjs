@@ -207,15 +207,13 @@ export function statesMoney(text) {
  */
 const statesFigure = (text, figures) => figures.length > 0 && typeof text === 'string'
   && figures.some((n) => priceAppearsIn(withoutMeasures(westernise(text)), n));
-/** The figures written in `text`, as numbers: "419,994" → 419994, "٣١٩٬٠١٥" → 319015, "Villa 15m" → 15. */
-const figuresIn = (text) => (westernise(text).match(/\d{1,3}(?:[,٬.'’ \u00a0\u202f\u2009]\d{3})+(?!\d)|\d+/g) ?? []).map((x) => Number(x.replace(/\D/g, '')));
 /**
- * A model NAME states money by a currency or a payment word, or by a figure equal to a price the reading carries
- * (`figures`: its model prices, Sakani prices and headline — r3 #3). "Villa 15m", "Plot 10000", "Penthouse 4,250"
- * are names.
+ * A model NAME states money by a currency or a payment word, or by a price the reading carries (`figures`: its
+ * model prices, Sakani prices and headline — r3 #3), in any form ("Penthouse 4.5m" against 4,500,000: r5 #3).
+ * "Villa 15m", "Plot 10000", "Penthouse 4,250" are names when the reading has no such price.
  */
 const nameStatesMoney = (text, figures = []) => typeof text === 'string'
-  && (NAME_CURRENCY_RE.test(westernise(text)) || PAYMENT_RE.test(text) || figuresIn(text).some((n) => figures.includes(n)));
+  && (NAME_CURRENCY_RE.test(westernise(text)) || PAYMENT_RE.test(text) || statesFigure(text, figures));
 
 /**
  * The money guard over a reading's free text (r2 #4, Codex r1 #3): a unit model's rooms or availability that
