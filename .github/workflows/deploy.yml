@@ -4,7 +4,10 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '0 3 * * *'   # 06:00 Asia/Riyadh daily — refresh listings from TK and rebuild
+    # LATE FALLBACK ONLY. The on-time 06:00 Asia/Riyadh refresh is a workflow_dispatch sent at 03:00:00 UTC by the
+    # azoz-a1 timer gh-dispatch@bona.timer; GitHub starts this cron 4-8 h late (Sep-Nov 2026). The gate job skips it
+    # when a main deploy already succeeded today, so the cron deploys only on a day the dispatch did not succeed.
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -14,18 +17,62 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # the late cron run queues behind (never cancels) a deploy in progress, so its gate then sees that deploy succeed
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 jobs:
+  # Lets GitHub's late cron run deploy only when no main deploy has succeeded today (the on-time 06:00 Riyadh run is
+  # the workflow_dispatch from azoz-a1's gh-dispatch@bona.timer). push and workflow_dispatch always build.
+  gate:
+    runs-on: ubuntu-latest   # public repo: hosted minutes are free
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != schedule ]; then echo build=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          # "today" = since the most recent 02:55 UTC (the azoz-a1 dispatch fires at 03:00:00 UTC)
+          since=$(date -u -d "$(date -u +%F) 02:55" +%s)
+          [ "$(date -u +%s)" -ge "$since" ] || since=$((since - 86400))
+          since=$(date -u -d "@$since" +%FT%TZ)
+          url="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/deploy.yml/runs?branch=main&status=success&exclude_pull_requests=true&created=%3E%3D$since&per_page=50"
+          # token via curl's stdin config, not argv
+          if ! body=$(printf 'header = "Authorization: Bearer %s"\n' "$GH_TOKEN" | curl -fsS -K - --retry 3 --retry-all-errors \
+                --max-time 20 -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "$url"); then
+            echo "::warning::could not list today's runs; the late cron run deploys anyway"
+            echo build=true >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # fail open here too: an unreadable answer means deploy, never a skipped day
+          if ! prev=$(jq -r --argjson me "$GITHUB_RUN_ID" \
+            '[.workflow_runs[] | select(.id != $me and .event != "pull_request")] | .[0] // empty | "\(.event) run \(.id) created \(.created_at)"' <<<"$body"); then
+            echo "::warning::could not read today's runs; the late cron run deploys anyway"
+            prev=
+          fi
+          if [ -n "$prev" ]; then
+            echo "Main already deployed since $since ($prev): this late cron run skips the build." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo build=false >> "$GITHUB_OUTPUT"
+          else
+            echo "No successful main deploy since $since: the late cron run deploys (fallback)." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo build=true >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
         with:
           enablement: true
       - run: npm ci
@@ -49,7 +96,9 @@ jobs:
       # Checks over the built dist/ (structured data, snippets, llms.txt parity, /ig redirect).
       # A failure here stops the artifact upload, so nothing that fails them reaches Pages.
       - run: npm run test:dist
-      - uses: actions/upload-pages-artifact@v3
+      # Since v4 the artifact leaves out hidden files (names starting with a dot). dist/ has none today; if the site
+      # ever needs one (e.g. public/.well-known/...), add `include-hidden-files: true` here.
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
   deploy:
@@ -60,9 +109,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+        uses: actions/deploy-pages@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: npm ci
