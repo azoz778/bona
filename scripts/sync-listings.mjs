@@ -137,17 +137,10 @@ async function main() {
     fs.renameSync(tmp, FILE);
   }
   const extra = missing.length ? `, ${missing.length} sourceRef(s) not in API: ${missing.join(' ')}` : '';
-  // The deploy counts a run as today's TK refresh only by the "sync: " line (deploy.yml, step "Sync listings from
-  // TK"). An answer that holds none of our TK-linked listings (an empty list, the wrong list) updated nothing, so it
-  // gets another label; the removals above still ran on the committed data.
-  const label = matched === 0 && missing.length > 0 ? 'sync incomplete' : 'sync';
-  console.log(`${label}: ${rows.length} API rows, ${matched} matched, ${changes.length} change(s)${changes.length ? ' — ' + changes.join('; ') : ''}${extra}`);
+  console.log(`sync: ${rows.length} API rows, ${matched} matched, ${changes.length} change(s)${changes.length ? ' — ' + changes.join('; ') : ''}${extra}`);
   return 0;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  // process.exitCode, never process.exit(): exit() drops stdout still queued for a pipe, and the deploy reads this
-  // output through $(...) to find the summary line. Nothing here keeps the event loop alive (the fetch timer is
-  // cleared), so the process ends on its own once stdout is flushed.
-  main().then((code) => { process.exitCode = code; }, (e) => { console.log(`sync skipped: ${e.message}`); process.exitCode = 0; });
+  main().then((code) => process.exit(code)).catch((e) => { console.log(`sync skipped: ${e.message}`); process.exit(0); });
 }

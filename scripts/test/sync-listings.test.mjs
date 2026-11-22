@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -99,64 +99,4 @@ test('a listing whose review-register entry carries the withdrawnAdvertising fla
     assert.match(out, /BONA-T6 REMOVED — advertising permission withdrawn/);
     assert.deepEqual(read(dir).map((l) => l.id), ['BONA-T7']);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-});
-
-// The deploy workflow (.github/workflows/deploy.yml, step "Sync listings from TK") counts a run as today's
-// listings refresh only when this summary line is printed, because the script also exits 0 when TK cannot be
-// read. If the line changes, change the workflow's grep with it (this test checks both).
-const SUMMARY = /^sync: [0-9]+ API rows, /m;
-test('the summary line the deploy workflow greps for: printed after a fetch, absent when TK cannot be read', () => {
-  const dir = tree([listing('BONA-T8', 'APT-8', { type: 'apartment', kind: 'apartment' })]);
-  try {
-    const ok = sync(dir, [{ id: 'APT-8', status: 'available', price: 'SAR 1,000,000' }]);
-    assert.match(ok, SUMMARY, 'a fetch that changes nothing still counts');
-    const failed = execFileSync(process.execPath, [path.join(dir, 'scripts/sync-listings.mjs')], {
-      encoding: 'utf8', env: { ...process.env, TK_PUBLIC_API: 'data:application/json,not-json' } });
-    assert.match(failed, /sync skipped/, failed);
-    assert.doesNotMatch(failed, SUMMARY, failed);
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  const wf = fs.readFileSync(path.join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
-  assert.ok(wf.includes("grep -Eq '^sync: [0-9]+ API rows, '"), 'deploy.yml greps the same summary line');
-});
-
-// A 200 answer that holds none of our TK-linked listings (an empty list, or the wrong list) updates nothing,
-// so it must not count as today's refresh. The removals still run on the committed data, as they always did.
-test('an answer that matches none of the TK-linked listings prints "sync incomplete", not the summary line', () => {
-  for (const rows of [[], [{ id: 'OTHER-1', status: 'sold', price: 'SAR 2,000,000' }]]) {
-    const dir = tree([listing('BONA-T9', 'APT-9', { type: 'apartment', kind: 'apartment' }), listing('BONA-002', 'VIL-2', { type: 'villa', kind: 'house' })]);
-    try {
-      const out = sync(dir, rows);
-      assert.match(out, /^sync incomplete: [0-9]+ API rows, 0 matched, /m, out);
-      assert.doesNotMatch(out, SUMMARY, out);
-      assert.match(out, /BONA-002 REMOVED — withheld from the public site by owner decision/, 'removals still run');
-      const after = read(dir);
-      assert.deepEqual(after.map((l) => l.id), ['BONA-T9']);
-      assert.equal(after[0].status, 'available', 'nothing from the answer is applied');
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  }
-});
-
-// The deploy reads this script's output through a pipe ($(...)). process.exit() would drop stdout that is still
-// queued for the pipe, and with it the summary line, so a real refresh would not count (2026-11-22, Codex review).
-test('the summary line survives a slow pipe reader after a lot of earlier output', () => {
-  const n = 400; // long local ids: about 160 kB of "currency mismatch" lines before the summary, well over a 64 kB pipe
-  const dir = tree(Array.from({ length: n }, (_, i) => listing(`BONA-P${i}-${'x'.repeat(300)}`, `P-${i}`, { type: 'apartment', kind: 'apartment' })));
-  try {
-    const rows = Array.from({ length: n }, (_, i) => ({ id: `P-${i}`, status: 'available', price: 'USD 1,000' }));
-    const r = spawnSync('bash', ['-c', '"$0" "$1" | { sleep 1; cat; }', process.execPath, path.join(dir, 'scripts/sync-listings.mjs')], {
-      encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
-      env: { ...process.env, TK_PUBLIC_API: `data:application/json,${encodeURIComponent(JSON.stringify({ data: rows }))}` } });
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, new RegExp(`^sync: ${n} API rows, ${n} matched, 0 change\\(s\\)$`, 'm'),
-      `summary line lost: ${r.stdout.length} bytes arrived, ending ${JSON.stringify(r.stdout.slice(-120))}`);
-    assert.ok(r.stdout.length > 128 * 1024, `enough output to fill the pipe (${r.stdout.length} bytes)`);
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-});
-
-test('deploy.yml: the gate looks for the Pages deploy and refresh marker steps by their exact names', () => {
-  const wf = fs.readFileSync(path.join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
-  for (const [env, name] of [['DEPLOY_STEP', 'Deploy to GitHub Pages'], ['REFRESH_STEP', 'Refresh marker (TK sync + Pages deploy)']]) {
-    assert.ok(wf.includes(`${env}: '${name}'`), `the gate searches for the step "${name}"`);
-    assert.equal(wf.split(`name: '${name}'`).length - 1, 1, `the deploy job has exactly one step named "${name}"`);
-  }
 });

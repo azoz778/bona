@@ -26,8 +26,5 @@ Owner rules, written down 2026-11-21. They apply to every change in this repo.
 - **This repo is PUBLIC.** Never commit client data, phone numbers, prices that are withheld from the
   public site, or anything private. Everything here can be read by anyone.
 - Production: every push to `main` deploys to GitHub Pages (`.github/workflows/deploy.yml`), and so do
-  manual runs and the daily listings refresh. That refresh is a `workflow_dispatch` sent at 06:00 Riyadh
-  by the azoz-a1 timer `gh-dispatch@bona.timer` (once the owner's token is in place). GitHub's own cron
-  (`17 3` UTC, which starts hours late) is only a fallback: its gate job deploys only when the live Pages
-  deploy did not carry that day's TK sync.
+  the daily 06:00 Riyadh rebuild and manual runs.
 - A local pre-push guard (W009) runs on push; do not bypass it.
