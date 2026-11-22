@@ -100,3 +100,28 @@ test('a listing whose review-register entry carries the withdrawnAdvertising fla
     assert.deepEqual(read(dir).map((l) => l.id), ['BONA-T7']);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// The deploy workflow (.github/workflows/deploy.yml, step "Sync listings from TK") counts a run as today's
+// listings refresh only when this summary line is printed, because the script also exits 0 when TK cannot be
+// read. If the line changes, change the workflow's grep with it (this test checks both).
+const SUMMARY = /^sync: [0-9]+ API rows, /m;
+test('the summary line the deploy workflow greps for: printed after a fetch, absent when TK cannot be read', () => {
+  const dir = tree([listing('BONA-T8', 'APT-8', { type: 'apartment', kind: 'apartment' })]);
+  try {
+    const ok = sync(dir, [{ id: 'APT-8', status: 'available', price: 'SAR 1,000,000' }]);
+    assert.match(ok, SUMMARY, 'a fetch that changes nothing still counts');
+    const failed = execFileSync(process.execPath, [path.join(dir, 'scripts/sync-listings.mjs')], {
+      encoding: 'utf8', env: { ...process.env, TK_PUBLIC_API: 'data:application/json,not-json' } });
+    assert.match(failed, /sync skipped/, failed);
+    assert.doesNotMatch(failed, SUMMARY, failed);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  const wf = fs.readFileSync(path.join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
+  assert.ok(wf.includes("grep -Eq '^sync: [0-9]+ API rows, '"), 'deploy.yml greps the same summary line');
+});
+
+test('deploy.yml: the gate looks for the refresh marker step by its exact name', () => {
+  const wf = fs.readFileSync(path.join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
+  const marker = 'Refresh marker (TK sync + Pages deploy)';
+  assert.ok(wf.includes(`REFRESH_STEP: '${marker}'`), 'the gate searches for this step name');
+  assert.ok(wf.includes(`- name: '${marker}'`), 'the deploy job has a step with exactly this name');
+});
