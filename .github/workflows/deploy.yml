@@ -5,8 +5,8 @@ on:
     branches: [main]
   schedule:
     # LATE FALLBACK ONLY. The on-time 06:00 Asia/Riyadh refresh is a workflow_dispatch sent at 03:00:00 UTC by the
-    # azoz-a1 timer gh-dispatch@bona.timer; GitHub starts this cron 4-8 h late (Sep-Nov 2026). The gate job skips it
-    # when main was already refreshed today (TK sync + Pages deploy), so the cron deploys only on a day nothing did.
+    # azoz-a1 timer gh-dispatch@bona.timer; GitHub starts this cron 4-8 h late (Sep-Nov 2026). The gate job lets it
+    # deploy only when the Pages deploy that is live did not carry today's TK sync (or nothing deployed today).
     - cron: '17 3 * * *'
   workflow_dispatch:
 
@@ -16,21 +16,25 @@ permissions:
   id-token: write
 
 concurrency:
-  # Main runs share one group. A manual dispatch on any other ref gets a group of its own, so it can never cancel or
-  # replace a main deploy (the github-pages environment only lets main deploy anyway).
+  # Main runs share one group. A manual dispatch on another ref gets a group of its own, so it never waits behind (or
+  # holds up) a main deploy; the github-pages environment only lets main deploy anyway. GitHub compares these names
+  # case-insensitively, so a branch named e.g. "Main" would still join the main group: with nothing cancelled below,
+  # that only makes it wait its turn.
   group: ${{ github.ref == 'refs/heads/main' && 'pages' || format('pages-{0}', github.ref) }}
-  # The late cron run queues behind (never cancels) a deploy in progress, so its gate then sees that deploy.
-  # GitHub keeps one pending run per group: a push that arrives while the cron run waits replaces it, and that push
-  # syncs and deploys the same (or a newer) main itself.
-  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+  # Nothing is cancelled or replaced: every run waits its turn (up to 100 pending) and they run in order, so the late
+  # cron run always runs after every deploy queued before it and its gate sees what is live. Each job has a timeout,
+  # so a stuck run cannot hold the queue for long. (queue is newer than actionlint 1.7.12, which flags the key.)
+  cancel-in-progress: false
+  queue: max
 
 jobs:
-  # Lets GitHub's late cron run deploy only when main has not been refreshed today. A run counts as a refresh only when
-  # its deploy job's "Refresh marker (TK sync + Pages deploy)" step succeeded (see there). The on-time 06:00 Riyadh run
-  # is the workflow_dispatch from azoz-a1's gh-dispatch@bona.timer. push and workflow_dispatch always build.
+  # Lets GitHub's late cron run deploy only when it is still needed. The live site is the newest successful
+  # "Deploy to GitHub Pages" step of this workflow; it counts as today's refresh only when it finished at or after
+  # 02:55 UTC AND the "Refresh marker (TK sync + Pages deploy)" step of the same job succeeded (see there). So a later
+  # push that deployed without TK data makes the cron deploy again. push and workflow_dispatch always build.
   gate:
     runs-on: ubuntu-latest   # public repo: hosted minutes are free
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       actions: read
     outputs:
@@ -40,47 +44,61 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
+          DEPLOY_STEP: 'Deploy to GitHub Pages'                     # = the deploy-pages step's name in the deploy job
           REFRESH_STEP: 'Refresh marker (TK sync + Pages deploy)'   # = the marker step's name in the deploy job
         run: |
           if [ "$EVENT" != schedule ]; then echo build=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          fail_open() {  # anything unread or unreadable means deploy: a needless deploy, never a missed day
+            echo "::warning::$1: the late cron run deploys anyway"
+            echo build=true >> "$GITHUB_OUTPUT"; exit 0
+          }
+          deadline=$(( $(date -u +%s) + 240 ))   # no API call starts after 4 min, well inside timeout-minutes
+          api() {  # GET $1, token via curl's stdin config, never argv
+            [ "$(date -u +%s)" -lt "$deadline" ] || return 1
+            printf 'header = "Authorization: Bearer %s"\n' "$GH_TOKEN" | curl -fsS -K - --retry 3 --retry-all-errors \
+              --retry-max-time 40 --connect-timeout 10 --max-time 20 -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' "$1"
+          }
           # "today" = since the most recent 02:55 UTC (the azoz-a1 dispatch fires at 03:00:00 UTC)
           since_s=$(date -u -d "$(date -u +%F) 02:55" +%s)
           [ "$(date -u +%s)" -ge "$since_s" ] || since_s=$((since_s - 86400))
           since=$(date -u -d "@$since_s" +%FT%TZ)
-          # a run created before $since can still deploy after it: list runs from 6 h earlier (the default job timeout)
-          # and judge each one by when its marker step finished
-          from=$(date -u -d "@$((since_s - 21600))" +%FT%TZ)
-          api() {  # GET $1, token via curl's stdin config, never argv
-            printf 'header = "Authorization: Bearer %s"\n' "$GH_TOKEN" | curl -fsS -K - --retry 3 --retry-all-errors \
-              --max-time 20 -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "$1"
-          }
+          # A run created well before $since can still deploy after it (queued behind others, or re-run): list the
+          # runs created in the 7 days before it, and read the jobs of those updated since $since. More runs than one
+          # page, or more jobs than one page, means we cannot see everything: fail open.
+          from=$(date -u -d "@$((since_s - 7 * 86400))" +%FT%TZ)
           # GitHub sends ...Z timestamps; a fraction or +00:00 is accepted, any other form makes jq fail (= deploy)
           defs='def t: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;'
           runs="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs"
           list="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/deploy.yml/runs?branch=main&exclude_pull_requests=true&created=%3E%3D$from&per_page=100"
-          # fail open: an unreadable answer means deploy, never a skipped day
-          if ! body=$(api "$list") || ! ids=$(jq -r --argjson me "$GITHUB_RUN_ID" --argjson since "$since_s" "$defs"'
-                .workflow_runs[] | select(.id != $me and .event != "pull_request" and (.updated_at | t) >= $since) | .id' <<<"$body"); then
-            echo "::warning::could not list today's runs; the late cron run deploys anyway"
-            echo build=true >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          prev=
+          body=$(api "$list") || fail_open "could not list this workflow's runs"
+          ids=$(jq -r --argjson me "$GITHUB_RUN_ID" --argjson since "$since_s" "$defs"'
+              if .total_count > (.workflow_runs | length) then error("more runs than one page") else .workflow_runs[] end
+              | select(.id != $me and .event != "pull_request" and (.updated_at | t) >= $since) | .id' <<<"$body") \
+            || fail_open "could not read this workflow's runs"
+          best=0; best_run=; best_marked=
           for id in $ids; do
-            # proof = the marker step succeeded at or after $since in the run's latest attempt; a run whose jobs
-            # cannot be read proves nothing
-            if ! jobs=$(api "$runs/$id/jobs?filter=latest&per_page=100") || ! at=$(jq -r --arg step "$REFRESH_STEP" \
-                --argjson since "$since_s" "$defs"'[.jobs[].steps[]? | select(.name == $step and .conclusion == "success"
-                and (.completed_at | t) >= $since) | .completed_at] | first // empty' <<<"$jobs"); then
-              echo "::warning::could not read the jobs of run $id; it does not count as today's refresh"
-              continue
-            fi
-            if [ -n "$at" ]; then prev="run $id, TK sync + Pages deploy done $at"; break; fi
+            # all attempts (a re-run can leave the live deploy in an earlier attempt); one line per job execution
+            # that deployed: "<epoch its deploy step finished> <true if the marker step succeeded in that job>"
+            jobs=$(api "$runs/$id/jobs?filter=all&per_page=100") || fail_open "could not read the jobs of run $id"
+            deployed=$(jq -r --arg d "$DEPLOY_STEP" --arg m "$REFRESH_STEP" "$defs"'
+                if .total_count > (.jobs | length) then error("more jobs than one page") else .jobs[] end
+                | [.steps[]? | select(.name == $d and .conclusion == "success") | .completed_at | t] as $at
+                | select($at | length > 0)
+                | "\($at | max) \(any(.steps[]?; .name == $m and .conclusion == "success"))"' <<<"$jobs") \
+              || fail_open "could not read the jobs of run $id"
+            while read -r at marked; do
+              if [ -n "$at" ] && [ "$at" -gt "$best" ]; then best=$at; best_run=$id; best_marked=$marked; fi
+            done <<<"$deployed"
           done
-          if [ -n "$prev" ]; then
-            echo "Main already refreshed since $since ($prev): this late cron run skips the build." | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$best" -lt "$since_s" ]; then
+            echo "No Pages deploy since $since: the late cron run deploys (fallback)." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo build=true >> "$GITHUB_OUTPUT"
+          elif [ "$best_marked" = true ]; then
+            echo "The live Pages deploy (run $best_run, $(date -u -d "@$best" +%FT%TZ), after $since) carried a TK sync: this late cron run skips the build." | tee -a "$GITHUB_STEP_SUMMARY"
             echo build=false >> "$GITHUB_OUTPUT"
           else
-            echo "No refresh (TK sync + Pages deploy) since $since: the late cron run deploys (fallback)." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "The live Pages deploy (run $best_run, $(date -u -d "@$best" +%FT%TZ), after $since) did not carry a TK sync: the late cron run deploys (fallback)." | tee -a "$GITHUB_STEP_SUMMARY"
             echo build=true >> "$GITHUB_OUTPUT"
           fi
 
@@ -89,6 +107,7 @@ jobs:
     # fail open: only an explicit build=false skips; a gate job that died (runner or infra) still builds
     if: ${{ !cancelled() && needs.gate.outputs.build != 'false' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20   # a normal build takes about 2 min; runs queue behind this one
     outputs:
       synced: ${{ steps.sync.outputs.ok }}
     steps:
@@ -109,15 +128,16 @@ jobs:
         run: npm test
       - name: Unit tests (WhatsApp intake)
         run: node --test services/intake/test/*.test.mjs
-      # The script exits 0 when TK cannot be read ("sync skipped: ..."), so only its summary line
-      # ("sync: N API rows, ...") proves a fetch; scripts/test/sync-listings.test.mjs pins that line and this grep.
-      # Without it the site still deploys, from the committed listings.json, but the run is not today's refresh:
-      # no marker in the deploy job, so the late cron run and the azoz-a1 dispatcher still refresh.
+      # The script exits 0 when TK cannot be read ("sync skipped: ...") or its answer matches none of our TK-linked
+      # listings ("sync incomplete: ..."), so only its summary line ("sync: N API rows, ...") proves a refresh;
+      # scripts/test/sync-listings.test.mjs pins that line and this grep. Without it the site still deploys, from the
+      # committed listings.json, but the run is not today's refresh: no marker in the deploy job, so the late cron
+      # run (and the azoz-a1 dispatcher) still refresh. `timeout` keeps a hung sync from failing the build.
       - name: Sync listings from TK (non-fatal)
         id: sync
         run: |
           ok=false
-          if out=$(node scripts/sync-listings.mjs 2>&1); then
+          if out=$(timeout 120 node scripts/sync-listings.mjs 2>&1); then
             if grep -Eq '^sync: [0-9]+ API rows, ' <<<"$out"; then ok=true; fi
           fi
           printf '%s\n' "$out"
@@ -145,17 +165,20 @@ jobs:
     # explicit, because the default success() would also skip this when the gate job died and build ran anyway
     if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20   # deploy-pages gives up after 10 min on its own
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # Keep this step's name equal to the gate's DEPLOY_STEP: its newest success is what is live.
       - id: deployment
+        name: 'Deploy to GitHub Pages'
         uses: actions/deploy-pages@v5
-      # The refresh marker: it runs only when the TK sync fetched AND Pages deployed. A run is today's refresh only
-      # when this step succeeded (Jobs API: step name, conclusion success, completed_at), never by run conclusion: the
-      # gate above checks it this way, and so must the azoz-a1 dispatcher. So a skipped cron run or a deploy without
-      # TK data does not count, and a failure in the IndexNow rebuild below does not undo it. Keep the name equal to
-      # the gate's REFRESH_STEP.
+      # The refresh marker: it runs only when the TK sync fetched AND Pages deployed. The live deploy is today's
+      # refresh only when this step succeeded in the same job (Jobs API: step names, conclusion success,
+      # completed_at), never by run conclusion: the gate above checks it this way, and so must the azoz-a1
+      # dispatcher. So a skipped cron run or a deploy without TK data does not count, and a failure in the IndexNow
+      # rebuild below does not undo it. Keep the name equal to the gate's REFRESH_STEP.
       - name: 'Refresh marker (TK sync + Pages deploy)'
         if: needs.build.outputs.synced == 'true'
         run: echo "TK listings synced and Pages deployed."
