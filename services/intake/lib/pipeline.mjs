@@ -1494,8 +1494,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
  * reading, its model prices and floor plans as they will be published) against `existing`. `before` /
  * `after` count the unit models, their published price figures (regular and Sakani) and their floor
  * plans, and name the fact lists carried; `losses` says, in words, every count that would go down, every
- * fact list that would go and, when the plan count does not go down, every model that would lose its plan,
- * and why: `why` maps a new model's position to the reason its plan was left out (r6 #5).
+ * fact list that would go and every model that would lose its plan (on the plan count's line when that count
+ * goes down: r7 #7), and why: `why` maps a new model's position to the reason its plan was left out (r6 #5).
  */
 export function compareEnrichment(existing, built, why = new Map()) {
   const list = (models) => (Array.isArray(models) ? models : []);
@@ -1512,17 +1512,28 @@ export function compareEnrichment(existing, built, why = new Map()) {
   // Plans are lost per model (Codex r4 #6): a model that carries a plan and would have none (flagged, unchecked,
   // skipped, not found, or the model itself gone) is a loss even when another model gains one and the count holds.
   // A new model with a plan covers an old one (r6 #5) when their English names are equal and each unique on its
-  // side ("Al Zumurrud 2" is "Zumurrud 2"), or their Arabic names are, or English, Arabic and area are all equal;
-  // it covers one at most. A loss says why: the reason its new model's plan was left out, else no plan was read.
+  // side ("Al Zumurrud 2" is "Zumurrud 2"), or their Arabic names are, or English, Arabic and area are all equal —
+  // never when the names are mixed up (below); it covers one at most. A loss says why: the reason its new model's
+  // plan was left out, else that its names are mixed up with another model's, else that no plan was read.
   const olds = list(existing?.models);
   const news = list(built?.models);
   const en = (m) => String(m?.name?.en ?? '').trim().replace(/\s+/g, ' ').toLowerCase().replace(/^(?:al |al-|the )/, '');
   const ar = (m) => String(m?.name?.ar ?? '').replace(/\u0640/g, '').trim().replace(/\s+/g, ' ');
   const tally = (models, f) => models.reduce((n, m) => n.set(f(m), (n.get(f(m)) ?? 0) + 1), new Map());
   const [oldEn, newEn, oldAr, newAr] = [tally(olds, en), tally(news, en), tally(olds, ar), tally(news, ar)];
-  const same = (o, n) => (en(o) !== '' && en(o) === en(n) && oldEn.get(en(o)) === 1 && newEn.get(en(n)) === 1)
-    || (ar(o) !== '' && ar(o) === ar(n) && oldAr.get(ar(o)) === 1 && newAr.get(ar(n)) === 1)
-    || (en(o) === en(n) && ar(o) === ar(n) && (o?.areaSqm ?? null) === (n?.areaSqm ?? null));
+  const byName = (f, oldT, newT) => (o, n) => f(o) !== '' && f(o) === f(n) && oldT.get(f(o)) === 1 && newT.get(f(n)) === 1;
+  const [byEn, byAr] = [byName(en, oldEn, newEn), byName(ar, oldAr, newAr)];
+  const named = (o, n) => byEn(o, n) || byAr(o, n) || (en(o) === en(n) && ar(o) === ar(n) && (o?.areaSqm ?? null) === (n?.areaSqm ?? null));
+  // Names mixed up (Codex r6 #4): the old model's English name names one new model and its Arabic name another,
+  // or the new model's English name names one old model and its Arabic name another. Such a pair is no match: the
+  // reading contradicts itself, a false cover would delete a published plan, and the matching would depend on
+  // the order of the rows. A match by one name alone stays ("Fairouz 1" → "Fairuz 1": the English names nothing).
+  const mixed = (o, n) => {
+    const [e, a] = [news.find((x) => byEn(o, x)), news.find((x) => byAr(o, x))];
+    const [eo, ao] = [olds.find((x) => byEn(x, n)), olds.find((x) => byAr(x, n))];
+    return Boolean((e && a && e !== a) || (eo && ao && eo !== ao));
+  };
+  const same = (o, n) => named(o, n) && !mixed(o, n);
   const used = new Set();
   const planDropped = [];
   olds.forEach((m, i) => {
@@ -1530,10 +1541,11 @@ export function compareEnrichment(existing, built, why = new Map()) {
     const j = news.findIndex((n, k) => !used.has(k) && hasPlan(n) && same(m, n));
     if (j >= 0) { used.add(j); return; }
     const k = news.findIndex((n) => !hasPlan(n) && same(m, n));
-    const lost = `${String(m?.name?.en ?? '').trim() || `model ${i + 1}`} (${(k >= 0 && why.get(k)) || 'no plan in the new reading'})`;
+    const reason = (k >= 0 && why.get(k)) || (news.some((n) => named(m, n) && !same(m, n)) ? "names mixed up with another model's in the new reading" : 'no plan in the new reading');
+    const lost = `${String(m?.name?.en ?? '').trim() || `model ${i + 1}`} (${reason})`;
     if (!planDropped.includes(lost)) planDropped.push(lost);
   });
-  if (after.plans < before.plans) losses.push(`floor plans ${before.plans} → ${after.plans}`);
+  if (after.plans < before.plans) losses.push(`floor plans ${before.plans} → ${after.plans}: ${planDropped.join(', ')}`);
   else if (planDropped.length) losses.push(`floor plan${planDropped.length === 1 ? '' : 's'} dropped: ${planDropped.join(', ')}`);
   const dropped = before.facts.filter((k) => !after.facts.includes(k));
   if (dropped.length) losses.push(`fact list${dropped.length === 1 ? '' : 's'} dropped: ${dropped.join(', ')}`);

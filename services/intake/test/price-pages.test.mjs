@@ -3859,13 +3859,13 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       seed(r, { price: { ...ON_REQUEST }, extra: { models: withPlan() } });
       const raw = fs.readFileSync(inboxFile(r), 'utf8');
       await assert.rejects(enrich(r), (err) => err.stage === 'enrich'
-        && /^BONA-W023 already carries more than this reading: floor plans 1 → 0 — nothing was changed; re-run with --force if the new reading is right$/.test(err.reason), 'refused');
+        && /^BONA-W023 already carries more than this reading: floor plans 1 → 0: Old 1 \(no plan in the new reading\) — nothing was changed; re-run with --force if the new reading is right$/.test(err.reason), 'refused');
       assert.equal(fs.readFileSync(inboxFile(r), 'utf8'), raw);
       assert.equal(fs.readFileSync(path.join(pubDir(r), 'plan-03.jpg'), 'utf8'), 'old plan', 'the plan file is still there');
       const dry = await enrich(r, { dryRun: true });
       assert.deepEqual(dry.enrich.compare.before, { models: 2, prices: 2, plans: 1, facts: [] });
       assert.deepEqual(dry.enrich.compare.after, { models: 2, prices: 4, plans: 0, facts: ['amenities', 'warranties'] });
-      assert.deepEqual(dry.enrich.compare.losses, ['floor plans 1 → 0']);
+      assert.deepEqual(dry.enrich.compare.losses, ['floor plans 1 → 0: Old 1 (no plan in the new reading)']);
       const forced = await enrich(r, { force: true });
       assert.equal(forced.ok, true);
       assert.equal(saved(r).models.filter((m) => m.floorPlan).length, 0);
@@ -4197,6 +4197,110 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
         assert.deepEqual(dry.enrich.compare.losses, [`floor plan dropped: Nawras (${why})`], why);
       } finally { r.cleanup(); }
     }
+  });
+
+  const MIXED = "names mixed up with another model's in the new reading";
+
+  it('r7 #7 (Codex r6 #4): a model whose English name names one new model and its Arabic name another is no match — the swapped Arabic names cost Type A its plan, in every row order', () => {
+    const one = (en, ar, areaSqm, floorPlan = null) => ({ name: { en, ar }, areaSqm, floorPlan });
+    // Codex's case: the re-reading keeps English and area, swaps the Arabic names, leaves A's plan out and gives B one.
+    const A = one('Type A', 'نموذج أ', 120, planAt(3));
+    const B = one('Type B', 'نموذج ب', 95);
+    const A2 = one('Type A', 'نموذج ب', 120);
+    const B2 = one('Type B', 'نموذج أ', 95, planAt(2));
+    for (const olds of [[A, B], [B, A]]) {
+      for (const news of [[A2, B2], [B2, A2]]) {
+        for (const why of [new Map(), new Map([[news.indexOf(A2), 'flagged: shows a phone number']])]) {
+          const got = compareEnrichment({ models: olds }, { models: news }, why);
+          assert.deepEqual([got.before.plans, got.after.plans], [1, 1]);
+          assert.deepEqual(got.losses, [`floor plan dropped: Type A (${MIXED})`], `${olds.map((m) => m.name.ar)} → ${news.map((m) => m.name.ar)}`);
+        }
+      }
+    }
+    // Without the swap, the same reading says the plan was flagged.
+    assert.deepEqual(compareEnrichment({ models: [A, B] }, { models: [one('Type A', 'نموذج أ', 120), one('Type B', 'نموذج ب', 95, planAt(2))] }, new Map([[0, 'flagged: shows a phone number']])).losses,
+      ['floor plan dropped: Type A (flagged: shows a phone number)']);
+    // The crossed greedy case: one result in every order (each name listed in the listing's own order).
+    const X = one('Villa A', 'فيلا أ', 200, planAt(3));
+    const Y = one('Villa B', 'فيلا ب', 300, planAt(4));
+    const N1 = one('Villa B', 'فيلا أ', 300, planAt(1));
+    const N2 = one('Villa A', 'فيلا ج', 200, planAt(2));
+    for (const olds of [[X, Y], [Y, X]]) {
+      for (const news of [[N1, N2], [N2, N1]]) {
+        assert.deepEqual(compareEnrichment({ models: olds }, { models: news }).losses,
+          [`floor plans dropped: ${olds.map((m) => `${m.name.en} (${MIXED})`).join(', ')}`], `${olds.map((m) => m.name.en)} → ${news.map((m) => m.name.ar)}`);
+      }
+    }
+    // The same contradiction seen from the new side: one new model carries Saif's English name and Marafi's Arabic
+    // name. It covers neither, whichever comes first (with the rule on the old side only, the first one took it).
+    const S = one('Saif 2', 'نموذج سيف 2', 122.98, planAt(3));
+    const M = one('Marafi 3', 'نموذج مرافئ 3', 148.46, planAt(5));
+    const SM = one('Saif 2', 'نموذج مرافئ 3', 122.98, planAt(1));
+    const K = one('Kahraman 2', 'نموذج كهرمان 2', 175.4, planAt(2));
+    for (const olds of [[S, M], [M, S]]) {
+      for (const news of [[SM, K], [K, SM]]) {
+        assert.deepEqual(compareEnrichment({ models: olds }, { models: news }).losses,
+          [`floor plans dropped: ${olds.map((m) => `${m.name.en} (${MIXED})`).join(', ')}`], `${olds.map((m) => m.name.en)} → ${news.map((m) => m.name.en)}`);
+      }
+    }
+  });
+
+  it('r7 #7: Codex r6 #4 end to end — the Arabic names swapped, Type A\'s plan flagged, Type B given one: refused, plan-03 stays; --force takes it', async () => {
+    const swapped = () => {
+      const a = twoPlans();
+      a.models[0].name = { en: 'Type A', ar: 'نموذج ب' };
+      a.models[1].name = { en: 'Type B', ar: 'نموذج أ' };
+      return a;
+    };
+    const carried = () => {
+      const m = prior(2);
+      m[0].name = { en: 'Type A', ar: 'نموذج أ' };
+      m[0].areaSqm = 105;
+      m[0].floorPlan = planAt(3);
+      m[1].name = { en: 'Type B', ar: 'نموذج ب' };
+      m[1].areaSqm = 88;
+      return m;
+    };
+    const r = await rig({ listing: swapped(), candidateCount: 7, planCheck: { 'plan-01': 'phone' } });
+    try {
+      seed(r, { price: { ...ON_REQUEST }, extra: { models: carried() } });
+      const raw = fs.readFileSync(inboxFile(r), 'utf8');
+      await assert.rejects(enrich(r), (err) => err.stage === 'enrich' && !err.retryable
+        && err.reason === `BONA-W023 already carries more than this reading: floor plan dropped: Type A (${MIXED}) — nothing was changed; re-run with --force if the new reading is right`, 'refused');
+      assert.equal(fs.readFileSync(inboxFile(r), 'utf8'), raw);
+      assert.equal(fs.readFileSync(path.join(pubDir(r), 'plan-03.jpg'), 'utf8'), 'old plan', 'the plan file is still there');
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+      const forced = await enrich(r, { force: true });
+      assert.equal(forced.ok, true);
+      assert.equal(forced.enrich.compare.forced, true);
+      assert.deepEqual(saved(r).models.map((m) => [m.name.en, m.floorPlan?.src ?? null]), [['Type A', null], ['Type B', `/listings/${SLUG}/plan-02.jpg`]]);
+    } finally { r.cleanup(); }
+  });
+
+  it('r7 #7 (Codex r6 NB3a, Claude r6 B7b): a plan count that goes down names the plans dropped and why', async () => {
+    const one = (en, floorPlan = null) => ({ name: { en, ar: `نموذج ${en}` }, areaSqm: 100, floorPlan });
+    assert.deepEqual(compareEnrichment({ models: [one('Type A', planAt(3)), one('Type B', planAt(4))] }, { models: [one('Type A'), one('Type B', planAt(2))] },
+      new Map([[0, 'flagged: shows a phone number']])).losses, ['floor plans 2 → 1: Type A (flagged: shows a phone number)']);
+    assert.deepEqual(compareEnrichment({ models: [one('Type A', planAt(3)), one('Type B', planAt(4))] }, { models: [one('Type B')] }).losses,
+      ['unit models 2 → 1', 'floor plans 2 → 0: Type A (no plan in the new reading), Type B (no plan in the new reading)']);
+    // End to end: Nawras and Lulu carry plans, the re-reading's plan for Nawras shows a phone number.
+    const carried = () => {
+      const m = prior(2);
+      m[0].name = { en: 'Nawras', ar: 'نموذج نورس' };
+      m[0].floorPlan = planAt(3);
+      m[1].name = { en: 'Lulu', ar: 'نموذج لؤلؤ' };
+      m[1].floorPlan = planAt(4);
+      return m;
+    };
+    const r = await rig({ listing: twoPlans(), candidateCount: 7, planCheck: { 'plan-01': 'phone' } });
+    try {
+      seed(r, { price: { ...ON_REQUEST }, extra: { models: carried() } });
+      for (const f of ['plan-04.jpg', 'plan-04-thumb.webp']) fs.writeFileSync(path.join(pubDir(r), f), 'old plan');
+      git(r, 'add', '-A'); git(r, 'commit', '-qm', 'second plan');
+      await assert.rejects(enrich(r), (err) => err.stage === 'enrich' && !err.retryable
+        && err.reason === 'BONA-W023 already carries more than this reading: floor plans 2 → 1: Nawras (flagged: shows a phone number) — nothing was changed; re-run with --force if the new reading is right', 'refused');
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+    } finally { r.cleanup(); }
   });
 
   it('r3 #7: --force accepts a first enrichment whose check failed for a reason that is not a quota — without those prices, and says so', async () => {
