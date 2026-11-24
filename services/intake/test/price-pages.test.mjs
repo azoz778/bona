@@ -197,7 +197,7 @@ if (mode === 'extract') {
   });
   fs.writeFileSync(new URL('./broken.json', import.meta.url), JSON.stringify(brokenFiles));
   out = { ok: true, pages: cfg.pageText.length, text: cfg.pageText.join('\\n'), pageText: cfg.pageText, candidates,
-    rendered: false, embeddedImageCount: candidates.length, links: [], meta: {} };
+    rendered: false, embeddedImageCount: candidates.length, links: cfg.links ?? [], meta: {} };
 } else if ([].concat(cfg.failPageDir ?? []).includes(opt('--page-dir'))) {
   // cfg.failPageDir: a page folder (or a list of them) whose render fails.
   out = { ok: false, error: 'extract_pdf.py failed (exit 1): cannot render' };
@@ -383,14 +383,14 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, u
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, printedIn = 'SAR', facts = null, cfgExtra = {}, build = '', candidateCount = 6, planCheck = null, planReply = null, healOnPlanCheck = false }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, printedIn = 'SAR', facts = null, cfgExtra = {}, build = '', candidateCount = 6, planCheck = null, planReply = null, healOnPlanCheck = false, links = [] }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail, printedIn, facts, candidateCount, planCheck, planReply, healOnPlanCheck }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail, printedIn, facts, candidateCount, planCheck, planReply, healOnPlanCheck, links }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   fs.writeFileSync(path.join(bin, 'fake-brochure.mjs'), FAKE_BROCHURE);
@@ -2508,7 +2508,7 @@ describe('processPdf: unit models and their floor plans reach the repo', { timeo
       assert.equal(fs.readdirSync(pub).some((f) => f.startsWith('plan-')), false);
       const saved = inboxJson(r);
       assert.deepEqual(saved.models.map((m) => m.floorPlan), [null, null]);
-      assert.ok(report.warnings.some((w) => /1 floor plan\(s\) could not be processed/.test(w)), report.warnings.join(' | '));
+      assert.ok(report.warnings.includes('1 floor plan left out by the contact check (Nawras: could not be prepared)'), report.warnings.join(' | '));
       assert.ok(saved._intake.warnings.includes('images-skipped'));
     } finally { r.cleanup(); }
   });
@@ -2643,7 +2643,7 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
         assert.deepEqual(report.listing.models.map((m) => m.floorPlan), [null, null]);
         const files = fs.readdirSync(path.join(r.repo, 'public', 'listings', report.slug));
         assert.ok(!files.some((f) => f.startsWith('plan-')), files.join(' '));
-        assert.ok(report.warnings.some((w) => /2 floor plan\(s\) could not be checked/.test(w) && /try again later/.test(w)), report.warnings.join(' | '));
+        assert.ok(report.warnings.includes(`2 floor plans left out by the contact check (Type A, Type B: could not be checked (${planCheck === 'quota' ? 'the AI quota ran out' : 'the check failed'}), try again later with \`run-once --enrich ${report.id}\`)`), report.warnings.join(' | '));
         assert.match(msg.planCheckLine(report.planCheck), /2 not checked — try again later/);
       } finally { r.cleanup(); }
     }
@@ -2692,7 +2692,7 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
       assert.deepEqual(report.listing.models.map((m) => m.floorPlan?.src ?? null), [null, `/listings/${report.slug}/plan-02.jpg`]);
       const files = fs.readdirSync(path.join(r.repo, 'public', 'listings', report.slug)).filter((f) => f.startsWith('plan-'));
       assert.deepEqual(files.sort(), ['plan-02-thumb.webp', 'plan-02.jpg']);
-      assert.ok(report.warnings.some((w) => /1 floor plan\(s\) could not be processed/.test(w)), report.warnings.join(' | '));
+      assert.ok(report.warnings.includes('1 floor plan left out by the contact check (Type A: could not be prepared)'), report.warnings.join(' | '));
       assert.ok(report.warningCodes.includes('images-skipped'));
     } finally { r.cleanup(); }
   });
@@ -2703,7 +2703,7 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
       const report = await d.run();
       assert.deepEqual(plansOf(report).map(Boolean), [false, true]);
       assert.deepEqual(report.floorPlans.map((p) => p.model), [1]);
-      assert.ok(report.warnings.some((w) => /1 floor plan\(s\) could not be processed/.test(w)), report.warnings.join(' | '));
+      assert.ok(report.warnings.includes('1 floor plan left out by the contact check (Type A: could not be prepared)'), report.warnings.join(' | '));
     } finally { d.cleanup(); }
   });
 
@@ -2826,6 +2826,62 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
       expectReply(msg.dryRunSummary(dry),
         '3 floor plans left out by the contact check (Type A: no clear answer from the check; Type B: shows a logo or brand name; Type C: shows a phone number)');
     } finally { d.cleanup(); }
+  });
+
+  it('r6 #8: the FINAL reply to a reading with model warnings: the price warnings first, ONE plan line naming every model, then the rest', async () => {
+    // Like the real W023 reading (10 model warnings), with two price warnings, a money-text drop (a club fee in the
+    // amenities), a map link no second link agrees with (Codex r5 #9), Type A's plan unchecked (the reply says nothing
+    // about it) and Type C's flagged.
+    const sale = withPlans(3);
+    sale.warnings = Array.from({ length: 10 }, (_, k) => `check item ${k + 1} by hand`);
+    sale.listing.price = { ...PRICE };
+    sale.priceEvidence = { page: 3, quote: '319,015' };
+    sale.subsidisedPriceEvidence = { page: 3, quote: '270,425' };
+    Object.assign(sale.models[0], { price: 400000, evidence: { page: 3, quote: '400000' } });
+    Object.assign(sale.models[1], { price: 450000, evidence: { page: 3, quote: '450000' } });
+    sale.amenities = { en: ['Gym', 'Club fee SAR 2000'], ar: ['نادٍ رياضي', 'رسوم النادي 2000 ريال'] };
+    const warningsOf = (reply) => reply.split('\n').filter((l) => l.startsWith('⚠️ '));
+    const expectReply = (report, reply, hint) => {
+      const shown = warningsOf(reply);
+      assert.equal(shown.length, 3, reply);
+      assert.match(shown[0], /2 unit-model price\(s\) could not be confirmed/, reply);
+      assert.match(shown[1], /subsidised \(Sakani\) price could not be confirmed/, reply);
+      assert.equal(shown[2], '⚠️ 2 floor plans left out by the contact check (Type A: could not be checked (the check failed), try again later'
+        + `${hint}; Type C: shows a phone number)`, reply);
+      assert.doesNotMatch(reply, /<id>/, reply);
+      assert.equal(report.warnings.filter((w) => /floor plan/.test(w)).length, 1, `ONE plan line: ${report.warnings.join(' | ')}`);
+      assert.match(reply, /^🔎 3 floor plans · 1 left out by the contact check · 1 not checked — try again later$/m, reply);
+      // The rest keep their order after it: the model's flags, the money-text drop, the map.
+      const order = msg.orderedWarnings(report);
+      const at = (re) => order.findIndex((w) => re.test(w));
+      assert.ok(at(/floor plan/) === 2 && at(/the model flagged 10 thing/) === 3 && at(/stated a price or a payment/) === 4
+        && at(/map link but no two links agreed/) === 5, order.join(' | '));
+    };
+    const links = [{ page: 2, uri: 'https://www.google.com/maps/@21.5433,39.1728,15z' }];
+    const r = await rig({ listing: sale, candidateCount: 9, modelConfirm: [], confirm: [319015], planCheck: { 'plan-03': 'phone' }, planReply: 'missing', links });
+    try {
+      const dry = await r.run();
+      assert.deepEqual(plansOf(dry).map(Boolean), [false, true, false]);
+      // A dry run publishes nothing: there is no listing to enrich yet, so no --enrich hint.
+      expectReply(dry, msg.dryRunSummary(dry), '');
+      const live = await r.publish();
+      assert.equal(live.id, 'BONA-W001');
+      assert.deepEqual(live.listing.models.map((m) => Boolean(m.floorPlan)), [false, true, false]);
+      for (const code of ['plans-unchecked', 'model-flagged', 'map-unconfirmed']) assert.ok(live.warningCodes.includes(code), live.warningCodes.join(' '));
+      // The real listing id in the hint (Claude r5 NB8), never `<id>`.
+      expectReply(live, msg.published(live), ' with `run-once --enrich BONA-W001`');
+    } finally { r.cleanup(); }
+    // A plan the check could not prepare is in the same line, by name (Claude r5 B9 scenario 2): never a nameless
+    // line of its own ahead of it.
+    const p = await rig({ listing: structuredClone(sale), candidateCount: 9, modelConfirm: [], confirm: [319015], planCheck: { 'plan-03': 'phone' }, broken: [6] });
+    try {
+      const dry = await p.run();
+      assert.deepEqual(plansOf(dry).map(Boolean), [false, true, false]);
+      const shown = warningsOf(msg.dryRunSummary(dry));
+      assert.equal(shown[2], '⚠️ 2 floor plans left out by the contact check (Type A: could not be prepared; Type C: shows a phone number)', shown.join('\n'));
+      assert.equal(dry.warnings.filter((w) => /floor plan/.test(w)).length, 1, dry.warnings.join(' | '));
+      assert.ok(dry.warningCodes.includes('images-skipped'), 'the code stays');
+    } finally { p.cleanup(); }
   });
 
   it('no plans: no call', async () => {
@@ -3572,7 +3628,7 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.deepEqual(r.calls().filter((c) => c.tool === 'claude-plan-check').map((c) => c.files), [['plan-02.jpg']]);
       assert.deepEqual(saved(r).models.map((m) => m.floorPlan?.src ?? null), [null, `/listings/${SLUG}/plan-02.jpg`]);
       assert.deepEqual(fs.readdirSync(pubDir(r)).filter((f) => f.startsWith('plan-')).sort(), ['plan-02-thumb.webp', 'plan-02.jpg']);
-      assert.ok(report.warnings.some((w) => /1 floor plan\(s\) could not be processed/.test(w)), report.warnings.join(' | '));
+      assert.ok(report.warnings.includes('1 floor plan left out by the contact check (Nawras: could not be prepared)'), report.warnings.join(' | '));
     } finally { r.cleanup(); }
   });
 

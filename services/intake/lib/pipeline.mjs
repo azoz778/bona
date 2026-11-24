@@ -304,6 +304,16 @@ export function dropMoneyText(holder, { figures = [] } = {}) {
   return { dropped, name };
 }
 
+/**
+ * A warning the WhatsApp reply ranks ahead of the rest (r6 #8): it shows only the first 3 (messages.mjs
+ * orderedWarnings), so the price ones (`price`: the headline, Sakani and unit-model prices) come first, then the one
+ * floor-plan line (`plan`), then every other warning, each group in the order it was pushed.
+ */
+const rankedWarning = (report, rank, text) => {
+  report.warnings.push(text);
+  report.warningPriority[rank].push(text);
+};
+
 /** The warning for dropMoneyText's dropped fields and items (none: null). */
 const moneyTextWarning = (dropped) => (dropped.length
   ? `${dropped.length} text field(s) or list item(s) stated a price or a payment, which the site shows only in the price fields, so they were left off (${dropped.join(', ')})`
@@ -350,8 +360,9 @@ export class RejectError extends Error {
 export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun = false, meta = {} }) {
   const started = Date.now();
   // `warnings` are OUR sentences (safe to send to WhatsApp); `warningCodes` are the fixed
-  // vocabulary written into the listing. Model free text belongs in neither.
-  const report = { pdf: pdfPath, dryRun, stage: 'start', warnings: [], warningCodes: [] };
+  // vocabulary written into the listing. Model free text belongs in neither. `warningPriority`: the warnings the
+  // WhatsApp reply puts first (rankedWarning).
+  const report = { pdf: pdfPath, dryRun, stage: 'start', warnings: [], warningCodes: [], warningPriority: { price: [], plan: [] } };
   const stat = fs.statSync(pdfPath);
   report.bytes = stat.size;
   report.sha256 = sha256File(pdfPath);
@@ -897,7 +908,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         ? `the property is in ${country ?? 'no recorded country'}, whose own currency the site does not print: there the models are priced only in ${ABROAD_CURRENCIES.join(' or ')}, beside a price the reading read itself — this reading has ${currency.reading ?? 'no currency'}${ownAmount ? '' : ' and no price of its own'}`
         : `${currency.reading ?? 'none'} is only the default — the reading has no price of its own, and it is not the currency of the country the property is in`;
       const per = (p) => (p ? `per ${p}` : 'with no rent period');
-      report.warnings.push(decision === 'period-mismatch'
+      rankedWarning(report, 'price', decision === 'period-mismatch'
         ? `the brochure's unit-model prices read as ${per(currencyDrop.period.reading)}, but the listing's price is ${per(currencyDrop.period.listing)}, so the models were published without prices — a figure is never shown for another period`
         : decision === 'currency-mismatch'
           ? `the brochure's unit-model prices are not in the listing's currency (${currency.listing ?? 'none'}): ${currency.established ? `they read as ${currency.reading}` : `the reading established no currency (${why})`}, so the models were published without prices`
@@ -961,13 +972,13 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     if (mp.refused.length) {
       report.warningCodes.push('model-price-not-printed');
       if (mp.tooMany) {
-        report.warnings.push(`the brochure prices its unit models on too many pages to check (${mp.tooMany.pages}; at most ${mp.tooMany.max} are looked at), so no unit-model price was published — the models show without them`);
+        rankedWarning(report, 'price', `the brochure prices its unit models on too many pages to check (${mp.tooMany.pages}; at most ${mp.tooMany.max} are looked at), so no unit-model price was published — the models show without them`);
       } else {
         if (notPrinted > 0) {
-          report.warnings.push(`${notPrinted} unit-model price(s) could not be confirmed on the brochure's own pages, so they were left off — the models show without them`);
+          rankedWarning(report, 'price', `${notPrinted} unit-model price(s) could not be confirmed on the brochure's own pages, so they were left off — the models show without them`);
         }
         if (incomplete.length) {
-          report.warnings.push(`the check of ${incomplete.length} unit-model price(s) could not be completed (page${incompletePages.length === 1 ? '' : 's'} ${incompletePages.join(', ')}), so they were left off for now — try again later`);
+          rankedWarning(report, 'price', `the check of ${incomplete.length} unit-model price(s) could not be completed (page${incompletePages.length === 1 ? '' : 's'} ${incompletePages.join(', ')}), so they were left off for now — try again later`);
         }
       }
     }
@@ -1051,7 +1062,6 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     if (written.skipped?.length) {
       for (const { model } of written.skipped) { models[model].floorPlan = null; planWhy.set(model, 'could not be prepared'); }
       if (!report.warningCodes.includes('images-skipped')) report.warningCodes.push('images-skipped');
-      report.warnings.push(`${written.skipped.length} floor plan(s) could not be processed and were left out`);
       log.warn('intake.floor_plans_skipped', { skipped: written.skipped });
     }
     const ask = async (images) => {
@@ -1071,26 +1081,31 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       leftOut: res.dirty.map(({ model, found }) => ({ model, found })), unchecked: res.unchecked,
     };
     log.info('intake.plan_checked', { plans: written.length, clean: res.clean.length, leftOut: res.dirty.length, unchecked: res.unchecked.length, fatal: res.fatal });
-    // Every plan it left out in ONE warning, its models grouped by reason (r5 #10): the WhatsApp reply shows only
-    // the first 3 warnings, and a warning per plan would push the later ones — and their model names — out. It
-    // is pushed here, after every price check, so the price warnings stay ahead of it in that reply.
-    // "shows …" only for a plan really flagged; a duplicate or malformed answer is no clear answer (r5 #5).
-    const byReason = new Map();
+    // Every plan it left out in ONE warning, by model name, grouped by reason (r5 #10, r6 #8): could not be prepared,
+    // flagged ("shows …" only for a plan really flagged; a duplicate or malformed answer is no clear answer, r5 #5)
+    // or not checked. The WhatsApp reply shows only 3 warnings and ranks this line right after the price ones
+    // (rankedWarning): a second plan line, or one per plan, would push the model names out.
+    const lineWhy = new Map();
+    for (const { model } of written.skipped ?? []) lineWhy.set(model, 'could not be prepared');
     for (const { model, found, flagged } of res.dirty) {
       const what = !flagged ? 'no clear answer from the check'
         : `shows ${found.length ? found.map((w) => PLAN_WORDS[w]).join(', ') : 'contact or brand details'}`;
-      byReason.set(what, [...(byReason.get(what) ?? []), modelName(model)]);
+      lineWhy.set(model, what);
       planWhy.set(model, flagged ? `flagged: ${what}` : what);
     }
-    if (res.dirty.length) {
-      const n = res.dirty.length;
-      report.warnings.push(`${n} floor plan${n === 1 ? '' : 's'} left out by the contact check (${[...byReason].map(([what, names]) => `${names.join(', ')}: ${what}`).join('; ')})`);
-    }
+    // An enrichment's unchecked plan is an unfinished check, which enrichListing reports: not in this line.
     if (res.unchecked.length && !enrich) {
       // On the listing too (r5 #11): the backfill plans such a listing for enrich, which adds the plans once checked.
       report.warningCodes.push('plans-unchecked');
-      report.warnings.push(`${res.unchecked.length} floor plan(s) could not be checked for contact details (${res.fatal ? 'the AI quota ran out' : 'the check failed'}), `
-        + 'so the listing goes up without them for now — try again later with `run-once --enrich <id>`');
+      // With the listing's real id (Claude r5 NB8); a dry run publishes nothing, so it has no listing to enrich yet.
+      const retry = `try again later${dryRun ? '' : ` with \`run-once --enrich ${report.id}\``}`;
+      for (const model of res.unchecked) lineWhy.set(model, `could not be checked (${res.fatal ? 'the AI quota ran out' : 'the check failed'}), ${retry}`);
+    }
+    if (lineWhy.size) {
+      const byReason = new Map();
+      for (const [model, what] of [...lineWhy].sort(([a], [b]) => a - b)) byReason.set(what, [...(byReason.get(what) ?? []), modelName(model)]);
+      const n = lineWhy.size;
+      rankedWarning(report, 'plan', `${n} floor plan${n === 1 ? '' : 's'} left out by the contact check (${[...byReason].map(([what, names]) => `${names.join(', ')}: ${what}`).join('; ')})`);
     }
   };
 
@@ -1139,16 +1154,16 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       price.onRequest = true;
       price.from = false;
       report.warningCodes.push('price-not-printed');
-      report.warnings.push(report.priceEvidence.unchecked
+      rankedWarning(report, 'price', report.priceEvidence.unchecked
         ? `the price could not be checked on the brochure (${uncheckedWhy(report.priceEvidence)}), so the listing says "price on request" for now — try again later, or send \`price <id> <amount>\` to set one`
         : ownPriceOnly
           ? 'the price read was the lowest unit-model price, which the brochure does not print as this single property\'s own price (a property is not "From" its cheapest model), so the listing says "price on request" — send `price <id> <amount>` to set one'
           : 'the price was not printed in the brochure, so the listing says "price on request" — send `price <id> <amount>` to set one');
     } else if (fromWords) {
       price.from = true;
-      report.warnings.push(`the price read was its one unit model's; confirmed on its page as the property's own price, and shown "From" as the brochure words it (its evidence: "${fromWords}")`);
+      rankedWarning(report, 'price', `the price read was its one unit model's; confirmed on its page as the property's own price, and shown "From" as the brochure words it (its evidence: "${fromWords}")`);
     } else if (ownPriceOnly) {
-      report.warnings.push('the price read was the lowest unit-model price; a single property is not "From" its cheapest model, so it is shown as the property\'s own price (confirmed on its page)');
+      rankedWarning(report, 'price', 'the price read was the lowest unit-model price; a single property is not "From" its cheapest model, so it is shown as the property\'s own price (confirmed on its page)');
     }
   }
   // The subsidised (Sakani) price rides on the headline price: it is published only beside a
@@ -1165,7 +1180,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       if (headline) {
         log.warn('intake.subsidised_price_unevidenced', { amount: price.subsidisedAmount, currency: price.currency, unchecked: evidence?.unchecked === true });
         report.warningCodes.push('subsidised-price-not-printed');
-        report.warnings.push(evidence?.unchecked
+        rankedWarning(report, 'price', evidence?.unchecked
           ? `the subsidised (Sakani) price could not be checked on the brochure (${uncheckedWhy(evidence)}), so only the regular price is shown for now — try again later`
           : 'the subsidised (Sakani) price could not be confirmed on the brochure, so only the regular price is shown');
       }
@@ -1264,7 +1279,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       .map(({ model, index, src, thumb }) => ({ model, index, src, thumb }));
     // A blocked dry run skipped the contact check: none of its plans was looked at, so none is previewed (r6 #6).
     if (report.blocked && !report.planCheck && floorPlans.length) {
-      report.warnings.push(`${floorPlans.length} floor plan(s) were not checked for contact details because the run would not publish, so the preview shows none`);
+      rankedWarning(report, 'plan', `${floorPlans.length} floor plan(s) were not checked for contact details because the run would not publish, so the preview shows none`);
       floorPlans = [];
     }
     report.floorPlans = floorPlans.map((p) => ({ model: p.model, candidate: p.index, src: p.src }));

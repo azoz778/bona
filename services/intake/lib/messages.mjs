@@ -25,6 +25,19 @@ const priceText = (p) => {
   return `${p.currency} ${Number(p.amount).toLocaleString('en-US')}${p.period ? ` / ${p.period}` : ''}${p.from ? ' (from)' : ''}${sakani}`;
 };
 
+/**
+ * Every warning, in the order the reply shows them (r6 #8): it shows only the first 3, so the price warnings come
+ * first (the headline, Sakani and unit-model prices), then the one floor-plan line, then the rest (the model's
+ * flags, the money-text drops, the map, the photos …), each group in the order it was pushed. The pipeline names
+ * the first two groups in `report.warningPriority` (pipeline.mjs rankedWarning).
+ */
+export function orderedWarnings(report) {
+  const first = [report.warningPriority?.price ?? [], report.warningPriority?.plan ?? []];
+  const rank = (w) => { const r = first.findIndex((group) => group.includes(w)); return r < 0 ? first.length : r; };
+  // Array.prototype.sort is stable: the order within each group is kept.
+  return (report.warnings || []).filter(Boolean).sort((a, b) => rank(a) - rank(b));
+}
+
 const coverOf = (listing) => {
   const room = listing._intake?.images?.[0]?.room;
   return room && ROOMS[room] ? ROOMS[room].en : 'first photo';
@@ -56,7 +69,7 @@ export function published(report) {
   const checked = planCheckLine(report.planCheck);
   if (checked) lines.push(`🔎 ${checked}`);
   if (l.hidden) lines.push('_Hidden: it is in the repo but not on the site (`show ' + l.id + '` publishes it)._');
-  const warn = (report.warnings || []).filter(Boolean).slice(0, 3);
+  const warn = orderedWarnings(report).slice(0, 3);
   if (warn.length) lines.push('', ...warn.map((w) => `⚠️ ${w}`));
   lines.push('', commandsFor(l.id));
   return lines.join('\n');
@@ -78,7 +91,7 @@ export function dryRunSummary(report) {
   const checked = planCheckLine(report.planCheck);
   if (checked) lines.push(`🔎 ${checked}`);
   if (report.blocked) lines.push('', `❌ It would NOT publish: ${report.blocked}`);
-  const warn = (report.warnings || []).filter(Boolean).slice(0, 3);
+  const warn = orderedWarnings(report).slice(0, 3);
   if (warn.length) lines.push('', ...warn.map((w) => `⚠️ ${w}`));
   lines.push('', 'Send it again without `#test` to publish it.');
   return lines.join('\n');
