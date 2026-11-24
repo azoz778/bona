@@ -147,12 +147,14 @@ const put = (rel) => { const abs = path.join(outDir, rel); fs.mkdirSync(path.dir
 fs.appendFileSync(new URL('./calls.jsonl', import.meta.url), JSON.stringify({ tool: 'py-' + mode, pages, dir: opt('--page-dir') }) + '\\n');
 let out;
 if (mode === 'extract') {
+  const brokenFiles = [];
   const candidates = Array.from({ length: cfg.candidateCount ?? 6 }, (_, index) => {
     const file = 'images/c' + String(index).padStart(3, '0') + '.jpg';
     // cfg.broken: candidates written as bytes no decoder reads (a truncated or hostile image).
-    const abs = (cfg.broken ?? []).includes(index) ? (put(file), fs.writeFileSync(path.join(outDir, file), 'not an image'), path.join(outDir, file)) : put(file);
+    const abs = (cfg.broken ?? []).includes(index) ? (put(file), fs.writeFileSync(path.join(outDir, file), 'not an image'), brokenFiles.push(path.join(outDir, file)), path.join(outDir, file)) : put(file);
     return { index, file, abs, width: 1200, height: 900, page: 1 + index, source: 'embedded', coverage: 0.5 };
   });
+  fs.writeFileSync(new URL('./broken.json', import.meta.url), JSON.stringify(brokenFiles));
   out = { ok: true, pages: cfg.pageText.length, text: cfg.pageText.join('\\n'), pageText: cfg.pageText, candidates,
     rendered: false, embeddedImageCount: candidates.length, links: [], meta: {} };
 } else if ([].concat(cfg.failPageDir ?? []).includes(opt('--page-dir'))) {
@@ -210,6 +212,9 @@ if (prompt.includes('the floor-plan images to check>>>')) {
   const fenced = prompt.split('<<<BONA-UNTRUSTED-DATA: the floor-plan images to check>>>')[1].split('<<<END ')[0];
   const images = fenced.split('\\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-plan-check', files: images.map((im) => im.file.split('/').pop()) }) + '\\n');
+  // cfg.healOnPlanCheck: the candidates cfg.broken made unreadable read fine from this call on (a failure that
+  // passed: the plan check could not prepare them, a staging after it can).
+  if (cfg.healOnPlanCheck) for (const f of JSON.parse(fs.readFileSync(new URL('./broken.json', import.meta.url), 'utf8'))) fs.copyFileSync(cfg.photo, f);
   if (cfg.planCheck === 'quota' || cfg.planCheck === true) {
     const quota = cfg.planCheck === 'quota';
     process.stdout.write(JSON.stringify({ is_error: true, api_error_status: quota ? 429 : null, result: quota ? "You've hit your session limit" : 'boom' }));
@@ -335,14 +340,14 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, u
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, printedIn = 'SAR', facts = null, cfgExtra = {}, build = '', candidateCount = 6, planCheck = null, planReply = null }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, printedIn = 'SAR', facts = null, cfgExtra = {}, build = '', candidateCount = 6, planCheck = null, planReply = null, healOnPlanCheck = false }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail, printedIn, facts, candidateCount, planCheck, planReply }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail, printedIn, facts, candidateCount, planCheck, planReply, healOnPlanCheck }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   fs.writeFileSync(path.join(bin, 'fake-brochure.mjs'), FAKE_BROCHURE);
@@ -2508,6 +2513,30 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
     } finally { r.cleanup(); }
   });
 
+  it('r5 #6: a plan the check could not prepare is left out before staging — never published unchecked', async () => {
+    // Type A's plan cannot be read while the check prepares the plans, and reads fine when the publish stages them.
+    const r = await rig({ listing: withPlans(2), candidateCount: 8, broken: [6], healOnPlanCheck: true });
+    try {
+      const report = await r.publish();
+      assert.deepEqual(planCalls(r).map((c) => c.files), [['plan-02.jpg']], 'only the plan it could prepare was checked');
+      assert.deepEqual(report.listing.models.map((m) => m.floorPlan?.src ?? null), [null, `/listings/${report.slug}/plan-02.jpg`]);
+      const files = fs.readdirSync(path.join(r.repo, 'public', 'listings', report.slug)).filter((f) => f.startsWith('plan-'));
+      assert.deepEqual(files.sort(), ['plan-02-thumb.webp', 'plan-02.jpg']);
+      assert.ok(report.warnings.some((w) => /1 floor plan\(s\) could not be processed/.test(w)), report.warnings.join(' | '));
+      assert.ok(report.warningCodes.includes('images-skipped'));
+    } finally { r.cleanup(); }
+  });
+
+  it('r5 #6: a dry run never previews a plan the check could not prepare as publishable, and says it was left out', async () => {
+    const d = await rig({ listing: withPlans(2), candidateCount: 8, broken: [6] });
+    try {
+      const report = await d.run();
+      assert.deepEqual(plansOf(report).map(Boolean), [false, true]);
+      assert.deepEqual(report.floorPlans.map((p) => p.model), [1]);
+      assert.ok(report.warnings.some((w) => /1 floor plan\(s\) could not be processed/.test(w)), report.warnings.join(' | '));
+    } finally { d.cleanup(); }
+  });
+
   it('r5 #4: the plan check comes after every price check — its quota never costs a headline or a Sakani price', async () => {
     // A rental headline that needs its page check (r3 #4), then a plan check that hits the quota.
     const rent = withPlans(2);
@@ -3253,6 +3282,38 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.ok(report.warnings.some((w) => /Nawras/.test(w) && /a website/.test(w)), report.warnings.join(' | '));
       assert.equal(msg.planCheckLine(report.planCheck), '1 floor plan · 1 left out by the contact check');
     } finally { r.cleanup(); }
+  });
+
+  /** r5 #6: Nawras's plan = candidate 5, Lulu's = candidate 6 (both excluded from the gallery). */
+  const twoPlans = () => {
+    const a = reading();
+    a.models[1].floorPlan = 6;
+    a.images.push({ index: 6, room: 'view', rank: null, hero: false, exclude: true, reason: 'floor plan', focus: null });
+    return a;
+  };
+
+  it('r5 #6: a plan the check could not prepare never reaches the repo on --enrich', async () => {
+    // Nawras's plan cannot be read while the check prepares the plans, and reads fine when the enrichment stages them.
+    const r = await rig({ listing: twoPlans(), candidateCount: 7, broken: [5], healOnPlanCheck: true });
+    try {
+      seed(r);
+      const report = await enrich(r);
+      assert.equal(report.ok, true);
+      assert.deepEqual(r.calls().filter((c) => c.tool === 'claude-plan-check').map((c) => c.files), [['plan-02.jpg']]);
+      assert.deepEqual(saved(r).models.map((m) => m.floorPlan?.src ?? null), [null, `/listings/${SLUG}/plan-02.jpg`]);
+      assert.deepEqual(fs.readdirSync(pubDir(r)).filter((f) => f.startsWith('plan-')).sort(), ['plan-02-thumb.webp', 'plan-02.jpg']);
+      assert.ok(report.warnings.some((w) => /1 floor plan\(s\) could not be processed/.test(w)), report.warnings.join(' | '));
+    } finally { r.cleanup(); }
+  });
+
+  it('r5 #6: an --enrich dry run never previews a plan the check could not prepare', async () => {
+    const d = await rig({ listing: twoPlans(), candidateCount: 7, broken: [5] });
+    try {
+      seed(d);
+      const report = await enrich(d, { dryRun: true });
+      assert.deepEqual(report.enrich.plans, [`/listings/${SLUG}/plan-02.jpg`]);
+      assert.deepEqual(report.floorPlans.map((p) => p.model), [1]);
+    } finally { d.cleanup(); }
   });
 
   it('r3 #7: --force accepts a first enrichment whose check failed for a reason that is not a quota — without those prices, and says so', async () => {

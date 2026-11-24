@@ -984,6 +984,14 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     const dir = path.join(workDir, 'plan-check');
     fs.rmSync(dir, { recursive: true, force: true });
     const written = await writeFloorPlans(extraction.candidates, models, dir, 'plan-check');
+    // A plan that could not be prepared here was never checked: it is left out now, so a later write that
+    // succeeds can never stage it and a dry run never previews it (r5 #6).
+    if (written.skipped?.length) {
+      for (const { model } of written.skipped) models[model].floorPlan = null;
+      if (!report.warningCodes.includes('images-skipped')) report.warningCodes.push('images-skipped');
+      report.warnings.push(`${written.skipped.length} floor plan(s) could not be processed and were left out`);
+      log.warn('intake.floor_plans_skipped', { skipped: written.skipped });
+    }
     const ask = async (images) => {
       if (quotaHit) return { reply: '', error: 'the AI quota ran out', fatal: true };
       const res = await askPlanContacts({
