@@ -1025,6 +1025,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       report.warnings.push(`${n} floor plan${n === 1 ? '' : 's'} left out by the contact check (${[...byReason].map(([what, names]) => `${names.join(', ')}: ${what}`).join('; ')})`);
     }
     if (res.unchecked.length && !enrich) {
+      // On the listing too (r5 #11): the backfill plans such a listing for enrich, which adds the plans once checked.
+      report.warningCodes.push('plans-unchecked');
       report.warnings.push(`${res.unchecked.length} floor plan(s) could not be checked for contact details (${res.fatal ? 'the AI quota ran out' : 'the check failed'}), `
         + 'so the listing goes up without them for now — try again later with `run-once --enrich <id>`');
     }
@@ -1462,6 +1464,10 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   }
 
   const merged = mergeEnrichment(existing, built, priceChanged ? { price: head.price } : {});
+  // `plans-unchecked` (r5 #11) is what makes the backfill enrich the listing again: --force taking the models
+  // without their unchecked plans sets it; a reading whose plans were all checked clears it.
+  if (forcedPlans) addWarningCode(merged, 'plans-unchecked');
+  else if (Array.isArray(merged._intake?.warnings)) merged._intake.warnings = merged._intake.warnings.filter((c) => c !== 'plans-unchecked');
   // The listing already has a brochure, printed from the data the enrichment replaces (r2 #8): if the new one
   // cannot be built, nothing is committed — the old PDF would contradict the new data, whichever row moved.
   const hadBrochure = Boolean(existing.brochureUrl) || fs.existsSync(brochureFileIn(publicDir));

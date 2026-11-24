@@ -2531,6 +2531,30 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
     }
   });
 
+  it('r5 #11: a publish that goes up without plans because their check did not finish says so on the listing (`plans-unchecked`); a finished check does not', async () => {
+    for (const planCheck of ['quota', true]) {
+      const r = await rig({ listing: withPlans(2), candidateCount: 8, planCheck });
+      try {
+        const report = await r.publish();
+        assert.ok(report.listing._intake.warnings.includes('plans-unchecked'), `${planCheck}: ${report.listing._intake.warnings}`);
+        const saved = JSON.parse(fs.readFileSync(path.join(r.repo, 'scripts', 'curate', 'inbox', `${report.slug}.json`), 'utf8'));
+        assert.ok(saved._intake.warnings.includes('plans-unchecked'), 'in the committed record');
+      } finally { r.cleanup(); }
+    }
+    const d = await rig({ listing: withPlans(2), candidateCount: 8, planCheck: 'quota' });
+    try {
+      assert.ok((await d.run()).listingPreview._intake.warnings.includes('plans-unchecked'), 'a dry run previews it');
+    } finally { d.cleanup(); }
+    // Every plan checked — clean, or flagged and left out: nothing unchecked to say.
+    for (const planCheck of [null, { 'plan-01': 'qr' }]) {
+      const c = await rig({ listing: withPlans(2), candidateCount: 8, planCheck });
+      try {
+        const report = await c.publish();
+        assert.ok(!report.listing._intake.warnings.includes('plans-unchecked'), JSON.stringify(planCheck));
+      } finally { c.cleanup(); }
+    }
+  });
+
   it('a live publish never stages a flagged plan', async () => {
     const r = await rig({ listing: withPlans(2), candidateCount: 8, planCheck: { 'plan-01': 'qr' } });
     try {
@@ -3324,6 +3348,32 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       seed(q, { price: { ...ON_REQUEST } });
       assert.equal((await enrich(q, { force: true }).then(() => null, (e) => e))?.retryable, true);
     } finally { q.cleanup(); }
+  });
+
+  it('r5 #11: an enrichment --force takes without its unchecked plans carries `plans-unchecked`; one whose plans were all checked clears it', async () => {
+    const f = await rig({ listing: reading(), planCheck: true });
+    try {
+      seed(f, { price: { ...ON_REQUEST } });
+      fs.rmSync(path.join(pubDir(f), 'plan-03.jpg')); fs.rmSync(path.join(pubDir(f), 'plan-03-thumb.webp'));
+      git(f, 'add', '-A'); git(f, 'commit', '-qm', 'no plan yet');
+      assert.equal((await enrich(f, { force: true })).ok, true);
+      assert.deepEqual(saved(f)._intake.warnings, ['map-unconfirmed', 'plans-unchecked']);
+      const [row] = planBackfill([saved(f)], { findPdf: () => f.pdfPath });
+      assert.equal(row.action, 'enrich', row.reason);
+    } finally { f.cleanup(); }
+    // Published without its plans earlier; this time every plan is checked (one clean, or flagged and left out).
+    for (const planCheck of [null, { 'plan-01': 'website' }]) {
+      const r = await rig({ listing: reading(), planCheck });
+      try {
+        seed(r, { price: { ...ON_REQUEST }, intake: { warnings: ['map-unconfirmed', 'plans-unchecked'] } });
+        const dry = await enrich(r, { dryRun: true });
+        assert.equal(dry.ok, true);
+        assert.equal((await enrich(r)).ok, true);
+        assert.deepEqual(saved(r)._intake.warnings, ['map-unconfirmed'], JSON.stringify(planCheck));
+        const [row] = planBackfill([saved(r)], { findPdf: () => r.pdfPath });
+        assert.equal(row.action, 'skip', row.reason);
+      } finally { r.cleanup(); }
+    }
   });
 
   it('r4: a re-enrichment whose plans cannot be checked keeps the never-degrade rule — refused, --force or not', async () => {

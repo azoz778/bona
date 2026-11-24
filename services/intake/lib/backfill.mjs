@@ -68,7 +68,8 @@ function bareModels(l) {
  * with a price or a floor plan, or a fact list (amenities / nearby / warranties: "already enriched",
  * enrichedWith — unit models with neither are planned again; the backfill is for listings
  * published before the intake read them; with `includeEnriched` it is enriched again, and run-once
- * still refuses a reading with less than it carries). Everything else is `enrich` when its source PDF is found by content hash, else
+ * still refuses a reading with less than it carries) — unless it carries `plans-unchecked` and its PDF is found (r5 #11).
+ * Everything else is `enrich` when its source PDF is found by content hash, else
  * `brochure-only`. `findPdf` is called only for the listings that are not skipped — every call can
  * mean hashing PDFs.
  *
@@ -93,23 +94,32 @@ export function planBackfill(listings, { findPdf, withdrawals = [], only = null,
     };
     const withdrawn = INTAKE_ID_RE.test(id) ? withdrawnAdvertising(l, withdrawals) : null;
     const enriched = enrichedWith(l);
+    const sha = typeof l._intake?.pdfSha256 === 'string' && l._intake.pdfSha256 ? l._intake.pdfSha256 : null;
+    // Published without the floor plans whose contact check did not finish (r5 #11): enriched again when its PDF
+    // is here, already enriched or not — that adds them once checked. Looked up once, for such a listing only.
+    const plansUnchecked = Array.isArray(l._intake?.warnings) && l._intake.warnings.includes('plans-unchecked');
+    let pdf;
+    const lookup = () => (pdf === undefined ? (pdf = (sha && findPdf(sha)) || null) : pdf);
     if (!INTAKE_ID_RE.test(id)) row.reason = 'not an intake listing (BONA-W###)';
     else if (withdrawn) row.reason = `advertising withdrawn (${withdrawn.reason})`;
     else if (l.status === 'withdrawn') row.reason = 'its record says withdrawn';
     else if (l.hidden) row.reason = 'hidden — not on the site';
     else if (!row.slug) row.reason = 'the record has no slug';
     else if (!isSlug(row.slug)) row.reason = `the record's slug ${JSON.stringify(row.slug)} is not a valid slug (lowercase-hyphenated) — fix the record first`;
-    else if (enriched && !includeEnriched) row.reason = `already enriched (${enriched}) — --include-enriched to enrich it again`;
-    else {
-      const sha = typeof l._intake?.pdfSha256 === 'string' && l._intake.pdfSha256 ? l._intake.pdfSha256 : null;
-      const pdf = sha ? findPdf(sha) : null;
-      row.pdf = pdf || null;
+    else if (enriched && !includeEnriched && !(plansUnchecked && lookup())) {
+      row.reason = plansUnchecked
+        ? `already enriched (${enriched}) — its floor plans were published unchecked, but its source PDF is not in the intake folder`
+        : `already enriched (${enriched}) — --include-enriched to enrich it again`;
+    } else {
+      lookup();
+      row.pdf = pdf;
       row.action = pdf ? 'enrich' : 'brochure-only';
       row.reason = pdf
         ? 'source PDF found'
         : sha ? 'source PDF not in the intake folder — brochure rebuilt from the listing only'
           : 'no source PDF recorded — brochure rebuilt from the listing only';
-      if (pdf && enriched) row.reason += ` (already has ${enriched} — enriched again)`;
+      if (pdf && plansUnchecked) row.reason += ' (its floor plans were published unchecked — enriched again)';
+      else if (pdf && enriched) row.reason += ` (already has ${enriched} — enriched again)`;
       else if (pdf && bareModels(l)) row.reason += ` (its ${bareModels(l)} unit model(s) carry no price or floor plan — enriched again)`;
     }
     rows.push(row);
@@ -176,6 +186,9 @@ export function makePdfFinder(intakeDir, { maxDepth = 3, hashFile = sha256File }
  */
 export const QUOTA_RE = /(?<![a-z])(?:usage|session|rate)[ _-]?limits?(?![a-z])|\bquotas?\b|too many requests|(?<![\w,.])429(?![\w,.])/i;
 
+/** buildBrandedBrochure's too-large refusal (lib/brochure.mjs), word for word — not any "too large" or "MB limit" (r5 #11). */
+const BROCHURE_TOO_LARGE_RE = /\bthe brochure is over the \d+(?:\.\d+)? MB limit even with its photos scaled down\b/;
+
 const lastLines = (text, n = 3) => String(text ?? '').split('\n').map((s) => s.trim()).filter(Boolean).slice(-n);
 const clip = (s, n = 220) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
@@ -187,7 +200,7 @@ const clip = (s, n = 220) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
  *   rejected — `REJECTED at "<stage>": …` (exit 1), or a dry run that says `WOULD BE REJECTED — …`
  *   refused  — `FAILED: --enrich <id>: …`, run-once's own refusal of that one listing (not in the
  *              inbox, withdrawn, hidden, a headline that disagrees with the models, …), or a brochure
- *              too large to build ("MB limit", r3 #7): skipped, the backfill goes on
+ *              too large to build (r3 #7; its refusal text only, BROCHURE_TOO_LARGE_RE): skipped, the backfill goes on
  *   failed   — any other FAILED, any other non-zero exit, and the one refusal that is not about the
  *              listing: the clone has uncommitted changes (every later job would hit it too)
  *   ok       — exit 0
@@ -208,7 +221,7 @@ export function classifyRun({ code, signal = null, output = '' }) {
   if (failed && code !== 0) {
     const msg = failed[1].trim();
     // A brochure too large to build is a fact about that listing, not a broken run: skipped, the backfill goes on (r3 #7).
-    const refused = (/^--enrich\s+BONA-W\d+:/i.test(msg) && !/uncommitted changes/i.test(msg)) || /MB limit|too large/i.test(msg);
+    const refused = (/^--enrich\s+BONA-W\d+:/i.test(msg) && !/uncommitted changes/i.test(msg)) || BROCHURE_TOO_LARGE_RE.test(msg);
     return { outcome: refused ? 'refused' : 'failed', line: clip(`${refused ? 'REFUSED' : 'FAILED'}: ${msg}`) };
   }
   if (code !== 0) return { outcome: 'failed', line: clip(`exit ${code}: ${lastLines(text).join(' | ') || 'no output'}`) };

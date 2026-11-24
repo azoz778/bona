@@ -191,6 +191,7 @@ export const WARNING_CODES = new Set([
   'model-flagged',          // the model returned warnings; read them in the work dir's ai.json
   'photos-cropped',         // one or more photographs were cut out of a page that was one flattened picture
   'map-unconfirmed',        // the brochure links a map but no two links agreed on one point -> district only
+  'plans-unchecked',        // the floor-plan contact check did not finish (quota, failed call) -> those plans left out; the backfill enriches it again
 ]);
 
 /**

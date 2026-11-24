@@ -8,6 +8,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import {
   QUOTA_RE, classifyRun, formatPlanTable, makePdfFinder, parseOnly, planBackfill, resumeCommand, stopsBackfill, summarizeRun, unknownIds,
 } from '../lib/backfill.mjs';
-import { findSourcePdf } from '../lib/brochure.mjs';
+import { buildBrandedBrochure, findSourcePdf } from '../lib/brochure.mjs';
 import { registerWithdrawals } from '../../../scripts/curate/rules.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -156,6 +157,31 @@ describe('planBackfill', () => {
     assert.match(by['BONA-W005'].reason, /^already enriched \(amenities\) — /, 'the bare models are not counted, the fact list is');
   });
 
+  it('r5 #11: a listing published without the floor plans whose contact check did not finish (`plans-unchecked`) is planned for enrich, though already enriched', () => {
+    const priced = () => [{ name: { en: 'A', ar: 'أ' }, price: 319015, subsidisedPrice: null, floorPlan: null }];
+    const unchecked = (id, sha256 = sha(`pdf of ${id}`)) => listing(id, { models: priced(), _intake: { source: 'whatsapp', pdfSha256: sha256, warnings: ['map-unconfirmed', 'plans-unchecked'] } });
+    const list = [
+      unchecked('BONA-W010'),                                     // its PDF is here: enrich
+      unchecked('BONA-W002'),                                     // its PDF is gone: left alone, and says why
+      listing('BONA-W003', { models: priced() }),                 // no code: already enriched, as before
+    ];
+    asked.length = 0;
+    const by = Object.fromEntries(planBackfill(list, { findPdf }).map((r) => [r.id, r]));
+    assert.equal(by['BONA-W010'].action, 'enrich');
+    assert.equal(by['BONA-W010'].pdf, '/data/intake/2026-09-07/w10.pdf');
+    assert.equal(by['BONA-W010'].reason, 'source PDF found (its floor plans were published unchecked — enriched again)');
+    assert.equal(by['BONA-W002'].action, 'skip', 'no PDF to read the plans from: never a pointless brochure-only rebuild');
+    assert.equal(by['BONA-W002'].pdf, null);
+    assert.match(by['BONA-W002'].reason, /^already enriched \(1 unit model\(s\)\) — its floor plans were published unchecked, but its source PDF is not in the intake folder$/);
+    assert.equal(by['BONA-W003'].action, 'skip');
+    assert.match(by['BONA-W003'].reason, /^already enriched \(1 unit model\(s\)\) — --include-enriched to enrich it again$/);
+    assert.ok(!asked.includes(sha('pdf of BONA-W003')), 'a listing without the code is not hashed for');
+    // --include-enriched: the same rows, enriched.
+    const again = Object.fromEntries(planBackfill(list, { findPdf, includeEnriched: true }).map((r) => [r.id, r]));
+    assert.equal(again['BONA-W010'].action, 'enrich');
+    assert.equal(again['BONA-W010'].reason, 'source PDF found (its floor plans were published unchecked — enriched again)');
+  });
+
   it('skips hidden, withdrawn (rules.mjs, the register, the record, the name), non-intake and slug-less listings', () => {
     const by = Object.fromEntries(planBackfill(listings, { findPdf, withdrawals }).map((r) => [r.id, r]));
     const skip = (id, re) => {
@@ -280,10 +306,40 @@ describe('classifyRun / summarizeRun', () => {
     const r = classifyRun({ code: 1, output: out });
     assert.equal(r.outcome, 'refused');
     assert.equal(stopsBackfill(r.outcome), false);
-    assert.equal(classifyRun({ code: 1, output: 'FAILED: the brochure is too large\n' }).outcome, 'refused');
     // A quota stays a quota (retryable), and any other failure a failure.
     assert.equal(classifyRun({ code: 1, output: 'FAILED: the AI quota ran out during the unit-model price check — nothing was changed; try again later\n' }).outcome, 'quota');
     assert.equal(classifyRun({ code: 1, output: 'FAILED: the check of 4 unit-model price(s) could not be completed (page 3) — nothing was changed; try again later\n' }).outcome, 'failed');
+  });
+
+  it('r5 #11: only the brochure-size refusal, as buildBrandedBrochure words it, is skipped — any other "too large" or "MB limit" is a failure', async () => {
+    // The refusal word for word: buildBrandedBrochure's too-large error (a stand-in renderer that answers
+    // too-large), inside the failure pipeline.mjs throws when an enrichment cannot rebuild the brochure.
+    const dir = scratch('bf-too-large-');
+    try {
+      const spawnImpl = () => {
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => true;
+        setImmediate(() => {
+          child.stdout.emit('data', Buffer.from(`${JSON.stringify({ ok: false, reason: 'too-large', error: '30000000 bytes, cap 26214400' })}\n`));
+          child.emit('close', 1);
+        });
+        return child;
+      };
+      for (const maxBrochureMb of [25, 12.5]) {
+        const built = await buildBrandedBrochure({ listing: listing('BONA-W023'), filesDir: dir, outPath: path.join(dir, 'brochure.pdf'), workDir: path.join(dir, 'work'), cfg: { maxBrochureMb }, spawnImpl });
+        assert.equal(built.reason, 'too-large');
+        const out = `FAILED: the Bona brochure could not be rebuilt (${built.error}), and the listing's old brochure would contradict the enriched listing (its models, prices and plans), so nothing was changed; run --enrich again once the brochure builds\nwork dir: /w`;
+        assert.equal(classifyRun({ code: 1, output: out }).outcome, 'refused', built.error);
+      }
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    // Any other "too large" or "MB limit" is not that refusal: a failure, which stops the backfill.
+    for (const msg of ['the brochure is too large', 'the request body is too large for the API', 'argument list too large', 'the PDF is over the 50 MB limit']) {
+      const r = classifyRun({ code: 1, output: `FAILED: ${msg}\n` });
+      assert.equal(r.outcome, 'failed', msg);
+      assert.equal(stopsBackfill(r.outcome), true, msg);
+    }
   });
 
   it('a dirty clone is a failure: every later job would hit it too', () => {
