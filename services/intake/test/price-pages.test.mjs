@@ -569,7 +569,8 @@ if (prompt.includes('the floor-plan images to check>>>')) {
   // 'quota' / true = the call fails (a quota, or another error); { 'plan-03': 'phone' } = that plan shows it.
   // cfg.planReply: 'duplicate' / 'malformed' = the first image's record comes twice / malformed; 'by-file-name'
   // (r7 #1) = each record numbered by the number in the file name shown, not by its index, and none about the last;
-  // 'from-one' (r8 #1, Codex r7 C#1) = each record numbered index + 1 whatever the file names, and none about the last.
+  // 'from-one' (r8 #1, Codex r7 C#1) = each record numbered index + 1 whatever the file names, and none about the last;
+  // 'second-fails' (r9 #5, Claude r8 NB14) = every call but the first (each call not showing plan-01) fails like true.
   const fenced = prompt.split('<<<BONA-UNTRUSTED-DATA: the floor-plan images to check>>>')[1].split('<<<END ')[0];
   const images = fenced.split('\\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
   // Which plan each file shown is, as its pixels would tell a model (r7 #1: the check reads a link named by its index
@@ -587,7 +588,7 @@ if (prompt.includes('the floor-plan images to check>>>')) {
   // cfg.healOnPlanCheck: the candidates cfg.broken made unreadable read fine from this call on (a failure that
   // passed: the plan check could not prepare them, a staging after it can).
   if (cfg.healOnPlanCheck) for (const f of JSON.parse(fs.readFileSync(new URL('./broken.json', import.meta.url), 'utf8'))) fs.copyFileSync(cfg.photo, f);
-  if (cfg.planCheck === 'quota' || cfg.planCheck === true) {
+  if (cfg.planCheck === 'quota' || cfg.planCheck === true || (cfg.planReply === 'second-fails' && !plans.includes('plan-01.jpg'))) {
     const quota = cfg.planCheck === 'quota';
     process.stdout.write(JSON.stringify({ is_error: true, api_error_status: quota ? 429 : null, result: quota ? "You've hit your session limit" : 'boom' }));
     process.exit(1);
@@ -3714,6 +3715,36 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
       assert.equal(shown[1], '⚠️ 1 floor plan not published (Type C: shows a phone number)', shown.join('\n'));
       assert.match(shown[2], /the model flagged 10 thing/, shown.join('\n'));
     } finally { h.cleanup(); }
+  });
+
+  it('r9 #5 (Claude r8 NB14): 13 plans, the first call flags Type C and the second fails — ONE plan line names both reasons, and the 🔎 line counts both', async () => {
+    // r8 #1 turned the r6 #8 reply into an all-unchecked one, so no test kept a plan line that mixes a flagged plan and
+    // a plan not checked. 13 plans take two calls (PLAN_CHECK_BATCH 12), each judged on its own: plans 1-12 come back
+    // with Type C flagged, and the call for Type M fails. The plan line must still name Type M with its --enrich hint
+    // beside Type C (not only when no plan was flagged), and the 🔎 line must still count it as not checked.
+    const r = await rig({ listing: withPlans(13), candidateCount: 19, planCheck: { 'plan-03': 'phone' }, planReply: 'second-fails' });
+    const expectReply = (report, reply, hint) => {
+      assert.deepEqual([report.planCheck.plans, report.planCheck.clean, report.planCheck.leftOut, report.planCheck.unchecked, report.planCheck.fatal],
+        [13, 11, [{ model: 2, found: ['phone'] }], [12], false], JSON.stringify(report.planCheck));
+      const line = `2 floor plans not published (Type C: shows a phone number; Type M: could not be checked (the check failed), try again later${hint})`;
+      assert.deepEqual(report.warnings.filter((w) => /floor plan/.test(w)), [line], report.warnings.join(' | '));
+      assert.equal(msg.planCheckLine(report.planCheck), '13 floor plans · 1 left out by the contact check · 1 not checked — try again later');
+      assert.ok(reply.split('\n').includes(`⚠️ ${line}`), reply);
+      assert.match(reply, /^🔎 13 floor plans · 1 left out by the contact check · 1 not checked — try again later$/m, reply);
+      assert.equal(reply.match(/left out by the contact check/g).length, 1, reply);
+    };
+    try {
+      const dry = await r.run();
+      assert.equal(planCalls(r).length, 2);
+      assert.deepEqual(plansOf(dry).map(Boolean), Array.from({ length: 13 }, (_, k) => k !== 2 && k !== 12));
+      // A dry run publishes nothing: no --enrich hint.
+      expectReply(dry, msg.dryRunSummary(dry), '');
+      const live = await r.publish();
+      assert.equal(live.id, 'BONA-W001');
+      assert.deepEqual(live.listing.models.map((m) => Boolean(m.floorPlan)), Array.from({ length: 13 }, (_, k) => k !== 2 && k !== 12));
+      assert.ok(live.warningCodes.includes('plans-unchecked'), live.warningCodes.join(' '));
+      expectReply(live, msg.published(live), ' with `run-once --enrich BONA-W001`');
+    } finally { r.cleanup(); }
   });
 
   it('no plans: no call', async () => {
