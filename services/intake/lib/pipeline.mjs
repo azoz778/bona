@@ -199,25 +199,33 @@ const NAME_CURRENCY_RE = new RegExp(String.raw`${NAME_SITE_CODE}\.?\s*${nameAmou
 /**
  * Arabic words as whole words, with the clitics و / ف, ب / ل / لل and ال in front (a tatweel may follow one:
  * "فـحجز"): "السعر", "بسعر", "للإيجار" — never inside another word ("رسوم" is not in "رسومات"). Only a LETTER
- * before or after continues the word: Arabic punctuation (، ؛ ؟ ٪) ends it, like a space (r5 #1).
+ * before or after continues the word: Arabic punctuation (، ؛ ؟ ٪) ends it, like a space (r5 #1). `ka`: the ك clitic
+ * ("as") may stand where ب / ل do — for the rent words only: "كإيجار", "كدخل", "كالدخل" (r8 #5, Claude r7 B1a).
  */
 const AR_LETTER = String.raw`[\u0621-\u064a\u066e-\u06d3\u06d5\u06fa-\u06ff]`;
-const arabicWords = (words) => String.raw`(?<!${AR_LETTER})[وف]?\u0640?(?:لل|[بل])?\u0640?(?:ال)?(?:${words})(?!${AR_LETTER})`;
+const arabicWords = (words, { ka = false } = {}) => String.raw`(?<!${AR_LETTER})[وف]?\u0640?(?:لل|[بل${ka ? 'ك' : ''}])?\u0640?(?:ال)?(?:${words})(?!${AR_LETTER})`;
+/** ى (alef maqsura) and ی (Farsi yeh) read as ي, as a writer or a text layer may put them for it: "إيجارى", "سنوى", "إیجار" (r8 #5). */
+const foldYeh = (s) => s.replace(/[\u0649\u06cc]/g, '\u064a');
 /** A payment (r3 #1): what a model NAME may not carry, and, with any number, money in free text. "مقدم" alone is not one. */
 const PAYMENT_EN = String.raw`\b(?:down\s*-?\s*payments?|payments?|pay|pays|paid|deposits?|fees?|instal{1,2}ments?|service\s+charges?)\b`;
 const PAYMENT_AR = arabicWords('دفع|دفعة|دفعات|عربون|رسوم|قسط|أقساط|اقساط');
 const PAYMENT_RE = new RegExp(`${PAYMENT_EN}|${PAYMENT_AR}`, 'i');
 /**
  * A rent period (r6 #1) — ONE list (r7 #5) for the free-text rule (PRICE_WORD_RE) and the sale-line rent check
- * (RENT_WORDING_RE): "per month / year / annum / yr / mo", "monthly", "yearly", "annually", "a month", "a year",
- * "every month / year", "p.a.", "/month", "/year", "/mo", "/yr"; شهري / شهرية / شهرياً, سنوي / سنوية / سنوياً,
- * في الشهر / في السنة / في العام, بالشهر / بالسنة, للشهر / للسنة, كل شهر / كل سنة, "/ شهر", "/ سنة". The Arabic as whole
- * words (arabicWords), every ة / ا form written out: "شهرين" (two months) is none.
+ * (RENT_WORDING_RE): "per month / year / annum / yr / mo / night / week", "monthly", "yearly", "annually", "nightly",
+ * "weekly", "a month", "a year", "every month / year", "pcm", "p.a.", "pa", "p/a", "/month", "/year", "/annum", "/mo",
+ * "/yr", "/night", "/week", and "annual" right after its figure ("SAR 60,000 annual"; "Annual maintenance" is none);
+ * شهري / شهرية / شهرياً, سنوي / سنوية / سنوياً, يومياً, أسبوعياً, في الشهر / في السنة / في العام / في اليوم, بالشهر / بالسنة,
+ * للشهر / للسنة, لليلة, كل شهر / كل سنة, "/ شهر", "/ سنة". A listing's period is only a year or a month, so a nightly or a
+ * weekly figure is guarded by this list alone (r8 #5, Claude r7 B1b). The Arabic as whole words (arabicWords), every
+ * ة / ه / ا form written out ("السنه", "لليله"): "شهرين" (two months) is none; ى and ی are read as ي (foldYeh).
  */
 const RENT_PERIOD = [
-  String.raw`\b(?:per\s+(?:month|year|annum|yr|mo)|monthly|yearly|annually|a\s+(?:month|year)|every\s+(?:month|year))\b|\bp\.\s?a\b|\/\s*(?:month|year|mo|yr)\b`,
-  arabicWords(String.raw`شهري|شهرية|شهريه|شهريا|سنوي|سنوية|سنويه|سنويا|في\s+(?:الشهر|السنة|العام)|بالشهر|بالسنة|للشهر|للسنة|كل\s+(?:شهر|سنة)`),
-  String.raw`\/\s*(?:شهر|سنة)(?!${AR_LETTER})`,
+  String.raw`\b(?:per\s+(?:month|year|annum|yr|mo|night|week)|monthly|yearly|annually|nightly|weekly|a\s+(?:month|year)|every\s+(?:month|year)|pcm)\b`
+    + String.raw`|\bp(?:\.\s?|\/)?a\b|\/\s*(?:month|year|annum|mo|yr|night|week)\b|(?<=[\d٠-٩۰-۹]\s*)annual\b`,
+  arabicWords(String.raw`شهري|شهرية|شهريه|شهريا|سنوي|سنوية|سنويه|سنويا|يومي[\u064b-\u0652]*ا|[أا]سبوعي[\u064b-\u0652]*ا|`
+    + String.raw`في\s+(?:الشهر|السنة|السنه|العام|اليوم)|بالشهر|بالسنة|بالسنه|للشهر|للسنة|للسنه|لليلة|لليله|كل\s+(?:شهر|سنة|سنه)`),
+  String.raw`\/\s*(?:شهر|سنة|سنه)(?!${AR_LETTER})`,
 ].join('|');
 /** A price word, a payment or a rent period: with ANY number in the same clause, the clause states money (r3 #1). */
 const PRICE_WORD_RE = new RegExp([
@@ -227,22 +235,27 @@ const PRICE_WORD_RE = new RegExp([
 /**
  * Rent or income wording (r6 #3): on a listing for sale, a headline printed on a line that says one of these, or
  * quoted with one, may be a rent, a rental income or a yield — never settled by the text layer, only on its page.
- * The rent periods (RENT_PERIOD), and rent / lease / yield / income / tenanted / let at; إيجار, أجرة, تأجير, مؤجر(ة),
- * مستأجر(ة), دخل, عائد (r7 #5, Claude r6 B1a). The Arabic as whole words with their clitics (arabicWords: الدخل,
- * بالدخل, للدخل, ودخل, الإيجار, للتأجير, العائد), every ة / ا form written out — a word that only contains one is
- * none: مدخل / تدخل (an entrance, enters), عائدة (belongs to) (Codex r6 #7, Claude r6 B1c).
+ * The rent periods (RENT_PERIOD), and rent / lease / yield / income / return / ROI / revenue / tenanted / let at;
+ * إيجار, أجرة, تأجير, مؤجر(ة), مستأجر(ة), دخل, عائد (r7 #5, Claude r6 B1a), إيراد(ات), ريع, مردود (r8 #5, Claude r7 B1b).
+ * The Arabic as whole words with their clitics (arabicWords: الدخل, بالدخل, للدخل, ودخل, الإيجار, للتأجير, العائد, and
+ * ك: كإيجار, كدخل), every ة / ه / ا form written out (أجره), and a pronoun suffix on دخل / عائد / إيجار (RENT_SUFFIX:
+ * دخلها, صافي دخله, عائدها, إيجاراتها, إيجارنا — r8 #5, Claude r7 B1a, the forms r7 #5 lost). A word that only contains
+ * one is none: مدخل / مدخلها / تدخل (an entrance, enters), عائدة (belongs to), سريع (Codex r6 #7, Claude r6 B1c).
+ * "عائده للمطور" (ه for ة) costs a page check: the safe side.
  */
+const RENT_SUFFIX = 'ه|ها|هم|هما|نا|ات|اتها';
 const RENT_WORDING_RE = new RegExp([
-  String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|tenant(?:s|ed)?|tenancy|let\s+at)\b`,
-  arabicWords(String.raw`[إاأ]يجار(?:ي|ية|يه|يا|ات|ه|ها|ا)?|استئجار|تأجير|تاجير|أجرة|اجرة|مؤجر|مؤجرة|مؤجره|مؤجرا|موجر|موجرة|`
-    + String.raw`مستأجر|مستأجرة|دخل|دخلا|عائد|عائدا|عائدات|عوائد`),
+  String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|returns?|roi|revenues?|tenant(?:s|ed)?|tenancy|let\s+at)\b`,
+  arabicWords(String.raw`[إاأ]يجار(?:ي|ية|يه|يا|ا|${RENT_SUFFIX})?|استئجار|تأجير|تاجير|أجرة|اجرة|أجره|اجره|مؤجر|مؤجرة|مؤجره|مؤجرا|موجر|موجرة|`
+    + String.raw`مستأجر|مستأجرة|دخل(?:ا|${RENT_SUFFIX})?|عائد(?:ا|${RENT_SUFFIX})?|عوائد|[إا]يراد|[إا]يرادات|ريع|مردود`, { ka: true }),
   RENT_PERIOD,
 ].join('|'), 'i');
 /**
  * Does `s` speak of rent or income (RENT_WORDING_RE)? Folded first as classify.mjs does: NFKC (a text layer's Arabic
- * presentation forms, "اﻹﻳﺠﺎر", become letters), no tatweel ("الإيـجار") and no harakat ("الدَّخل", "مَدخل": r7 #5).
+ * presentation forms, "اﻹﻳﺠﺎر", become letters), no tatweel ("الإيـجار") and no harakat ("الدَّخل", "مَدخل": r7 #5), then
+ * ى and ی read as ي ("إيجارى", "القيمة الإيجارى", "سنوی": r8 #5, Claude r7 B1a / B1b).
  */
-const rentWorded = (s) => typeof s === 'string' && RENT_WORDING_RE.test(s.normalize('NFKC').replace(/[\u0640\u064b-\u0652\u0670]/g, ''));
+const rentWorded = (s) => typeof s === 'string' && RENT_WORDING_RE.test(foldYeh(s.normalize('NFKC').replace(/[\u0640\u064b-\u0652\u0670]/g, '')));
 /** "starting / starts / from / يبدأ / ابتداء": money beside a figure of four digits or more (r3 #1). */
 const FROM_WORD_RE = new RegExp(String.raw`\b(?:starting|starts?|from)\b|` + arabicWords('يبدأ|تبدأ|ابتداء|ابتداءً|إبتداء|ابتداءا'), 'i');
 /** A figure of four digits or more, ungrouped. */
@@ -283,7 +296,7 @@ const MONEY_SENTENCE_END = /(?<!\bsq)(?!\.+\s+[\d٠-٩۰-۹])[.!?؟؛;\n]+(?=\s|
  * then, once measurements (withoutMeasures) and durations ("2 years", "24 ساعة") are cut out (a lone year, "2027",
  * only from the "from" test):
  *   - a price or payment word or a rent period with ANY number ("Price 4500", "Deposit 750", "حجز 5000",
- *     "4500 per month", "٤٥٠٠ شهرياً");
+ *     "4500 per month", "٤٥٠٠ شهرياً", "4500 per night", "4500 سنوى": r8 #5);
  *   - "starting / from / يبدأ / ابتداء" with a figure of four digits or more ("Starting from 4500");
  *   - grouped thousands ("Down payment 50 000", "Parking for 1,200 cars" — a count, dropped all the same:
  *     TAQEEM first), five digits or more, or a scaled amount ("4.5m", "1.2 million");
@@ -303,7 +316,9 @@ export function statesMoney(text) {
     if (CURRENCY_BY_FIGURE_RE.test(w)) return true;
     const t = withoutMeasures(w).replace(DURATION_G, ' ');
     if (CURRENCY_BY_FIGURE_RE.test(t)) return true;
-    if (PRICE_WORD_RE.test(t) && /\d/.test(t)) return true;
+    // The words read as the rent check reads them, ى and ی as ي: "4500 سنوى", "إیجار 4500" (r8 #5). The fold is for this
+    // test only: the marks read ی as written, and the distance words keep "ممشى".
+    if (PRICE_WORD_RE.test(foldYeh(t)) && /\d/.test(t)) return true;
     // A lone year is cut from the "from" test only ("Handover starts 2027"), never before the others ("SAR 2000").
     if (FROM_WORD_RE.test(t) && FOUR_PLUS_RE.test(t.replace(YEAR_G, ' '))) return true;
     if (GROUPED_RE.test(t) || /(?<![\d.,٫٬])\d{5,}/.test(t) || SCALED_RE.test(t)) return true;

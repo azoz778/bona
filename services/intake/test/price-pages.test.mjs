@@ -160,6 +160,16 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     // r8 #4 (Codex r7 #7 = Claude r7 NB6, not fixed): a known over-drop, kept on the TAQEEM-safe side. A dot before a
     // figure joins two sentences (r7 #4); narrowing that join reopens the two leaks after it.
     'No booking required. 3 tennis courts.', 'Deposit required. 75', 'Down payment required. 10% on signing',
+    // r8 #5 (Claude r7 B1b): the short-stay periods of the one shared list, English (bare "annual" right after its
+    // figure) and Arabic, and the ه / ى / ی spellings (ى and ی fold to ي first).
+    'Floors 1–3, 4500 per night', 'Floors 1–3, 4500 nightly', 'Floors 1–3, 4500/night', 'Floors 1–3, 4500 per week',
+    'Floors 1–3, 4500 weekly', 'Floors 1–3, 4500 / week', 'Floors 1–3, 4500 pa', 'Floors 1–3, 4500 p/a', 'Floors 1–3, 4500/annum',
+    'Floors 1–3, 4500 pcm', 'Floors 1–3, 4500 annual',
+    'الأدوار 1–3، 4500 يوميا', 'الأدوار 1–3، 4500 يومياً', 'الأدوار 1–3، 4500 يوميًا', 'الأدوار 1–3، 4500 في اليوم',
+    'الأدوار 1–3، 4500 لليلة', 'الأدوار 1–3، 4500 لليله', 'الأدوار 1–3، 4500 أسبوعيا', 'الأدوار 1–3، 4500 اسبوعياً',
+    'الأدوار 1–3، 4500 في السنه', 'الأدوار 1–3، 4500 للسنه', 'الأدوار 1–3، 4500 بالسنه', 'الأدوار 1–3، 4500 كل سنه',
+    'الأدوار 1–3، 4500 / سنه', 'الأدوار 1–3، 4500 سنوى', 'الأدوار 1–3، 4500 شهرى', 'الأدوار 1–3، 4500 سنوی', 'الأدوار 1–3، 4500 شهری',
+    'الأدوار 1–3، 4500 فى الشهر', 'إیجار 4500',
   ];
   const NOT_MONEY = [
     'Handover starts 2027', 'No maintenance fees for 2 years', 'ضمان 10 سنوات … مقدم من المطور', 'خدمات مقدمة … 24 ساعة',
@@ -181,6 +191,8 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     // r8 #4: the dot before a figure follows a Latin CODE only — after a letter or a currency word it ends a sentence;
     // only a standalone "p." joins a spaced "a".
     'Tower B. 12 floors', 'Quoted in US dollars. 2027 handover', 'Gym on the top floor. A pool with 2 lanes', 'Step. A 3 bedroom plan',
+    // r8 #5: bare "annual" before a word is no period, "pa" only a word of its own, and ى folds to no period word.
+    'Annual maintenance — 2 visits', 'Spa with 2 pools', 'مستوى 2 من المواقف',
   ];
   it('MONEY', () => { for (const t of MONEY) assert.equal(statesMoney(t), true, t); });
   it('NOT MONEY', () => { for (const t of NOT_MONEY) assert.equal(statesMoney(t), false, t); });
@@ -1647,6 +1659,33 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       // …and with tatweel and harakat, which are folded out first ("الدَّخل" is الدخل).
       ['الإيـجار 60,000 ريال', '60,000 ريال', 'buy'], ['الدَّخل 60,000 ريال', '60,000 ريال', 'buy'], ['الدَّخل السنوي 60,000 ريال', '60,000 ريال', 'buy'],
       ['الإيجَار 60,000 ريال', '60,000 ريال', 'buy'], ['مؤجَّرة بـ 60,000 ريال', '60,000 ريال', 'buy'], ['Price SAR 60,000', 'الإيـجار 60,000 ريال', 'buy'],
+      // r8 #5 (Claude r7 B1a, the r7 #5 regression): the forms e892790 caught — a pronoun suffix on دخل / عائد / إيجار
+      // (ه ها هم هما نا ات اتها), a ك clitic, a final ى (folded to ي, as ی is).
+      ['عمارة للبيع دخلها 60,000 ريال', '60,000 ريال', 'buy'], ['صافي دخلها 60,000 ريال', '60,000 ريال', 'buy'],
+      ['دخله 60,000 ريال', '60,000 ريال', 'buy'], ['دخلهما 60,000 ريال', '60,000 ريال', 'buy'], ['دخلهم 60,000 ريال', '60,000 ريال', 'buy'],
+      ['دخلنا 60,000 ريال', '60,000 ريال', 'buy'], ['عائدها 60,000 ريال', '60,000 ريال', 'buy'], ['عائده 60,000 ريال', '60,000 ريال', 'buy'],
+      ['عائدهم 60,000 ريال', '60,000 ريال', 'buy'], ['عائدهما 60,000 ريال', '60,000 ريال', 'buy'], ['عائدنا 60,000 ريال', '60,000 ريال', 'buy'],
+      ['عائداتها 60,000 ريال', '60,000 ريال', 'buy'], ['إيجاراتها 60,000 ريال', '60,000 ريال', 'buy'], ['إيجارهم 60,000 ريال', '60,000 ريال', 'buy'],
+      ['إيجارهما 60,000 ريال', '60,000 ريال', 'buy'], ['إيجارنا 60,000 ريال', '60,000 ريال', 'buy'], ['كإيجار 60,000 ريال', '60,000 ريال', 'buy'],
+      ['كدخل 60,000 ريال', '60,000 ريال', 'buy'], ['كعائد 60,000 ريال', '60,000 ريال', 'buy'], ['كأجرة 60,000 ريال', '60,000 ريال', 'buy'],
+      ['كالدخل 60,000 ريال', '60,000 ريال', 'buy'], ['إيجارى 60,000 ريال', '60,000 ريال', 'buy'],
+      ['القيمة الإيجارى 60,000 ريال', '60,000 ريال', 'buy'], ['دخلها الشهرى 60,000 ريال', '60,000 ريال', 'buy'],
+      // r8 #5 (Claude r7 B1b): the spellings السنه / أجره, ى-final and Farsi-yeh (ی) forms…
+      ['60,000 ريال في السنه', '60,000 ريال', 'buy'], ['60,000 ريال للسنه', '60,000 ريال', 'buy'], ['أجره 60,000 ريال', '60,000 ريال', 'buy'],
+      ['اجره 60,000 ريال', '60,000 ريال', 'buy'], ['60,000 ريال سنوى', '60,000 ريال', 'buy'], ['60,000 ريال شهرى', '60,000 ريال', 'buy'],
+      ['إیجار 60,000 ريال', '60,000 ريال', 'buy'], ['60,000 ريال سنوی', '60,000 ريال', 'buy'],
+      // …the short-stay periods and the income words, English (bare "annual" right after its figure)…
+      ['SAR 60,000 per night', 'SAR 60,000', 'buy'], ['SAR 60,000 nightly', 'SAR 60,000', 'buy'], ['SAR 60,000/night', 'SAR 60,000', 'buy'],
+      ['SAR 60,000 per week', 'SAR 60,000', 'buy'], ['SAR 60,000 weekly', 'SAR 60,000', 'buy'], ['SAR 60,000/week', 'SAR 60,000', 'buy'],
+      ['SAR 60,000 pa', 'SAR 60,000', 'buy'], ['SAR 60,000 p/a', 'SAR 60,000', 'buy'], ['SAR 60,000/annum', 'SAR 60,000', 'buy'],
+      ['SAR 60,000 pcm', 'SAR 60,000', 'buy'], ['SAR 60,000 annual', 'SAR 60,000', 'buy'], ['Return SAR 60,000', 'SAR 60,000', 'buy'],
+      ['Returns of SAR 60,000', 'SAR 60,000', 'buy'], ['ROI SAR 60,000', 'SAR 60,000', 'buy'], ['Revenue SAR 60,000', 'SAR 60,000', 'buy'],
+      // …and Arabic.
+      ['إيراد 60,000 ريال', '60,000 ريال', 'buy'], ['الإيرادات 60,000 ريال', '60,000 ريال', 'buy'], ['ايراد 60,000 ريال', '60,000 ريال', 'buy'],
+      ['ريع 60,000 ريال', '60,000 ريال', 'buy'], ['الريع 60,000 ريال', '60,000 ريال', 'buy'], ['مردود 60,000 ريال', '60,000 ريال', 'buy'],
+      ['60,000 ريال يوميا', '60,000 ريال', 'buy'], ['60,000 ريال يومياً', '60,000 ريال', 'buy'], ['60,000 ريال يوميًا', '60,000 ريال', 'buy'],
+      ['60,000 ريال في اليوم', '60,000 ريال', 'buy'], ['60,000 ريال لليلة', '60,000 ريال', 'buy'], ['60,000 ريال أسبوعيا', '60,000 ريال', 'buy'],
+      ['60,000 ريال اسبوعياً', '60,000 ريال', 'buy'],
     ]) {
       const o = await outcome({ listing: sale(null, quote, category), pageText: pages(p3), confirm: [] });
       assert.deepEqual(o.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, null, true]], p3);
@@ -1667,11 +1706,26 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       ['يدخل الضوء — السعر 60,000 ريال', '60,000 ريال', 60000], ['ادخل عالم الفخامة بسعر 60,000 ريال', '60,000 ريال', 60000],
       ['الملكية عائدية للمطور — 60,000 ريال', '60,000 ريال', 60000], ['فيلا بمَدخل خاص — السعر 60,000 ريال', '60,000 ريال', 60000],
       ['السعر 60,000 ريال', 'فيلا بمدخل خاص 60,000 ريال', 60000],
+      // r8 #5 (Claude r7 B1): a suffix never reaches inside another word — مدخلها (its entrance), تدخلها (enters it),
+      // سريع (quick, ريع inside); a final ى folds to no rent word (مستوى); bare "annual" before a word is no period
+      // ("Annual maintenance"), and "pa" counts only as a word of its own ("Spa").
+      ['فيلا مدخلها مستقل — السعر 60,000 ريال', '60,000 ريال', 60000], ['تدخلها الشمس — السعر 60,000 ريال', '60,000 ريال', 60000],
+      ['وصول سريع للطريق — السعر 60,000 ريال', '60,000 ريال', 60000], ['مستوى فاخر — السعر 60,000 ريال', '60,000 ريال', 60000],
+      ['Annual maintenance included — Price SAR 60,000', 'SAR 60,000', 60000], ['Spa and gym — Price SAR 60,000', 'SAR 60,000', 60000],
     ]) {
       const o = await outcome({ listing: sale(null, quote, 'buy', amount), pageText: pages(p3), confirm: [] });
       assert.deepEqual(o.evidence, { inText: true, confirmed: null }, p3);
       assert.deepEqual(o.checks, [], p3);
       assert.deepEqual(o.price, { amount, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
+    }
+    // r8 #5 (Claude r7 B1b): the owner's brochure AC51D2 p11 prints a nightly rate, "Return Rates / 700 - 1300 / ريال
+    // لليلة الواحدة". A reading period is only a year or a month, so it arrives as a sale of 700 with no period: the
+    // words beside it send it to its page — refused there, on request, never "SAR 700".
+    for (const p3 of ['Return Rates\n700 - 1300\nريال لليلة الواحدة', 'Return Rates 700 - 1300 ريال لليلة الواحدة']) {
+      const o = await outcome({ listing: sale(null, '700 - 1300', 'buy', 700), pageText: pages(p3), confirm: [] });
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.period, c.sale]), [[700, null, true]], p3);
+      assert.equal(o.price.onRequest, true, p3);
+      assert.equal(o.price.amount, null, p3);
     }
     // A rental keeps the r3 #4 rule: its page, for its period, with no sale line.
     const rental = await outcome({ listing: sale('year', 'Annual rent SAR 60,000', 'rent'), pageText: pages('Annual rent SAR 60,000'), confirm: [60000] });
