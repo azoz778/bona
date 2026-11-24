@@ -229,6 +229,9 @@ doc.save(sys.argv[1])
 // r6 #7: the r5 #8 fixture (MAKE_CAPPED, pages 1-4) plus 3 new unique soft-masked pictures past the cap (pages 5-7), then
 // bitmap A over its whole page (page 8). argv[2] = "same": page 8 draws A's own xref, as in r5 #8. "graft": page 8 is a
 // byte-identical copy of A under a NEW xref (inserted from a second document), so only the raw-bytes key can match it.
+// r7 #8: "swap" is the graft with Width and Height swapped in the copy's dictionary (the same raw bytes, another
+// picture), and "form" draws the grafted copy inside a form XObject (show_pdf_page), where it has no page-level name.
+// Every mode ends with page 9, which draws page 4's and page 5's pictures again (their own xrefs, neither one kept).
 const MAKE_CAP_WORK = `
 import sys, io, json, hashlib, pymupdf
 from PIL import Image
@@ -256,19 +259,34 @@ def put(d, stream, small=False, m=None):
 put(doc, a, small=True)
 for s in others: put(doc, s)
 for s in masked: put(doc, s, m=mask())
-if sys.argv[2] == 'graft':
+if sys.argv[2] in ('graft', 'swap'):
     src = pymupdf.open(); put(src, a); doc.insert_pdf(src)
+    if sys.argv[2] == 'swap':
+        x = doc[7].get_images(full=True)[0][0]
+        wd, ht = doc.xref_get_key(x, 'Width')[1], doc.xref_get_key(x, 'Height')[1]
+        doc.xref_set_key(x, 'Width', ht); doc.xref_set_key(x, 'Height', wd)
+elif sys.argv[2] == 'form':
+    src = pymupdf.open(); put(src, a)
+    page = doc.new_page(width=842, height=595)
+    page.show_pdf_page(page.rect, src, 0)
 else:
     put(doc, a)
+page = doc.new_page(width=842, height=595)
+for p, r in ((3, pymupdf.Rect(0, 0, 421, 595)), (4, pymupdf.Rect(421, 0, 842, 595))):
+    page.insert_image(r, xref=doc[p].get_images(full=True)[0][0])
 doc.save(sys.argv[1])
 doc = pymupdf.open(sys.argv[1])
-x1, x8 = doc[0].get_images(full=True)[0][0], doc[7].get_images(full=True)[0][0]
+i1, i8 = doc[0].get_images(full=True)[0], doc[7].get_images(full=True)[0]
+x1, x8 = i1[0], i8[0]
 raw = lambda x: hashlib.sha256(doc.xref_stream_raw(x)).hexdigest()
-print(json.dumps({'same_xref': x1 == x8, 'same_raw': raw(x1) == raw(x8), 'masks': [bool(doc[p].get_images(full=True)[0][1]) for p in (4, 5, 6)]}))
+print(json.dumps({'same_xref': x1 == x8, 'same_raw': raw(x1) == raw(x8), 'size1': list(i1[2:4]), 'size8': list(i8[2:4]),
+                  'in_form8': i8[-1] != 0, 'masks': [bool(doc[p].get_images(full=True)[0][1]) for p in (4, 5, 6)]}))
 `;
 
-// Runs extract_pdf.py as a module with call counters on extract_image, colour_ratio, flatten_on_white and
-// placement_coverage. A call counts as "past the cap" once images/ holds the 3 kept files (--max-candidates 3).
+// Runs extract_pdf.py as a module with call counters on extract_image, colour_ratio, flatten_on_white,
+// placement_coverage, repeat_coverage and raw_key, and (r7 #8) on what decodes a picture inside PyMuPDF: Pixmap(doc, xref),
+// Page.get_image_rects and MuPDF's fz_get_pixmap_from_image. A call counts as "past the cap" once images/ holds the
+// 3 kept files (--max-candidates 3).
 const CAP_WORK_HARNESS = `
 import sys, io, os, json, contextlib, importlib.util
 script, pdf, out = sys.argv[1:4]
@@ -276,20 +294,30 @@ spec = importlib.util.spec_from_file_location('extract_pdf', script)
 x = importlib.util.module_from_spec(spec); spec.loader.exec_module(x)
 import pymupdf
 img_dir = os.path.join(out, 'images')
-past = {'extract_image': [], 'colour_ratio': [], 'flatten_on_white': [], 'placement_coverage': []}
+past = {'extract_image': [], 'colour_ratio': [], 'flatten_on_white': [], 'placement_coverage': [], 'repeat_coverage': [],
+        'raw_key': [], 'pixmap_xref': [], 'get_image_rects': [], 'decode': []}
 before = {k: 0 for k in past}
 def wrap(name, fn, tag):
     def inner(*a, **k):
-        if os.path.isdir(img_dir) and len(os.listdir(img_dir)) >= 3:
-            past[name].append(tag(*a))
-        else:
-            before[name] += 1
+        t = tag(*a)
+        if t is not None:
+            if os.path.isdir(img_dir) and len(os.listdir(img_dir)) >= 3:
+                past[name].append(t)
+            else:
+                before[name] += 1
         return fn(*a, **k)
     return inner
 pymupdf.Document.extract_image = wrap('extract_image', pymupdf.Document.extract_image, lambda self, xref, *r: xref)
 x.colour_ratio = wrap('colour_ratio', x.colour_ratio, lambda doc, xref: xref)
 x.flatten_on_white = wrap('flatten_on_white', x.flatten_on_white, lambda doc, data, smask: smask)
 x.placement_coverage = wrap('placement_coverage', x.placement_coverage, lambda page, xref: page.number + 1)
+x.raw_key = wrap('raw_key', x.raw_key, lambda doc, xref, *r: xref)
+if hasattr(x, 'repeat_coverage'):
+    x.repeat_coverage = wrap('repeat_coverage', x.repeat_coverage, lambda page, info: page.number + 1)
+pymupdf.Pixmap.__init__ = wrap('pixmap_xref', pymupdf.Pixmap.__init__,
+    lambda self, *a: a[1] if len(a) == 2 and isinstance(a[0], pymupdf.Document) and isinstance(a[1], int) else None)
+pymupdf.Page.get_image_rects = wrap('get_image_rects', pymupdf.Page.get_image_rects, lambda page, *r: page.number + 1)
+pymupdf.mupdf.fz_get_pixmap_from_image = wrap('decode', pymupdf.mupdf.fz_get_pixmap_from_image, lambda *a: 1)
 sys.argv = ['extract_pdf.py', pdf, out, '--min-side', '300', '--max-candidates', '3']
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
@@ -314,19 +342,33 @@ function capWork(mode) {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
-function assertNoWorkPastCap(r) {
+// Coverages of the three kept candidates as e892790 (r6 #7) gave them, with page 8 placed (same, graft) and not (swap).
+const COVERAGE_PLACED = [0.9086, 0.9086, 0.9086];
+const COVERAGE_UNPLACED = [0.037, 0.9086, 0.9086];
+
+// placed: the pages whose repeat is placed past the cap. decoded: the pages placed by placement_coverage (a repeat
+// drawn inside a form XObject has no page-level name to place without decoding, r7 #8).
+function assertNoWorkPastCap(r, { placed = [8], decoded = [] } = {}) {
   assert.equal(r.rc, 0);
   assert.deepEqual(r.fixture.masks, [true, true, true], 'pages 5-7 are soft-masked pictures');
-  assert.ok(r.before.extract_image >= 3 && r.before.colour_ratio >= 3 && r.before.placement_coverage >= 3,
+  assert.ok(r.before.extract_image >= 3 && r.before.colour_ratio >= 3 && r.before.placement_coverage >= 3
+    && r.before.pixmap_xref >= 3 && r.before.get_image_rects >= 3 && r.before.decode >= 3,
     `the counters count: ${JSON.stringify(r.before)}`);
   assert.deepEqual(r.res.candidates.map((c) => c.page), [1, 2, 3], 'the cap keeps the first three pictures');
   assert.deepEqual(r.files, ['000.png', '001.png', '002.png'], 'nothing past the cap is written');
   assert.deepEqual(r.past.extract_image, [], 'no extract_image past the cap');
   assert.deepEqual(r.past.colour_ratio, [], 'no colour_ratio past the cap');
   assert.deepEqual(r.past.flatten_on_white, [], 'no flatten_on_white past the cap (pages 5-7 are soft-masked)');
-  assert.deepEqual(r.past.placement_coverage, [8], 'past the cap only the repeat on page 8 is placed');
-  // Page 8 draws A at 765 x 595 pt on an 842 x 595 pt page: 0.9086, not page 1's 0.037.
-  assert.ok(r.res.candidates[0].coverage >= 0.85, `coverage ${r.res.candidates[0].coverage}: the page-8 repeat covers its page`);
+  assert.deepEqual(r.past.repeat_coverage, placed, 'past the cap only a repeat of a kept picture is placed');
+  assert.deepEqual(r.past.placement_coverage, decoded, 'past the cap a page-level repeat is placed by its name, not by get_image_rects');
+  assert.deepEqual(r.past.get_image_rects, decoded, 'no get_image_rects past the cap for a page-level repeat');
+  if (decoded.length === 0) {
+    assert.deepEqual(r.past.pixmap_xref, [], 'no Pixmap(doc, xref) past the cap');
+    assert.deepEqual(r.past.decode, [], 'no picture decoded past the cap');
+  }
+  // Pages 4-7 bring four pictures that are not kept; page 9 draws two of them again (r7 #8, Claude NB8).
+  assert.ok(r.past.raw_key.length >= 4, `the raw-key counter counts: ${r.past.raw_key}`);
+  assert.equal(new Set(r.past.raw_key).size, r.past.raw_key.length, `past the cap each picture's raw key is hashed once: ${r.past.raw_key}`);
 }
 
 describe('extract_pdf.py - transparent images', { skip: !UV && 'uv not installed' }, () => {
@@ -454,16 +496,37 @@ describe('extract_pdf.py - transparent images', { skip: !UV && 'uv not installed
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it('r6 #7: past the cap nothing is extracted, decoded or flattened; a repeat of a kept picture (same xref) only has its coverage placed', () => {
+  it('r6 #7, r7 #8: past the cap nothing is extracted, decoded or flattened; a repeat of a kept picture (same xref) only has its coverage placed, by its name', () => {
     const r = capWork('same');
     assert.equal(r.fixture.same_xref, true, 'page 8 draws the xref kept on page 1');
     assertNoWorkPastCap(r);
+    // Page 8 draws A at 765 x 595 pt on an 842 x 595 pt page: 0.9086, not page 1's 0.037.
+    assert.deepEqual(r.res.candidates.map((c) => c.coverage), COVERAGE_PLACED, 'the page-8 repeat covers its page');
   });
 
-  it('r6 #7: past the cap a byte-identical copy of a kept picture under a NEW xref is matched by its raw-bytes key, with no decode', () => {
+  it('r6 #7, r7 #8: past the cap a byte-identical copy of a kept picture under a NEW xref is matched by its raw-bytes key, with no decode', () => {
     const r = capWork('graft');
     assert.equal(r.fixture.same_xref, false, 'page 8 is a different object');
     assert.equal(r.fixture.same_raw, true, '... with the same raw (still compressed) stream');
     assertNoWorkPastCap(r);
+    assert.deepEqual(r.res.candidates.map((c) => c.coverage), COVERAGE_PLACED, 'the page-8 copy covers its page');
+  });
+
+  it('r7 #8: past the cap the same raw bytes under a dictionary with Width and Height swapped are another picture, not a repeat', () => {
+    const r = capWork('swap');
+    assert.equal(r.fixture.same_xref, false, 'page 8 is a different object');
+    assert.equal(r.fixture.same_raw, true, '... with the same raw (still compressed) stream');
+    assert.deepEqual([r.fixture.size1, r.fixture.size8], [[900, 700], [700, 900]], '... read as 700 x 900, not 900 x 700');
+    assertNoWorkPastCap(r, { placed: [] });
+    assert.ok(r.res.candidates[0].coverage < 0.85, `coverage ${r.res.candidates[0].coverage}: page 8 is not a placement of A`);
+    assert.deepEqual(r.res.candidates.map((c) => c.coverage), COVERAGE_UNPLACED);
+  });
+
+  it('r7 #8: past the cap a repeat drawn inside a form XObject is still placed (by get_image_rects), so a whole page is still a whole page', () => {
+    const r = capWork('form');
+    assert.equal(r.fixture.in_form8, true, 'page 8 draws the copy inside a form XObject');
+    assert.equal(r.fixture.same_raw, true, '... with the same raw stream as A');
+    assertNoWorkPastCap(r, { placed: [8], decoded: [8] });
+    assert.ok(r.res.candidates[0].coverage >= 0.85, `coverage ${r.res.candidates[0].coverage}: the page-8 form draws A over its page`);
   });
 });

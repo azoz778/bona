@@ -325,16 +325,38 @@ def placement_coverage(page, xref: int):
     return round(min(1.0, (biggest.width * biggest.height) / area), 4)
 
 
-def raw_key(doc, xref: int, smask: int) -> str | None:
-    """sha256 of an image's raw (still compressed) stream, plus its soft mask's raw stream, or None.
+def repeat_coverage(page, info):
+    """placement_coverage() for a repeat of a kept picture past the candidate cap, with nothing decoded (r7 #8).
 
-    Nothing is decoded. Past the candidate cap this is how a picture is known as a repeat of a kept one (r6 #7).
+    `info` is the image's get_images(full=True) item. get_image_rects() builds a Pixmap of the image and hashes every
+    image on the page at full size, so an image the page draws itself (info[-1] == 0) is placed by its resource name in
+    the page's content stream instead (get_image_bbox: no Pixmap, no hash). An image drawn inside a form XObject, or one
+    whose rect cannot be read that way (an exception, an empty or infinite rect), falls back to placement_coverage().
+    """
+    if info[-1] == 0:
+        try:
+            r = page.get_image_bbox(info)
+        except Exception:
+            r = None
+        area = page.rect.width * page.rect.height
+        if r is not None and not r.is_empty and not r.is_infinite and area > 0:
+            return round(min(1.0, (r.width * r.height) / area), 4)
+    return placement_coverage(page, info[0])
+
+
+def raw_key(doc, xref: int, smask: int, meta=()) -> str | None:
+    """sha256 of an image's raw (still compressed) stream, its dictionary, and its soft mask's raw stream, or None.
+
+    Nothing is decoded. Past the candidate cap this is how a picture is known as a repeat of a kept one (r6 #7). `meta`
+    is info[2:6] of its get_images(full=True) item (width, height, bits per component, colour-space name), hashed with
+    its /Decode after the raw bytes: the same bytes under another dictionary are another picture (r7 #8).
     """
     try:
         raw = doc.xref_stream_raw(xref)
         if not raw:
             return None
         h = hashlib.sha256(raw)
+        h.update(b"\0" + repr(tuple(meta)).encode() + b"\0" + repr(doc.xref_get_key(xref, "Decode")).encode())
         if smask:
             h.update(b"\0" + (doc.xref_stream_raw(smask) or b""))
         return h.hexdigest()
@@ -521,6 +543,7 @@ def main() -> int:
     seen: dict[str, int] = {}      # sha256 -> candidate index
     raw_seen: dict[str, int] = {}  # raw_key() of a kept or matched image -> candidate index (r6 #7)
     xref_seen: dict[int, int] = {}  # xref of a kept or matched image -> candidate index (r6 #7)
+    raw_memo: dict[int, str | None] = {}  # past the cap: xref -> its raw_key(), hashed once per picture (r7 #8)
     candidates = []
     embedded_total = 0
 
@@ -566,7 +589,8 @@ def main() -> int:
 
     for i in range(pages):
         try:
-            images = doc[i].get_images(full=True)
+            page = doc[i]  # loaded once per page; past the cap every repeat on it is placed on this one object
+            images = page.get_images(full=True)
         except Exception:
             images = []
         embedded_total += len(images)
@@ -574,13 +598,18 @@ def main() -> int:
             xref = info[0]
             if len(candidates) >= args.max_candidates:
                 # Past the cap a picture costs nothing unless it repeats a kept one, known by its xref or by its raw
-                # (still compressed) bytes. Then only its placement is looked up, and the kept candidate keeps its
-                # LARGEST coverage (r5 #8). Nothing is extracted, decoded or flattened past the cap (r6 #7).
+                # (still compressed) bytes and dictionary, hashed once per xref. Then only its placement is looked up,
+                # and the kept candidate keeps its LARGEST coverage (r5 #8). Nothing is extracted, decoded or flattened
+                # past the cap (r6 #7), and a repeat the page draws itself is placed by its name with nothing decoded;
+                # one drawn inside a form XObject is placed by placement_coverage(), which decodes it and hashes the
+                # page's images (r7 #8).
                 k = xref_seen.get(xref)
                 if k is None:
-                    k = raw_seen.get(raw_key(doc, xref, info[1]))
+                    if xref not in raw_memo:
+                        raw_memo[xref] = raw_key(doc, xref, info[1], info[2:6])
+                    k = raw_seen.get(raw_memo[xref])
                 if k is not None:
-                    cov = placement_coverage(doc[i], xref)
+                    cov = repeat_coverage(page, info)
                     first = candidates[k]
                     if cov is not None and (first["coverage"] is None or cov > first["coverage"]):
                         first["coverage"] = cov
@@ -607,11 +636,14 @@ def main() -> int:
                 flat = flatten_on_white(doc, data, info[1])
                 if flat:
                     data, ext = flat, "png"
+            # Below the cap each placement gets a page of its own, as before r7 #8. A page kept across its images
+            # hashes them all at the first placement, before colour_ratio() shrinks the next one's cached Pixmap in
+            # place, and that one then matches nothing: 30 of 40 coverages came out null on a 60-page gallery.
             k = add(data, ext, w, h, i + 1, "embedded", stats[0] if stats else None,
                     placement_coverage(doc[i], xref), flattened=bool(flat))
             if k is not None:
                 xref_seen.setdefault(xref, k)
-                key = raw_key(doc, xref, info[1])
+                key = raw_key(doc, xref, info[1], info[2:6])
                 if key:
                     raw_seen.setdefault(key, k)
             ext_img = data = flat = None
