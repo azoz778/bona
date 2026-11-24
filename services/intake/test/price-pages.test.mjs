@@ -140,6 +140,16 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     'Deposit e.g. 750', 'العربون... 750', 'العربون... ٧٥٠',
     // r7 #4 (Codex r6 #8, not fixed): the leaks a narrower comma split or a bounded د.إ would reopen.
     'Club membership 5k,5 min walk', 'Club membership 2000 د.إسنوياً',
+    // r7 #5 (Claude r6 B1b / B8): every rent-period wording of the one shared list, English and Arabic, pinned alone.
+    'Floors 1–3, 4500 per year', 'Floors 1–3, 4500 per annum', 'Floors 1–3, 4500 per yr', 'Floors 1–3, 4500 per mo',
+    'Floors 1–3, 4500 monthly', 'Floors 1–3, 4500 yearly', 'Floors 1–3, 4500 annually', 'Floors 1–3, 4500 a month',
+    'Floors 1–3, 4500 a year', 'Floors 1–3, 4500 every month', 'Floors 1–3, 4500 every year', 'Floors 1–3, 4500 p.a.',
+    'Floors 1–3, 4500 p.a', 'Floors 1–3, 4500/month', 'Floors 1–3, 4500 / year', 'Floors 1–3, 4500/mo', 'Floors 1–3, 4500/yr',
+    'الأدوار 1–3، 4500 شهري', 'الأدوار 1–3، 4500 شهرية', 'الأدوار 1–3، 4500 شهريه', 'الأدوار 1–3، 4500 شهريا', 'الأدوار 1–3، 4500 شهريًا',
+    'الأدوار 1–3، 4500 سنوي', 'الأدوار 1–3، 4500 سنوية', 'الأدوار 1–3، 4500 سنويه', 'الأدوار 1–3، 4500 سنوياً',
+    'الأدوار 1–3، 4500 في الشهر', 'الأدوار 1–3، 4500 في السنة', 'الأدوار 1–3، 4500 في العام', 'الأدوار 1–3، 4500 بالشهر',
+    'الأدوار 1–3، 4500 بالسنة', 'الأدوار 1–3، 4500 للشهر', 'الأدوار 1–3، 4500 للسنة', 'الأدوار 1–3، 4500 كل شهر',
+    'الأدوار 1–3، 4500 كل سنة', 'الأدوار 1–3، 4500 / شهر', 'الأدوار 1–3، 4500/سنة',
   ];
   const NOT_MONEY = [
     'Handover starts 2027', 'No maintenance fees for 2 years', 'ضمان 10 سنوات … مقدم من المطور', 'خدمات مقدمة … 24 ساعة',
@@ -1424,8 +1434,8 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
   });
 
   it('r6 #3: a sale headline read with a period, or printed or quoted as a rent or income, is settled only on its page, asked as a sale', async () => {
-    const sale = (period, quote, category = 'buy') => {
-      const a = withModels([], { price: { amount: 60000, currency: 'SAR', from: false, period, onRequest: false }, priceEvidence: { page: 3, quote } });
+    const sale = (period, quote, category = 'buy', amount = 60000) => {
+      const a = withModels([], { price: { amount, currency: 'SAR', from: false, period, onRequest: false }, priceEvidence: { page: 3, quote } });
       a.listing.category = category;
       return a;
     };
@@ -1448,16 +1458,51 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     const kept = await outcome({ listing: sale('year', 'Annual rent SAR 60,000'), pageText: pages('Annual rent SAR 60,000'), confirm: [60000] });
     assert.equal(kept.checks.length, 1);
     assert.deepEqual(kept.price, { amount: 60000, currency: 'SAR', from: false, period: null, onRequest: false });
-    // No period: the line printing the figure says rent or income (English, Arabic, an instalment), or the reading's
-    // quote does — a page check, which refuses here. Off-plan is a sale too.
+    // No period: the line printing the figure says rent or income, or names a rent period (one list with the free-text
+    // rule: r7 #5), or the reading's quote does — a page check, which refuses here. Off-plan is a sale too.
     for (const [p3, quote, category] of [
       ['Annual rent SAR 60,000', 'SAR 60,000', 'buy'],
       ['الإيجار السنوي 60,000 ريال', '60,000 ريال', 'buy'],
       // The same in a text layer's Arabic presentation forms (as W023's), the riyal as ﷼.
       ['اﻹﻳﺠﺎر اﻟﺴﻨﻮي 60,000 ﷼', '60,000', 'buy'],
       ['Expected yield: SAR 60,000', 'SAR 60,000', 'buy'],
+      // A monthly instalment: the period word (شهرية, "monthly") sends it — an instalment word alone is no rent wording
+      // (Claude r6 NB6, the owner's call).
       ['أقساط شهرية تبدأ من 60,000 ريال', '60,000 ريال', 'off-plan'],
+      ['Monthly instalments from SAR 60,000', 'SAR 60,000', 'off-plan'],
       ['Price SAR 60,000', 'Rental income SAR 60,000', 'buy'],
+      // r7 #5 (Claude r6 B1a / B8): one row per rent or income word, English…
+      ['Rent SAR 60,000', 'SAR 60,000', 'buy'], ['Rental SAR 60,000', 'SAR 60,000', 'buy'], ['Rented at SAR 60,000', 'SAR 60,000', 'buy'],
+      ['Lease SAR 60,000', 'SAR 60,000', 'buy'], ['Leased at SAR 60,000', 'SAR 60,000', 'buy'], ['Leasing price SAR 60,000', 'SAR 60,000', 'buy'],
+      ['Income SAR 60,000', 'SAR 60,000', 'buy'], ['Tenanted, SAR 60,000', 'SAR 60,000', 'buy'], ['Let at SAR 60,000', 'SAR 60,000', 'buy'],
+      // …one per period wording, English…
+      ['SAR 60,000 per month', 'SAR 60,000', 'buy'], ['SAR 60,000 per year', 'SAR 60,000', 'buy'], ['SAR 60,000 per annum', 'SAR 60,000', 'buy'],
+      ['SAR 60,000 per yr', 'SAR 60,000', 'buy'], ['SAR 60,000 p.a.', 'SAR 60,000', 'buy'], ['SAR 60,000 monthly', 'SAR 60,000', 'buy'],
+      ['SAR 60,000 yearly', 'SAR 60,000', 'buy'], ['SAR 60,000 annually', 'SAR 60,000', 'buy'], ['SAR 60,000 a month', 'SAR 60,000', 'buy'],
+      ['SAR 60,000 a year', 'SAR 60,000', 'buy'], ['SAR 60,000 every month', 'SAR 60,000', 'buy'], ['SAR 60,000/month', 'SAR 60,000', 'buy'],
+      ['SAR 60,000 / year', 'SAR 60,000', 'buy'], ['SAR 60,000/mo', 'SAR 60,000', 'buy'], ['SAR 60,000/yr', 'SAR 60,000', 'buy'],
+      // …the Arabic rent and income words, with their clitics…
+      ['إيجار 60,000 ريال', '60,000 ريال', 'buy'], ['ايجار 60,000 ريال', '60,000 ريال', 'buy'], ['للإيجار 60,000 ريال', '60,000 ريال', 'buy'],
+      ['دخل إيجاري 60,000 ريال', '60,000 ريال', 'buy'], ['أجرة 60,000 ريال', '60,000 ريال', 'buy'], ['مؤجر بـ 60,000 ريال', '60,000 ريال', 'buy'],
+      ['مؤجرة بـ 60,000 ريال', '60,000 ريال', 'buy'], ['للتأجير 60,000 ريال', '60,000 ريال', 'buy'], ['دخل 60,000 ريال', '60,000 ريال', 'buy'],
+      ['الدخل 60,000 ريال', '60,000 ريال', 'buy'], ['بالدخل 60,000 ريال', '60,000 ريال', 'buy'], ['للدخل 60,000 ريال', '60,000 ريال', 'buy'],
+      ['ودخل 60,000 ريال', '60,000 ريال', 'buy'], ['عائد 60,000 ريال', '60,000 ريال', 'buy'], ['العائد 60,000 ريال', '60,000 ريال', 'buy'],
+      // …their other forms and spellings (ة / ا / tanween, no hamza), and "tenanted" in Arabic (مستأجرة).
+      ['Tenants in place, SAR 60,000', 'SAR 60,000', 'buy'], ['Tenancy SAR 60,000', 'SAR 60,000', 'buy'],
+      ['قيمة إيجارية 60,000 ريال', '60,000 ريال', 'buy'], ['إيجارها 60,000 ريال', '60,000 ريال', 'buy'], ['إيجارات 60,000 ريال', '60,000 ريال', 'buy'],
+      ['استئجار 60,000 ريال', '60,000 ريال', 'buy'], ['تاجير 60,000 ريال', '60,000 ريال', 'buy'], ['اجرة 60,000 ريال', '60,000 ريال', 'buy'],
+      ['مؤجره بـ 60,000 ريال', '60,000 ريال', 'buy'], ['موجرة بـ 60,000 ريال', '60,000 ريال', 'buy'], ['مستأجرة بـ 60,000 ريال', '60,000 ريال', 'buy'],
+      ['يحقق دخلاً 60,000 ريال', '60,000 ريال', 'buy'], ['يحقق عائداً 60,000 ريال', '60,000 ريال', 'buy'], ['عائدات 60,000 ريال', '60,000 ريال', 'buy'],
+      ['عوائد 60,000 ريال', '60,000 ريال', 'buy'],
+      // …the Arabic period wordings…
+      ['60,000 ريال شهري', '60,000 ريال', 'buy'], ['60,000 ريال شهرية', '60,000 ريال', 'buy'], ['60,000 ريال شهرياً', '60,000 ريال', 'buy'],
+      ['60,000 ريال سنوي', '60,000 ريال', 'buy'], ['60,000 ريال سنوية', '60,000 ريال', 'buy'], ['60,000 ريال سنوياً', '60,000 ريال', 'buy'],
+      ['60,000 ريال في الشهر', '60,000 ريال', 'buy'], ['60,000 ريال في السنة', '60,000 ريال', 'buy'], ['60,000 ريال في العام', '60,000 ريال', 'buy'],
+      ['60,000 ريال بالشهر', '60,000 ريال', 'buy'], ['60,000 ريال للسنة', '60,000 ريال', 'buy'], ['60,000 ريال كل شهر', '60,000 ريال', 'buy'],
+      ['60,000 ريال / شهر', '60,000 ريال', 'buy'],
+      // …and with tatweel and harakat, which are folded out first ("الدَّخل" is الدخل).
+      ['الإيـجار 60,000 ريال', '60,000 ريال', 'buy'], ['الدَّخل 60,000 ريال', '60,000 ريال', 'buy'], ['الدَّخل السنوي 60,000 ريال', '60,000 ريال', 'buy'],
+      ['الإيجَار 60,000 ريال', '60,000 ريال', 'buy'], ['مؤجَّرة بـ 60,000 ريال', '60,000 ريال', 'buy'], ['Price SAR 60,000', 'الإيـجار 60,000 ريال', 'buy'],
     ]) {
       const o = await outcome({ listing: sale(null, quote, category), pageText: pages(p3), confirm: [] });
       assert.deepEqual(o.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, null, true]], p3);
@@ -1468,6 +1513,22 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     assert.deepEqual(plain.evidence, { inText: true, confirmed: null });
     assert.deepEqual(plain.checks, []);
     assert.deepEqual(plain.price, { amount: 60000, currency: 'SAR', from: false, period: null, onRequest: false });
+    // r7 #5 (Codex r6 #7 = Claude r6 B1c): an Arabic word that only CONTAINS a rent word is none — مدخل (an entrance),
+    // يدخل / تدخل / ادخل (enters), شهرين (two months), عائدة / عائدية (belongs to), harakat or not; nor "Current price".
+    for (const [p3, quote, amount] of [
+      ['مدخل مستقل — سعر البيع 450,000 ريال', '450,000 ريال', 450000], ['فيلا بمدخلين 60,000 ريال', '60,000 ريال', 60000],
+      ['التسليم خلال شهرين 60,000 ريال', '60,000 ريال', 60000], ['الأرض عائدة للمطور 60,000 ريال', '60,000 ريال', 60000],
+      ['Current price SAR 450,000', 'SAR 450,000', 450000], ['المدخل الرئيسي — السعر 60,000 ريال', '60,000 ريال', 60000],
+      ['فيلا بمدخل خاص — السعر 60,000 ريال', '60,000 ريال', 60000], ['تدخل الشمس كل الغرف — السعر 60,000 ريال', '60,000 ريال', 60000],
+      ['يدخل الضوء — السعر 60,000 ريال', '60,000 ريال', 60000], ['ادخل عالم الفخامة بسعر 60,000 ريال', '60,000 ريال', 60000],
+      ['الملكية عائدية للمطور — 60,000 ريال', '60,000 ريال', 60000], ['فيلا بمَدخل خاص — السعر 60,000 ريال', '60,000 ريال', 60000],
+      ['السعر 60,000 ريال', 'فيلا بمدخل خاص 60,000 ريال', 60000],
+    ]) {
+      const o = await outcome({ listing: sale(null, quote, 'buy', amount), pageText: pages(p3), confirm: [] });
+      assert.deepEqual(o.evidence, { inText: true, confirmed: null }, p3);
+      assert.deepEqual(o.checks, [], p3);
+      assert.deepEqual(o.price, { amount, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
+    }
     // A rental keeps the r3 #4 rule: its page, for its period, with no sale line.
     const rental = await outcome({ listing: sale('year', 'Annual rent SAR 60,000', 'rent'), pageText: pages('Annual rent SAR 60,000'), confirm: [60000] });
     assert.deepEqual(rental.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, 'year', false]]);

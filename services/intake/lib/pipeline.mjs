@@ -53,17 +53,6 @@ import { FACT_LISTS, headlineFollowsModels, loadRegisterWithdrawals, withdrawnAd
 /** Words that make a figure in the copy a price: a currency, "price", "from"-style openers. */
 const PRICE_CONTEXT_RE = /سعر|أسعار|اسعار|ريال|ر\.\s?س|ثمن|قيمة(?!\s*المضافة)|ابتداء|تبدأ|يبدأ|\b(?:SAR|SR|AED|USD|EUR|GBP|riyals?|prices?|priced|costs?|starting|starts)\b|[$€£﷼\u20c1]/i;
 
-/**
- * Rent or income wording (r6 #3): on a listing for sale, a headline printed on a line that says one of these, or
- * quoted with one, may be a rent, a rental income or a yield — never settled by the text layer, only on its page.
- */
-const RENT_WORDING_RE = /\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|per\s+(?:month|year|annum))\b|\/\s*(?:month|year)\b|[إاأ]يجار|شهري|سنوي|دخل|عائد/i;
-/**
- * Does `s` speak of rent or income (RENT_WORDING_RE)? Folded first as classify.mjs does: NFKC (a text layer's Arabic
- * presentation forms, "اﻹﻳﺠﺎر", become letters) and no tatweel ("الإيـجار").
- */
-const rentWorded = (s) => typeof s === 'string' && RENT_WORDING_RE.test(s.normalize('NFKC').replace(/ـ/g, ''));
-
 /** A "starting from" word: from / starting / starts, ابتداءً من / إبتداء, يبدأ / تبدأ من. */
 const FROM_WORD = String.raw`\b(?:from|starting|starts)\b|بتداء|[يت]بد[أا]`;
 /** …leading to what follows it: at most 25 characters on, none of them a digit (final review M2). */
@@ -194,14 +183,42 @@ const arabicWords = (words) => String.raw`(?<!${AR_LETTER})[وف]?\u0640?(?:لل
 const PAYMENT_EN = String.raw`\b(?:down\s*-?\s*payments?|payments?|pay|pays|paid|deposits?|fees?|instal{1,2}ments?|service\s+charges?)\b`;
 const PAYMENT_AR = arabicWords('دفع|دفعة|دفعات|عربون|رسوم|قسط|أقساط|اقساط');
 const PAYMENT_RE = new RegExp(`${PAYMENT_EN}|${PAYMENT_AR}`, 'i');
-/** A rent period (r6 #1): "4500 per month", "monthly", "a year", "/month", "٤٥٠٠ شهرياً", "سنوي", "في الشهر". */
-const RENT_PERIOD_EN = String.raw`\b(?:per\s+(?:month|year)|monthly|yearly|annually|a\s+(?:month|year))\b|\/\s*(?:month|year)\b`;
-const RENT_PERIOD_AR = arabicWords(String.raw`شهري|شهريا|سنوي|سنويا|في\s+الشهر|في\s+السنة`);
+/**
+ * A rent period (r6 #1) — ONE list (r7 #5) for the free-text rule (PRICE_WORD_RE) and the sale-line rent check
+ * (RENT_WORDING_RE): "per month / year / annum / yr / mo", "monthly", "yearly", "annually", "a month", "a year",
+ * "every month / year", "p.a.", "/month", "/year", "/mo", "/yr"; شهري / شهرية / شهرياً, سنوي / سنوية / سنوياً,
+ * في الشهر / في السنة / في العام, بالشهر / بالسنة, للشهر / للسنة, كل شهر / كل سنة, "/ شهر", "/ سنة". The Arabic as whole
+ * words (arabicWords), every ة / ا form written out: "شهرين" (two months) is none.
+ */
+const RENT_PERIOD = [
+  String.raw`\b(?:per\s+(?:month|year|annum|yr|mo)|monthly|yearly|annually|a\s+(?:month|year)|every\s+(?:month|year))\b|\bp\.\s?a\b|\/\s*(?:month|year|mo|yr)\b`,
+  arabicWords(String.raw`شهري|شهرية|شهريه|شهريا|سنوي|سنوية|سنويه|سنويا|في\s+(?:الشهر|السنة|العام)|بالشهر|بالسنة|للشهر|للسنة|كل\s+(?:شهر|سنة)`),
+  String.raw`\/\s*(?:شهر|سنة)(?!${AR_LETTER})`,
+].join('|');
 /** A price word, a payment or a rent period: with ANY number in the same clause, the clause states money (r3 #1). */
 const PRICE_WORD_RE = new RegExp([
   String.raw`\b(?:prices?|priced|pricing|rents?|rental|rentals|booking|book|costs?)\b`, arabicWords('سعر|أسعار|اسعار|إيجار|ايجار|حجز'), PAYMENT_EN, PAYMENT_AR,
-  RENT_PERIOD_EN, RENT_PERIOD_AR,
+  RENT_PERIOD,
 ].join('|'), 'i');
+/**
+ * Rent or income wording (r6 #3): on a listing for sale, a headline printed on a line that says one of these, or
+ * quoted with one, may be a rent, a rental income or a yield — never settled by the text layer, only on its page.
+ * The rent periods (RENT_PERIOD), and rent / lease / yield / income / tenanted / let at; إيجار, أجرة, تأجير, مؤجر(ة),
+ * مستأجر(ة), دخل, عائد (r7 #5, Claude r6 B1a). The Arabic as whole words with their clitics (arabicWords: الدخل,
+ * بالدخل, للدخل, ودخل, الإيجار, للتأجير, العائد), every ة / ا form written out — a word that only contains one is
+ * none: مدخل / تدخل (an entrance, enters), عائدة (belongs to) (Codex r6 #7, Claude r6 B1c).
+ */
+const RENT_WORDING_RE = new RegExp([
+  String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|tenant(?:s|ed)?|tenancy|let\s+at)\b`,
+  arabicWords(String.raw`[إاأ]يجار(?:ي|ية|يه|يا|ات|ه|ها|ا)?|استئجار|تأجير|تاجير|أجرة|اجرة|مؤجر|مؤجرة|مؤجره|مؤجرا|موجر|موجرة|`
+    + String.raw`مستأجر|مستأجرة|دخل|دخلا|عائد|عائدا|عائدات|عوائد`),
+  RENT_PERIOD,
+].join('|'), 'i');
+/**
+ * Does `s` speak of rent or income (RENT_WORDING_RE)? Folded first as classify.mjs does: NFKC (a text layer's Arabic
+ * presentation forms, "اﻹﻳﺠﺎر", become letters), no tatweel ("الإيـجار") and no harakat ("الدَّخل", "مَدخل": r7 #5).
+ */
+const rentWorded = (s) => typeof s === 'string' && RENT_WORDING_RE.test(s.normalize('NFKC').replace(/[\u0640\u064b-\u0652\u0670]/g, ''));
 /** "starting / starts / from / يبدأ / ابتداء": money beside a figure of four digits or more (r3 #1). */
 const FROM_WORD_RE = new RegExp(String.raw`\b(?:starting|starts?|from)\b|` + arabicWords('يبدأ|تبدأ|ابتداء|ابتداءً|إبتداء|ابتداءا'), 'i');
 /** A figure of four digits or more, ungrouped. */
