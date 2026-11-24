@@ -401,7 +401,8 @@ if (prompt.includes('the floor-plan images to check>>>')) {
   // r4: the floor-plan contact check — one JSON line per image. cfg.planCheck: null = every plan clean;
   // 'quota' / true = the call fails (a quota, or another error); { 'plan-03': 'phone' } = that plan shows it.
   // cfg.planReply: 'duplicate' / 'malformed' = the first image's record comes twice / malformed; 'by-file-name'
-  // (r7 #1) = each record numbered by the number in the file name shown, not by its index, and none about the last.
+  // (r7 #1) = each record numbered by the number in the file name shown, not by its index, and none about the last;
+  // 'from-one' (r8 #1, Codex r7 C#1) = each record numbered index + 1 whatever the file names, and none about the last.
   const fenced = prompt.split('<<<BONA-UNTRUSTED-DATA: the floor-plan images to check>>>')[1].split('<<<END ')[0];
   const images = fenced.split('\\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
   // Which plan each file shown is, as its pixels would tell a model (r7 #1: the check reads a link named by its index
@@ -427,10 +428,10 @@ if (prompt.includes('the floor-plan images to check>>>')) {
   const dirty = (cfg.planCheck && typeof cfg.planCheck === 'object') ? cfg.planCheck : {};
   const lines = images.map((im, k) => {
     const base = plans[k].replace(/\\.jpg$/, '');
-    const index = cfg.planReply === 'by-file-name' ? Number(im.file.match(/(\\d+)\\.jpg$/)[1]) : im.index;
+    const index = cfg.planReply === 'by-file-name' ? Number(im.file.match(/(\\d+)\\.jpg$/)[1]) : cfg.planReply === 'from-one' ? im.index + 1 : im.index;
     return JSON.stringify({ index, clean: !dirty[base], found: dirty[base] ?? '' });
   });
-  if (cfg.planReply === 'by-file-name') lines.pop();
+  if (cfg.planReply === 'by-file-name' || cfg.planReply === 'from-one') lines.pop();
   if (cfg.planReply === 'duplicate') lines.push(lines[0]);
   if (cfg.planReply === 'malformed') lines[0] = JSON.stringify({ index: 0, clean: 'yes', found: '' });
   if (cfg.planReply === 'missing') lines.shift();
@@ -2957,7 +2958,9 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
   });
 
   it('r5 #5: a reply that says nothing about a plan leaves it unchecked ("try again later"), never "contact details"', async () => {
-    for (const [planReply, plans] of [['prose', [false, false]], ['missing', [false, true]]]) {
+    // 'missing' (no record about Type A): the whole call is unchecked, Type B too (r8 #1, Codex r7 C#1: a reply that
+    // leaves out an image asked cannot be trusted to number the rest; r5 #5's per-plan rule kept Type B, [false, true]).
+    for (const [planReply, plans] of [['prose', [false, false]], ['missing', [false, false]]]) {
       const r = await rig({ listing: withPlans(2), candidateCount: 8, planReply });
       try {
         const report = await r.run();
@@ -2998,6 +3001,21 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
       assert.ok(report.planCheck.leftOut.some((l) => l.model === 1) || report.planCheck.unchecked.includes(1), JSON.stringify(report.planCheck));
       const files = fs.readdirSync(path.join(r.repo, 'public', 'listings', report.slug));
       assert.ok(!files.includes('plan-02.jpg'), files.join(' '));
+    } finally { r.cleanup(); }
+  });
+
+  it('r8 #1 (Codex r7 C#1): a reply numbered from 1 whatever the file names, that says nothing about the last plan, leaves the whole call unchecked — no plan goes up', async () => {
+    // At ef8352d this reply ({1 clean}, {2 phone} for images 0..2) published plan-02.jpg, Type B's phone plan, as clean.
+    const r = await rig({ listing: withPlans(3), candidateCount: 9, planCheck: { 'plan-02': 'phone' }, planReply: 'from-one' });
+    try {
+      const report = await r.publish();
+      assert.equal(report.ok, true);
+      assert.deepEqual(planCalls(r)[0].indexes, [0, 1, 2]);
+      assert.deepEqual(report.listing.models.map((m) => m.floorPlan), [null, null, null]);
+      assert.deepEqual([report.planCheck.clean, report.planCheck.leftOut, report.planCheck.unchecked], [0, [], [0, 1, 2]], JSON.stringify(report.planCheck));
+      const files = fs.readdirSync(path.join(r.repo, 'public', 'listings', report.slug));
+      assert.ok(!files.some((f) => /^plan-/.test(f)), files.join(' '));
+      assert.ok(!report.warnings.some((w) => /shows/.test(w)), report.warnings.join(' | '));
     } finally { r.cleanup(); }
   });
 
@@ -3203,8 +3221,9 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
 
   it('r6 #8: the FINAL reply to a reading with model warnings: the price warnings first, ONE plan line naming every model, then the rest', async () => {
     // Like the real W023 reading (10 model warnings), with two price warnings, a money-text drop (a club fee in the
-    // amenities), a map link no second link agrees with (Codex r5 #9), Type A's plan unchecked (the reply says nothing
-    // about it) and Type C's flagged.
+    // amenities), a map link no second link agrees with (Codex r5 #9), and a plan reply that says nothing about Type A
+    // and flags Type C. Since r8 #1 (Codex r7 C#1) a reply that leaves out an image asked leaves the WHOLE call
+    // unchecked, so the one plan line names all three as not checked (it was Type A not checked, Type C flagged).
     const sale = withPlans(3);
     sale.warnings = Array.from({ length: 10 }, (_, k) => `check item ${k + 1} by hand`);
     sale.listing.price = { ...PRICE };
@@ -3219,11 +3238,11 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
       assert.equal(shown.length, 3, reply);
       assert.match(shown[0], /2 unit-model price\(s\) could not be confirmed/, reply);
       assert.match(shown[1], /subsidised \(Sakani\) price could not be confirmed/, reply);
-      assert.equal(shown[2], '⚠️ 2 floor plans not published (Type A: could not be checked (the check failed), try again later'
-        + `${hint}; Type C: shows a phone number)`, reply);
+      assert.equal(shown[2], '⚠️ 3 floor plans not published (Type A, Type B, Type C: could not be checked (the check failed), try again later'
+        + `${hint})`, reply);
       assert.doesNotMatch(reply, /<id>/, reply);
       assert.equal(report.warnings.filter((w) => /floor plan/.test(w)).length, 1, `ONE plan line: ${report.warnings.join(' | ')}`);
-      assert.match(reply, /^🔎 3 floor plans · 1 left out by the contact check · 1 not checked — try again later$/m, reply);
+      assert.match(reply, /^🔎 3 floor plans · 0 left out by the contact check · 3 not checked — try again later$/m, reply);
       // r7 #9 (Claude r6 B7a): only the 🔎 line counts the plans the contact check left out; the plan line's head is
       // neutral, so the reply never gives two counts for the same words.
       assert.equal(reply.match(/left out by the contact check/g).length, 1, reply);
@@ -3237,12 +3256,12 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
     const r = await rig({ listing: sale, candidateCount: 9, modelConfirm: [], confirm: [319015], planCheck: { 'plan-03': 'phone' }, planReply: 'missing', links });
     try {
       const dry = await r.run();
-      assert.deepEqual(plansOf(dry).map(Boolean), [false, true, false]);
+      assert.deepEqual(plansOf(dry).map(Boolean), [false, false, false]);
       // A dry run publishes nothing: there is no listing to enrich yet, so no --enrich hint.
       expectReply(dry, msg.dryRunSummary(dry), '');
       const live = await r.publish();
       assert.equal(live.id, 'BONA-W001');
-      assert.deepEqual(live.listing.models.map((m) => Boolean(m.floorPlan)), [false, true, false]);
+      assert.deepEqual(live.listing.models.map((m) => Boolean(m.floorPlan)), [false, false, false]);
       for (const code of ['plans-unchecked', 'model-flagged', 'map-unconfirmed']) assert.ok(live.warningCodes.includes(code), live.warningCodes.join(' '));
       // The real listing id in the hint (Claude r5 NB8), never `<id>`.
       expectReply(live, msg.published(live), ' with `run-once --enrich BONA-W001`');
@@ -4208,10 +4227,13 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       return m;
     };
     const noPlan = () => { const a = twoPlans(); a.models[0].floorPlan = null; return a; };
-    for (const [opts, why] of [
+    // `after`: the new reading's plans kept. 'missing' (no record about Nawras's image) leaves the whole call unchecked
+    // since r8 #1 (Codex r7 C#1), so Lulu's plan is not kept either (it was 1 under r5 #5's per-plan rule), and the
+    // loss is worded as the count that fell, with the same reason.
+    for (const [opts, why, after = 1] of [
       [{ listing: twoPlans(), planCheck: { 'plan-01': 'phone, logo' } }, 'flagged: shows a phone number, a logo or brand name'],
       [{ listing: twoPlans(), planReply: 'duplicate' }, 'no clear answer from the check'],
-      [{ listing: twoPlans(), planReply: 'missing' }, 'not checked'],
+      [{ listing: twoPlans(), planReply: 'missing' }, 'not checked', 0],
       [{ listing: twoPlans(), broken: [5] }, 'could not be prepared'],
       [{ listing: noPlan() }, 'no plan in the new reading'],
     ]) {
@@ -4219,8 +4241,8 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       try {
         seed(r, { price: { ...ON_REQUEST }, extra: { models: carried() } });
         const dry = await enrich(r, { dryRun: true });
-        assert.deepEqual([dry.enrich.compare.before.plans, dry.enrich.compare.after.plans], [1, 1], why);
-        assert.deepEqual(dry.enrich.compare.losses, [`floor plan dropped: Nawras (${why})`], why);
+        assert.deepEqual([dry.enrich.compare.before.plans, dry.enrich.compare.after.plans], [1, after], why);
+        assert.deepEqual(dry.enrich.compare.losses, [`${after === 1 ? 'floor plan dropped' : `floor plans 1 → ${after}`}: Nawras (${why})`], why);
       } finally { r.cleanup(); }
     }
   });

@@ -131,6 +131,56 @@ describe('parsePlanReply — r7 #1: an array nested in an array is read too', ()
     assert.deepEqual(planVerdicts(parsePlanReply(`[[${C(0)}]]`), [0]).get(0), { state: 'clean', flagged: false, found: [] });
     assert.equal(planVerdicts(parsePlanReply(`[[${C(0)}`), [0]).get(0).state, 'unchecked');
   });
+
+  it('r8 #1 (Claude r7 NB11a): three levels deep, `[C0,[[F0]]]`, the flagged record is still read — a duplicate, never C0 alone', async () => {
+    const reply = `[${C(0)},[[${F(0, 'phone')}]]]`;
+    assert.deepEqual(planVerdicts(parsePlanReply(reply), [0]).get(0), { state: 'dirty', flagged: false, found: [] });
+    const res = await checkPlanImages([{ model: 0, file: '/w/a.jpg' }], { ask: async () => ({ reply, error: null, fatal: false }) });
+    assert.deepEqual([res.clean, res.dirty, res.unchecked], [[], [{ model: 0, found: [], flagged: false }], []]);
+  });
+});
+
+describe('checkPlanImages — r8 #1 (Codex r7 C#1): a call counts only when its reply answers EVERY image asked', () => {
+  const C = (i) => line({ index: i, clean: true, found: '' });
+  const F = (i, found) => line({ index: i, clean: false, found });
+  const plans = (n) => Array.from({ length: n }, (_, k) => ({ model: k, file: `/w/plan-check/call-1/image-${k}.jpg` }));
+  const check = (n, reply) => checkPlanImages(plans(n), { ask: async () => ({ reply, error: null, fatal: false }) });
+
+  it('numbered from 1 with the last image left out ({1 clean}, {2 phone} for images 0..2): the whole call is unchecked, in every shape', async () => {
+    // At ef8352d each of these published image 1 (the phone plan) as clean and called image 2 a phone plan.
+    const pretty = JSON.stringify([[{ index: 1, clean: true, found: '' }, { index: 2, clean: false, found: 'phone' }]], null, 2);
+    for (const [what, reply] of [
+      ['JSON lines', `${C(1)}\n${F(2, 'phone')}`],
+      ['compact [[…]]', `[[${C(1)},${F(2, 'phone')}]]`],
+      ['pretty [[…]]', pretty],
+      ['fenced [[…]] among prose', `Here you go:\n\`\`\`json\n${pretty}\n\`\`\`\nDone.`],
+      ['[C1,[P2]]', `[${C(1)},[${F(2, 'phone')}]]`],
+      ['the middle one left out ({0}, {2})', `${C(0)}\n${C(2)}`],
+    ]) {
+      const res = await check(3, reply);
+      assert.deepEqual([res.clean, res.dirty, res.unchecked], [[], [], [0, 1, 2]], what);
+      assert.match(res.errors.join(' '), /no answer about an image asked in the reply/, what);
+    }
+  });
+
+  it('every image answered once still counts as before', async () => {
+    const res = await check(3, `${C(0)}\n${F(1, 'phone')}\n${C(2)}`);
+    assert.deepEqual([res.clean, res.dirty, res.unchecked, res.errors], [[0, 2], [{ model: 1, found: ['phone'], flagged: true }], [], []]);
+  });
+
+  it('Claude r7 NB10: a reply nested far too deep to flatten counts as no answer at all — every plan unchecked, nothing thrown', async () => {
+    const deep = (rec, n = 50000) => `${'['.repeat(n)}${rec}${']'.repeat(n)}`;
+    for (const [what, reply] of [
+      ['the whole reply', deep(F(0, 'phone'))],
+      ['a deep line after clean lines', `${C(0)}\n${C(1)}\n${deep(F(0, 'phone'))}`],
+      ['a fenced deep block after clean lines', `${C(0)}\n${C(1)}\n\`\`\`json\n${deep(F(0, 'phone'))}\n\`\`\``],
+    ]) {
+      assert.deepEqual(parsePlanReply(reply), [], what);
+      const res = await check(2, reply);
+      assert.deepEqual([res.clean, res.dirty, res.unchecked], [[], [], [0, 1]], what);
+      assert.match(res.errors.join(' '), /no answer/, what);
+    }
+  });
 });
 
 describe('checkPlanImages — batches of 12, two at a time, nothing new after a quota', () => {
@@ -181,9 +231,11 @@ describe('checkPlanImages — batches of 12, two at a time, nothing new after a 
       assert.deepEqual([res.clean, res.dirty, res.unchecked], [[], [], [0, 1]], JSON.stringify(reply));
       assert.match(res.errors.join(' '), /no answer/);
     }
-    // One answered, one missing: the missing one is unchecked.
+    // One answered, one missing: a reply that leaves out an image asked cannot be trusted to number the others, so
+    // the whole call is unchecked (r8 #1, Codex r7 C#1; r5 #5's per-plan rule gave [[0], [1]]).
     const half = await checkPlanImages(plans(2), { ask: async () => ({ reply: line({ index: 0, clean: true, found: '' }), error: null, fatal: false }) });
-    assert.deepEqual([half.clean, half.unchecked], [[0], [1]]);
+    assert.deepEqual([half.clean, half.unchecked], [[], [0, 1]]);
+    assert.match(half.errors.join(' '), /no answer about an image asked in the reply/);
   });
 
   it('r6 #4 (NB1): a record about an index not asked makes the whole call unchecked — never applied to another image', async () => {

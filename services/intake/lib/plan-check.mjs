@@ -2,7 +2,8 @@
 // carry the developer's phone number, website, QR code, logo or a price table in its pixels — and the owner's
 // rule is "no developer logos or contacts" on the site and in the Bona brochure. So every plan image a run
 // would publish is looked at by a second model before any plan file reaches the repo, and a plan is published
-// only on ONE `clean: true` answer about it with nothing found (r5 #5).
+// only on ONE `clean: true` answer about it with nothing found (r5 #5), in a reply that answers every image of its
+// call (r8 #1).
 //
 // One call covers up to PLAN_CHECK_BATCH (12) plans; more plans take more calls, PLAN_CHECK_CONCURRENCY (2) at
 // a time, none started after a quota error. The call itself is injected (`ask`: pipeline.mjs passes
@@ -38,6 +39,17 @@ const arrayRecords = (s) => { const p = json(s.trim()); return p && Array.isArra
  * @returns {object[]}
  */
 export function parsePlanReply(text) {
+  // A reply nested far too deep (~9,000 levels) makes flat(Infinity) throw a RangeError (Claude r7 NB10): the WHOLE
+  // reply then counts as no answer, so its call is unchecked — never the lines around it read alone.
+  try {
+    return readPlanReply(text);
+  } catch (err) {
+    if (err instanceof RangeError) return [];
+    throw err;
+  }
+}
+
+function readPlanReply(text) {
   const body = String(text ?? '');
   const whole = arrayRecords(body);
   if (whole) return whole;
@@ -75,7 +87,8 @@ const emptyFound = (f) => f === undefined || f === null
  *   - one with `clean: false`, or `clean: true` beside a PLAN_FINDINGS word: 'dirty', flagged;
  *   - one with `clean: true` beside any other word ("maybe"): 'dirty', not flagged (no clear answer, r6 #4).
  * `found` keeps only PLAN_FINDINGS words. Records about an index not asked are not read here (checkPlanImages
- * then leaves the whole call unchecked, r6 #4).
+ * then leaves the whole call unchecked, r6 #4), and one index 'unchecked' leaves the whole call unchecked there too
+ * (r8 #1).
  * @returns {Map<number, {state:'clean'|'dirty'|'unchecked', flagged:boolean, found:string[]}>}
  */
 export function planVerdicts(records, asked) {
@@ -101,7 +114,8 @@ export function planVerdicts(records, asked) {
  * throw counts as an error, fatal when it says so).
  * @returns {Promise<{clean:number[], dirty:Array<{model:number, found:string[], flagged:boolean}>, unchecked:number[], fatal:boolean,
  *   calls:number, errors:string[]}>}  models by verdict: `unchecked` = its call failed, was never sent, said
- *   nothing about it, or answered about an image not asked; `dirty` = flagged, or no clear answer (`flagged: false`)
+ *   nothing about it or about another image in the call (r8 #1), or answered about an image not asked; `dirty` =
+ *   flagged, or no clear answer (`flagged: false`)
  */
 export async function checkPlanImages(plans, { ask, batch = PLAN_CHECK_BATCH, concurrency = PLAN_CHECK_CONCURRENCY } = {}) {
   const list = Array.isArray(plans) ? plans : [];
@@ -150,10 +164,18 @@ export async function checkPlanImages(plans, { ask, batch = PLAN_CHECK_BATCH, co
       res.unchecked.push(...job.map((p) => p.model));
       return;
     }
+    // No record about an image asked (r8 #1, Codex r7 C#1; it replaces r5 #5's per-plan rule): a reply numbered from
+    // 1 that stops one short ({1}, {2} for images 0..2) stays in range, and its records would land on the wrong
+    // images. So the call counts only when every image asked is answered; else the whole call is unchecked
+    // (retryable: plans-unchecked already re-checks every plan, so no extra call).
+    if ([...verdicts.values()].some((v) => v.state === 'unchecked')) {
+      res.errors.push('no answer about an image asked in the reply');
+      res.unchecked.push(...job.map((p) => p.model));
+      return;
+    }
     job.forEach((p, index) => {
       const v = verdicts.get(index);
       if (v.state === 'clean') res.clean.push(p.model);
-      else if (v.state === 'unchecked') res.unchecked.push(p.model);
       else res.dirty.push({ model: p.model, found: v.found, flagged: v.flagged });
     });
   });
