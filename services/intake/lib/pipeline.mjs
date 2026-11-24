@@ -135,10 +135,23 @@ function refusedFigureIn(segments, refused, published) {
   return null;
 }
 
-/** A currency's code, name or symbol (r3 #1). */
-const CUR = String.raw`(?:(?<![A-Za-z])(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP|riyals?|rials?|dirhams?|dollars?|euros?|pounds?|sterling)(?![A-Za-z])|ريال|ر\.\s?س|ر\.\s?ع|درهم|دولار|يورو|جنيه|دينار|[$€£﷼\u20c1])`;
-/** A currency next to a figure: "SAR 1,500", "1,500 riyals", "$ 750", "750 SR", "4500SAR" (r5 #1: a code glued to its figure). */
-const CURRENCY_BY_FIGURE_RE = new RegExp(String.raw`${CUR}\s*[:\-–—=]?\s*\d|\d(?:[.,٫]\d{1,2})?\s*(?:\/-\s*)?${CUR}`, 'i');
+/** A currency's code, name or symbol (r3 #1), and the marks price.mjs MARKS reads too: S.R, Dhs, ر.ق, د.إ, د.ك (r6 #1). */
+const CUR = String.raw`(?:(?<![A-Za-z])(?:SAR|SR|S\.\s?R|AED|Dhs?|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP|riyals?|rials?|dirhams?|dollars?|euros?|pounds?|sterling)(?![A-Za-z])|ريال|ر\.\s?س|ر\.\s?ع|ر\.\s?ق|د\.\s?إ|د\.\s?ك|درهم|دولار|يورو|جنيه|دينار|[$€£﷼\u20c1])`;
+/**
+ * A currency next to a figure: "SAR 1,500", "1,500 riyals", "$ 750", "750 SR", "4500SAR" (r5 #1: a code glued to its
+ * figure), "750 Saudi Riyals" (r6 #1: a country between the figure and its currency).
+ */
+const CURRENCY_BY_FIGURE_RE = new RegExp(String.raw`${CUR}\s*[:\-–—=]?\s*\d|\d(?:[.,٫]\d{1,2})?\s*(?:\/-\s*)?`
+  + String.raw`(?:(?:saudi|omani|qatari|emirati|uae|kuwaiti|bahraini|us)\s+)?${CUR}`, 'i');
+/**
+ * A dotted currency mark — "ر.س", "ر. س.", "ر.ع", "ر.ق", "د.إ", "د.ك", "S.R.", "SR." — whose dot would end the sentence
+ * and part the mark from its figure (Codex r5 #1). statesMoney reads it as " SAR " before the split. The Arabic letters
+ * stand alone, as in price.mjs: "ر. سعيد" is a name, "الدار. سعر" a sentence end (r6 #1).
+ */
+const DOTTED_MARK_G = new RegExp(String.raw`(?<![\u0600-\u06ff])(?:ر\.\s?[سعق]|د\.\s?[إك])(?:\.|(?![\u0620-\u065f\u066e-\u06d3\u06d5-\u06ff]))`
+  + String.raw`|(?<![A-Za-z])(?:S\.\s?R\.?|SR\.)(?![A-Za-z])`, 'gi');
+/** "approx." / "incl." / "excl." — an abbreviation's dot is no sentence end ("Deposit approx. 750": r6 #1). */
+const ABBREVIATION_DOT_G = /(?<![A-Za-z])(approx|incl|excl)\./gi;
 /** A currency's name or symbol anywhere, or its code by a figure — what a model NAME may not carry (r2 #4). */
 const NAME_CURRENCY_RE = new RegExp(String.raw`\b(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)\b\s*\d|\d\s*\b(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)\b|\b(?:riyals?|rials?|dirhams?|dollars?|euros?|sterling)\b|ريال|ر\.\s?س|ر\.\s?ع|درهم|دولار|يورو|جنيه|دينار|[$€£﷼\u20c1]`, 'i');
 /**
@@ -152,20 +165,25 @@ const arabicWords = (words) => String.raw`(?<!${AR_LETTER})[وف]?\u0640?(?:لل
 const PAYMENT_EN = String.raw`\b(?:down\s*-?\s*payments?|payments?|pay|pays|paid|deposits?|fees?|instal{1,2}ments?|service\s+charges?)\b`;
 const PAYMENT_AR = arabicWords('دفع|دفعة|دفعات|عربون|رسوم|قسط|أقساط|اقساط');
 const PAYMENT_RE = new RegExp(`${PAYMENT_EN}|${PAYMENT_AR}`, 'i');
-/** A price word or a payment: with ANY number in the same clause, the clause states money (r3 #1). */
+/** A rent period (r6 #1): "4500 per month", "monthly", "a year", "/month", "٤٥٠٠ شهرياً", "سنوي", "في الشهر". */
+const RENT_PERIOD_EN = String.raw`\b(?:per\s+(?:month|year)|monthly|yearly|annually|a\s+(?:month|year))\b|\/\s*(?:month|year)\b`;
+const RENT_PERIOD_AR = arabicWords(String.raw`شهري|شهريا|سنوي|سنويا|في\s+الشهر|في\s+السنة`);
+/** A price word, a payment or a rent period: with ANY number in the same clause, the clause states money (r3 #1). */
 const PRICE_WORD_RE = new RegExp([
   String.raw`\b(?:prices?|priced|pricing|rents?|rental|rentals|booking|book|costs?)\b`, arabicWords('سعر|أسعار|اسعار|إيجار|ايجار|حجز'), PAYMENT_EN, PAYMENT_AR,
+  RENT_PERIOD_EN, RENT_PERIOD_AR,
 ].join('|'), 'i');
 /** "starting / starts / from / يبدأ / ابتداء": money beside a figure of four digits or more (r3 #1). */
 const FROM_WORD_RE = new RegExp(String.raw`\b(?:starting|starts?|from)\b|` + arabicWords('يبدأ|تبدأ|ابتداء|ابتداءً|إبتداء|ابتداءا'), 'i');
 /** A figure of four digits or more, ungrouped. */
 const FOUR_PLUS_RE = /(?<![\d.,٫٬])\d{4,}/;
 /**
- * A money-sized figure: thousands grouped by a comma, a dot, a space, a no-break or a thin space ("50,000",
- * "50 000"); five digits or more; a scaled amount ("4.5m", "1.2 million", "مليون", "ألف", "990k"). A whole number
- * written solid with "m" ("15m", "500m") is metres here, never millions; "5k" beside a distance word is a distance.
+ * A money-sized figure: thousands grouped by a comma, an Arabic comma (r6 #1, as price.mjs SEP), a dot, a space, a
+ * no-break or a thin space ("50,000", "50 000", "٤،٥٠٠،٠٠٠"); five digits or more; a scaled amount ("4.5m", "1.2 million",
+ * "مليون", "ألف", "990k"). A whole number written solid with "m" ("15m", "500m") is metres here, never millions; "5k"
+ * beside a distance word in the same comma sub-clause is a distance.
  */
-const GROUPED_RE = /(?<![\d.,٫٬])\d{1,3}(?:[,٬.'’ \u00a0\u202f\u2009]\d{3})+(?!\d)/;
+const GROUPED_RE = /(?<![\d.,٫٬])\d{1,3}(?:[,٬.'’ \u00a0\u202f\u2009\u060c]\d{3})+(?!\d)/;
 const SCALED_RE = new RegExp([
   String.raw`(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?\s*(?:million|mn|thousand|billion|bn|مليون|ملايين|مليار|ألف|الف|آلاف|الاف)(?![a-z])`,
   String.raw`(?<![\d.,٫٬])\d+[.,٫]\d+m(?![a-z²\d])`,
@@ -178,26 +196,36 @@ const YEAR_G = /(?<![\d.,٫٬])(?:19|20)\d{2}(?![\d]|[.,٫٬]\d)/g;
 
 /**
  * Does `text` state money? THE rule for free text — a unit model's rooms and availability, every amenities /
- * nearby / warranties item (r3 #1, r5 #1; its whole contract is one table in price-pages.test.mjs). Sentence by
- * sentence, once measurements (withoutMeasures) and durations ("2 years", "24 ساعة") are cut out (a lone year,
- * "2027", only from the "from" test):
- *   - a currency next to a figure ("Club fee SAR 1,500");
- *   - a price or payment word with ANY number ("Price 4500", "Rent 8500 per month", "Deposit 750", "حجز 5000");
+ * nearby / warranties item (r3 #1, r5 #1, r6 #1; its whole contract is one table in price-pages.test.mjs). Tatweel
+ * goes first, and a dotted mark or "approx." / "incl." / "excl." never ends a sentence. Sentence by sentence:
+ *   - a currency next to a figure ("Club fee SAR 1,500"), looked for BEFORE anything is cut ("SAR 4.5 M" is no
+ *     4.5 metres, "SAR 4,500 month" no duration: r6 #1);
+ * then, once measurements (withoutMeasures) and durations ("2 years", "24 ساعة") are cut out (a lone year, "2027",
+ * only from the "from" test):
+ *   - a price or payment word or a rent period with ANY number ("Price 4500", "Deposit 750", "حجز 5000",
+ *     "4500 per month", "٤٥٠٠ شهرياً");
  *   - "starting / from / يبدأ / ابتداء" with a figure of four digits or more ("Starting from 4500");
  *   - grouped thousands ("Down payment 50 000", "Parking for 1,200 cars" — a count, dropped all the same:
- *     TAQEEM first), five digits or more, or a scaled amount ("4.5m", "1.2 million").
+ *     TAQEEM first), five digits or more, or a scaled amount ("4.5m", "1.2 million");
+ *   - a solid-k figure, unless a distance word shares its comma sub-clause ("A 5k jogging track").
  * Prices are published from the price fields only, so no free text may carry one.
  */
 export function statesMoney(text) {
-  // Sentences only — a comma never sets a figure apart from its word ("Deposit, 750": r5 #1).
-  return String(text ?? '').split(SENTENCE_END).some((clause) => {
-    const t = withoutMeasures(westernise(clause)).replace(DURATION_G, ' ');
+  // Sentences only — a comma never sets a figure apart from its word ("Deposit, 750": r5 #1). Tatweel out, and a dotted
+  // mark or an abbreviation closed up first, so no dot parts "ر. س" / "S.R." / "approx." from its figure (r6 #1).
+  const folded = String(text ?? '').replace(/\u0640/g, '').replace(DOTTED_MARK_G, ' SAR ').replace(ABBREVIATION_DOT_G, '$1 ');
+  return folded.split(SENTENCE_END).some((clause) => {
+    const w = westernise(clause);
+    // The currency before any cut: "SAR 4.5 M" is no 4.5 metres, "SAR 4,500 month" no duration (r6 #1).
+    if (CURRENCY_BY_FIGURE_RE.test(w)) return true;
+    const t = withoutMeasures(w).replace(DURATION_G, ' ');
     if (CURRENCY_BY_FIGURE_RE.test(t)) return true;
     if (PRICE_WORD_RE.test(t) && /\d/.test(t)) return true;
     // A lone year is cut from the "from" test only ("Handover starts 2027"), never before the others ("SAR 2000").
     if (FROM_WORD_RE.test(t) && FOUR_PLUS_RE.test(t.replace(YEAR_G, ' '))) return true;
     if (GROUPED_RE.test(t) || /(?<![\d.,٫٬])\d{5,}/.test(t) || SCALED_RE.test(t)) return true;
-    return SOLID_K_RE.test(t) && !DISTANCE_WORD_RE.test(t);
+    // The distance exception per comma sub-clause: "from 850k, walking distance to the mall" is still a price (r6 #1).
+    return t.split(/[,،]\s*/).some((c) => SOLID_K_RE.test(c) && !DISTANCE_WORD_RE.test(c));
   });
 }
 

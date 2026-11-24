@@ -107,6 +107,19 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     'Price 2000', 'Down payment 2000', 'عربون 2000',
     'Down payment, 4500', 'Deposit, 750', 'عربون، 5000', 'Monthly installments, 3500',
     '4500SAR', '4500SR', 'فـحجز 5000', 'Club fee SAR 2000',
+    // r6 #1 (B11): the r5 #1 rules pinned — Arabic punctuation ends a word, a code glued to its figure.
+    'ملاحظة،عربون 5000', '؛رسوم 2000', 'SAR4500', 'Club SAR4500',
+    // r6 #1 (B1): a distance word clears a solid-k figure only in its own comma sub-clause.
+    'Apartments from 850k, walking distance to the mall', 'Club membership 5k, near the jogging track',
+    // r6 #1 (B2a): the currency is looked for before measures and durations are cut out.
+    'Upper floors, SAR 4.5 M', 'SR 4.5 M', 'Rent SAR 4,500 month', 'SAR 45,000 year',
+    // r6 #1 (B2b, Codex r5 #1): a dotted mark, "approx.", "incl." or "excl." never ends the sentence; the marks price.mjs knows.
+    'ر. س 2000', '2000 ر. س', 'ر.س. 2000', 'ر. س. 2000', 'ر. ع 750', 'S.R. 2000', 'S.R 2000', 'SR. 750', 'Club fee S.R. 750',
+    'Deposit approx. 750', 'Rent incl. VAT 4500', 'Price excl. VAT 4500', 'رسوم الخدمة ر. س 2000', 'عربون ر. س 5000',
+    'د.إ 2000', 'د. إ 2000', 'ر.ق 2000', 'د.ك 750', 'Dhs 750', '750 Dhs',
+    // r6 #1 (B3): a rent period is a price word; a country between figure and currency; "،" groups digits; tatweel.
+    'Floors 1–3, 4500 per month', 'الأدوار 1–3، 4500 شهرياً', 'Club membership 750 Saudi Riyals a year',
+    'Club membership 750 Saudi Riyals', 'الأدوار العليا ٤،٥٠٠،٠٠٠', 'متاح الآن، الـحجز 5000', 'السعـر 2000',
   ];
   const NOT_MONEY = [
     'Handover starts 2027', 'No maintenance fees for 2 years', 'ضمان 10 سنوات … مقدم من المطور', 'خدمات مقدمة … 24 ساعة',
@@ -115,6 +128,8 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     'Area 15,000 sq m', 'Plot 1,200 m²', '120 sqm', 'المساحة 1,500 م²', '15 km to the airport', 'Villa 15m frontage', 'Beach 500m away',
     'King Abdulaziz Airport — 15 minutes', 'Mall — 1.2 million visitors a year', 'Structure — 10 years', 'خدمة 24 ساعة',
     'Gym', 'رسومات معمارية لكل نموذج', 'Living room 4.2 x 5.1 m', 'Built in 1998',
+    // r6 #1: a dotted mark is a mark only where its letters stand alone.
+    'ر. سعيد', 'ر. سعيد 2000', 'الدار. سعر الوحدة', 'د. إبراهيم 2000',
   ];
   it('MONEY', () => { for (const t of MONEY) assert.equal(statesMoney(t), true, t); });
   it('NOT MONEY', () => { for (const t of NOT_MONEY) assert.equal(statesMoney(t), false, t); });
