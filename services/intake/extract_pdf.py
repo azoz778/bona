@@ -325,6 +325,23 @@ def placement_coverage(page, xref: int):
     return round(min(1.0, (biggest.width * biggest.height) / area), 4)
 
 
+def raw_key(doc, xref: int, smask: int) -> str | None:
+    """sha256 of an image's raw (still compressed) stream, plus its soft mask's raw stream, or None.
+
+    Nothing is decoded. Past the candidate cap this is how a picture is known as a repeat of a kept one (r6 #7).
+    """
+    try:
+        raw = doc.xref_stream_raw(xref)
+        if not raw:
+            return None
+        h = hashlib.sha256(raw)
+        if smask:
+            h.update(b"\0" + (doc.xref_stream_raw(smask) or b""))
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
 def colour_ratio(doc, xref: int):
     """Distinct colours in a <=64px thumbnail / its pixel count.
 
@@ -502,12 +519,15 @@ def main() -> int:
         return 0
 
     seen: dict[str, int] = {}      # sha256 -> candidate index
+    raw_seen: dict[str, int] = {}  # raw_key() of a kept or matched image -> candidate index (r6 #7)
+    xref_seen: dict[int, int] = {}  # xref of a kept or matched image -> candidate index (r6 #7)
     candidates = []
     embedded_total = 0
 
     def add(data: bytes, ext: str, width: int, height: int, page: int, source: str,
             colours: int | None = None, coverage: float | None = None,
-            flattened: bool = False) -> None:
+            flattened: bool = False) -> int | None:
+        """The index of the candidate these bytes were kept as or matched, or None past the cap."""
         digest = hashlib.sha256(data).hexdigest()
         if digest in seen:
             # The same bitmap drawn again: it keeps its LARGEST coverage. A whole-page picture first seen as a
@@ -515,11 +535,11 @@ def main() -> int:
             first = candidates[seen[digest]]
             if coverage is not None and (first["coverage"] is None or coverage > first["coverage"]):
                 first["coverage"] = coverage
-            return
+            return seen[digest]
         if len(candidates) >= args.max_candidates:
-            # The cap counts NEW pictures only. It sits after the dedupe above, so a kept preview drawn over a
-            # whole page past the cap still gets that page's coverage (r5 #8).
-            return
+            # The cap counts NEW pictures only. The embedded loop stops every picture past the cap before it gets
+            # here (r6 #7); this stays as a backstop.
+            return None
         seen[digest] = len(candidates)
         idx = len(candidates)
         name = f"{idx:03d}.{ext}"
@@ -542,6 +562,7 @@ def main() -> int:
             "coverage": coverage,
             **({"flattened": True} if flattened else {}),
         })
+        return idx
 
     for i in range(pages):
         try:
@@ -551,6 +572,19 @@ def main() -> int:
         embedded_total += len(images)
         for info in images:
             xref = info[0]
+            if len(candidates) >= args.max_candidates:
+                # Past the cap a picture costs nothing unless it repeats a kept one, known by its xref or by its raw
+                # (still compressed) bytes. Then only its placement is looked up, and the kept candidate keeps its
+                # LARGEST coverage (r5 #8). Nothing is extracted, decoded or flattened past the cap (r6 #7).
+                k = xref_seen.get(xref)
+                if k is None:
+                    k = raw_seen.get(raw_key(doc, xref, info[1]))
+                if k is not None:
+                    cov = placement_coverage(doc[i], xref)
+                    first = candidates[k]
+                    if cov is not None and (first["coverage"] is None or cov > first["coverage"]):
+                        first["coverage"] = cov
+                continue
             try:
                 ext_img = doc.extract_image(xref)
             except Exception:
@@ -573,8 +607,13 @@ def main() -> int:
                 flat = flatten_on_white(doc, data, info[1])
                 if flat:
                     data, ext = flat, "png"
-            add(data, ext, w, h, i + 1, "embedded", stats[0] if stats else None,
-                placement_coverage(doc[i], xref), flattened=bool(flat))
+            k = add(data, ext, w, h, i + 1, "embedded", stats[0] if stats else None,
+                    placement_coverage(doc[i], xref), flattened=bool(flat))
+            if k is not None:
+                xref_seen.setdefault(xref, k)
+                key = raw_key(doc, xref, info[1])
+                if key:
+                    raw_seen.setdefault(key, k)
             ext_img = data = flat = None
         # colour_ratio() builds a Pixmap per candidate and MuPDF keeps every one of them in
         # its store; a 40-image brochure would otherwise carry all of them to the end.
