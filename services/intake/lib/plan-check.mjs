@@ -17,16 +17,20 @@ export const PLAN_CHECK_CONCURRENCY = 2;
 export const PLAN_FINDINGS = Object.freeze(['phone', 'email', 'website', 'social', 'qr', 'logo', 'price']);
 
 const json = (s) => { try { return { v: JSON.parse(s) }; } catch { return null; } };
-/** A parsed value's records: an object is one, an array gives each of its object elements. */
-const recordsOf = (v) => (Array.isArray(v) ? v : [v]).filter((r) => r && typeof r === 'object' && !Array.isArray(r));
+/**
+ * A parsed value's records: an object is one, an array gives each object in it, at any depth (r7 #1: a record in
+ * a nested array is still a record, so `[C0, [F0]]` is a duplicate, never C0 alone).
+ */
+const recordsOf = (v) => (Array.isArray(v) ? v.flat(Infinity) : [v]).filter((r) => r && typeof r === 'object' && !Array.isArray(r));
 /** The records of a text that is one JSON array (compact or pretty-printed), else null. */
 const arrayRecords = (s) => { const p = json(s.trim()); return p && Array.isArray(p.v) ? recordsOf(p.v) : null; };
 
 /**
  * The records in a reply (r5 #5, r6 #4):
- *   - the whole reply, or a fenced block, that is one JSON array (pretty-printed or not): its objects;
+ *   - the whole reply, or a fenced block, that is one JSON array (pretty-printed or not): its objects, nested
+ *     arrays' too (r7 #1);
  *   - otherwise each trimmed line, read as JSON first after dropping ONE trailing comma: an object is a record,
- *     an array (compact, on one line) gives each object in it;
+ *     an array (compact, on one line) gives each object in it, at any depth;
  *   - else an array written one object per line ("[{…},", "{…}]"): at most ONE `[` before the object and ONE `]`
  *     and / or ONE `,` after it — never a run of brackets.
  * Every other line (prose, a record cut short, stray brackets) is ignored. A record about the same index on an
@@ -92,8 +96,9 @@ export function planVerdicts(records, asked) {
 
 /**
  * Check `plans` ([{ model, file }], the plan images as they would be published) in calls of `batch`, `concurrency`
- * at a time. `ask(images)` gets `[{ index, file }]` (index = the image's number in that call) and returns
- * `{ reply, error, fatal }` (a throw counts as an error, fatal when it says so).
+ * at a time. `ask(images)` gets `[{ index, file }]` (index = the image's number in that call; the caller shows each
+ * file to the check under a name carrying that index, pipeline.mjs r7 #1) and returns `{ reply, error, fatal }` (a
+ * throw counts as an error, fatal when it says so).
  * @returns {Promise<{clean:number[], dirty:Array<{model:number, found:string[], flagged:boolean}>, unchecked:number[], fatal:boolean,
  *   calls:number, errors:string[]}>}  models by verdict: `unchecked` = its call failed, was never sent, said
  *   nothing about it, or answered about an image not asked; `dirty` = flagged, or no clear answer (`flagged: false`)

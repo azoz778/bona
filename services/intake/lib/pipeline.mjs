@@ -1069,10 +1069,23 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       if (!report.warningCodes.includes('images-skipped')) report.warningCodes.push('images-skipped');
       log.warn('intake.floor_plans_skipped', { skipped: written.skipped });
     }
+    // The check reads each plan under a name carrying its index in that call — image-0.jpg, image-1.jpg, … — in a
+    // folder of its own per call (r7 #1): plan-NN.jpg counts models from 1 and the indexes count from 0, so a reply
+    // numbered by the file names put one plan's verdict on another. A hard link is the same file (a copy where a
+    // link cannot be made); a throw here is a failed call, its plans unchecked.
+    let callNo = 0;
     const ask = async (images) => {
       if (quotaHit) return { reply: '', error: 'the AI quota ran out', fatal: true };
+      callNo += 1;
+      const callDir = path.join(dir, `call-${callNo}`);
+      fs.mkdirSync(callDir, { recursive: true });
+      const shown = images.map(({ index, file }) => {
+        const named = path.join(callDir, `image-${index}.jpg`);
+        try { fs.linkSync(file, named); } catch { fs.copyFileSync(file, named); }
+        return { index, file: named };
+      });
       const res = await askPlanContacts({
-        images, bin: cfg.claudeBin, model: cfg.claudeModel, cwd: workDir, addDirs: [workDir], settingsPath: confinement.file,
+        images: shown, bin: cfg.claudeBin, model: cfg.claudeModel, cwd: workDir, addDirs: [workDir], settingsPath: confinement.file,
       });
       log.info('intake.plan_check', { plans: images.length, error: res.error, fatal: res.fatal });
       if (res.fatal) quotaHit = true;

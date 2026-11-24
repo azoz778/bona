@@ -257,10 +257,22 @@ let rawResult = null;
 if (prompt.includes('the floor-plan images to check>>>')) {
   // r4: the floor-plan contact check — one JSON line per image. cfg.planCheck: null = every plan clean;
   // 'quota' / true = the call fails (a quota, or another error); { 'plan-03': 'phone' } = that plan shows it.
-  // cfg.planReply: 'duplicate' / 'malformed' = the first image's record comes twice / malformed.
+  // cfg.planReply: 'duplicate' / 'malformed' = the first image's record comes twice / malformed; 'by-file-name'
+  // (r7 #1) = each record numbered by the number in the file name shown, not by its index, and none about the last.
   const fenced = prompt.split('<<<BONA-UNTRUSTED-DATA: the floor-plan images to check>>>')[1].split('<<<END ')[0];
   const images = fenced.split('\\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
-  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-plan-check', files: images.map((im) => im.file.split('/').pop()) }) + '\\n');
+  // Which plan each file shown is, as its pixels would tell a model (r7 #1: the check reads a link named by its index
+  // in the call): the plan-NN.jpg with the same inode in its folder or the one above it.
+  const planOf = (file) => {
+    const ino = fs.statSync(file).ino;
+    for (let dir = file.slice(0, file.lastIndexOf('/')), up = 0; up < 2; up += 1, dir = dir.slice(0, dir.lastIndexOf('/'))) {
+      const hit = fs.readdirSync(dir).find((f) => /^plan-\\d+\\.jpg$/.test(f) && fs.statSync(dir + '/' + f).ino === ino);
+      if (hit) return hit;
+    }
+    return file.split('/').pop();
+  };
+  const plans = images.map((im) => planOf(im.file));
+  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-plan-check', files: plans, shown: images.map((im) => im.file), indexes: images.map((im) => im.index) }) + '\\n');
   // cfg.healOnPlanCheck: the candidates cfg.broken made unreadable read fine from this call on (a failure that
   // passed: the plan check could not prepare them, a staging after it can).
   if (cfg.healOnPlanCheck) for (const f of JSON.parse(fs.readFileSync(new URL('./broken.json', import.meta.url), 'utf8'))) fs.copyFileSync(cfg.photo, f);
@@ -270,10 +282,12 @@ if (prompt.includes('the floor-plan images to check>>>')) {
     process.exit(1);
   }
   const dirty = (cfg.planCheck && typeof cfg.planCheck === 'object') ? cfg.planCheck : {};
-  const lines = images.map((im) => {
-    const base = im.file.split('/').pop().replace(/\\.jpg$/, '');
-    return JSON.stringify({ index: im.index, clean: !dirty[base], found: dirty[base] ?? '' });
+  const lines = images.map((im, k) => {
+    const base = plans[k].replace(/\\.jpg$/, '');
+    const index = cfg.planReply === 'by-file-name' ? Number(im.file.match(/(\\d+)\\.jpg$/)[1]) : im.index;
+    return JSON.stringify({ index, clean: !dirty[base], found: dirty[base] ?? '' });
   });
+  if (cfg.planReply === 'by-file-name') lines.pop();
   if (cfg.planReply === 'duplicate') lines.push(lines[0]);
   if (cfg.planReply === 'malformed') lines[0] = JSON.stringify({ index: 0, clean: 'yes', found: '' });
   if (cfg.planReply === 'missing') lines.shift();
@@ -2640,6 +2654,32 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
       assert.ok(report.warnings.some((w) => /no clear answer/.test(w) && /Type A/.test(w)), report.warnings.join(' | '));
       assert.ok(!report.warnings.some((w) => /shows/.test(w)), report.warnings.join(' | '));
     } finally { d.cleanup(); }
+  });
+
+  it('r7 #1 (B6a): the check reads each plan under a name carrying its index in that call (image-0.jpg, …), two calls never sharing a file', async () => {
+    const r = await rig({ listing: withPlans(13), candidateCount: 19 });
+    try {
+      const report = await r.run();
+      const calls = planCalls(r);
+      assert.equal(calls.length, 2);
+      for (const c of calls) assert.deepEqual(c.shown.map((f) => path.basename(f)), c.indexes.map((i) => `image-${i}.jpg`), c.shown.join(' '));
+      assert.deepEqual(calls.flatMap((c) => c.files).sort(), Array.from({ length: 13 }, (_, k) => `plan-${String(k + 1).padStart(2, '0')}.jpg`));
+      assert.equal(new Set(calls.flatMap((c) => c.shown)).size, 13, 'no file shown twice');
+      assert.equal(plansOf(report).filter(Boolean).length, 13);
+    } finally { r.cleanup(); }
+  });
+
+  it('r7 #1 (B6a): a reply numbered by the file names that says nothing about the last plan never publishes the plan with a phone number', async () => {
+    // With the plans shown as plan-01..03 this reply was {1 clean}, {2 phone}: Type B's phone plan went up as clean.
+    const r = await rig({ listing: withPlans(3), candidateCount: 9, planCheck: { 'plan-02': 'phone' }, planReply: 'by-file-name' });
+    try {
+      const report = await r.publish();
+      assert.equal(report.ok, true);
+      assert.equal(report.listing.models[1].floorPlan, null, 'Type B shows a phone number');
+      assert.ok(report.planCheck.leftOut.some((l) => l.model === 1) || report.planCheck.unchecked.includes(1), JSON.stringify(report.planCheck));
+      const files = fs.readdirSync(path.join(r.repo, 'public', 'listings', report.slug));
+      assert.ok(!files.includes('plan-02.jpg'), files.join(' '));
+    } finally { r.cleanup(); }
   });
 
   it('a quota (or a failed call) on publish: the listing goes up WITHOUT plans, "try again later"', async () => {

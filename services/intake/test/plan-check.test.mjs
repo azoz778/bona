@@ -103,6 +103,36 @@ describe('parsePlanReply / planVerdicts — r6 #4: JSON first per line, arrays, 
   });
 });
 
+describe('parsePlanReply — r7 #1: an array nested in an array is read too', () => {
+  const C = (i) => line({ index: i, clean: true, found: '' });
+  const F = (i, found) => line({ index: i, clean: false, found });
+
+  it('a flagged record in a nested array beside a clean one about the same plan is a duplicate (no clear answer), never clean', () => {
+    const pretty = `[\n  ${C(0)},\n  [\n    ${F(0, 'phone')}\n  ]\n]`;
+    for (const reply of [
+      pretty,                                                   // pretty, the nested array on lines of its own
+      `[\n  ${C(0)},\n  [${F(0, 'phone')}]\n]`,                 // pretty, the nested array on one line
+      `[\n  [${F(0, 'phone')}],\n  ${C(0)}\n]`,                 // pretty, nested first
+      `Here you go:\n\`\`\`json\n${pretty}\n\`\`\`\nDone.`,     // fenced among prose
+      `[${C(0)},[${F(0, 'phone')}]]`,                           // compact
+      `x\n[${C(0)},[${F(0, 'phone')}]]`,                        // compact after prose (read line by line)
+    ]) {
+      assert.deepEqual(planVerdicts(parsePlanReply(reply), [0]).get(0), { state: 'dirty', flagged: false, found: [] }, reply);
+    }
+  });
+
+  it('two plans, the nested flag on the first: the first is left out, the second kept', async () => {
+    const reply = `[\n  ${C(0)},\n  ${C(1)},\n  [\n    ${F(0, 'phone')}\n  ]\n]`;
+    const res = await checkPlanImages([{ model: 0, file: '/w/a.jpg' }, { model: 1, file: '/w/b.jpg' }], { ask: async () => ({ reply, error: null, fatal: false }) });
+    assert.deepEqual([res.clean, res.dirty, res.unchecked], [[1], [{ model: 0, found: [], flagged: false }], []]);
+  });
+
+  it('one record wrapped twice is one answer: `[[C0]]` is clean; an invalid `[[C0` stays unread', () => {
+    assert.deepEqual(planVerdicts(parsePlanReply(`[[${C(0)}]]`), [0]).get(0), { state: 'clean', flagged: false, found: [] });
+    assert.equal(planVerdicts(parsePlanReply(`[[${C(0)}`), [0]).get(0).state, 'unchecked');
+  });
+});
+
 describe('checkPlanImages — batches of 12, two at a time, nothing new after a quota', () => {
   const plans = (n) => Array.from({ length: n }, (_, k) => ({ model: k, file: `/w/plan-check/plan-${String(k + 1).padStart(2, '0')}.jpg` }));
   const allClean = (calls) => async (images) => {
