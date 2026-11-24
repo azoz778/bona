@@ -181,6 +181,16 @@ const marksIn = (slice, table) => {
   return hit ? hit[1] : [];
 };
 
+/**
+ * A measure straight after a figure — after its decimal tail and spaces, an "of" / "من" and an "ال" at most: "4.5 million
+ * square feet", "4,500,000 sq ft", "4.5 millions of square feet", "٤٫٥ ملايين م²", "4.5 مليون متر مربع". Such a figure is
+ * an area or a length, never a printed price (r9 #1, Codex r8 #1): printedInCurrency skips it. Read on NFKC-folded text
+ * ("²" folds to "2", presentation forms to letters).
+ */
+const MEASURE_NEXT = new RegExp(String.raw`^(?:[.,٫]\d{1,2})?[ \t\u00a0\u202f\u2009]*(?:(?:of|من)\s+)?(?:ال)?`
+  + String.raw`(?:m²|m2(?!\d)|sq\.?\s?(?:m|ft|yds?)\b|sqm\b|sqft\b|square\s+(?:met|feet|foot|yards?)|met(?:re|er)s?\b|ft\b|feet\b|hectares?\b|acres?\b|km\b|`
+  + String.raw`م²|م2|متر|أمتار|امتار|هكتار|كم(?![\u0600-\u06ff]))`, 'i');
+
 /** The countries where a bare riyal is not the Saudi one: their own currency is a riyal or rial too. */
 const OWN_RIYALS = Object.freeze(['OMR', 'QAR', 'YER', 'IRR']);
 
@@ -203,7 +213,8 @@ export function riyalOf(home) {
  * country whose currency it is (pipeline.mjs printed()). `home` is the currency of the country the
  * property is in, printed by the site or not (model-prices.mjs countryCurrency): a bare "ريال" / ﷼ is
  * that country's riyal (riyalOf) — an Omani "190,000 ريال" is 190,000 OMR, never 190,000 SAR — and a
- * marked figure, so never a bare one.
+ * marked figure, so never a bare one. An occurrence with a measure straight after it ("4,500,000 sq ft",
+ * "4.5 مليون متر مربع": MEASURE_NEXT) is an area, no price in any currency (r9 #1).
  * @returns {boolean}
  */
 export function printedInCurrency(text, amount, currency, { bareCounts = true, home = null } = {}) {
@@ -215,6 +226,8 @@ export function printedInCurrency(text, amount, currency, { bareCounts = true, h
     for (const m of t.matchAll(re)) {
       const head = t.slice(Math.max(0, m.index - 24), m.index);
       const tail = t.slice(m.index + m[0].length, m.index + m[0].length + 32);
+      // An area or a length is no price, whatever mark is near it: only its page can settle the figure (r9 #1).
+      if (MEASURE_NEXT.test(tail.normalize('NFKC'))) continue;
       const marksBy = ({ before, after }) => [...marksIn(head, before), ...marksIn(tail, after)].map((c) => (c === RIYAL ? riyal : c));
       // A mark directly beside the figure decides it — the one before first ("$ 1,250,000 SAR 4,687,500": the SAR
       // is 4,687,500's), else the one after; other marks on the line do not count for it (r3 #5).

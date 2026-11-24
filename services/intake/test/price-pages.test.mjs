@@ -439,6 +439,26 @@ describe('r8 #3: the copy guard — "،" / space grouping, "/-", "SAR:", plural 
   });
 });
 
+// r9 #1 (Codex r8 #1): the text layer settles a sale's headline (pipeline.mjs printed()) when printedInCurrency finds the
+// figure, a bare one too on a Saudi listing in SAR. A figure with a measure straight after it is an area, never that
+// evidence: "4.5 million square feet", "4,500,000 sq ft", "٤٫٥ ملايين م²". Only its page can settle it.
+describe('r9 #1: printedInCurrency — a figure followed by a measure is no printed price', () => {
+  const inText = (t) => printedInCurrency(t, 4500000, 'SAR', { bareCounts: true, home: 'SAR' });
+  it('an area is not the price: square feet, sq ft, m², m2, متر, م²', () => {
+    for (const t of [
+      'The development spans 4.5 millions of square feet', 'The development spans 4.5 million square feet', '4.5 million square feet',
+      'Total built-up area 4,500,000 sq ft', 'مساحة المشروع 4.5 مليون متر مربع', 'Total area 4.5m sq ft', 'Total area 4.5 millions sq ft',
+      'مساحة المشروع ٤٫٥ ملايين م²', 'Land of 4,500,000 m2',
+    ]) assert.equal(inText(t), false, t);
+  });
+  it('…and a price is still a price, with an area elsewhere on its line or none', () => {
+    for (const t of [
+      'Prices from SAR 4.5 millions', 'Price 4,500,000', 'السعر 4.5 مليون ريال', 'Price SAR 4,500,000 for a 450 m² villa',
+      '4,500,000 SAR / 450 m²', 'SAR 4,500,000.00',
+    ]) assert.equal(inText(t), true, t);
+  });
+});
+
 describe('pricePagesToRender', () => {
   it('returns the 1-based pages that need a look, in order', () => {
     assert.deepEqual(pricePagesToRender([LOCATION_PAGE, 'شقة بغرفتين', PRICE_PAGE, '', PRICE_PAGE]), [3, 5]);
@@ -1929,6 +1949,41 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     assert.equal(same.evidence.inText, false);
     assert.deepEqual(same.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, null, true]]);
     assert.equal(same.price.onRequest, true);
+  });
+
+  it('r9 #1 (Codex r8 #1): a headline that is an area figure ("4.5 million square feet") is not settled by the text layer — its page refuses it, on request', async () => {
+    const sale = (amount, priceEvidence) => {
+      const a = withModels([], { price: { amount, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence });
+      a.listing.category = 'buy';
+      return a;
+    };
+    const overview = 'Overview\nA residential compound for sale. A residential compound for sale.';
+    const outcome = async (opts) => {
+      const r = await rig(opts);
+      try {
+        const report = await r.run();
+        return { evidence: report.priceEvidence, price: report.listingPreview.price, codes: report.warningCodes, checks: r.calls().filter((c) => c.tool === 'claude-confirm') };
+      } finally { r.cleanup(); }
+    };
+    // Page 2 prints the area; its "Prices on request" line (no figure near it) has it rendered for the reading.
+    for (const area of [
+      'The development spans 4.5 millions of square feet', 'The development spans 4.5 million square feet',
+      'Total built-up area 4,500,000 sq ft', 'مساحة المشروع 4.5 مليون متر مربع',
+    ]) {
+      const p2 = `${area}\nMasterplan\nAmenities\nLocation\nPrices on request`;
+      const o = await outcome({ listing: sale(4500000, { page: 2, quote: area }), pageText: [overview, p2, 'Specification', 'Contact'], confirm: [] });
+      assert.equal(o.evidence.inText, false, area);
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.page, c.sale]), [[4500000, 2, true]], area);
+      assert.equal(o.price.onRequest, true, area);
+      assert.equal(o.price.amount, null, area);
+      assert.ok(o.codes.includes('price-not-printed'), area);
+    }
+    // Control: a price printed with an area further along its line is still settled by the text layer, no check.
+    const priced = 'Price SAR 4,500,000 for a 450 m² villa';
+    const o = await outcome({ listing: sale(4500000, { page: 2, quote: priced }), pageText: [overview, priced, 'Specification', 'Contact'], confirm: [] });
+    assert.deepEqual(o.evidence, { inText: true, confirmed: null });
+    assert.deepEqual(o.checks, []);
+    assert.deepEqual(o.price, { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false });
   });
 
   it('r2 #3: caption "rent per month", the brochure prints only SAR 60,000 a year — no monthly headline', async () => {
