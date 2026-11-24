@@ -897,6 +897,16 @@ describe('confirmPriceEvidence', () => {
     assert.doesNotMatch(f.calls[1].prompt, /rent per/, 'a sale has no period');
   });
 
+  it('r6 #3: `sale` — the listing is for sale: a rent, rental income, service fee, deposit or instalment is not its asking price', async () => {
+    const f = fakeSpawn([{ envelope: envelope({ confirmed: false }) }, { envelope: envelope({ confirmed: false }) }]);
+    await confirmPriceEvidence({ ...opts, sale: true, spawnImpl: f.spawnImpl });
+    assert.match(f.calls[0].prompt, /The listing is for sale: a rent, a rental income, a service fee, a deposit or an instalment printed on the page is NOT its asking price/);
+    assert.match(f.calls[0].prompt, /answer \{"confirmed": false\} for such a figure/);
+    assert.doesNotMatch(f.calls[0].prompt, /rent per/, 'a sale has no period');
+    await confirmPriceEvidence({ ...opts, spawnImpl: f.spawnImpl });
+    assert.doesNotMatch(f.calls[1].prompt, /for sale/, 'no sale line unless asked');
+  });
+
   it('`whole` with `project` (Codex r1 #1a): only the development\'s own price counts, not a model\'s row — and no "a model\'s price counts" allowance', async () => {
     const f = fakeSpawn([{ envelope: envelope({ confirmed: false }) }]);
     await confirmPriceEvidence({ ...opts, whole: true, project: true, spawnImpl: f.spawnImpl });

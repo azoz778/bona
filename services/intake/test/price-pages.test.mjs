@@ -312,6 +312,7 @@ if (prompt.includes('the floor-plan images to check>>>')) {
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-confirm', amount, currency, bare: /may be taken as/.test(prompt), subsidised, page, project: /unit models/.test(prompt), mirror: /only the price for everyone else counts/.test(prompt),
     whole: /only a price printed for the whole property counts/.test(prompt),
     period: (prompt.match(/The price is the rent per (month|year)/) || [])[1] ?? null,
+    sale: /The listing is for sale: a rent/.test(prompt),
     subject: (prompt.match(/listing this price is for[^\\n]*\\n([^\\n]*)/) || [])[1] ?? null }) + '\\n');
   if (cfg.confirmFail === 'quota') {
     process.stdout.write(JSON.stringify({ is_error: true, api_error_status: 429, result: "You've hit your session limit" }));
@@ -1232,7 +1233,7 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     }
   });
 
-  it('r5 #9: a reading period on a sale counts for nothing — the same run as without it, text layer allowed, no period in a prompt', async () => {
+  it('r5 #9 (r6 #3): a reading period on a sale is never a rent period in a prompt — it sends the headline to its page, asked as a sale', async () => {
     const sale = (period, amount, quote) => {
       const a = withModels([], { price: { amount, currency: 'SAR', from: false, period, onRequest: false }, priceEvidence: { page: 3, quote } });
       a.listing.category = 'buy';
@@ -1245,18 +1246,77 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
         return { evidence: report.priceEvidence, price: report.listingPreview.price, warnings: report.warningCodes, checks: r.calls().filter((c) => c.tool === 'claude-confirm') };
       } finally { r.cleanup(); }
     };
-    // Printed in the text layer: settled there, no page check — a stray "year" makes it no rental headline.
+    // Printed in the text layer: settled there, no page check.
     const textPages = ['Overview\nA residential compound for sale. A residential compound for sale.', 'Location', 'Price SAR 60,000', 'Specification', 'Contact'];
     const plain = await outcome({ listing: sale(null, 60000, 'SAR 60,000'), pageText: textPages, confirm: [60000] });
     assert.deepEqual(plain.evidence, { inText: true, confirmed: null });
     assert.deepEqual(plain.checks, []);
     assert.deepEqual(plain.price, { amount: 60000, currency: 'SAR', from: false, period: null, onRequest: false });
-    assert.deepEqual(await outcome({ listing: sale('year', 60000, 'SAR 60,000'), pageText: textPages, confirm: [60000] }), plain, 'a sale read "per year" is checked like any sale');
-    // Printed on a page only: the page check is the ordinary one, with no rent period in its prompt.
+    // The same sale read "per year" (r6 #3): the reading says it may be a rent, so only its page settles it — asked
+    // as a sale's price, with no rent period — and published as a sale, with no period.
+    const yearly = await outcome({ listing: sale('year', 60000, 'SAR 60,000'), pageText: textPages, confirm: [60000] });
+    assert.deepEqual(yearly.evidence, { inText: false, confirmed: true });
+    assert.deepEqual(yearly.checks.map((c) => [c.amount, c.period, c.whole, c.sale]), [[60000, null, false, true]]);
+    assert.deepEqual(yearly.price, plain.price);
+    // Printed on a page only: the page check is the ordinary one, with no rent period in its prompt — the sale line
+    // only for the reading that carries a period.
     const paged = await outcome({ listing: sale(null, 319015, '319015'), confirm: [319015] });
-    assert.deepEqual(paged.checks.map((c) => [c.amount, c.period, c.whole]), [[319015, null, false]]);
+    assert.deepEqual(paged.checks.map((c) => [c.amount, c.period, c.whole, c.sale]), [[319015, null, false, false]]);
     assert.equal(paged.price.amount, 319015);
-    assert.deepEqual(await outcome({ listing: sale('month', 319015, '319015'), confirm: [319015] }), paged);
+    const monthly = await outcome({ listing: sale('month', 319015, '319015'), confirm: [319015] });
+    assert.deepEqual(monthly.checks.map((c) => [c.amount, c.period, c.whole, c.sale]), [[319015, null, false, true]]);
+    assert.deepEqual(monthly.price, paged.price);
+  });
+
+  it('r6 #3: a sale headline read with a period, or printed or quoted as a rent or income, is settled only on its page, asked as a sale', async () => {
+    const sale = (period, quote, category = 'buy') => {
+      const a = withModels([], { price: { amount: 60000, currency: 'SAR', from: false, period, onRequest: false }, priceEvidence: { page: 3, quote } });
+      a.listing.category = category;
+      return a;
+    };
+    const pages = (p3) => ['Overview\nA residential compound for sale. A residential compound for sale.', 'Location', p3, 'Specification', 'Contact'];
+    const outcome = async (opts) => {
+      const r = await rig(opts);
+      try {
+        const report = await r.run();
+        return { evidence: report.priceEvidence, price: report.listingPreview.price, warnings: report.warningCodes, checks: r.calls().filter((c) => c.tool === 'claude-confirm') };
+      } finally { r.cleanup(); }
+    };
+    // buy + "year" + "Annual rent SAR 60,000": the second model refuses — on request, "not printed".
+    const refused = await outcome({ listing: sale('year', 'Annual rent SAR 60,000'), pageText: pages('Annual rent SAR 60,000'), confirm: [] });
+    assert.equal(refused.evidence.inText, false, 'the text layer never settles it');
+    assert.deepEqual(refused.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, null, true]]);
+    assert.equal(refused.price.onRequest, true);
+    assert.equal(refused.price.amount, null);
+    assert.ok(refused.warnings.includes('price-not-printed'));
+    // …and when the second model confirms it on its page, the price is kept (as a sale: no period).
+    const kept = await outcome({ listing: sale('year', 'Annual rent SAR 60,000'), pageText: pages('Annual rent SAR 60,000'), confirm: [60000] });
+    assert.equal(kept.checks.length, 1);
+    assert.deepEqual(kept.price, { amount: 60000, currency: 'SAR', from: false, period: null, onRequest: false });
+    // No period: the line printing the figure says rent or income (English, Arabic, an instalment), or the reading's
+    // quote does — a page check, which refuses here. Off-plan is a sale too.
+    for (const [p3, quote, category] of [
+      ['Annual rent SAR 60,000', 'SAR 60,000', 'buy'],
+      ['الإيجار السنوي 60,000 ريال', '60,000 ريال', 'buy'],
+      // The same in a text layer's Arabic presentation forms (as W023's), the riyal as ﷼.
+      ['اﻹﻳﺠﺎر اﻟﺴﻨﻮي 60,000 ﷼', '60,000', 'buy'],
+      ['Expected yield: SAR 60,000', 'SAR 60,000', 'buy'],
+      ['أقساط شهرية تبدأ من 60,000 ريال', '60,000 ريال', 'off-plan'],
+      ['Price SAR 60,000', 'Rental income SAR 60,000', 'buy'],
+    ]) {
+      const o = await outcome({ listing: sale(null, quote, category), pageText: pages(p3), confirm: [] });
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, null, true]], p3);
+      assert.equal(o.price.onRequest, true, p3);
+    }
+    // An ordinary sale line, no period: the text layer settles it, no check — as before.
+    const plain = await outcome({ listing: sale(null, 'SAR 60,000'), pageText: pages('Price SAR 60,000'), confirm: [] });
+    assert.deepEqual(plain.evidence, { inText: true, confirmed: null });
+    assert.deepEqual(plain.checks, []);
+    assert.deepEqual(plain.price, { amount: 60000, currency: 'SAR', from: false, period: null, onRequest: false });
+    // A rental keeps the r3 #4 rule: its page, for its period, with no sale line.
+    const rental = await outcome({ listing: sale('year', 'Annual rent SAR 60,000', 'rent'), pageText: pages('Annual rent SAR 60,000'), confirm: [60000] });
+    assert.deepEqual(rental.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, 'year', false]]);
+    assert.deepEqual(rental.price, { amount: 60000, currency: 'SAR', from: false, period: 'year', onRequest: false });
   });
 
   it('r2 #3: caption "rent per month", the brochure prints only SAR 60,000 a year — no monthly headline', async () => {

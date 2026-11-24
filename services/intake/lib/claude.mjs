@@ -486,12 +486,14 @@ const periodRule = (what, period) => [
  *     development's own price counts, not one model's row — and the `project` allowance is not given.
  *   - `unit`: one specific unit — a price printed for another unit or model does not count.
  *   - `period`: a rental's ('month' | 'year') — the figure must be the rent for that period (r2 #3).
+ *   - `sale`: a listing for sale whose headline may be a rent (r6 #3) — a rent, rental income, service fee,
+ *     deposit or instalment is not its asking price.
  * @returns {Promise<{confirmed:boolean, error?:string, fatal?:boolean}>} on a failed call: not
  *   confirmed, the error message, and `fatal` when it was a quota or session limit (runClaudeOnce) —
  *   the pipeline then makes no more calls for this brochure
  */
 export async function confirmPriceEvidence({
-  pageImage, amount, currency, quote, subsidised = false, project = false, whole = false, subject = null, unit = null, bareCounts = false, home = null, period = null, bin = 'claude', model = 'sonnet', cwd,
+  pageImage, amount, currency, quote, subsidised = false, project = false, whole = false, subject = null, unit = null, bareCounts = false, home = null, period = null, sale = false, bin = 'claude', model = 'sonnet', cwd,
   addDirs = [], settingsPath = null, timeoutMs = 300000, spawnImpl = spawn,
 }) {
   const which = subsidised
@@ -509,6 +511,10 @@ export async function confirmPriceEvidence({
     'on the same page does not count unless the page makes clear it is this property\'s price.',
     ...(CURRENCIES.includes(currency) ? currencyRule(currency, bareCounts, home) : []),
     ...(period === 'month' || period === 'year' ? periodRule('The price is the rent', period) : []),
+    ...(sale
+      ? ['The listing is for sale: a rent, a rental income, a service fee, a deposit or an instalment printed on the page is NOT its asking price —',
+        'answer {"confirmed": false} for such a figure.']
+      : []),
     ...(project && !whole
       ? ['The listing is a whole development sold as several unit models: a price printed for one of its',
         'unit models counts as the property\'s price.']
