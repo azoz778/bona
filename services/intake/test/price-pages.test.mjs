@@ -459,6 +459,40 @@ describe('r9 #1: printedInCurrency — a figure followed by a measure is no prin
   });
 });
 
+// r10 #2: three more ways an area passed for a printed price, or a price for an area. A model code after a price is no
+// m² (Codex r9 #2 = Claude r9 NB6): "M2A" is a code, "m2" with no letter or digit after it a measure. The solid million
+// "m" and thousand "k" do not take the "m" of m² / m2 / m³ (Codex r9 NB1 = Claude r9 NB2): "4.5m²" is no 4.5 million.
+// A measure right BEFORE the figure (Claude r9 NB1): the Arabic text layer comes in visual order, "² م1,000,000" for
+// "1,000,000 م²" (AC53D4FF p5), so the unit stands before the area.
+describe('r10 #2: printedInCurrency — a model code is no m², m² is no million, a unit before the figure is an area', () => {
+  const sar = (t, n) => printedInCurrency(t, n, 'SAR', { bareCounts: true, home: 'SAR' });
+  it('C#2 / NB6: "M2A" after a price is a model code, not m²', () => {
+    assert.equal(sar('Sale price SAR 450,000 M2A Villa', 450000), true);
+    assert.equal(sar('Sale price SAR 450,000 m2a Villa', 450000), true);
+    assert.equal(sar('Sale price SAR 450,000 M22 Villa', 450000), true);
+    for (const t of ['Land of 450,000 m2', 'Land of 450,000 M2', 'Land of 450,000 m2.', 'Land of 450,000 m2 in all', 'Land of 450,000 M²']) {
+      assert.equal(sar(t, 450000), false, t);
+    }
+  });
+  it('C-NB1 / NB2: the solid "m" of m² / m2 / m³ is no million', () => {
+    for (const [t, n] of [['Total area 4.5m²', 4.5e6], ['Bathroom 4.5m²', 4.5e6], ['Plot 136m2', 136e6], ['Tank 4.5m³', 4.5e6], ['المساحة136m2', 136e6]]) {
+      assert.equal(sar(t, n), false, t);
+      assert.equal(priceAppearsIn(t, n), false, `${t} (priceAppearsIn)`);
+    }
+    for (const t of ['SAR 4.5m', 'SAR 4.5m.', '4.5m SAR', 'Price 4.5m', 'SAR 4.5M, all in']) assert.equal(sar(t, 4.5e6), true, t);
+    for (const t of ['SAR 990k', 'SAR 990k.', '990k SAR']) assert.equal(sar(t, 990000), true, t);
+  });
+  it('NB1: a measure right before the figure — unit first in the visual-order text layer — is an area', () => {
+    for (const t of ['² م1,000,000', 'م² 1,000,000', 'متر مربع 1,000,000', 'على مساحة ² م1,000,000', 'م2 1,000,000', '2م 1,000,000',
+      'المساحة متر 1,000,000', 'Area m² 1,000,000', 'Area sqm: 1,000,000', 'Area sq. m 1,000,000', 'هكتار 1,000,000']) {
+      assert.equal(sar(t, 1e6), false, t);
+    }
+    for (const t of ['السعر 1,000,000 ريال', 'Price SAR 1,000,000', 'ريال 1,000,000', 'Price 1,000,000', 'Villa 450 m², SAR 1,000,000']) {
+      assert.equal(sar(t, 1e6), true, t);
+    }
+  });
+});
+
 // r9 #3 (Codex r8 #2): in a model NAME a tight dotted pair with letters glued after it is initials ("د.إبراهيم": r8 #2),
 // unless a figure stands right before it, spaces between or not: "نموذج ٧٥٠ر.سشهريًا" is 750 riyals a month, whatever
 // follows the pair. The guard reads westernised digits, so Arabic and Latin figures alike.

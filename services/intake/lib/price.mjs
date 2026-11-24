@@ -26,9 +26,11 @@ function figurePatterns(amount, flags = '') {
     if (!(v >= 1 && v < 1000)) continue;
     const s = Number(v.toFixed(3)).toString().replace('.', '[.,٫]');
     for (const w of words) {
-      // "4.5m" / "990k" only written solid: "20 m" is twenty metres, not twenty million.
-      const gap = w === 'm' || w === 'k' ? '' : '\\s*';
-      out.push(new RegExp(`(?<![\\d.,٫])${s}${gap}${w}(?![a-z\\u0600-\\u06ff])`, `i${flags}`));
+      // "4.5m" / "990k" only written solid: "20 m" is twenty metres, not twenty million. And not the "m" of m² / m2 / m³:
+      // "Total area 4.5m²", "Plot 136m2" are areas (r10 #2, Codex r9 NB1 = Claude r9 NB2).
+      const solid = w === 'm' || w === 'k';
+      const gap = solid ? '' : '\\s*';
+      out.push(new RegExp(`(?<![\\d.,٫])${s}${gap}${w}(?![a-z\\u0600-\\u06ff${solid ? '²³\\d' : ''}])`, `i${flags}`));
     }
   }
   return out;
@@ -185,11 +187,18 @@ const marksIn = (slice, table) => {
  * A measure straight after a figure — after its decimal tail and spaces, an "of" / "من" and an "ال" at most: "4.5 million
  * square feet", "4,500,000 sq ft", "4.5 millions of square feet", "٤٫٥ ملايين م²", "4.5 مليون متر مربع". Such a figure is
  * an area or a length, never a printed price (r9 #1, Codex r8 #1): printedInCurrency skips it. Read on NFKC-folded text
- * ("²" folds to "2", presentation forms to letters).
+ * ("²" folds to "2", presentation forms to letters). "m2" with a letter or digit after it is a model code ("SAR 450,000
+ * M2A Villa": r10 #2, Codex r9 #2 = Claude r9 NB6), not m².
  */
 const MEASURE_NEXT = new RegExp(String.raw`^(?:[.,٫]\d{1,2})?[ \t\u00a0\u202f\u2009]*(?:(?:of|من)\s+)?(?:ال)?`
-  + String.raw`(?:m²|m2(?!\d)|sq\.?\s?(?:m|ft|yds?)\b|sqm\b|sqft\b|square\s+(?:met|feet|foot|yards?)|met(?:re|er)s?\b|ft\b|feet\b|hectares?\b|acres?\b|km\b|`
+  + String.raw`(?:m²|m2(?![\da-z])|sq\.?\s?(?:m|ft|yds?)\b|sqm\b|sqft\b|square\s+(?:met|feet|foot|yards?)|met(?:re|er)s?\b|ft\b|feet\b|hectares?\b|acres?\b|km\b|`
   + String.raw`م²|م2|متر|أمتار|امتار|هكتار|كم(?![\u0600-\u06ff]))`, 'i');
+/**
+ * …and a measure that ends right BEFORE the figure, spaces, a colon or a dash between at most: the Arabic text layer
+ * comes in visual order, so "1,000,000 م²" reads "² م1,000,000" (AC53D4FF p5); "م² 1,000,000", "متر مربع 1,000,000",
+ * "Area sqm: 1,000,000" too. Such a figure is an area as well (r10 #2, Claude r9 NB1). Read on the NFKC-folded head.
+ */
+const MEASURE_BEFORE = new RegExp(String.raw`(?:م\s?2|2\s?م|م²|²\s?م|متر(?:\s+مربع)?|أمتار|امتار|هكتار|sqm|sq\.?\s?m|m2|m²)[\s:：\-–—]*$`, 'i');
 
 /** The countries where a bare riyal is not the Saudi one: their own currency is a riyal or rial too. */
 const OWN_RIYALS = Object.freeze(['OMR', 'QAR', 'YER', 'IRR']);
@@ -214,7 +223,8 @@ export function riyalOf(home) {
  * property is in, printed by the site or not (model-prices.mjs countryCurrency): a bare "ريال" / ﷼ is
  * that country's riyal (riyalOf) — an Omani "190,000 ريال" is 190,000 OMR, never 190,000 SAR — and a
  * marked figure, so never a bare one. An occurrence with a measure straight after it ("4,500,000 sq ft",
- * "4.5 مليون متر مربع": MEASURE_NEXT) is an area, no price in any currency (r9 #1).
+ * "4.5 مليون متر مربع": MEASURE_NEXT) is an area, no price in any currency (r9 #1); so is one with a measure
+ * right before it ("² م1,000,000", "م² 1,000,000": MEASURE_BEFORE, r10 #2).
  * @returns {boolean}
  */
 export function printedInCurrency(text, amount, currency, { bareCounts = true, home = null } = {}) {
@@ -226,8 +236,9 @@ export function printedInCurrency(text, amount, currency, { bareCounts = true, h
     for (const m of t.matchAll(re)) {
       const head = t.slice(Math.max(0, m.index - 24), m.index);
       const tail = t.slice(m.index + m[0].length, m.index + m[0].length + 32);
-      // An area or a length is no price, whatever mark is near it: only its page can settle the figure (r9 #1).
-      if (MEASURE_NEXT.test(tail.normalize('NFKC'))) continue;
+      // An area or a length is no price, whatever mark is near it: only its page can settle the figure (r9 #1). The
+      // unit may come before it too, in the visual-order Arabic text layer (r10 #2).
+      if (MEASURE_NEXT.test(tail.normalize('NFKC')) || MEASURE_BEFORE.test(head.normalize('NFKC'))) continue;
       const marksBy = ({ before, after }) => [...marksIn(head, before), ...marksIn(tail, after)].map((c) => (c === RIYAL ? riyal : c));
       // A mark directly beside the figure decides it — the one before first ("$ 1,250,000 SAR 4,687,500": the SAR
       // is 4,687,500's), else the one after; other marks on the line do not count for it (r3 #5).
