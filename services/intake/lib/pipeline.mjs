@@ -165,9 +165,14 @@ const DOTTED_MARK_G = new RegExp(String.raw`(?<![\u0600-\u06ff])(?:ر\.\s?[سع�
 const ABBREVIATION_DOT_G = /(?<![A-Za-z])(approx|incl|excl)\./gi;
 /**
  * A currency's name or symbol anywhere, or its code by a figure — what a model NAME may not carry (r2 #4). Only a LETTER
- * continues a code or a name, as in CUR: "Studio 4500SAR", "Studio SAR4500", "Villa 1,250,000SAR" (r6 #2).
+ * continues a code or a name, as in CUR: "Studio 4500SAR", "Studio SAR4500", "Villa 1,250,000SAR" (r6 #2). Every mark
+ * CUR reads is here too: "S.R. 4500", "4500Dhs", "4500 pounds", "ر.ق 2000", "د.إ 2000", "د. ك 2000" — the Arabic
+ * letters standing alone, as in DOTTED_MARK_G ("د. إبراهيم" is a name).
  */
-const NAME_CURRENCY_RE = new RegExp(String.raw`(?<![A-Za-z])(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)(?![A-Za-z])\s*\d|\d\s*(?<![A-Za-z])(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)(?![A-Za-z])|(?<![A-Za-z])(?:riyals?|rials?|dirhams?|dollars?|euros?|sterling)(?![A-Za-z])|ريال|ر\.\s?س|ر\.\s?ع|درهم|دولار|يورو|جنيه|دينار|[$€£﷼\u20c1]`, 'i');
+const NAME_CODE = String.raw`(?<![A-Za-z])(?:SAR|SR|S\.\s?R\.?|AED|Dhs?|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)(?![A-Za-z])`;
+const NAME_CURRENCY_RE = new RegExp(String.raw`${NAME_CODE}\s*\d|\d\s*${NAME_CODE}|(?<![A-Za-z])(?:riyals?|rials?|dirhams?|dollars?|euros?|pounds?|sterling)(?![A-Za-z])`
+  + String.raw`|ريال|ر\.\s?س|ر\.\s?ع|(?<![\u0600-\u06ff])(?:ر\.\s?ق|د\.\s?[إك])(?:\.|(?![\u0620-\u065f\u066e-\u06d3\u06d5-\u06ff]))`
+  + String.raw`|درهم|دولار|يورو|جنيه|دينار|[$€£﷼\u20c1]`, 'i');
 /**
  * Arabic words as whole words, with the clitics و / ف, ب / ل / لل and ال in front (a tatweel may follow one:
  * "فـحجز"): "السعر", "بسعر", "للإيجار" — never inside another word ("رسوم" is not in "رسومات"). Only a LETTER

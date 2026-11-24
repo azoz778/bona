@@ -142,6 +142,14 @@ describe('r6 #2: the model-name guard — glued currency codes and scaled readin
   it('a currency code glued to its figure refuses the name, whatever the figure', () => {
     for (const en of ['Studio 4500SAR', 'Studio SAR4500', 'Villa 1,250,000SAR']) assert.equal(nameOf(en, 'نموذج', []), 'models[0].name', en);
   });
+  it('every mark the money rule reads refuses the name too: S.R, Dhs, pounds, ر.ق, د.إ, د.ك (r6 verifier)', () => {
+    for (const [en, ar] of [
+      ['Villa S.R. 4500', 'نموذج'], ['Villa S.R 4500', 'نموذج'], ['Studio Dhs 4500', 'نموذج'], ['Studio 4500Dhs', 'نموذج'],
+      ['Studio 4500 pounds', 'نموذج'], ['Studio', 'نموذج ر.ق 2000'], ['Studio', 'نموذج د.إ 2000'], ['Studio', 'نموذج د. ك 2000'],
+    ]) assert.equal(nameOf(en, ar, []), 'models[0].name', `${en} / ${ar}`);
+    // the letters standing alone: "د. إبراهيم" is a name, as in the money rule.
+    assert.equal(nameOf('Villa Ibrahim', 'فيلا د. إبراهيم 2', []), null);
+  });
   it('a reading price as a scaled token refuses the name: trailing zeros, under a million, K, an Arabic comma after it', () => {
     for (const [en, ar, n] of [
       ['Penthouse 4.50m', 'بنتهاوس', 4500000], ['Townhouse 0.95m', 'تاون هاوس', 950000], ['Penthouse 4500K', 'بنتهاوس', 4500000],
