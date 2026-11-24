@@ -48,6 +48,61 @@ describe('parsePlanReply / planVerdicts — the r5 #5 rule', () => {
   });
 });
 
+describe('parsePlanReply / planVerdicts — r6 #4: JSON first per line, arrays, a bounded fallback, found "none"', () => {
+  const C = (i) => line({ index: i, clean: true, found: '' });
+  const F = (i, found) => line({ index: i, clean: false, found });
+
+  it('a run of stray brackets or commas is not a record: `C0]]]` is not clean; the fallback strips one `[`, one `]`, one `,`', () => {
+    for (const reply of [`${C(0)}]]]`, `${C(0)},,]],]`, `[${C(0)}]]]],`, `[[${C(0)}`, `${C(0)},,`]) {
+      assert.equal(planVerdicts(parsePlanReply(reply), [0]).get(0).state, 'unchecked', reply);
+    }
+    for (const reply of [`[${C(0)},`, `${C(0)},`, `${C(0)}]`, `[${C(0)}]`, `${C(0)}],`]) {
+      assert.equal(planVerdicts(parsePlanReply(reply), [0]).get(0).state, 'clean', reply);
+    }
+  });
+
+  it('a compact array on one line gives each object as a record, fenced or not', () => {
+    const arr = `[${C(0)},${F(1, 'phone')}]`;
+    for (const reply of [arr, `Sure.\n\`\`\`json\n${arr}\n\`\`\`\nDone.`, `${arr},`]) {
+      const v = planVerdicts(parsePlanReply(reply), [0, 1]);
+      assert.deepEqual([v.get(0), v.get(1)], [{ state: 'clean', flagged: false, found: [] }, { state: 'dirty', flagged: true, found: ['phone'] }], reply);
+    }
+  });
+
+  it('a pretty-printed array is read — the whole body, or a fenced block among prose', () => {
+    const pretty = JSON.stringify([{ index: 0, clean: false, found: 'logo' }, { index: 1, clean: true, found: '' }], null, 2);
+    for (const reply of [pretty, `Here you go:\n\`\`\`json\n${pretty}\n\`\`\`\nThat is all.`, `\`\`\`\n${pretty}\n\`\`\``]) {
+      const v = planVerdicts(parsePlanReply(reply), [0, 1]);
+      assert.deepEqual([v.get(0), v.get(1)], [{ state: 'dirty', flagged: true, found: ['logo'] }, { state: 'clean', flagged: false, found: [] }], reply);
+    }
+    // A pretty array of one-line objects is read once, not again line by line.
+    const oneLine = `[\n  ${C(0)},\n  ${C(1)}\n]`;
+    const w = planVerdicts(parsePlanReply(oneLine), [0, 1]);
+    assert.deepEqual([w.get(0).state, w.get(1).state], ['clean', 'clean']);
+  });
+
+  it('an array line and an object line about the same index are a duplicate: not clean (no clear answer)', () => {
+    for (const reply of [`${C(0)}\n${C(1)}\n[${F(0, 'phone')},${C(1)}]`, `[${F(0, 'phone')},${C(1)}]\n${C(0)}`]) {
+      const v = planVerdicts(parsePlanReply(reply), [0, 1]);
+      assert.deepEqual(v.get(0), { state: 'dirty', flagged: false, found: [] }, reply);
+    }
+  });
+
+  it('found "none" / "N/A" / "nothing" / "no" / "-" (any case) is empty: clean:true with it is clean', () => {
+    for (const found of ['none', 'None', 'NONE', 'n/a', 'N/A', 'nothing', 'Nothing', 'no', 'No', '-', ' none ']) {
+      assert.deepEqual(planVerdicts(parsePlanReply(line({ index: 0, clean: true, found })), [0]).get(0), { state: 'clean', flagged: false, found: [] }, found);
+      assert.deepEqual(planVerdicts(parsePlanReply(line({ index: 0, clean: false, found })), [0]).get(0), { state: 'dirty', flagged: true, found: [] }, found);
+    }
+  });
+
+  it('clean:true beside another word that is not a finding ("maybe") is no clear answer — not flagged; a finding word still flags', () => {
+    for (const found of ['maybe', 'something odd', 'unsure']) {
+      assert.deepEqual(planVerdicts(parsePlanReply(line({ index: 0, clean: true, found })), [0]).get(0), { state: 'dirty', flagged: false, found: [] }, found);
+    }
+    assert.deepEqual(planVerdicts(parsePlanReply(line({ index: 0, clean: true, found: 'maybe a logo' })), [0]).get(0), { state: 'dirty', flagged: true, found: ['logo'] });
+  });
+});
+
 describe('checkPlanImages — batches of 12, two at a time, nothing new after a quota', () => {
   const plans = (n) => Array.from({ length: n }, (_, k) => ({ model: k, file: `/w/plan-check/plan-${String(k + 1).padStart(2, '0')}.jpg` }));
   const allClean = (calls) => async (images) => {
@@ -99,6 +154,21 @@ describe('checkPlanImages — batches of 12, two at a time, nothing new after a 
     // One answered, one missing: the missing one is unchecked.
     const half = await checkPlanImages(plans(2), { ask: async () => ({ reply: line({ index: 0, clean: true, found: '' }), error: null, fatal: false }) });
     assert.deepEqual([half.clean, half.unchecked], [[0], [1]]);
+  });
+
+  it('r6 #4 (NB1): a record about an index not asked makes the whole call unchecked — never applied to another image', async () => {
+    const rec = (index, clean = true, found = '') => line({ index, clean, found });
+    for (const [what, reply] of [
+      ['numbered from 1 (files 0..2)', [rec(1, false, 'phone'), rec(2), rec(3)].join('\n')],
+      ['one out of range beside clean answers', [rec(0), rec(1), rec(2), rec(3)].join('\n')],
+      ['a negative index', [rec(0), rec(1), rec(2), rec(-1)].join('\n')],
+      ['an index that is not a number', [rec(0), rec(1), rec(2), line({ index: '1', clean: false, found: 'phone' })].join('\n')],
+      ['a compact array numbered from 1', `[${rec(1)},${rec(2)},${rec(3)}]`],
+    ]) {
+      const res = await checkPlanImages(plans(3), { ask: async () => ({ reply, error: null, fatal: false }) });
+      assert.deepEqual([res.clean, res.dirty, res.unchecked], [[], [], [0, 1, 2]], what);
+      assert.match(res.errors.join(' '), /not asked/, what);
+    }
   });
 
   it('a failed call leaves its plans unchecked; a quota stops every later call and says so', async () => {
