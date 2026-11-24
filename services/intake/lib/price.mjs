@@ -187,14 +187,27 @@ const marksIn = (slice, table) => {
  * A measure straight after a figure — after its decimal tail and spaces, an "of" / "من" and an "ال" at most: "4.5 million
  * square feet", "4,500,000 sq ft", "4.5 millions of square feet", "٤٫٥ ملايين م²", "4.5 مليون متر مربع". Such a figure is
  * an area or a length, never a printed price (r9 #1, Codex r8 #1): printedInCurrency skips it. Read on NFKC-folded text
- * ("²" folds to "2", presentation forms to letters). "m2" with a digit or ONE letter after it is a model code ("SAR
- * 450,000 M2A Villa", "M2B2": r10 #2, Codex r9 #2 = Claude r9 NB6), not m²; with a word after it, it is the unit glued to
- * the next cell ("30,000 m²Built-up", "450,000 m²of land": r11 #2, Claude r10 B2 = Codex r10 #2). A price per unit area
- * is no total either: "SAR 4,500 / m²", "4,500 per sqm" (r11 #2, Codex r10 NB1).
+ * ("²" folds to "2", presentation forms to letters). "m2" with a digit, ONE letter, or up to three capitals after it is
+ * a model code ("SAR 450,000 M2A Villa", "M2B2", "M2AB": r10 #2, Codex r9 #2 = Claude r9 NB6; r12 #2, Codex r11 #3), not
+ * m²; with a word after it, it is the unit glued to the next cell ("30,000 m²Built-up", "450,000 m²of land": r11 #2,
+ * Claude r10 B2 = Codex r10 #2).
  */
-const MEASURE_NEXT = new RegExp(String.raw`^(?:[.,٫]\d{1,2})?[ \t\u00a0\u202f\u2009]*(?:(?:of|من)\s+)?(?:(?:\/|per|لكل)\s*)?(?:ال)?`
-  + String.raw`(?:m²|m2(?!\d|[a-z](?![a-z]))|sq\.?\s?(?:m|ft|yds?)\b|sqm\b|sqft\b|square\s+(?:met|feet|foot|yards?)|met(?:re|er)s?\b|ft\b|feet\b|hectares?\b|acres?\b|km\b|`
-  + String.raw`م²|م2|متر|أمتار|امتار|هكتار|كم(?![\u0600-\u06ff]))`, 'i');
+const UNITS = String.raw`(?:m²|m2(?!\d|(?-i:[A-Z]{1,3})(?![a-z])|[a-z](?![a-z]))|sq\.?\s?(?:m|ft|yds?)\b|sqm\b|sqft\b|square\s+(?:met|feet|foot|yards?)|met(?:re|er)s?\b|ft\b|feet\b|hectares?\b|acres?\b|km\b|`
+  + String.raw`م²|م2|متر|أمتار|امتار|هكتار|كم(?![\u0600-\u06ff]))`;
+const MEASURE_NEXT = new RegExp(String.raw`^(?:[.,٫]\d{1,2})?[ \t\u00a0\u202f\u2009]*(?:(?:of|من)\s+)?(?:ال)?${UNITS}`, 'i');
+/**
+ * A price per unit area, its currency before the "/" or not: "SAR 4,500 / m²", "4,500 SAR / m²", "4,500 ريال لكل متر
+ * مربع", "4,500 per sqm" — no total (r11 #2, Codex r10 NB1; r12 #2, Codex r11 NB1). A unit with a figure of its own
+ * after it is the next column's label, not a denominator: "Sale price SAR 1,250,000 / sqm: 250" keeps its total
+ * (r12 #2, Codex r11 #3).
+ */
+const PER_AREA_NEXT = new RegExp(String.raw`^(?:[.,٫]\d{1,2})?[ \t\u00a0\u202f\u2009]*(?:${MONEY_MARKS.any}[ \t\u00a0\u202f\u2009]*)?(?:\/|per\b|لكل)[ \t\u00a0\u202f\u2009]*(?:ال)?${UNITS}(?![ \t\u00a0\u202f\u2009:：\-–—]*[\d٠-٩۰-۹])`, 'i');
+/**
+ * A unit label alone on the line above a BARE figure ("Plot area sqm" / "450,000", "المساحة م²" / "450,000"): the
+ * figure is that area (r12 #2, Codex r11 #1). A figure with its own currency mark is a price whatever label stands
+ * above it ("Built-up area sqm" / "1,250,000 SAR", a page join).
+ */
+const UNIT_LINE_ABOVE = new RegExp(String.raw`(?:^|\n)[^\d٠-٩۰-۹\n]*(?:\b(?:sqm|sq\.?\s?m|m²|m2|sq\.?\s?ft|sqft|square\s+(?:met(?:re|er)s?|feet))\b|م²|م2|متر\s+مربع)[^\d٠-٩۰-۹\n]*\n[ \t\u00a0\u202f\u2009]*$`, 'i');
 /**
  * …and a measure that ends right BEFORE the figure, spaces, a colon or a dash between at most: the Arabic text layer
  * comes in visual order, so "1,000,000 م²" reads "² م1,000,000" (AC53D4FF p5); "م² 1,000,000", "متر مربع 1,000,000",
@@ -250,7 +263,7 @@ export function printedInCurrency(text, amount, currency, { bareCounts = true, h
       const tail = t.slice(m.index + m[0].length, m.index + m[0].length + 32);
       // An area or a length is no price, whatever mark is near it: only its page can settle the figure (r9 #1). The
       // unit may come before it too, in the visual-order Arabic text layer (r10 #2).
-      if (MEASURE_NEXT.test(tail.normalize('NFKC')) || MEASURE_BEFORE.test(head.normalize('NFKC')) || MEASURE_BEFORE_LATIN.test(head)) continue;
+      if (MEASURE_NEXT.test(tail.normalize('NFKC')) || PER_AREA_NEXT.test(tail.normalize('NFKC')) || MEASURE_BEFORE.test(head.normalize('NFKC')) || MEASURE_BEFORE_LATIN.test(head)) continue;
       const marksBy = ({ before, after }) => [...marksIn(head, before), ...marksIn(tail, after)].map((c) => (c === RIYAL ? riyal : c));
       // A mark directly beside the figure decides it — the one before first ("$ 1,250,000 SAR 4,687,500": the SAR
       // is 4,687,500's), else the one after; other marks on the line do not count for it (r3 #5).
@@ -262,7 +275,7 @@ export function printedInCurrency(text, amount, currency, { bareCounts = true, h
       // THIS currency's mark counts only on the figure's own line; ANY other currency's mark, even one a line
       // away ("AED" / "1,250,000" split by the text layer), means the figure is not a bare one (r2 #1).
       if (marksBy(ON_LINE).includes(currency)) return true;
-      if (bareCounts && marksBy(ACROSS_LINES).every((c) => c === currency)) return true;
+      if (bareCounts && !UNIT_LINE_ABOVE.test(head.normalize('NFKC')) && marksBy(ACROSS_LINES).every((c) => c === currency)) return true;
     }
   }
   return false;

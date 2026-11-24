@@ -516,6 +516,18 @@ describe('r10 #2: printedInCurrency — a model code is no m², m² is no millio
       ['Villa A\n250\nm²\n1,250,000 SAR', 1.25e6], ['Built-up area sqm\n1,250,000 SAR', 1.25e6], ['SAR 4,500,000 / villa', 4.5e6],
     ]) assert.equal(sar(t, n), true, t);
   });
+  it('r12 #2 (Codex r11 #1 / #3 / NB1): a bare figure under a unit label is an area; a column after "/ sqm:" or a code "M2AB" keeps the total; a per-area price with its currency between', () => {
+    for (const [t, n] of [
+      ['Plot area sqm\n450,000', 450000], ['المساحة م²\n450,000', 450000], ['Built-up area (sqm)\n450,000', 450000],
+      ['4,500 SAR / m²', 4500], ['4,500 ريال لكل متر مربع', 4500], ['4,500 ريال / م²', 4500], ['AED 4,500 per sqm', 4500],
+    ]) assert.equal(sar(t, n), false, t);
+    for (const [t, n] of [
+      ['Sale price SAR 1,250,000 / sqm: 250', 1.25e6], ['Sale price SAR 1,250,000 M2AB Villa', 1.25e6], ['Plot area sqm\n450,000 SAR', 450000],
+      ['Villa A 250 m² 1,250,000 SAR', 1.25e6], ['Land 30,000 m²Built-up 12,000 m²', 0],
+    ].filter(([, n]) => n)) assert.equal(sar(t, n), true, t);
+    assert.equal(sar('Land 30,000 m²Built-up 12,000 m²', 30000), false);
+    assert.equal(sar('GFA 4.5 million m²Total', 4.5e6), false);
+  });
 });
 
 // r9 #3 (Codex r8 #2): in a model NAME a tight dotted pair with letters glued after it is initials ("د.إبراهيم": r8 #2),
@@ -544,8 +556,13 @@ describe('r9 #3: a glued dotted pair right after a figure refuses a model name',
 describe('r11 #3 (Codex r10 #5 = Claude r10 NB4): a decimal figure right before a glued dotted pair refuses a model name', () => {
   const nameOf = (en, ar, figures = []) => dropMoneyText({ models: [{ name: { en, ar } }] }, { figures }).name;
   it('the figure counts whole, its decimal part too; a one-digit model number before initials stays a name', () => {
-    for (const ar of ['نموذج ٧٥٠٫٥ر.سشهريًا', 'نموذج ١٬٢٥٠٫٥ر.سشهريًا', 'نموذج 7.5ر.سشهريا']) assert.equal(nameOf('Studio', ar, [850000]), 'models[0].name', ar);
+    // (r12 #3: "7.5" before the pair is the shape of a model number like "١٫٢" — Codex r11 #4 — so it is no amount.)
+    for (const ar of ['نموذج ٧٥٠٫٥ر.سشهريًا', 'نموذج ١٬٢٥٠٫٥ر.سشهريًا']) assert.equal(nameOf('Studio', ar, [850000]), 'models[0].name', ar);
     for (const ar of ['فيلا ٣ د.إبراهيم', 'نموذج 2 ر.قاسم']) assert.equal(nameOf('Villa', ar, [850000]), null, ar);
+  });
+  it('r12 #3 (Codex r11 #4): a dotted model number before initials stays a name; an amount-sized figure before the pair refuses it', () => {
+    for (const ar of ['فيلا ١٫٢ د.إبراهيم', 'فيلا 1.2 د.إبراهيم', 'نموذج ٢٫٣ ر.قاسم']) assert.equal(nameOf('Villa', ar, [850000]), null, ar);
+    for (const ar of ['نموذج ٧٥ر.سسنويًا', 'نموذج ٧٥٠٫٥ر.سشهريًا', 'نموذج 1.25ر.سشهريا', 'نموذج ١٬٢٥٠ر.سشهريًا']) assert.equal(nameOf('Studio', ar, [850000]), 'models[0].name', ar);
   });
 });
 
@@ -2258,6 +2275,10 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     for (const prose of ['Open 7 days a week', 'Gym open 24 hours a day, 7 days a week', 'Handover in a week', '2BR ready in a week']) {
       await settled(`${prose}\nSale price SAR 450,000`);
       await settled(`Sale price SAR 450,000\n${prose}`);
+    }
+    // r12 #1 (Codex r11 #2): on a line with a money-sized figure the prose lead-in excuses nothing — a short-stay package.
+    for (const [p3, amount] of [['SAR 1,200 for 2 nights a week', 1200], ['1,200 ريال — SAR 1,200 in a week', 1200], ['SAR 4,500 for 3 days a week', 4500]]) {
+      await sentToPage(p3, amount, `SAR ${amount.toLocaleString('en-US')}`);
     }
   });
 
