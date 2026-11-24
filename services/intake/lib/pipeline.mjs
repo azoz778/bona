@@ -176,7 +176,8 @@ const SPACED_PA_G = /(?<![A-Za-z])p\.\s+a(?![A-Za-z])/gi;
  * names; "Studio TL 4500", "Villa TL 1,250,000", "Villa TL 4.5m" are not: r8 #2, Codex r7 #5a, Claude r7 NB5). Arabic
  * marks, currency words and symbols refuse a name anywhere — but a tight dotted pair counts only where its word ends or
  * a figure follows, never with letters glued after it: "فيلا د.إبراهيم" and "نموذج ر.قاسم 2" are names, "نموذج ر.س" and
- * "نموذجر.س 2000" are not (r8 #2, Claude r7 NB4).
+ * "نموذجر.س 2000" are not (r8 #2, Claude r7 NB4) — unless a figure stands right before it, spaces between or not: then
+ * it counts whatever follows, "نموذج ٧٥٠ر.سشهريًا", "نموذج ٧٥٠ ر.سشهريًا" (r9 #3, Codex r8 #2).
  */
 const NAME_SITE_CODE = `(?<![A-Za-z])${MONEY_MARKS.siteCodes}(?![A-Za-z])`;
 const NAME_OTHER_CODE = `(?<![A-Za-z])(?-i:${MONEY_MARKS.otherCodes})(?![A-Za-z])`;
@@ -195,7 +196,8 @@ const nameAmountBefore = (whole) => String.raw`(?:${whole}|\d[.,٫٬]\d+|\d{1,3}
 const NAME_WORD_ENDS = String.raw`(?![\u0640\u064b-\u065f\u0670]*[\u0620-\u063f\u0641-\u064a\u066e\u066f\u0671-\u06d3\u06d5-\u06ff])`;
 const NAME_CURRENCY_RE = new RegExp(String.raw`${NAME_SITE_CODE}\.?\s*${nameAmountAfter(String.raw`\d{3}`)}|${nameAmountBefore(String.raw`\d{3}`)}\s*${NAME_SITE_CODE}`
   + String.raw`|${NAME_OTHER_CODE}\.?\s*${nameAmountAfter(String.raw`\d{4}`)}|${nameAmountBefore(String.raw`\d{4}`)}\s*${NAME_OTHER_CODE}`
-  + String.raw`|(?<![A-Za-z])${MONEY_MARKS.words}(?![A-Za-z])|${MONEY_MARKS.arabic}|${MONEY_MARKS.abbreviations}${NAME_WORD_ENDS}|${MONEY_MARKS.symbols}`, 'i');
+  + String.raw`|(?<![A-Za-z])${MONEY_MARKS.words}(?![A-Za-z])|${MONEY_MARKS.arabic}|${MONEY_MARKS.abbreviations}${NAME_WORD_ENDS}`
+  + String.raw`|(?<=\d[ \t\u00a0\u202f\u2009]*)${MONEY_MARKS.abbreviations}|${MONEY_MARKS.symbols}`, 'i');
 /**
  * Arabic words as whole words, with the clitics و / ف, ب / ل / لل and ال in front (a tatweel may follow one:
  * "فـحجز"): "السعر", "بسعر", "للإيجار" — never inside another word ("رسوم" is not in "رسومات"). Only a LETTER

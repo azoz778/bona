@@ -459,6 +459,26 @@ describe('r9 #1: printedInCurrency — a figure followed by a measure is no prin
   });
 });
 
+// r9 #3 (Codex r8 #2): in a model NAME a tight dotted pair with letters glued after it is initials ("د.إبراهيم": r8 #2),
+// unless a figure stands right before it, spaces between or not: "نموذج ٧٥٠ر.سشهريًا" is 750 riyals a month, whatever
+// follows the pair. The guard reads westernised digits, so Arabic and Latin figures alike.
+describe('r9 #3: a glued dotted pair right after a figure refuses a model name', () => {
+  const nameOf = (en, ar, figures = []) => dropMoneyText({ models: [{ name: { en, ar } }] }, { figures }).name;
+  it('refused: a figure, then the pair with letters glued after it, the figure not among the reading\'s prices', () => {
+    for (const ar of [
+      'نموذج ٧٥٠ر.سشهريًا', 'نموذج 750ر.سشهريا', 'نموذج ٧٥٠ر.سـشهريًا', 'نموذج ٧٥٠ ر.سشهريًا', 'نموذج ٧٥٠د.إشهريًا', 'نموذج ٧٥ر.سسنويًا',
+      'نموذج ٧٥٠ ر.سشهريًا', 'نموذج ٧٥٠ ر.سشهريًا',
+    ]) {
+      for (const figures of [[], [850000]]) assert.equal(nameOf('Studio', ar, figures), 'models[0].name', `${ar} ${figures}`);
+    }
+  });
+  it('still names: glued initials with no figure before them, an undotted pair inside a word after a figure', () => {
+    for (const ar of ['فيلا د.إبراهيم', 'نموذج ر.قاسم 2', 'نموذج ر.سعيد', 'نموذج ٢رسومات']) {
+      for (const figures of [[], [850000]]) assert.equal(nameOf('Studio', ar, figures), null, `${ar} ${figures}`);
+    }
+  });
+});
+
 describe('pricePagesToRender', () => {
   it('returns the 1-based pages that need a look, in order', () => {
     assert.deepEqual(pricePagesToRender([LOCATION_PAGE, 'شقة بغرفتين', PRICE_PAGE, '', PRICE_PAGE]), [3, 5]);
