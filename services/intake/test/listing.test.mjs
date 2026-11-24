@@ -1004,9 +1004,11 @@ describe('edits.setLicence / setWafi — REGA advertising licences', () => {
 describe('edits.addVideo — a video attaches to a listing that already exists', () => {
   let tmp;
   const slug = 'tmp-video-villa';
+  const preparedDirs = [];
   /** Stand-in for what prepareVideo() leaves behind: a transcoded clip, optionally a poster. */
   const prepared = (name, bytes, poster = null) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-prepared-'));
+    preparedDirs.push(dir);
     const file = path.join(dir, `${name}.mp4`);
     fs.writeFileSync(file, bytes);
     let posterFile = null;
@@ -1029,7 +1031,10 @@ describe('edits.addVideo — a video attaches to a listing that already exists',
     writeInboxListing(tmp, seed());
     writeIndex(tmp, { nextSeq: 2, listings: { [slug]: 'BONA-W001' } });
   });
-  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    for (const dir of preparedDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
 
   it('copies the clip AND its poster in, and records both site-local paths on the listing', () => {
     const bytes = Buffer.from('fake mp4 bytes');
@@ -1095,6 +1100,7 @@ describe('a PDF + a video together — the combination the owner actually sends'
   it('publishes from the PDF, then the video attaches to that same listing', () => {
     const slug = 'obhur-waterfront-villa';
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-pdf-video-'));
+    const media = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-prepared-'));
     try {
       fs.mkdirSync(path.join(tmp, 'scripts', 'curate', 'inbox'), { recursive: true });
       const picks = orderedPicks(AI.images);
@@ -1111,7 +1117,6 @@ describe('a PDF + a video together — the combination the owner actually sends'
 
       // Step 2 — the video, captioned "video BONA-W020" (see findListingId in commands.mjs),
       // after lib/video.mjs prepareVideo() has re-encoded it and cut a poster out of it.
-      const media = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-prepared-'));
       fs.writeFileSync(path.join(media, 'clip.mp4'), 'a whole walkthrough clip');
       fs.writeFileSync(path.join(media, 'poster.jpg'), 'its first frame');
       const res = edits.addVideo(tmp, listing.id, { file: path.join(media, 'clip.mp4'), poster: path.join(media, 'poster.jpg') });
@@ -1124,6 +1129,7 @@ describe('a PDF + a video together — the combination the owner actually sends'
       assert.deepEqual(findInbox(tmp, listing.id).listing.videos, expected);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
+      fs.rmSync(media, { recursive: true, force: true });
     }
   });
 });
