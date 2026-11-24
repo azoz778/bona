@@ -355,6 +355,16 @@ describe('copyProblems — owner rules', () => {
     ok.description.ar = ['تبدأ من 3 آلاف متر مربع.', 'اثنان.'];
     assert.deepEqual(copyProblems(ok), []);
   });
+  it('r6 #2 (Claude r5 NB10): a currency code glued to its figure is a price, in the copy and in a model name', () => {
+    for (const text of ['Apartments from 4500SAR.', 'Villas at 1,250,000SAR.', 'Studios SAR4500 a month.', 'Plots from 45000SR.']) {
+      const l = structuredClone(GOOD.listing);
+      l.description.en = [text, 'Two.'];
+      assert.ok(copyProblems(l).some((p) => /description\.en\[0\] states a price/.test(p)), text);
+    }
+    for (const name of ['Studio 4500SAR', 'Studio SAR4500', 'Villa 1,250,000SAR']) {
+      assert.ok(copyProblems(GOOD.listing, { models: [{ name: { en: name, ar: 'نموذج' } }] }).some((p) => /^models\[0\]\.name\.en states a price/.test(p)), name);
+    }
+  });
 
   it('catches a phone number', () => {
     const l = structuredClone(GOOD.listing);

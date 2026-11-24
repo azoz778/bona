@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { hasSubsidyWording, pageNeedsPriceRender, pricePagesToRender, MAX_PRICE_PAGES } from '../lib/price-pages.mjs';
 import { execFileSync } from 'node:child_process';
 import { checkListing, replaceMetaFor, writeInboxListing } from '../lib/listing.mjs';
-import { compareEnrichment, processPdf, statesMoney } from '../lib/pipeline.mjs';
+import { compareEnrichment, dropMoneyText, processPdf, statesMoney } from '../lib/pipeline.mjs';
 import { classifyRun, planBackfill } from '../lib/backfill.mjs';
 import * as msg from '../lib/messages.mjs';
 
@@ -133,6 +133,32 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
   ];
   it('MONEY', () => { for (const t of MONEY) assert.equal(statesMoney(t), true, t); });
   it('NOT MONEY', () => { for (const t of NOT_MONEY) assert.equal(statesMoney(t), false, t); });
+});
+
+// r6 #2 (Claude r5 B4, Codex r5 #1b/c) — the model-NAME guard (dropMoneyText's `name`): a currency code glued to its
+// figure, and a reading's price in a scaled form — trailing zeros, under a million, "4500K", an Arabic comma after.
+describe('r6 #2: the model-name guard — glued currency codes and scaled reading prices', () => {
+  const nameOf = (en, ar, figures) => dropMoneyText({ models: [{ name: { en, ar } }] }, { figures }).name;
+  it('a currency code glued to its figure refuses the name, whatever the figure', () => {
+    for (const en of ['Studio 4500SAR', 'Studio SAR4500', 'Villa 1,250,000SAR']) assert.equal(nameOf(en, 'نموذج', []), 'models[0].name', en);
+  });
+  it('a reading price as a scaled token refuses the name: trailing zeros, under a million, K, an Arabic comma after it', () => {
+    for (const [en, ar, n] of [
+      ['Penthouse 4.50m', 'بنتهاوس', 4500000], ['Townhouse 0.95m', 'تاون هاوس', 950000], ['Penthouse 4500K', 'بنتهاوس', 4500000],
+      ['Penthouse', 'بنتهاوس ٤٫٥ مليون، إطلالة', 4500000],
+    ]) assert.equal(nameOf(en, ar, [n]), 'models[0].name', `${en} / ${ar}`);
+  });
+  it('"Villa 15m" with no 15,000,000 in the reading, and the 8 real W023 names, are names', () => {
+    assert.equal(nameOf('Villa 15m', 'فيلا 15م', [4500000]), null);
+    // enrich-dry6/work/ai.json: the names and every price the reading carries (models, Sakani, headline).
+    const W023 = [
+      ['Lulu 2', 'نموذج لؤلؤ 2', 319015, 270425], ['Nawras 2', 'نموذج نورس 2', 419994, 356024], ['Saif 2', 'نموذج سيف 2', 491819, 416910],
+      ['Saif 3', 'نموذج سيف 3', 511615, 433690], ['Marafi 3', 'نموذج مرافئ 3', 593719, 503288], ['Zumurrud 2', 'نموذج الزمرد 2', 673245, 559261],
+      ['Fairouz 1', 'نموذج الفيروز 1', 636245, 519928], ['Kahraman 2', 'نموذج كهرمان 2', 752914, 625442],
+    ];
+    const figures = W023.flatMap(([, , p, s]) => [p, s]);
+    for (const [en, ar] of W023) assert.equal(nameOf(en, ar, figures), null, en);
+  });
 });
 
 describe('pricePagesToRender', () => {
@@ -1304,6 +1330,23 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     try {
       assert.deepEqual((await t.run()).listingPreview.models.map((m) => m.name.en), ['Penthouse', 'Villa 15m']);
     } finally { t.cleanup(); }
+  });
+
+  it('r6 #2: a model NAME with a reading price as "4.50m" or "٤٫٥ مليون،", or a code glued to a figure ("Studio 4500SAR"), refuses the run end to end', async () => {
+    for (const [en, ar] of [['Penthouse 4.50m', 'بنتهاوس'], ['Penthouse', 'بنتهاوس ٤٫٥ مليون، إطلالة']]) {
+      const a = withModels([model('Penthouse', 4500000, null, 3), model('Villa 15m', 6000000, null, 3)]);
+      a.models[0].name = { en, ar };
+      const r = await rig({ listing: a });
+      try {
+        await assert.rejects(r.run(), (err) => err.stage === 'price' && /^models\[0\]\.name states/.test(err.reason), `${en} / ${ar}`);
+      } finally { r.cleanup(); }
+    }
+    // A glued code is not one of the reading's prices: the reading contract (claude.mjs copyProblems) refuses it first.
+    const g = withModels([model('Studio 4500SAR', null, null, null), model('Villa 15m', 6000000, null, 3)]);
+    const u = await rig({ listing: g });
+    try {
+      await assert.rejects(u.run(), /models\[0\]\.name\.en states a price/);
+    } finally { u.cleanup(); }
   });
 
   it('r3 #3: a model NAME that carries a price the reading carries — a model price, a Sakani price, the headline — refuses the run', async () => {

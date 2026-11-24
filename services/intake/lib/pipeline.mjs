@@ -152,8 +152,11 @@ const DOTTED_MARK_G = new RegExp(String.raw`(?<![\u0600-\u06ff])(?:ر\.\s?[سع�
   + String.raw`|(?<![A-Za-z])(?:S\.\s?R\.?|SR\.)(?![A-Za-z])`, 'gi');
 /** "approx." / "incl." / "excl." — an abbreviation's dot is no sentence end ("Deposit approx. 750": r6 #1). */
 const ABBREVIATION_DOT_G = /(?<![A-Za-z])(approx|incl|excl)\./gi;
-/** A currency's name or symbol anywhere, or its code by a figure — what a model NAME may not carry (r2 #4). */
-const NAME_CURRENCY_RE = new RegExp(String.raw`\b(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)\b\s*\d|\d\s*\b(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)\b|\b(?:riyals?|rials?|dirhams?|dollars?|euros?|sterling)\b|ريال|ر\.\s?س|ر\.\s?ع|درهم|دولار|يورو|جنيه|دينار|[$€£﷼\u20c1]`, 'i');
+/**
+ * A currency's name or symbol anywhere, or its code by a figure — what a model NAME may not carry (r2 #4). Only a LETTER
+ * continues a code or a name, as in CUR: "Studio 4500SAR", "Studio SAR4500", "Villa 1,250,000SAR" (r6 #2).
+ */
+const NAME_CURRENCY_RE = new RegExp(String.raw`(?<![A-Za-z])(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)(?![A-Za-z])\s*\d|\d\s*(?<![A-Za-z])(?:SAR|SR|AED|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)(?![A-Za-z])|(?<![A-Za-z])(?:riyals?|rials?|dirhams?|dollars?|euros?|sterling)(?![A-Za-z])|ريال|ر\.\s?س|ر\.\s?ع|درهم|دولار|يورو|جنيه|دينار|[$€£﷼\u20c1]`, 'i');
 /**
  * Arabic words as whole words, with the clitics و / ف, ب / ل / لل and ال in front (a tatweel may follow one:
  * "فـحجز"): "السعر", "بسعر", "للإيجار" — never inside another word ("رسوم" is not in "رسومات"). Only a LETTER
@@ -236,12 +239,28 @@ export function statesMoney(text) {
 const statesFigure = (text, figures) => figures.length > 0 && typeof text === 'string'
   && figures.some((n) => priceAppearsIn(withoutMeasures(westernise(text)), n));
 /**
+ * A scaled token in a model NAME (r6 #2, Claude r5 B4, Codex r5 #1): its digits — "." or "٫" as the decimal mark,
+ * trailing zeros or not, thousands grouped by "," or "٬" — then m / mn / million / مليون / ملايين or k / thousand /
+ * ألف / الف / آلاف / الاف. "m" and "k" only written solid ("20 m" is metres, as in price.mjs). The word ends at a
+ * letter, never at Arabic punctuation ("٤٫٥ مليون،"). Name-only: price.mjs, which also confirms prices, is unchanged.
+ */
+const NAME_SCALED_G = new RegExp(String.raw`(?<!\d[.,٫٬]?)(\d{1,3}(?:[,٬]\d{3})+|\d+)(?:[.٫](\d+))?`
+  + String.raw`(?:(m|k)|\s*(million|mn|thousand|مليون|ملايين|ألف|الف|آلاف|الاف))(?![a-z²\d]|[\u0620-\u065f\u066e-\u06d3\u06d5-\u06ff])`, 'gi');
+const NAME_SCALE = { m: 1e6, mn: 1e6, million: 1e6, 'مليون': 1e6, 'ملايين': 1e6, k: 1e3, thousand: 1e3, 'ألف': 1e3, 'الف': 1e3, 'آلاف': 1e3, 'الاف': 1e3 };
+/** Does a scaled token in `text` come to one of `figures` ("Penthouse 4.50m", "Townhouse 0.95m", "Penthouse 4500K": r6 #2)? */
+const statesScaledFigure = (text, figures) => figures.length > 0 && typeof text === 'string'
+  && [...withoutMeasures(text).matchAll(NAME_SCALED_G)].some(([, whole, frac, solid, word]) => {
+    const n = Math.round(Number(`${whole.replace(/[,٬]/g, '')}.${frac ?? '0'}`) * NAME_SCALE[(solid ?? word).toLowerCase()]);
+    return figures.some((f) => Math.round(f) === n);
+  });
+/**
  * A model NAME states money by a currency or a payment word, or by a price the reading carries (`figures`: its
- * model prices, Sakani prices and headline — r3 #3), in any form ("Penthouse 4.5m" against 4,500,000: r5 #3).
- * "Villa 15m", "Plot 10000", "Penthouse 4,250" are names when the reading has no such price.
+ * model prices, Sakani prices and headline — r3 #3), in any form ("Penthouse 4.5m" against 4,500,000: r5 #3;
+ * "4.50m", "0.95m", "4500K", "٤٫٥ مليون،": r6 #2). "Villa 15m", "Plot 10000", "Penthouse 4,250" are names when the
+ * reading has no such price.
  */
 const nameStatesMoney = (text, figures = []) => typeof text === 'string'
-  && (NAME_CURRENCY_RE.test(westernise(text)) || PAYMENT_RE.test(text) || statesFigure(text, figures));
+  && (NAME_CURRENCY_RE.test(westernise(text)) || PAYMENT_RE.test(text) || statesFigure(text, figures) || statesScaledFigure(text, figures));
 
 /**
  * The money guard over a reading's free text (r2 #4, Codex r1 #3): a unit model's rooms or availability that
