@@ -210,23 +210,31 @@ const FOUR_PLUS_RE = /(?<![\d.,٫٬])\d{4,}/;
  * A money-sized figure: thousands grouped by a comma, an Arabic comma (r6 #1, as price.mjs SEP), a dot, a space, a
  * no-break or a thin space ("50,000", "50 000", "٤،٥٠٠،٠٠٠"); five digits or more; a scaled amount ("4.5m", "1.2 million",
  * "مليون", "ألف", "990k"). A whole number written solid with "m" ("15m", "500m") is metres here, never millions; "5k"
- * beside a distance word in the same comma sub-clause is a distance.
+ * with a distance word one or two words after it, in its sub-clause, is a distance (r7 #4).
  */
 const GROUPED_RE = /(?<![\d.,٫٬])\d{1,3}(?:[,٬.'’ \u00a0\u202f\u2009\u060c]\d{3})+(?!\d)/;
 const SCALED_RE = new RegExp([
   String.raw`(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?\s*(?:million|mn|thousand|billion|bn|مليون|ملايين|مليار|ألف|الف|آلاف|الاف)(?![a-z])`,
   String.raw`(?<![\d.,٫٬])\d+[.,٫]\d+m(?![a-z²\d])`,
 ].join('|'), 'i');
-const SOLID_K_RE = /(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?k(?![a-z²\d])/i;
+const SOLID_K_G = /(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?k(?![a-z²\d])/gi;
+/** A k-figure's sub-clause ends at a comma, a dash or a bracket ("From 850k – walking distance…", "850k (walking…)": r7 #4). */
+const K_SUBCLAUSE_END = /[,،\-–—()[\]{}]/;
 const DISTANCE_WORD_RE = /\b(?:run|runs|running|jog|jogging|walk|walking|track|trail|race|route|loop|path|cycling|cycle)\b|ممشى|مضمار|مسار|جري/i;
 /** Cut out before the test (r3 #1): a duration right after its number, and a year 1900–2099 standing alone. */
 const DURATION_G = /(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?\s*(?:years?|yrs?|months?|weeks?|days?|hours?|hrs?|minutes?|mins?|سنة|سنوات|سنين|عام|أعوام|اعوام|شهر|شهور|أشهر|اشهر|أسبوع|أسابيع|يوم|أيام|ايام|ساعة|ساعات|دقيقة|دقائق)(?![a-z\u0600-\u06ff])/gi;
 const YEAR_G = /(?<![\d.,٫٬])(?:19|20)\d{2}(?![\d]|[.,٫٬]\d)/g;
+/**
+ * statesMoney's sentence end: SENTENCE_END, except dots followed by a space and a figure — "Booking fee min. 2000",
+ * "Deposit est. 750", "Deposit... 750" are one sentence (r7 #4). publishedText and the copy guard keep SENTENCE_END.
+ */
+const MONEY_SENTENCE_END = /(?<!\bsq)(?!\.+\s+[\d٠-٩۰-۹])[.!?؟؛;\n]+(?=\s|$)/i;
 
 /**
  * Does `text` state money? THE rule for free text — a unit model's rooms and availability, every amenities /
  * nearby / warranties item (r3 #1, r5 #1, r6 #1; its whole contract is one table in price-pages.test.mjs). Tatweel
- * goes first, and a dotted mark or "approx." / "incl." / "excl." never ends a sentence. Sentence by sentence:
+ * goes first, and a dotted mark, "approx." / "incl." / "excl." or a dot before a figure ("min. 2000") never ends a
+ * sentence. Sentence by sentence:
  *   - a currency next to a figure ("Club fee SAR 1,500"), looked for BEFORE anything is cut ("SAR 4.5 M" is no
  *     4.5 metres, "SAR 4,500 month" no duration: r6 #1);
  * then, once measurements (withoutMeasures) and durations ("2 years", "24 ساعة") are cut out (a lone year, "2027",
@@ -236,14 +244,15 @@ const YEAR_G = /(?<![\d.,٫٬])(?:19|20)\d{2}(?![\d]|[.,٫٬]\d)/g;
  *   - "starting / from / يبدأ / ابتداء" with a figure of four digits or more ("Starting from 4500");
  *   - grouped thousands ("Down payment 50 000", "Parking for 1,200 cars" — a count, dropped all the same:
  *     TAQEEM first), five digits or more, or a scaled amount ("4.5m", "1.2 million");
- *   - a solid-k figure, unless a distance word shares its comma sub-clause ("A 5k jogging track").
+ *   - a solid-k figure, unless a distance word is one of the two words right after it, in its sub-clause — a comma,
+ *     a dash or a bracket ends one ("A 5k jogging track" is a distance, "Studios 850k near the jogging track" not).
  * Prices are published from the price fields only, so no free text may carry one.
  */
 export function statesMoney(text) {
   // Sentences only — a comma never sets a figure apart from its word ("Deposit, 750": r5 #1). Tatweel out, and a dotted
   // mark or an abbreviation closed up first, so no dot parts "ر. س" / "S.R." / "approx." from its figure (r6 #1).
   const folded = String(text ?? '').replace(/\u0640/g, '').replace(DOTTED_MARK_G, ' SAR ').replace(ABBREVIATION_DOT_G, '$1 ');
-  return folded.split(SENTENCE_END).some((clause) => {
+  return folded.split(MONEY_SENTENCE_END).some((clause) => {
     const w = westernise(clause);
     // The currency before any cut: "SAR 4.5 M" is no 4.5 metres, "SAR 4,500 month" no duration (r6 #1).
     if (CURRENCY_BY_FIGURE_RE.test(w)) return true;
@@ -253,8 +262,10 @@ export function statesMoney(text) {
     // A lone year is cut from the "from" test only ("Handover starts 2027"), never before the others ("SAR 2000").
     if (FROM_WORD_RE.test(t) && FOUR_PLUS_RE.test(t.replace(YEAR_G, ' '))) return true;
     if (GROUPED_RE.test(t) || /(?<![\d.,٫٬])\d{5,}/.test(t) || SCALED_RE.test(t)) return true;
-    // The distance exception per comma sub-clause: "from 850k, walking distance to the mall" is still a price (r6 #1).
-    return t.split(/[,،]\s*/).some((c) => SOLID_K_RE.test(c) && !DISTANCE_WORD_RE.test(c));
+    // Each k-figure is money unless a distance word is one of the two words after it, in its sub-clause (r6 #1, r7 #4):
+    // "from 850k, walking distance to the mall", "850k (walking distance…)", "Studios 850k near the jogging track".
+    return t.split(K_SUBCLAUSE_END).some((c) => [...c.matchAll(SOLID_K_G)]
+      .some((k) => !DISTANCE_WORD_RE.test(c.slice(k.index + k[0].length).trim().split(/\s+/).slice(0, 2).join(' '))));
   });
 }
 

@@ -128,6 +128,18 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     'ملاحظة،ر. ع 2000', 'ملاحظة،ر. ق 2000', 'ملاحظة،د. إ 2000', 'ملاحظة،د. ك 2000',
     // r7 #2 (Claude r6 B5c): the marks price.mjs MARKS reads — undotted "رس" / "ر س", the Farsi-yeh ریال, "US$" after a figure.
     'رس 2000', '2000 ر س', 'ریال 2000', '2000 US$',
+    // r7 #4 (Claude r6 B5a): a distance word clears a solid-k figure only when it comes within two words AFTER that
+    // figure, in the same sub-clause — and a dash (– — -) or a bracket ends a sub-clause too, like a comma.
+    'From 850k – walking distance to the beach', '850k (walking distance…)', 'Studios 850k near the jogging track',
+    'Apartments from 850k — walking distance to the mall', 'Apartments from 850k - walking distance to the mall',
+    'Apartments from 850k [walking distance to the mall]', 'Units 850k near the walking track',
+    'Apartments from 850k and a short walk to the mall', 'شقق من 850k - ممشى قريب', 'Golf membership 5k – next to the walking trail',
+    'A 5k jogging track and membership 850k', 'Walking track 2.5k',
+    // r7 #4 (Claude r6 B5b): a dot, then a space, then a digit never ends the sentence ("min. 2000", "est. 750", "... 750").
+    'Booking fee min. 2000', 'Deposit est. 750', 'Deposit... 750', 'Down payment max. 5000', 'Service fee avg. 1500',
+    'Deposit e.g. 750', 'العربون... 750', 'العربون... ٧٥٠',
+    // r7 #4 (Codex r6 #8, not fixed): the leaks a narrower comma split or a bounded د.إ would reopen.
+    'Club membership 5k,5 min walk', 'Club membership 2000 د.إسنوياً',
   ];
   const NOT_MONEY = [
     'Handover starts 2027', 'No maintenance fees for 2 years', 'ضمان 10 سنوات … مقدم من المطور', 'خدمات مقدمة … 24 ساعة',
@@ -140,6 +152,10 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     'ر. سعيد', 'ر. سعيد 2000', 'الدار. سعر الوحدة', 'د. إبراهيم 2000',
     // r7 #2: after Arabic punctuation too — and a vowel mark is part of the word before ("مُر.").
     '،د. إبراهيم', 'الدور 2،د. إبراهيم', '،ر. سعيد 2000', 'مُر. سعيد 2000',
+    // r7 #4: a distance word one or two words after the k-figure, in its sub-clause, is a distance; a dot before a
+    // figure joins two sentences, which still state no money here.
+    'A 5k fun run', 'A 5k jogging track (lit at night)', '5k run – every Friday', 'Area 120 sqm. 3 bedrooms, 2 bathrooms',
+    'Ground to sixth floor. 2 lifts',
   ];
   it('MONEY', () => { for (const t of MONEY) assert.equal(statesMoney(t), true, t); });
   it('NOT MONEY', () => { for (const t of NOT_MONEY) assert.equal(statesMoney(t), false, t); });
