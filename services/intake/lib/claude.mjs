@@ -29,7 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
 import { bilingualListProblems, FORBIDDEN as COPY_FORBIDDEN, forbiddenHits, HYPE_WORDS as SHARED_HYPE_WORDS, isImageFocus as isFocus, MODEL_LIMITS } from '../../../scripts/curate/rules.mjs';
-import { riyalOf } from './price.mjs';
+import { MONEY_MARKS, riyalOf } from './price.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PROMPT_TEMPLATE = path.join(HERE, 'prompt.md');
@@ -675,18 +675,21 @@ const unitLabel = (u) => {
 /**
  * A price inside the copy: a price-sized figure next to a currency. The site prints the price from
  * `price` (which the TAQEEM check may have cleared), so a figure in the prose could outlive it. Only a
- * letter continues a code, so one glued to its figure counts: "from 4500SAR", "SAR4500" (r6 #2).
+ * letter continues a code, so one glued to its figure counts: "from 4500SAR", "SAR4500" (r6 #2). Every mark price.mjs
+ * MARKS reads, from its one list (r7 #2): "650,000 dirhams", "درهم", "د.إ", "ر.ع", "Dhs", "S.R.", "US$"; a country may
+ * stand between a figure and its currency ("4500 Saudi Riyals").
  */
-const CUR = '(?:(?<![A-Za-z])(?:SAR|SR|AED|USD|EUR|GBP|OMR)(?![A-Za-z])|riyals?|ريال|ر\\.\\s?س|[$€£﷼\u20c1])';
+const CUR = MONEY_MARKS.any;
+const COUNTRY = `(?:${MONEY_MARKS.countries}\\s+)?`;
 const SCALE = '(?:k|m|mn|million|bn|billion|ألف|الف|آلاف|الاف|مليون|ملايين|مليار)';
 const PRICE_IN_COPY_RE = new RegExp([
   `${CUR}\\s*(?:[\\d٠-٩]{1,3}(?:[,٬.\\s][\\d٠-٩]{3})+|[\\d٠-٩]{4,})`,         // SAR 319,015 / SAR 8500 — not "SR 15"
   `${CUR}\\s*[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*${SCALE}(?![a-z])`,           // SAR 2.5m
 
-  `[\\d٠-٩]{1,3}(?:[,٬.][\\d٠-٩]{3})+\\s*(?:(?:saudi|ريال سعودي)\\s*)?${CUR}`, // 319,015 ريال
-  `[\\d٠-٩]{4,}\\s*${CUR}`,                                             // 319015 SAR / 4500SAR, as "SAR 8500" (r6 #2)
-  `[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*${SCALE}\\s*(?:saudi\\s*)?${CUR}`,       // 2.5 million SAR / 3 ملايين ريال
-  `(?:^|[^\\d٠-٩\\s.,])\\s*(?:مليون|ملايين|ألف|آلاف|الف|الاف)\\s*(?:ريال|ر\\.\\s?س)`, // مليون ريال (no figure)
+  `[\\d٠-٩]{1,3}(?:[,٬.][\\d٠-٩]{3})+\\s*${COUNTRY}${CUR}`,       // 319,015 ريال / 319,015 Saudi Riyals (r7 #2)
+  `[\\d٠-٩]{4,}\\s*${COUNTRY}${CUR}`,                                    // 319015 SAR / 4500SAR, as "SAR 8500" (r6 #2) / 4500 Saudi Riyals (r7 #2)
+  `[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*${SCALE}\\s*${COUNTRY}${CUR}`,      // 2.5 million SAR / 3 ملايين ريال
+  `(?:^|[^\\d٠-٩\\s.,])\\s*(?:مليون|ملايين|ألف|آلاف|الف|الاف)\\s*${CUR}`, // مليون ريال (no figure)
   `(?:بسعر|السعر|ابتداء[ًا]? من|تبدأ من|يبدأ من|starting (?:at|from)|priced at)\\s*[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*${SCALE}(?![a-z²³2])(?!\\s*(?:m²|m2|sq|square|met|متر|م²|م2|km|كم|min|دقيق|دقائق|هكتار))`, // ابتداءً من 5 ملايين — not "from 120 m²"
 ].join('|'), 'i');
 

@@ -13,6 +13,8 @@ import { hasSubsidyWording, pageNeedsPriceRender, pricePagesToRender, MAX_PRICE_
 import { execFileSync } from 'node:child_process';
 import { checkListing, replaceMetaFor, writeInboxListing } from '../lib/listing.mjs';
 import { compareEnrichment, dropMoneyText, processPdf, statesMoney } from '../lib/pipeline.mjs';
+import { copyProblems } from '../lib/claude.mjs';
+import { printedInCurrency } from '../lib/price.mjs';
 import { classifyRun, planBackfill } from '../lib/backfill.mjs';
 import * as msg from '../lib/messages.mjs';
 
@@ -120,6 +122,12 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     // r6 #1 (B3): a rent period is a price word; a country between figure and currency; "،" groups digits; tatweel.
     'Floors 1–3, 4500 per month', 'الأدوار 1–3، 4500 شهرياً', 'Club membership 750 Saudi Riyals a year',
     'Club membership 750 Saudi Riyals', 'الأدوار العليا ٤،٥٠٠،٠٠٠', 'متاح الآن، الـحجز 5000', 'السعـر 2000',
+    // r7 #2 (Codex r6 #3): Arabic punctuation (، ؛ ؟ ٪ ۔) and digits before a dotted mark end a word, like a space.
+    'ملاحظة،ر. س 2000', 'ملاحظة؛ر. س 2000', 'ملاحظة،ر.س. 2000', '٢٠٠٠ر. س', 'عربون،ر. س 750',
+    'ملاحظة؟ر. س 2000', 'ملاحظة٪ر. س 2000', 'ملاحظة۔ر. س 2000',
+    'ملاحظة،ر. ع 2000', 'ملاحظة،ر. ق 2000', 'ملاحظة،د. إ 2000', 'ملاحظة،د. ك 2000',
+    // r7 #2 (Claude r6 B5c): the marks price.mjs MARKS reads — undotted "رس" / "ر س", the Farsi-yeh ریال, "US$" after a figure.
+    'رس 2000', '2000 ر س', 'ریال 2000', '2000 US$',
   ];
   const NOT_MONEY = [
     'Handover starts 2027', 'No maintenance fees for 2 years', 'ضمان 10 سنوات … مقدم من المطور', 'خدمات مقدمة … 24 ساعة',
@@ -130,6 +138,8 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     'Gym', 'رسومات معمارية لكل نموذج', 'Living room 4.2 x 5.1 m', 'Built in 1998',
     // r6 #1: a dotted mark is a mark only where its letters stand alone.
     'ر. سعيد', 'ر. سعيد 2000', 'الدار. سعر الوحدة', 'د. إبراهيم 2000',
+    // r7 #2: after Arabic punctuation too — and a vowel mark is part of the word before ("مُر.").
+    '،د. إبراهيم', 'الدور 2،د. إبراهيم', '،ر. سعيد 2000', 'مُر. سعيد 2000',
   ];
   it('MONEY', () => { for (const t of MONEY) assert.equal(statesMoney(t), true, t); });
   it('NOT MONEY', () => { for (const t of NOT_MONEY) assert.equal(statesMoney(t), false, t); });
@@ -166,6 +176,56 @@ describe('r6 #2: the model-name guard — glued currency codes and scaled readin
     ];
     const figures = W023.flatMap(([, , p, s]) => [p, s]);
     for (const [en, ar] of W023) assert.equal(nameOf(en, ar, figures), null, en);
+  });
+});
+
+// r7 #2 (Claude r6 B3 / B5c, Codex r6 #3) — ONE currency-mark list (price.mjs MONEY_MARKS) for the guards that keep
+// money OUT of the text: the free-text money rule, the model-name guard and the listing-copy guard read every mark
+// price.mjs MARKS reads (MARKS decides a confirmed figure's currency; a mark these guards miss is published). A row per mark.
+describe('r7 #2: one currency-mark list — every guard reads every mark price.mjs MARKS reads', () => {
+  const MARKS_READ = [
+    // codes
+    'SAR', 'SR', 'S.R', 'S.R.', 'AED', 'Dh', 'Dhs', 'USD', 'US$', 'EUR', 'GBP', 'OMR', 'QAR', 'KWD', 'BHD', 'EGP', 'JOD', 'TRY', 'CHF',
+    'CAD', 'AUD', 'INR', 'PKR', 'CNY', 'JPY', 'RUB', 'BGN', 'HRK', 'TL', 'A$', 'HK$', 'kn',
+    // words
+    'riyals', 'riyal', 'rials', 'Saudi Riyals', 'omani rials', 'dirhams', 'dirham', 'dollars', 'euros', 'pounds', 'pounds sterling', 'sterling',
+    // Arabic names and abbreviations
+    'ريال', 'ریال', 'ريالات', 'ريال سعودي', 'ريال عماني', 'ريال قطري', 'درهم', 'دولار', 'يورو', 'جنيه', 'دينار', 'ليرة', 'ليره', 'إسترليني', 'استرليني',
+    'ر.س', 'ر.س.', 'ر. س', 'ر س', 'رس', 'ر.ع', 'ر. ع', 'ر ع', 'ر.ق', 'ر. ق', 'رق', 'د.إ', 'د. إ', 'د إ', 'د.ك', 'د. ك', 'د ك',
+    // symbols
+    '$', '€', '£', '﷼', '⃁', '₺', 'лв',
+  ];
+  const nameOf = (en, ar) => dropMoneyText({ models: [{ name: { en, ar } }] }, { figures: [] }).name;
+  it('the list above is what price.mjs MARKS reads: beside 750, a SAR mark makes it SAR, any other makes it never a bare figure', () => {
+    const marksRead = (t) => printedInCurrency(t, 750, 'SAR', { bareCounts: false }) || !printedInCurrency(t, 750, 'SAR', { bareCounts: true });
+    assert.equal(marksRead('Note 750'), false, 'a bare figure');
+    for (const m of MARKS_READ) for (const t of [`Note 750 ${m}`, `Note ${m} 750`]) assert.ok(marksRead(t), t);
+  });
+  it('the free-text money rule (statesMoney) reads each one beside a figure, before or after it, in either language', () => {
+    for (const t of ['Note 750', 'ملاحظة 750']) assert.equal(statesMoney(t), false, t);
+    for (const m of MARKS_READ) {
+      for (const t of [`Note ${m} 750`, `Note 750 ${m}`, `ملاحظة ${m} 750`, `ملاحظة 750 ${m}`]) assert.equal(statesMoney(t), true, t);
+    }
+  });
+  it('the model-name guard refuses each one beside a figure, in either name', () => {
+    for (const m of MARKS_READ) {
+      for (const [en, ar] of [[`Studio ${m} 4500`, 'نموذج'], [`Studio 4500 ${m}`, 'نموذج'], ['Studio', `نموذج ${m} 4500`], ['Studio', `نموذج 4500 ${m}`]]) {
+        assert.equal(nameOf(en, ar), 'models[0].name', `${en} / ${ar}`);
+      }
+    }
+  });
+  it('the name guard: Arabic punctuation before ر.ق / د.إ / د.ك ends a word too (Codex r6 #3); "د. إبراهيم" stays a name', () => {
+    for (const ar of ['نموذج أ،د. إ 2000', 'نموذج أ،ر. ق 2000', 'نموذج أ؛د. ك 2000']) assert.equal(nameOf('Studio', ar), 'models[0].name', ar);
+    for (const ar of ['فيلا،د. إبراهيم 2', 'فيلا د. إبراهيم 2']) assert.equal(nameOf('Villa Ibrahim', ar), null, ar);
+  });
+  it('the listing-copy guard (copyProblems) refuses each one beside a price, in English and in Arabic copy', () => {
+    for (const m of MARKS_READ) {
+      for (const [en, ar] of [[`Townhouses from 650,000 ${m}.`, `تاون هاوس تبدأ من 650,000 ${m}.`], [`Townhouses from ${m} 650,000.`, `تاون هاوس تبدأ من ${m} 650,000.`]]) {
+        const bad = copyProblems({ description: { en: [en], ar: [ar] } });
+        assert.ok(bad.some((p) => p.startsWith('description.en[0] states a price')), en);
+        assert.ok(bad.some((p) => p.startsWith('description.ar[0] states a price')), ar);
+      }
+    }
   });
 });
 

@@ -365,6 +365,28 @@ describe('copyProblems — owner rules', () => {
       assert.ok(copyProblems(GOOD.listing, { models: [{ name: { en: name, ar: 'نموذج' } }] }).some((p) => /^models\[0\]\.name\.en states a price/.test(p)), name);
     }
   });
+  it('r7 #2 (Claude r6 B3): every currency mark is a price in the copy — dirhams, درهم, دولار, يورو, د.إ, ر.ع, Dhs, S.R., a country before it', () => {
+    // An AED listing on request whose copy said "650,000 dirhams" was published; so was each of these, in both languages.
+    // (A row for every mark price.mjs MARKS reads: price-pages.test.mjs "r7 #2".)
+    for (const [en, ar] of [
+      ['Townhouses from 650,000 dirhams.', 'تاون هاوس تبدأ من 650,000 درهم.'],
+      ['Apartments from 850,000 dollars.', 'شقق تبدأ من 850,000 دولار.'],
+      ['Apartments from 850,000 euros.', 'شقق تبدأ من 850,000 يورو.'],
+      ['Townhouses from 650,000 Dhs.', 'تاون هاوس تبدأ من 650,000 د.إ'],
+      ['Apartments from Dhs 850,000.', 'شقق تبدأ من 85,000 ر.ع.'],
+      ['Apartments from S.R. 850,000.', 'شقق تبدأ من ر. س 850,000.'],
+      ['Club membership 4500 Saudi Riyals a year.', 'عضوية النادي 4500 دولار سنوياً.'],
+      ['Club membership 4500 US$ a year.', 'عضوية النادي 4500 ر. ع سنوياً.'],
+      ['Apartments from 850,000 US dollars.', 'شقق تبدأ من 850,000 جنيه.'],
+    ]) {
+      const l = structuredClone(GOOD.listing);
+      l.description.en = [en, 'Two.'];
+      l.description.ar = [ar, 'اثنان.'];
+      const bad = copyProblems(l);
+      assert.ok(bad.some((p) => p.startsWith('description.en[0] states a price')), en);
+      assert.ok(bad.some((p) => p.startsWith('description.ar[0] states a price')), ar);
+    }
+  });
 
   it('catches a phone number', () => {
     const l = structuredClone(GOOD.listing);
