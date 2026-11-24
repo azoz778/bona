@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { hasSubsidyWording, pageNeedsPriceRender, pricePagesToRender, MAX_PRICE_PAGES } from '../lib/price-pages.mjs';
 import { execFileSync } from 'node:child_process';
 import { checkListing, replaceMetaFor, writeInboxListing } from '../lib/listing.mjs';
-import { processPdf, statesMoney } from '../lib/pipeline.mjs';
+import { compareEnrichment, processPdf, statesMoney } from '../lib/pipeline.mjs';
 import { classifyRun, planBackfill } from '../lib/backfill.mjs';
 import * as msg from '../lib/messages.mjs';
 
@@ -3314,6 +3314,41 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.deepEqual(report.enrich.plans, [`/listings/${SLUG}/plan-02.jpg`]);
       assert.deepEqual(report.floorPlans.map((p) => p.model), [1]);
     } finally { d.cleanup(); }
+  });
+
+  it('r5 #7 (Codex r4 #6): re-enrich counts plan losses per model — a published plan flagged now is a loss though another model gains one; --force takes it', async () => {
+    // The listing carries Nawras's plan; this reading's plan for Nawras is flagged and Lulu gains a clean one: 1 → 1.
+    const carried = () => {
+      const m = prior(2);
+      m[0].name = { en: 'Nawras', ar: 'نموذج نورس' };
+      m[1].name = { en: 'Lulu', ar: 'نموذج لؤلؤ' };
+      m[0].floorPlan = { src: `/listings/${SLUG}/plan-03.jpg`, thumb: `/listings/${SLUG}/plan-03-thumb.webp` };
+      return m;
+    };
+    const r = await rig({ listing: twoPlans(), candidateCount: 7, planCheck: { 'plan-01': 'phone' } });
+    try {
+      seed(r, { price: { ...ON_REQUEST }, extra: { models: carried() } });
+      const raw = fs.readFileSync(inboxFile(r), 'utf8');
+      await assert.rejects(enrich(r), (err) => err.stage === 'enrich' && !err.retryable
+        && /^BONA-W023 already carries more than this reading: floor plan dropped: Nawras — nothing was changed; re-run with --force if the new reading is right$/.test(err.reason), 'refused');
+      assert.equal(fs.readFileSync(inboxFile(r), 'utf8'), raw);
+      assert.equal(fs.readFileSync(path.join(pubDir(r), 'plan-03.jpg'), 'utf8'), 'old plan', 'the plan file is still there');
+      assert.equal(git(r, 'status', '--porcelain', '--untracked-files=all'), '');
+      const dry = await enrich(r, { dryRun: true });
+      assert.deepEqual([dry.enrich.compare.before.plans, dry.enrich.compare.after.plans], [1, 1]);
+      assert.deepEqual(dry.enrich.compare.losses, ['floor plan dropped: Nawras']);
+      assert.match(dry.blocked, /floor plan dropped: Nawras/);
+      const forced = await enrich(r, { force: true });
+      assert.equal(forced.ok, true);
+      assert.equal(forced.enrich.compare.forced, true);
+      assert.deepEqual(saved(r).models.map((m) => [m.name.en, m.floorPlan?.src ?? null]), [['Nawras', null], ['Lulu', `/listings/${SLUG}/plan-02.jpg`]]);
+    } finally { r.cleanup(); }
+    // Not found this time, or the model itself gone: a loss all the same. The same model keeping a plan is none.
+    const plan = (n) => ({ src: `/listings/${SLUG}/plan-0${n}.jpg`, thumb: `/listings/${SLUG}/plan-0${n}-thumb.webp` });
+    const m = (en, floorPlan = null) => ({ name: { en, ar: en }, floorPlan });
+    assert.deepEqual(compareEnrichment({ models: [m('Nawras', plan(3)), m('Lulu')] }, { models: [m('Nawras'), m('Lulu', plan(2))] }).losses, ['floor plan dropped: Nawras']);
+    assert.deepEqual(compareEnrichment({ models: [m('Nawras', plan(3)), m('Lulu')] }, { models: [m('Lulu'), m('Saif', plan(2))] }).losses, ['floor plan dropped: Nawras']);
+    assert.deepEqual(compareEnrichment({ models: [m('Nawras', plan(3)), m('Lulu')] }, { models: [m('Nawras', plan(1)), m('Lulu', plan(2))] }).losses, []);
   });
 
   it('r3 #7: --force accepts a first enrichment whose check failed for a reason that is not a quota — without those prices, and says so', async () => {

@@ -1300,13 +1300,14 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
  * What an enrichment would take away from the listing as it stands: `built` (modelsAndFacts() of the new
  * reading, its model prices and floor plans as they will be published) against `existing`. `before` /
  * `after` count the unit models, their published price figures (regular and Sakani) and their floor
- * plans, and name the fact lists carried; `losses` says, in words, every count that would go down and
- * every fact list that would go.
+ * plans, and name the fact lists carried; `losses` says, in words, every count that would go down, every
+ * fact list that would go and, when the plan count does not go down, every model that would lose its plan.
  */
 export function compareEnrichment(existing, built) {
   const list = (models) => (Array.isArray(models) ? models : []);
   const figures = (models) => list(models).flatMap((m) => [m?.price, m?.subsidisedPrice]).filter(isFigure).length;
-  const plans = (models) => list(models).filter((m) => m?.floorPlan && typeof m.floorPlan === 'object' && typeof m.floorPlan.src === 'string').length;
+  const hasPlan = (m) => Boolean(m?.floorPlan && typeof m.floorPlan === 'object' && typeof m.floorPlan.src === 'string');
+  const plans = (models) => list(models).filter(hasPlan).length;
   const facts = (l) => Object.keys(FACT_LISTS).filter((k) => ['en', 'ar'].some((lang) => Array.isArray(l?.[k]?.[lang]) && l[k][lang].length > 0));
   const side = (l) => ({ models: list(l?.models).length, prices: figures(l?.models), plans: plans(l?.models), facts: facts(l) });
   const before = side(existing);
@@ -1314,7 +1315,21 @@ export function compareEnrichment(existing, built) {
   const losses = [];
   if (after.models < before.models) losses.push(`unit models ${before.models} → ${after.models}`);
   if (after.prices < before.prices) losses.push(`confirmed model prices ${before.prices} → ${after.prices}`);
+  // Plans are lost per model (Codex r4 #6): a model that carries a plan and would have none (flagged, unchecked,
+  // skipped, not found, or the model itself gone) is a loss even when another model gains one and the count holds.
+  // Models are matched by their English name; two of one name are counted, never merged.
+  const key = (m) => String(m?.name?.en ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const planned = new Map();
+  for (const m of list(built?.models).filter(hasPlan)) planned.set(key(m), (planned.get(key(m)) ?? 0) + 1);
+  const planDropped = [];
+  list(existing?.models).forEach((m, i) => {
+    if (!hasPlan(m)) return;
+    if (planned.get(key(m))) { planned.set(key(m), planned.get(key(m)) - 1); return; }
+    const name = String(m?.name?.en ?? '').trim() || `model ${i + 1}`;
+    if (!planDropped.includes(name)) planDropped.push(name);
+  });
   if (after.plans < before.plans) losses.push(`floor plans ${before.plans} → ${after.plans}`);
+  else if (planDropped.length) losses.push(`floor plan${planDropped.length === 1 ? '' : 's'} dropped: ${planDropped.join(', ')}`);
   const dropped = before.facts.filter((k) => !after.facts.includes(k));
   if (dropped.length) losses.push(`fact list${dropped.length === 1 ? '' : 's'} dropped: ${dropped.join(', ')}`);
   return { before, after, losses };
@@ -1378,7 +1393,7 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   // cut the check short (a quota: Codex r1 #9; a page that did not render, a failed call: r2 #9) — nothing is
   // committed and the run is retryable, so the backfill enriches the listing again from scratch instead of
   // finding it "already enriched" by the plans and fact lists a cut-short run would have committed.
-  // A reading with fewer models, fewer confirmed model prices, fewer floor plans or a fact list fewer is
+  // A reading with fewer models, fewer confirmed model prices, fewer floor plans (or a model's plan) or a fact list fewer is
   // refused unless --force says it is right (the brochure really changed, or the old reading was wrong).
   const mp = report.modelPrices;
   // The way out of a check that keeps failing (r3 #7): --force accepts a FIRST enrichment (no model price to
