@@ -177,7 +177,9 @@ const SPACED_PA_G = /(?<![A-Za-z])p\.\s+a(?![A-Za-z])/gi;
  * marks, currency words and symbols refuse a name anywhere — but a tight dotted pair counts only where its word ends or
  * a figure follows, never with letters glued after it: "فيلا د.إبراهيم" and "نموذج ر.قاسم 2" are names, "نموذج ر.س" and
  * "نموذجر.س 2000" are not (r8 #2, Claude r7 NB4) — unless a figure stands right before it, spaces between or not: then
- * it counts whatever follows, "نموذج ٧٥٠ر.سشهريًا", "نموذج ٧٥٠ ر.سشهريًا" (r9 #3, Codex r8 #2).
+ * it counts whatever follows, "نموذج ٧٥٠ر.سشهريًا", "نموذج ٧٥٠ ر.سشهريًا" (r9 #3, Codex r8 #2). That figure has two digits
+ * or more: a one-digit model number before a person's initials is a name, "فيلا ٣ د.إبراهيم", "نموذج 2 ر.قاسم" (r10 #3,
+ * Codex r9 #4 = Claude r9 NB7).
  */
 const NAME_SITE_CODE = `(?<![A-Za-z])${MONEY_MARKS.siteCodes}(?![A-Za-z])`;
 const NAME_OTHER_CODE = `(?<![A-Za-z])(?-i:${MONEY_MARKS.otherCodes})(?![A-Za-z])`;
@@ -197,7 +199,7 @@ const NAME_WORD_ENDS = String.raw`(?![\u0640\u064b-\u065f\u0670]*[\u0620-\u063f\
 const NAME_CURRENCY_RE = new RegExp(String.raw`${NAME_SITE_CODE}\.?\s*${nameAmountAfter(String.raw`\d{3}`)}|${nameAmountBefore(String.raw`\d{3}`)}\s*${NAME_SITE_CODE}`
   + String.raw`|${NAME_OTHER_CODE}\.?\s*${nameAmountAfter(String.raw`\d{4}`)}|${nameAmountBefore(String.raw`\d{4}`)}\s*${NAME_OTHER_CODE}`
   + String.raw`|(?<![A-Za-z])${MONEY_MARKS.words}(?![A-Za-z])|${MONEY_MARKS.arabic}|${MONEY_MARKS.abbreviations}${NAME_WORD_ENDS}`
-  + String.raw`|(?<=\d[ \t\u00a0\u202f\u2009]*)${MONEY_MARKS.abbreviations}|${MONEY_MARKS.symbols}`, 'i');
+  + String.raw`|(?<=\d{2}[ \t\u00a0\u202f\u2009]*)${MONEY_MARKS.abbreviations}|${MONEY_MARKS.symbols}`, 'i');
 /**
  * Arabic words as whole words, with the clitics و / ف, ب / ل / لل and ال in front (a tatweel may follow one:
  * "فـحجز"): "السعر", "بسعر", "للإيجار" — never inside another word ("رسوم" is not in "رسومات"). Only a LETTER

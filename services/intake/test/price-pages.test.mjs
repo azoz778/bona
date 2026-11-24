@@ -513,6 +513,23 @@ describe('r9 #3: a glued dotted pair right after a figure refuses a model name',
   });
 });
 
+// r10 #3 (Codex r9 #4 = Claude r9 NB7): that pair counts after a figure of two digits or more only, so a one-digit model
+// number before a person's initials is a name, "فيلا ٣ د.إبراهيم" — refusing it refused the whole run. A pair whose
+// word ends still refuses after any figure ("نموذج ٣ ر.س").
+describe('r10 #3: a glued dotted pair after a one-digit model number is initials', () => {
+  const nameOf = (en, ar, figures = []) => dropMoneyText({ models: [{ name: { en, ar } }] }, { figures }).name;
+  it('still refused: two digits or more, then the pair with letters glued after it; a pair whose word ends', () => {
+    for (const ar of ['نموذج ٧٥ر.سسنويًا', 'نموذج ٧٥٠ر.سشهريًا', 'نموذج 75 ر.سسنويا', 'نموذج ٣ ر.س', 'نموذج 3ر.س']) {
+      for (const figures of [[], [850000]]) assert.equal(nameOf('Studio', ar, figures), 'models[0].name', `${ar} ${figures}`);
+    }
+  });
+  it('names: a one-digit model number, then a person\'s initials', () => {
+    for (const ar of ['فيلا ٣ د.إبراهيم', 'نموذج 2 ر.قاسم', 'فيلا 3 د.إبراهيم', 'فيلا ٣د.إبراهيم', 'نموذج ٢ ر.قاسم']) {
+      for (const figures of [[], [850000]]) assert.equal(nameOf('Studio', ar, figures), null, `${ar} ${figures}`);
+    }
+  });
+});
+
 describe('pricePagesToRender', () => {
   it('returns the 1-based pages that need a look, in order', () => {
     assert.deepEqual(pricePagesToRender([LOCATION_PAGE, 'شقة بغرفتين', PRICE_PAGE, '', PRICE_PAGE]), [3, 5]);
