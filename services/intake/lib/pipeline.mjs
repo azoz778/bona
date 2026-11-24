@@ -1159,7 +1159,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // Every plan it left out in ONE warning, by model name, grouped by reason (r5 #10, r6 #8): could not be prepared,
     // flagged ("shows …" only for a plan really flagged; a duplicate or malformed answer is no clear answer, r5 #5)
     // or not checked. The WhatsApp reply shows only 3 warnings and ranks this line right after the price ones
-    // (rankedWarning): a second plan line, or one per plan, would push the model names out.
+    // (rankedWarning): a second plan line, or one per plan, would push the model names out. Its head is neutral,
+    // "not published" (r7 #9): it also holds plans never checked or never prepared, which the 🔎 line
+    // (messages.mjs planCheckLine) does not count as "left out by the contact check".
     const lineWhy = new Map();
     for (const { model } of written.skipped ?? []) lineWhy.set(model, 'could not be prepared');
     for (const { model, found, flagged } of res.dirty) {
@@ -1180,7 +1182,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       const byReason = new Map();
       for (const [model, what] of [...lineWhy].sort(([a], [b]) => a - b)) byReason.set(what, [...(byReason.get(what) ?? []), modelName(model)]);
       const n = lineWhy.size;
-      rankedWarning(report, 'plan', `${n} floor plan${n === 1 ? '' : 's'} left out by the contact check (${[...byReason].map(([what, names]) => `${names.join(', ')}: ${what}`).join('; ')})`);
+      rankedWarning(report, 'plan', `${n} floor plan${n === 1 ? '' : 's'} not published (${[...byReason].map(([what, names]) => `${names.join(', ')}: ${what}`).join('; ')})`);
     }
   };
 

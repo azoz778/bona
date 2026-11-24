@@ -2849,7 +2849,7 @@ describe('processPdf: unit models and their floor plans reach the repo', { timeo
       assert.equal(fs.readdirSync(pub).some((f) => f.startsWith('plan-')), false);
       const saved = inboxJson(r);
       assert.deepEqual(saved.models.map((m) => m.floorPlan), [null, null]);
-      assert.ok(report.warnings.includes('1 floor plan left out by the contact check (Nawras: could not be prepared)'), report.warnings.join(' | '));
+      assert.ok(report.warnings.includes('1 floor plan not published (Nawras: could not be prepared)'), report.warnings.join(' | '));
       assert.ok(saved._intake.warnings.includes('images-skipped'));
     } finally { r.cleanup(); }
   });
@@ -3010,8 +3010,14 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
         assert.deepEqual(report.listing.models.map((m) => m.floorPlan), [null, null]);
         const files = fs.readdirSync(path.join(r.repo, 'public', 'listings', report.slug));
         assert.ok(!files.some((f) => f.startsWith('plan-')), files.join(' '));
-        assert.ok(report.warnings.includes(`2 floor plans left out by the contact check (Type A, Type B: could not be checked (${planCheck === 'quota' ? 'the AI quota ran out' : 'the check failed'}), try again later with \`run-once --enrich ${report.id}\`)`), report.warnings.join(' | '));
+        assert.ok(report.warnings.includes(`2 floor plans not published (Type A, Type B: could not be checked (${planCheck === 'quota' ? 'the AI quota ran out' : 'the check failed'}), try again later with \`run-once --enrich ${report.id}\`)`), report.warnings.join(' | '));
         assert.match(msg.planCheckLine(report.planCheck), /2 not checked — try again later/);
+        // r7 #9 (Claude r6 B7a): the reply never says "0 left out by the contact check" on the 🔎 line and then
+        // "2 floor plans left out by the contact check" on the plan line: the plan line's head is neutral.
+        const reply = msg.published(report);
+        assert.match(reply, /^🔎 2 floor plans · 0 left out by the contact check · 2 not checked — try again later$/m, reply);
+        assert.match(reply, /^⚠️ 2 floor plans not published \(Type A, Type B: could not be checked /m, reply);
+        assert.equal(reply.match(/left out by the contact check/g).length, 1, reply);
       } finally { r.cleanup(); }
     }
   });
@@ -3059,7 +3065,7 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
       assert.deepEqual(report.listing.models.map((m) => m.floorPlan?.src ?? null), [null, `/listings/${report.slug}/plan-02.jpg`]);
       const files = fs.readdirSync(path.join(r.repo, 'public', 'listings', report.slug)).filter((f) => f.startsWith('plan-'));
       assert.deepEqual(files.sort(), ['plan-02-thumb.webp', 'plan-02.jpg']);
-      assert.ok(report.warnings.includes('1 floor plan left out by the contact check (Type A: could not be prepared)'), report.warnings.join(' | '));
+      assert.ok(report.warnings.includes('1 floor plan not published (Type A: could not be prepared)'), report.warnings.join(' | '));
       assert.ok(report.warningCodes.includes('images-skipped'));
     } finally { r.cleanup(); }
   });
@@ -3070,7 +3076,7 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
       const report = await d.run();
       assert.deepEqual(plansOf(report).map(Boolean), [false, true]);
       assert.deepEqual(report.floorPlans.map((p) => p.model), [1]);
-      assert.ok(report.warnings.includes('1 floor plan left out by the contact check (Type A: could not be prepared)'), report.warnings.join(' | '));
+      assert.ok(report.warnings.includes('1 floor plan not published (Type A: could not be prepared)'), report.warnings.join(' | '));
     } finally { d.cleanup(); }
   });
 
@@ -3180,10 +3186,10 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
     try {
       const dry = await r.run();
       assert.deepEqual(plansOf(dry).map(Boolean), [false, true, false]);
-      expectReply(msg.dryRunSummary(dry), '2 floor plans left out by the contact check (Type A, Type C: shows a phone number)');
+      expectReply(msg.dryRunSummary(dry), '2 floor plans not published (Type A, Type C: shows a phone number)');
       const live = await r.publish();
       assert.deepEqual(live.listing.models.map((m) => Boolean(m.floorPlan)), [false, true, false]);
-      expectReply(msg.published(live), '2 floor plans left out by the contact check (Type A, Type C: shows a phone number)');
+      expectReply(msg.published(live), '2 floor plans not published (Type A, Type C: shows a phone number)');
     } finally { r.cleanup(); }
     // Different reasons: grouped by reason, still one line — a plan with no clear answer is never said to show anything.
     const d = await rig({ listing: structuredClone(sale), candidateCount: 9, modelConfirm: [], confirm: [319015], planCheck: { 'plan-02': 'logo', 'plan-03': 'phone' }, planReply: 'duplicate' });
@@ -3191,7 +3197,7 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
       const dry = await d.run();
       assert.deepEqual(plansOf(dry).map(Boolean), [false, false, false]);
       expectReply(msg.dryRunSummary(dry),
-        '3 floor plans left out by the contact check (Type A: no clear answer from the check; Type B: shows a logo or brand name; Type C: shows a phone number)');
+        '3 floor plans not published (Type A: no clear answer from the check; Type B: shows a logo or brand name; Type C: shows a phone number)');
     } finally { d.cleanup(); }
   });
 
@@ -3213,11 +3219,14 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
       assert.equal(shown.length, 3, reply);
       assert.match(shown[0], /2 unit-model price\(s\) could not be confirmed/, reply);
       assert.match(shown[1], /subsidised \(Sakani\) price could not be confirmed/, reply);
-      assert.equal(shown[2], '⚠️ 2 floor plans left out by the contact check (Type A: could not be checked (the check failed), try again later'
+      assert.equal(shown[2], '⚠️ 2 floor plans not published (Type A: could not be checked (the check failed), try again later'
         + `${hint}; Type C: shows a phone number)`, reply);
       assert.doesNotMatch(reply, /<id>/, reply);
       assert.equal(report.warnings.filter((w) => /floor plan/.test(w)).length, 1, `ONE plan line: ${report.warnings.join(' | ')}`);
       assert.match(reply, /^🔎 3 floor plans · 1 left out by the contact check · 1 not checked — try again later$/m, reply);
+      // r7 #9 (Claude r6 B7a): only the 🔎 line counts the plans the contact check left out; the plan line's head is
+      // neutral, so the reply never gives two counts for the same words.
+      assert.equal(reply.match(/left out by the contact check/g).length, 1, reply);
       // The rest keep their order after it: the model's flags, the money-text drop, the map.
       const order = msg.orderedWarnings(report);
       const at = (re) => order.findIndex((w) => re.test(w));
@@ -3245,10 +3254,27 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
       const dry = await p.run();
       assert.deepEqual(plansOf(dry).map(Boolean), [false, true, false]);
       const shown = warningsOf(msg.dryRunSummary(dry));
-      assert.equal(shown[2], '⚠️ 2 floor plans left out by the contact check (Type A: could not be prepared; Type C: shows a phone number)', shown.join('\n'));
+      assert.equal(shown[2], '⚠️ 2 floor plans not published (Type A: could not be prepared; Type C: shows a phone number)', shown.join('\n'));
       assert.equal(dry.warnings.filter((w) => /floor plan/.test(w)).length, 1, dry.warnings.join(' | '));
       assert.ok(dry.warningCodes.includes('images-skipped'), 'the code stays');
+      assert.match(msg.dryRunSummary(dry), /^🔎 2 floor plans · 1 left out by the contact check$/m);
     } finally { p.cleanup(); }
+    // The headline price not printed (r7 #9, Claude r6 B8): ranked with the price warnings, so it leads the reply,
+    // ahead of the plan line and the model's flags — never pushed out of the 3 lines the reply shows. The models carry
+    // no price here (a confirmed model price would become the headline), and the page refuses the headline.
+    const headline = structuredClone(sale);
+    for (const m of headline.models) Object.assign(m, { price: null, evidence: null });
+    const h = await rig({ listing: headline, candidateCount: 9, confirm: [], planCheck: { 'plan-03': 'phone' } });
+    try {
+      const dry = await h.run();
+      assert.equal(dry.listingPreview.price.onRequest, true);
+      assert.ok(dry.warningCodes.includes('price-not-printed'), dry.warningCodes.join(' '));
+      const shown = warningsOf(msg.dryRunSummary(dry));
+      assert.equal(shown.length, 3, shown.join('\n'));
+      assert.match(shown[0], /^⚠️ the price was not printed in the brochure.*"price on request"/, shown.join('\n'));
+      assert.equal(shown[1], '⚠️ 1 floor plan not published (Type C: shows a phone number)', shown.join('\n'));
+      assert.match(shown[2], /the model flagged 10 thing/, shown.join('\n'));
+    } finally { h.cleanup(); }
   });
 
   it('no plans: no call', async () => {
@@ -3953,7 +3979,7 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.equal(row.action, 'enrich', row.reason);
       // r6 #9: the plans were left out of the published listing, never published unchecked.
       assert.equal(saved(f).models.some((m) => m.floorPlan), false, 'no plan went up');
-      assert.match(row.reason, /published without its floor plans, left out because their contact check did not finish — enriched again\)$/);
+      assert.match(row.reason, /published without the floor plans whose contact check did not finish — enriched again\)$/);
       assert.doesNotMatch(row.reason, /published unchecked/);
     } finally { f.cleanup(); }
     // Published without its plans earlier; this time every plan is checked (one clean, or flagged and left out).
@@ -4012,7 +4038,7 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.deepEqual(r.calls().filter((c) => c.tool === 'claude-plan-check').map((c) => c.files), [['plan-02.jpg']]);
       assert.deepEqual(saved(r).models.map((m) => m.floorPlan?.src ?? null), [null, `/listings/${SLUG}/plan-02.jpg`]);
       assert.deepEqual(fs.readdirSync(pubDir(r)).filter((f) => f.startsWith('plan-')).sort(), ['plan-02-thumb.webp', 'plan-02.jpg']);
-      assert.ok(report.warnings.includes('1 floor plan left out by the contact check (Nawras: could not be prepared)'), report.warnings.join(' | '));
+      assert.ok(report.warnings.includes('1 floor plan not published (Nawras: could not be prepared)'), report.warnings.join(' | '));
     } finally { r.cleanup(); }
   });
 
