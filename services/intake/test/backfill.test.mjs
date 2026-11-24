@@ -169,17 +169,19 @@ describe('planBackfill', () => {
     const by = Object.fromEntries(planBackfill(list, { findPdf }).map((r) => [r.id, r]));
     assert.equal(by['BONA-W010'].action, 'enrich');
     assert.equal(by['BONA-W010'].pdf, '/data/intake/2026-09-07/w10.pdf');
-    assert.equal(by['BONA-W010'].reason, 'source PDF found (its floor plans were published unchecked — enriched again)');
+    assert.equal(by['BONA-W010'].reason, 'source PDF found (published without its floor plans, left out because their contact check did not finish — enriched again)');
     assert.equal(by['BONA-W002'].action, 'skip', 'no PDF to read the plans from: never a pointless brochure-only rebuild');
     assert.equal(by['BONA-W002'].pdf, null);
-    assert.match(by['BONA-W002'].reason, /^already enriched \(1 unit model\(s\)\) — its floor plans were published unchecked, but its source PDF is not in the intake folder$/);
+    assert.match(by['BONA-W002'].reason, /^already enriched \(1 unit model\(s\)\) — published without its floor plans, left out because their contact check did not finish, but its source PDF is not in the intake folder$/);
     assert.equal(by['BONA-W003'].action, 'skip');
     assert.match(by['BONA-W003'].reason, /^already enriched \(1 unit model\(s\)\) — --include-enriched to enrich it again$/);
     assert.ok(!asked.includes(sha('pdf of BONA-W003')), 'a listing without the code is not hashed for');
     // --include-enriched: the same rows, enriched.
     const again = Object.fromEntries(planBackfill(list, { findPdf, includeEnriched: true }).map((r) => [r.id, r]));
     assert.equal(again['BONA-W010'].action, 'enrich');
-    assert.equal(again['BONA-W010'].reason, 'source PDF found (its floor plans were published unchecked — enriched again)');
+    assert.equal(again['BONA-W010'].reason, 'source PDF found (published without its floor plans, left out because their contact check did not finish — enriched again)');
+    // r6 #9: the plans were left out, never published unchecked — the plan table must not say otherwise.
+    for (const row of [...Object.values(by), ...Object.values(again)]) assert.doesNotMatch(row.reason, /published unchecked/, row.id);
   });
 
   it('skips hidden, withdrawn (rules.mjs, the register, the record, the name), non-intake and slug-less listings', () => {

@@ -108,7 +108,7 @@ export function planBackfill(listings, { findPdf, withdrawals = [], only = null,
     else if (!isSlug(row.slug)) row.reason = `the record's slug ${JSON.stringify(row.slug)} is not a valid slug (lowercase-hyphenated) — fix the record first`;
     else if (enriched && !includeEnriched && !(plansUnchecked && lookup())) {
       row.reason = plansUnchecked
-        ? `already enriched (${enriched}) — its floor plans were published unchecked, but its source PDF is not in the intake folder`
+        ? `already enriched (${enriched}) — published without its floor plans, left out because their contact check did not finish, but its source PDF is not in the intake folder`
         : `already enriched (${enriched}) — --include-enriched to enrich it again`;
     } else {
       lookup();
@@ -118,7 +118,7 @@ export function planBackfill(listings, { findPdf, withdrawals = [], only = null,
         ? 'source PDF found'
         : sha ? 'source PDF not in the intake folder — brochure rebuilt from the listing only'
           : 'no source PDF recorded — brochure rebuilt from the listing only';
-      if (pdf && plansUnchecked) row.reason += ' (its floor plans were published unchecked — enriched again)';
+      if (pdf && plansUnchecked) row.reason += ' (published without its floor plans, left out because their contact check did not finish — enriched again)';
       else if (pdf && enriched) row.reason += ` (already has ${enriched} — enriched again)`;
       else if (pdf && bareModels(l)) row.reason += ` (its ${bareModels(l)} unit model(s) carry no price or floor plan — enriched again)`;
     }

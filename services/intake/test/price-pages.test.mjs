@@ -3571,6 +3571,10 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.deepEqual(saved(f)._intake.warnings, ['map-unconfirmed', 'plans-unchecked']);
       const [row] = planBackfill([saved(f)], { findPdf: () => f.pdfPath });
       assert.equal(row.action, 'enrich', row.reason);
+      // r6 #9: the plans were left out of the published listing, never published unchecked.
+      assert.equal(saved(f).models.some((m) => m.floorPlan), false, 'no plan went up');
+      assert.match(row.reason, /published without its floor plans, left out because their contact check did not finish — enriched again\)$/);
+      assert.doesNotMatch(row.reason, /published unchecked/);
     } finally { f.cleanup(); }
     // Published without its plans earlier; this time every plan is checked (one clean, or flagged and left out).
     for (const planCheck of [null, { 'plan-01': 'website' }]) {
