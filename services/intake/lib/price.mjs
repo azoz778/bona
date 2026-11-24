@@ -111,10 +111,16 @@ const AR_ABBREVIATIONS = [['ر', 'س'], ['ر', 'ع'], ['ر', 'ق'], ['د', 'إ']
  * punctuation (، ؛ ؟ ٪ ۔) and digits end a word like a space ("ملاحظة،ر. س 2000", "٢٠٠٠ر. س": Codex r6 #3, r7 #2).
  */
 const NO_LETTER_BEFORE = `(?<!${WORD_GOES_ON})`;
-const CODES = String.raw`(?:SAR|SR|S\.\s?R\.?|AED|Dhs?|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP|JOD|TRY|CHF|CAD|AUD|INR|PKR|CNY|JPY|RUB|BGN|HRK|TL|[A-Z]{1,3}\$|(?-i:kn))`;
+/** The codes of the currencies the site prints (r8 #2), and the others: `codes` is both, in this order. */
+const SITE_CODES = String.raw`(?:SAR|SR|S\.\s?R\.?|AED|Dhs?|USD|EUR|GBP|OMR|QAR|KWD|BHD|EGP)`;
+const OTHER_CODES = String.raw`(?:JOD|TRY|CHF|CAD|AUD|INR|PKR|CNY|JPY|RUB|BGN|HRK|TL|[A-Z]{1,3}\$|(?-i:kn))`;
+const CODES = `(?:${SITE_CODES}|${OTHER_CODES})`;
 const WORDS = String.raw`(?:riyals?|rials?|dirhams?|dollars?|euros?|pounds?(?:\s+sterling)?|sterling)`;
 const ARABIC = String.raw`(?:ر[يی]الا?ت?(?:\s*(?:سعودي|عماني|عُماني|قطري))?|درهم|دولار|يورو|جنيه|دينار|لير[ةه]|إسترليني|استرليني)`;
-const ABBREVIATIONS = `(?:${AR_ABBREVIATIONS.map(([a, b]) => `${NO_LETTER_BEFORE}${a}(?:\\.${b}\\.?|\\.\\s${b}(?:\\.|(?!${WORD_GOES_ON}))|\\s?${b}(?:\\.|(?!${WORD_GOES_ON})))`).join('|')})`;
+/** A figure right after a mark: spaces, then one colon, dash or "=" at most ("ر.س 2000", "ر.س2000", "ر.س: 2000"). */
+const FIGURE_NEXT = String.raw`(?=\s*[:\-–—=]?\s*[\d٠-٩۰-۹])`;
+const ABBREVIATIONS = `(?:${AR_ABBREVIATIONS.map(([a, b]) => `${NO_LETTER_BEFORE}${a}(?:\\.${b}\\.?|\\.\\s${b}(?:\\.|(?!${WORD_GOES_ON}))|\\s?${b}(?:\\.|(?!${WORD_GOES_ON})))`
+  + `|${a}\\.${b}\\.?${FIGURE_NEXT}`).join('|')})`;
 const SYMBOLS = String.raw`(?:[$€£﷼\u20c1₺]|(?<![\u0400-\u04ff])лв(?![\u0400-\u04ff]))`;
 /**
  * ONE list of the currency marks — every mark MARKS above reads — for the guards that keep money OUT of the text: the
@@ -126,10 +132,15 @@ const SYMBOLS = String.raw`(?:[$€£﷼\u20c1₺]|(?<![\u0400-\u04ff])лв(?![\
  *   - `codes`: Latin codes ("US$", "A$" and the other prefixed dollars with them), and `words`: Latin names — each a
  *     mark only where no LETTER continues it, so the guards put `(?<![A-Za-z])…(?![A-Za-z])` around them: "4500SAR"
  *     and "SAR4500" are marks (r6 #2), "SARAH" is not;
+ *   - `siteCodes` and `otherCodes`: `codes` in two parts (r8 #2) — SAR SR S.R AED Dhs USD EUR GBP OMR QAR KWD BHD EGP,
+ *     and the codes of the currencies the site does not print (JOD … HRK, TL, "XY$", kn), which the model-name guard
+ *     reads as printed and only beside a money-sized figure ("Villa TL 120" is a unit code);
  *   - `arabic`: Arabic names, inside a word too ("بالريال", "ريالات"), a country after the riyal ("ريال عماني");
  *   - `abbreviations`: ر.س / ر.ع / ر.ق / د.إ / د.ك as MARKS reads them (abbr) — dotted, the mark whatever follows;
  *     spaced ("ر. س") or undotted ("رس", "ر س") only where the word ends ("ر. سعيد", "رسوم" are words) — their first
- *     letter standing alone (NO_LETTER_BEFORE: "مُر. سعيد", "الدار. سعر" are words);
+ *     letter standing alone (NO_LETTER_BEFORE: "مُر. سعيد", "الدار. سعر" are words); and the tight dotted form glued to
+ *     the word before it when a figure follows ("الاشتراكر.س 2000", "منر.س 850,000": r8 #2, Codex r7 #4) — MARKS does
+ *     not read that one, so the guards read more than MARKS there, never less ("مُر.سعيد 2000" is still a word);
  *   - `dotted`: the dotted ones that a sentence-end dot could part from their figure, only where the word ends;
  *   - `symbols`: $ € £ ﷼ ⃁ ₺, and лв;
  *   - `countries`: what may stand between a figure and its currency ("4500 Saudi Riyals", "US dollars");
@@ -137,6 +148,8 @@ const SYMBOLS = String.raw`(?:[$€£﷼\u20c1₺]|(?<![\u0400-\u04ff])лв(?![\
  */
 export const MONEY_MARKS = Object.freeze({
   codes: CODES,
+  siteCodes: SITE_CODES,
+  otherCodes: OTHER_CODES,
   words: WORDS,
   arabic: ARABIC,
   abbreviations: ABBREVIATIONS,

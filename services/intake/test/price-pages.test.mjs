@@ -150,6 +150,9 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     'الأدوار 1–3، 4500 في الشهر', 'الأدوار 1–3، 4500 في السنة', 'الأدوار 1–3، 4500 في العام', 'الأدوار 1–3، 4500 بالشهر',
     'الأدوار 1–3، 4500 بالسنة', 'الأدوار 1–3، 4500 للشهر', 'الأدوار 1–3، 4500 للسنة', 'الأدوار 1–3، 4500 كل شهر',
     'الأدوار 1–3، 4500 كل سنة', 'الأدوار 1–3، 4500 / شهر', 'الأدوار 1–3، 4500/سنة',
+    // r8 #2 (Codex r7 #4): a tight dotted mark glued to the word before it is a mark when a figure follows.
+    'الاشتراكر.س 2000', 'الاشتراكر.س2000', 'الاشتراكر.س. 2000', 'الاشتراكر.ع 750', 'الاشتراكر.ق 750', 'الاشتراكد.إ 750',
+    'الاشتراكد.ك 750',
   ];
   const NOT_MONEY = [
     'Handover starts 2027', 'No maintenance fees for 2 years', 'ضمان 10 سنوات … مقدم من المطور', 'خدمات مقدمة … 24 ساعة',
@@ -166,6 +169,8 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     // figure joins two sentences, which still state no money here.
     'A 5k fun run', 'A 5k jogging track (lit at night)', '5k run – every Friday', 'Area 120 sqm. 3 bedrooms, 2 bathrooms',
     'Ground to sixth floor. 2 lifts',
+    // r8 #2: a glued tight pair with no figure right after it is a word; a spaced pair after a letter is a sentence end.
+    'مُر.سعيد 2000', 'الدار. س 2: هل يوجد موقف؟',
   ];
   it('MONEY', () => { for (const t of MONEY) assert.equal(statesMoney(t), true, t); });
   it('NOT MONEY', () => { for (const t of NOT_MONEY) assert.equal(statesMoney(t), false, t); });
@@ -309,6 +314,39 @@ describe('r7 #3: the model-name guard — dotted codes, amount-shaped figures be
       ['Tower B. 12 floors', 'نموذج'], ['Villa Ibrahim', 'فيلا د. إبراهيم 2'], ['Villa 20 m', 'نموذج'], ['Townhouse 95m', 'نموذج'],
     ]) assert.equal(nameOf(en, ar, [4500000, 950000, ...W023_FIGURES]), null, `${en} / ${ar}`);
     for (const [en, ar] of W023) assert.equal(nameOf(en, ar, W023_FIGURES), null, en);
+  });
+});
+
+// r8 #2 (Codex r7 #4 / #5a, Claude r7 NB4 / NB5) — a tight dotted Arabic mark glued to the word before it is a mark when
+// a figure follows (every guard: it is in the one list); in a model NAME, the codes the site prints keep r7 #3's amount
+// rule, the other codes are read as printed (case-sensitive) and need a stronger amount (4+ digits, grouped, decimal,
+// scaled), and a glued dotted pair counts only where the word ends or a figure follows ("د.إبراهيم" is a name).
+describe('r8 #2: glued dotted marks before a figure; site and other codes and glued initials in a model name', () => {
+  const nameOf = (en, ar, figures = []) => dropMoneyText({ models: [{ name: { en, ar } }] }, { figures }).name;
+  it('a fact-list item with a glued tight mark before its figure is dropped (Codex r7 #4)', () => {
+    const holder = { amenities: { en: ['Club membership', 'Gym'], ar: ['الاشتراكر.س 2000', 'نادي رياضي'] } };
+    assert.deepEqual(dropMoneyText(holder, { figures: [450000] }).dropped, ['amenities[0]']);
+    assert.deepEqual(holder.amenities, { en: ['Gym'], ar: ['نادي رياضي'] });
+  });
+  it('the copy guard reads a glued tight mark before its figure: "تبدأ الأسعار منر.س 850,000" (Codex r7 #4)', () => {
+    const bad = copyProblems({ description: { en: ['Townhouses with gardens.'], ar: ['تبدأ الأسعار منر.س 850,000'] } });
+    assert.ok(bad.some((p) => p.startsWith('description.ar[0] states a price')), JSON.stringify(bad));
+  });
+  it('names kept: other codes by a short or lower-case figure, glued Arabic initials (Codex r7 #5a, Claude r7 NB4 / NB5)', () => {
+    for (const code of ['Villa TL 120', 'Type tl 120', 'Villa kn 120', 'Block CHF 300', 'Unit CAD 120', 'Type INR 500', 'Villa TL 120 m²', 'Block CHF 3']) {
+      for (const [en, ar] of [[code, 'نموذج'], ['Studio', `نموذج ${code}`]]) assert.equal(nameOf(en, ar), null, `${en} / ${ar}`);
+    }
+    for (const [en, ar] of [['Villa Ibrahim', 'فيلا د.إبراهيم'], ['Type Qasim 2', 'نموذج ر.قاسم 2']]) assert.equal(nameOf(en, ar), null, ar);
+  });
+  it('still refused: site codes by 3+ digits, other codes by a money-sized figure, symbols, Arabic marks at a word end or before a figure', () => {
+    for (const code of [
+      'Villa TL 1,250,000', 'Villa 1,250,000 TL', 'Villa 1 250 000 TL', 'Villa TL 4.5m', 'Type TL1200', 'Studio TL 4500', 'Villa ₺120',
+      'Villa SR 120', 'Villa DH 120', 'Studio SR. 750', 'Studio 750 SR', 'Villa kn 4500',
+    ]) {
+      for (const [en, ar] of [[code, 'نموذج'], ['Studio', `نموذج ${code}`]]) assert.equal(nameOf(en, ar), 'models[0].name', `${en} / ${ar}`);
+    }
+    // a tatweel draws the mark out, it does not make it a word: "ر.سـ 2000" stays refused.
+    for (const ar of ['نموذج ر.س 2000', 'نموذجر.س 2000', 'نموذج ر.س', 'نموذج ر.سـ 2000']) assert.equal(nameOf('Studio', ar), 'models[0].name', ar);
   });
 });
 

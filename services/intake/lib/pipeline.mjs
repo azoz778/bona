@@ -163,15 +163,31 @@ const ABBREVIATION_DOT_G = /(?<![A-Za-z])(approx|incl|excl)\./gi;
  * Arabic letters standing alone, as in DOTTED_MARK_G ("د. إبراهيم" is a name). A Latin code counts only beside an
  * amount-shaped figure (r7 #3, Claude r6 B4): three digits or more, grouped ("1,250,000", "1 250 000"), decimal ("4.5",
  * "0,95", ".95") or scaled ("2m", "5 k", "2 million") — the unit codes a brochure prints, "Type SR2", "Villa DH 1",
- * "Unit 2 DH", "Villa S.R. 2", are names. Arabic marks, currency words and symbols refuse a name anywhere.
+ * "Unit 2 DH", "Villa S.R. 2", are names. That rule is for the codes the site prints (MONEY_MARKS.siteCodes); the other
+ * codes (MONEY_MARKS.otherCodes: TL, CHF, CAD, INR, kn …) are read as printed — "TL", never "tl" — and only beside a
+ * money-sized figure: four digits or more, grouped, decimal or scaled ("Villa TL 120", "Block CHF 300", "Type tl 120" are
+ * names; "Studio TL 4500", "Villa TL 1,250,000", "Villa TL 4.5m" are not: r8 #2, Codex r7 #5a, Claude r7 NB5). Arabic
+ * marks, currency words and symbols refuse a name anywhere — but a tight dotted pair counts only where its word ends or
+ * a figure follows, never with letters glued after it: "فيلا د.إبراهيم" and "نموذج ر.قاسم 2" are names, "نموذج ر.س" and
+ * "نموذجر.س 2000" are not (r8 #2, Claude r7 NB4).
  */
-const NAME_CODE = `(?<![A-Za-z])${MONEY_MARKS.codes}(?![A-Za-z])`;
+const NAME_SITE_CODE = `(?<![A-Za-z])${MONEY_MARKS.siteCodes}(?![A-Za-z])`;
+const NAME_OTHER_CODE = `(?<![A-Za-z])(?-i:${MONEY_MARKS.otherCodes})(?![A-Za-z])`;
 const NAME_SCALE_WORD = String.raw`\s*(?:k|m|mn|bn|millions?|thousands?|billions?)(?![a-z²\d])`;
-/** The figure right after a code ("SR 750", "SR 4.5m", "SR .95m"), and the one right before ("4500SAR", "4.5 SR", "2m SAR"). */
-const NAME_AMOUNT_AFTER = String.raw`(?:\d{3}|\d+[.,٫٬]\d|\d{1,3}[ \u00a0\u202f\u2009]\d{3}(?!\d)|(?<=\s)[.٫]\d|\d+${NAME_SCALE_WORD})`;
-const NAME_AMOUNT_BEFORE = String.raw`(?:\d{3}|\d[.,٫٬]\d+|(?<![A-Za-z])[.٫]\d+|\d${NAME_SCALE_WORD})`;
-const NAME_CURRENCY_RE = new RegExp(String.raw`${NAME_CODE}\.?\s*${NAME_AMOUNT_AFTER}|${NAME_AMOUNT_BEFORE}\s*${NAME_CODE}`
-  + String.raw`|(?<![A-Za-z])${MONEY_MARKS.words}(?![A-Za-z])|${MONEY_MARKS.arabic}|${MONEY_MARKS.abbreviations}|${MONEY_MARKS.symbols}`, 'i');
+/**
+ * The figure right after a code ("SR 750", "SR 4.5m", "SR .95m"), and the one right before ("4500SAR", "4.5 SR", "2m SAR"):
+ * `whole` digits, grouped ("1,250,000", "1 250 000"), decimal or scaled.
+ */
+const nameAmountAfter = (whole) => String.raw`(?:${whole}|\d+[.,٫٬]\d|\d{1,3}[ \u00a0\u202f\u2009]\d{3}(?!\d)|(?<=\s)[.٫]\d|\d+${NAME_SCALE_WORD})`;
+const nameAmountBefore = (whole) => String.raw`(?:${whole}|\d[.,٫٬]\d+|\d{1,3}[ \u00a0\u202f\u2009]\d{3}|(?<![A-Za-z])[.٫]\d+|\d${NAME_SCALE_WORD})`;
+/**
+ * A dotted pair's word ends where no Arabic LETTER follows, past any tatweel or vowel mark (unlike price.mjs WORD_GOES_ON,
+ * these alone do not carry the word on): "ر.سـ 2000" is the mark drawn out, "د.إبراهيم" a name; a figure is no letter.
+ */
+const NAME_WORD_ENDS = String.raw`(?![\u0640\u064b-\u065f\u0670]*[\u0620-\u063f\u0641-\u064a\u066e\u066f\u0671-\u06d3\u06d5-\u06ff])`;
+const NAME_CURRENCY_RE = new RegExp(String.raw`${NAME_SITE_CODE}\.?\s*${nameAmountAfter(String.raw`\d{3}`)}|${nameAmountBefore(String.raw`\d{3}`)}\s*${NAME_SITE_CODE}`
+  + String.raw`|${NAME_OTHER_CODE}\.?\s*${nameAmountAfter(String.raw`\d{4}`)}|${nameAmountBefore(String.raw`\d{4}`)}\s*${NAME_OTHER_CODE}`
+  + String.raw`|(?<![A-Za-z])${MONEY_MARKS.words}(?![A-Za-z])|${MONEY_MARKS.arabic}|${MONEY_MARKS.abbreviations}${NAME_WORD_ENDS}|${MONEY_MARKS.symbols}`, 'i');
 /**
  * Arabic words as whole words, with the clitics و / ف, ب / ل / لل and ال in front (a tatweel may follow one:
  * "فـحجز"): "السعر", "بسعر", "للإيجار" — never inside another word ("رسوم" is not in "رسومات"). Only a LETTER
