@@ -2754,6 +2754,43 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
     } finally { r.cleanup(); }
   });
 
+  it('r6 #6: no plan call is spent on a publish the duplicate check refuses (enough photos, a twin in the inbox)', async () => {
+    const r = await rig({ listing: withPlans(2), candidateCount: 8 });
+    try {
+      const sha = crypto.createHash('sha256').update(fs.readFileSync(r.pdfPath)).digest('hex');
+      writeInboxListing(r.repo, { id: 'BONA-W001', slug: 'jeddah-heights-twin', title: { en: 'Twin', ar: 'توأم' }, _intake: { source: 'whatsapp', pdfSha256: sha } });
+      await assert.rejects(r.publish(), (err) => err.stage === 'duplicate');
+      assert.equal(planCalls(r).length, 0);
+    } finally { r.cleanup(); }
+  });
+
+  it('r6 #6: no plan call is spent on a publish whose photo staging drops a corrupt photo below the minimum', async () => {
+    // Exactly 4 picks (the minimum) pass the pick-count gate; one cannot be decoded when the photos are staged.
+    const four = withPlans(2);
+    for (const im of four.images.slice(4, 6)) { im.exclude = true; im.rank = null; im.hero = false; }
+    const r = await rig({ listing: four, candidateCount: 8, broken: [2] });
+    try {
+      await assert.rejects(r.publish(), (err) => err.stage === 'validate' && err.message === 'not enough usable photos (3 of 4 needed)');
+      assert.equal(planCalls(r).length, 0);
+      assert.deepEqual(fs.readdirSync(path.join(path.dirname(r.pdfPath), 'work', 'publish')), [], 'the stage dir is removed');
+      assert.equal(fs.existsSync(path.join(r.repo, 'public', 'listings')), false);
+    } finally { r.cleanup(); }
+  });
+
+  it('r6 #6: a blocked dry run that skipped the plan check never previews a plan, and says they were not checked', async () => {
+    const few = withPlans(2);
+    for (const im of few.images.slice(0, 6)) { im.exclude = true; im.rank = null; im.hero = false; }
+    const r = await rig({ listing: few, candidateCount: 8, planCheck: { 'plan-01': 'phone' } });
+    try {
+      const dry = await r.run();
+      assert.ok(dry.blocked);
+      assert.equal(planCalls(r).length, 0);
+      assert.deepEqual(plansOf(dry), [null, null]);
+      assert.deepEqual(dry.floorPlans, []);
+      assert.ok(dry.warnings.some((w) => /2 floor plan\(s\)/.test(w) && /not checked/.test(w)), dry.warnings.join(' | '));
+    } finally { r.cleanup(); }
+  });
+
   it('r5 #10: the WhatsApp reply keeps the price warnings in its first 3 lines, then ONE line for every plan left out', async () => {
     // Two price warnings compete for the reply's 3 warning lines: two unit-model prices not confirmed on their page,
     // and a Sakani price not confirmed beside a confirmed headline. Then the contact check flags two plans.

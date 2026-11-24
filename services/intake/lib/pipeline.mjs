@@ -1027,7 +1027,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   const startingFromWords = () => (readFrom && !ai.listing?.project && Array.isArray(ai.models) && ai.models.length === 1
     && report.priceEvidence?.confirmed === true ? fromWordingOf(ai.priceEvidence?.quote, price.amount) : null);
   // --- 4c. the floor-plan contact check (r4, owner decision 2026-11-21) — defined here, run after the price
-  // checks: before enrichListing on --enrich, after the duplicate check on a publish (r5 #4) -------------
+  // checks: before enrichListing on --enrich, after the photo staging on a publish (r5 #4, r6 #6) ---------
   // A plan cut from a developer's PDF can carry the developer's phone, website, QR code, logo or a price table
   // in its pixels. Every plan the run would publish is looked at by a second model — the same pixels, at the same
   // size (writeFloorPlans into the work dir), up to 12 per call, 2 calls at a time (plan-check.mjs) — before any
@@ -1239,11 +1239,11 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     }
   }
 
-  // The floor-plan contact check (4c) runs here on a publish: after EVERY price check (models, headline,
-  // Sakani) — so its quota or failure can never change a price — and after the copy guard, the photo gate and
-  // the duplicate check, so no call is spent on a run that fails those (r5 #4). A dry run that would not
-  // publish spends none either.
-  if (!report.blocked) await checkFloorPlans();
+  // The floor-plan contact check (4c) runs after EVERY price check (models, headline, Sakani) — so its quota or
+  // failure can never change a price — and after the copy guard, the photo gate and the duplicate check, so no
+  // call is spent on a run that fails those (r5 #4). A dry run asks here, unless it would not publish; a publish
+  // asks once its photos are staged and counted (6., r6 #6).
+  if (dryRun && !report.blocked) await checkFloorPlans();
 
   const index = readIndex(cfg.repo);
   const id = meta.id || nextListingId(index, inboxIds(cfg.repo));
@@ -1260,8 +1260,13 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   if (dryRun) {
     report.stage = 'dry-run';
     // The paths writeFloorPlans() would write, for every plan whose candidate exists — no file is made.
-    const floorPlans = floorPlanTargets(extraction.candidates, ai.models ?? [], slug).filter((t) => t.cand)
+    let floorPlans = floorPlanTargets(extraction.candidates, ai.models ?? [], slug).filter((t) => t.cand)
       .map(({ model, index, src, thumb }) => ({ model, index, src, thumb }));
+    // A blocked dry run skipped the contact check: none of its plans was looked at, so none is previewed (r6 #6).
+    if (report.blocked && !report.planCheck && floorPlans.length) {
+      report.warnings.push(`${floorPlans.length} floor plan(s) were not checked for contact details because the run would not publish, so the preview shows none`);
+      floorPlans = [];
+    }
     report.floorPlans = floorPlans.map((p) => ({ model: p.model, candidate: p.index, src: p.src }));
     report.listingPreview = buildListing({
       ai,
@@ -1288,6 +1293,15 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     log.warn('intake.images_skipped', { skipped: images.skipped });
   }
   report.images = images.map((im) => ({ n: im.n, candidate: im.index, room: im.room, src: im.src, w: im.width, h: im.height, reason: im.reason }));
+  // A photo staging could not decode can leave the run under the minimum: refused here, before the plan check
+  // spends a call on it (r6 #6) — the same refusal checkListing would give below.
+  if (images.length < cfg.minImages) {
+    fs.rmSync(stageDir, { recursive: true, force: true });
+    throw new RejectError(`not enough usable photos (${images.length} of ${cfg.minImages} needed)`, 'validate');
+  }
+  // The plan check (4c) on a publish: after the photos are staged and counted, before any plan is staged.
+  await checkFloorPlans();
+  report.stage = 'write';
   // Each unit model's floor plan, staged beside the photos (plan-NN.jpg, NN = the model's position),
   // so it is promoted — and rolled back — with them. One that cannot be decoded costs that model its
   // plan, never the listing.
