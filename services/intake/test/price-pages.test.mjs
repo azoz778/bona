@@ -2024,7 +2024,7 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     assert.deepEqual(o.price, { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false });
   });
 
-  it('r9 #2 (Codex r8 #3 / NB1, Claude r8 NB6 / NB13): a weak frequency word makes a neighbour a rent label only as a card label, an income word always does, a percentage is no amount, and every ownAmount branch is pinned', async () => {
+  it('r9 #2 (Codex r8 #3 / NB1, Claude r8 NB6 / NB13), r10 #1: a frequency word or an income word beside a sale figure makes a rent label, a percentage is no amount, and every ownAmount branch is pinned', async () => {
     const sale = (amount) => {
       const a = withModels([], { price: { amount, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence: null });
       a.listing.category = 'buy';
@@ -2038,21 +2038,22 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
         return { evidence: report.priceEvidence, price: report.listingPreview.price, texts: report.warnings, checks: r.calls().filter((c) => c.tool === 'claude-confirm') };
       } finally { r.cleanup(); }
     };
-    // An amenity beside the sale price, its weak frequency word (weekly, nightly, PA, أسبوعياً) cut, says no rent: no
-    // rent label, no check — so a spent quota never sends a correct price on request.
+    // An amenity with a frequency word (weekly, nightly, PA, أسبوعياً) beside a correct sale price is a rent label again
+    // (r10 #1, Claude r9 B1 = Codex r9 #1: r9 #2's weak-word cut unmade card labels such as "Weekly rate (SAR)", so a
+    // nightly or weekly rate settled as the sale price with 0 checks). It costs one sale check, which confirms the price
+    // here and publishes it — under a spent quota the listing goes on request: the TAQEEM-safe side (a recorded
+    // disagreement with Codex r8 #3).
     for (const amenity of ['Weekly housekeeping included', 'Nightly security patrols', 'PA system in the lobby', 'تنظيف أسبوعياً']) {
       for (const p3 of [`${amenity}\nSale price SAR 450,000`, `Sale price SAR 450,000\n${amenity}`]) {
-        const o = await outcome({ listing: sale(450000), pageText: pages(p3), confirm: [], confirmFail: 'quota' });
-        assert.deepEqual(o.evidence, { inText: true, confirmed: null }, p3);
-        assert.deepEqual(o.checks, [], p3);
+        const o = await outcome({ listing: sale(450000), pageText: pages(p3), confirm: [450000] });
+        assert.deepEqual(o.checks.map((c) => [c.amount, c.period, c.sale]), [[450000, null, true]], p3);
         assert.deepEqual(o.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
       }
     }
-    // Still rent labels: a weak word alone or with only a rate or price word (a card label), a rent wording with no weak
-    // word, an income heading — return, ROI, revenue, مردود are income words, never weak ones (r9 verifier: "Expected
-    // return" over a lone figure is an income card) — a yield with three decimals or a spaced "%" (a percentage is no
-    // amount: Codex r8 NB1), and a rent label whose only figure is an area (the measure cut: Claude r8 NB13). One sale
-    // check, which refuses: on request, and why.
+    // Still rent labels: a frequency word alone or with only a rate or price word (a card label), a rent wording, an
+    // income heading — return, ROI, revenue, مردود (r9 verifier: "Expected return" over a lone figure is an income card)
+    // — a yield with three decimals or a spaced "%" (a percentage is no amount: Codex r8 NB1), and a rent label whose
+    // only figure is an area (the measure cut: Claude r8 NB13). One sale check, which refuses: on request, and why.
     const labels = [
       ['Nightly rate', 'SAR 60,000'], ['Weekly', 'SAR 60,000'], ['Return Rates', 'SAR 60,000'], ['Per night', 'SAR 60,000'],
       ['لليلة الواحدة', '60,000 ريال'], ['أسبوعياً', '60,000 ريال'], ['Rental yield 7.125%', 'SAR 60,000'], ['Net yield 6.875 %', 'SAR 60,000'],
@@ -2089,6 +2090,74 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       assert.deepEqual(o.checks, [], p3);
       assert.deepEqual(o.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
     }
+  });
+
+  it('r10 #1 (Claude r9 B1 / B2 / NB4 / NB5, Codex r9 #1 / #3 / NB2): every frequency word makes a rent label, ات takes a pronoun after it, "a night" / "a week" / "per day" / "كل يوم" count only after a figure, and the short-stay siblings count on the figure\'s own line', async () => {
+    const sale = (amount, quote = null) => {
+      const a = withModels([], { price: { amount, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence: quote ? { page: 3, quote } : null });
+      a.listing.category = 'buy';
+      return a;
+    };
+    const pages = (p3) => ['Overview\nA residential compound for sale. A residential compound for sale.', 'Location', p3, 'Specification', 'Contact'];
+    const outcome = async (opts) => {
+      const r = await rig(opts);
+      try {
+        const report = await r.run();
+        return { evidence: report.priceEvidence, price: report.listingPreview.price, checks: r.calls().filter((c) => c.tool === 'claude-confirm') };
+      } finally { r.cleanup(); }
+    };
+    // One sale check, which refuses: on request — never the rate published as the sale price.
+    const sentToPage = async (p3, amount, quote = null) => {
+      const o = await outcome({ listing: sale(amount, quote), pageText: pages(p3), confirm: [] });
+      assert.equal(o.evidence.inText, false, p3);
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.period, c.sale]), [[amount, null, true]], p3);
+      assert.equal(o.price.onRequest, true, p3);
+      assert.equal(o.price.amount, null, p3);
+    };
+    // No check under a spent quota: the text layer settles the correct sale price.
+    const settled = async (p3) => {
+      const o = await outcome({ listing: sale(450000), pageText: pages(p3), confirm: [], confirmFail: 'quota' });
+      assert.deepEqual(o.evidence, { inText: true, confirmed: null }, p3);
+      assert.deepEqual(o.checks, [], p3);
+      assert.deepEqual(o.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
+    };
+    // B1 = Codex r9 #1: card labels and table headers with a frequency word and a qualifier — a currency, "from", a
+    // bracket, a second column word — are rent labels, in either order (r9 #2's weak-word cut made them none).
+    const labels = [
+      ['Weekly rate (SAR)', 'SAR 60,000'], ['Nightly price (AED)', 'SAR 60,000'], ['Nightly rate (SAR)', 'SAR 60,000'],
+      ['Weekly rates from', 'SAR 60,000'], ['Weekly rate (excl. VAT)', 'SAR 60,000'], ['Nightly rate per villa', 'SAR 60,000'],
+      ['أسبوعياً ابتداءً من', '60,000 ريال'], ['تبدأ الأسعار أسبوعياً من', '60,000 ريال'],
+      ['Unit type Nightly Weekly', 'SAR 60,000'], ['Season | Nightly | Weekly', 'SAR 60,000'],
+      ['Weekly price', 'SAR 60,000'], ['Nightly tariff', 'SAR 60,000'], ['Daily rate', 'SAR 60,000'], ['Daily', 'SAR 60,000'],
+      ['Rental yield 7.125 percent', 'SAR 60,000'],
+    ];
+    for (const p3 of labels.flatMap(([label, fig]) => [`${label}\n${fig}`, `${fig}\n${label}`])) await sentToPage(p3, 60000);
+    // B2: ات with a pronoun after it, on إيجار and عائد — on the figure's own line and as its label.
+    for (const form of ['عائداتك', 'عائداتكم', 'عائداتنا', 'عائداتي', 'عائداتهما', 'إيجاراتك', 'إيجاراتكم', 'إيجاراتنا', 'إيجاراتي']) {
+      await sentToPage(`${form} المتوقعة 60,000 ريال`, 60000, '60,000 ريال');
+      await sentToPage(`${form} المتوقعة\n60,000 ريال`, 60000);
+    }
+    // …and a word that only contains one is still none (عائدة: belongs to; مدخلها: its entrance), on the line or beside it.
+    for (const p3 of [
+      'الأرض عائدة للمطور — سعر البيع 450,000 ريال', 'الأرض عائدة للمطور\nسعر البيع 450,000 ريال',
+      'فيلا مدخلها مستقل — سعر البيع 450,000 ريال', 'فيلا مدخلها مستقل\nسعر البيع 450,000 ريال',
+    ]) await settled(p3);
+    // C#3 / NB5: "a night" / "a week" are rates only after a figure on the same line…
+    await sentToPage('SAR 700 a night', 700, 'SAR 700');
+    await sentToPage('700 SAR a week', 700, '700 SAR');
+    // …so a timeline or a frequency in prose beside a correct sale price is no rent label — nor "per day" / "كل يوم"
+    // with no figure before them.
+    for (const prose of ['Move in within a week', 'Housekeeping twice a week', 'Housekeeping once per day', 'تنظيف كل يوم']) {
+      await settled(`${prose}\nSale price SAR 450,000`);
+      await settled(`Sale price SAR 450,000\n${prose}`);
+    }
+    // NB4 = Codex r9 NB2: the short-stay siblings on the figure's own line — "daily", "per day" and "كل يوم" after the
+    // figure, the others before it or after.
+    for (const [p3, quote] of [
+      ['SAR 60,000 daily', 'SAR 60,000'], ['SAR 60,000 per day', 'SAR 60,000'], ['60,000 ريال كل يوم', '60,000 ريال'],
+      ...['سعر الليلة', 'لليوم', 'للأسبوع', 'للاسبوع', 'ليلياً', 'القيمة التأجيرية']
+        .flatMap((form) => [[`${form} 60,000 ريال`, '60,000 ريال'], [`60,000 ريال ${form}`, '60,000 ريال']]),
+    ]) await sentToPage(p3, 60000, quote);
   });
 
   it('r2 #3: caption "rent per month", the brochure prints only SAR 60,000 a year — no monthly headline', async () => {

@@ -243,18 +243,28 @@ const PRICE_WORD_RE = new RegExp([
  * بالدخل, للدخل, ودخل, الإيجار, للتأجير, العائد, and ك: كإيجار, كدخل), every ة / ه / ا form written out (أجره), and a
  * pronoun suffix on دخل / عائد / إيجار and on the income words (RENT_SUFFIX: دخلها, صافي دخله, عائدها, إيجاراتها, إيجارنا —
  * r8 #5, Claude r7 B1a; إيجاراته, عائداتهم, دخلك, عائدكم, دخلي, إيراداتها, ريعها, مردوده, عوائدها, "يحقق إيراداً" — r9 #2,
- * Claude r8 B1a / B1b). The short-stay rates past RENT_PERIOD, for this check only (statesMoney keeps its list): "a night",
- * "a week", بالليلة, في الليلة, كل ليلة, "/ ليلة", باليوم, في الأسبوع, بالأسبوع (r9 #2, Claude r8 B1c). A word that only
- * contains one is none: مدخل / مدخلها / تدخل (an entrance, enters), عائدة (belongs to), سريع (Codex r6 #7, Claude r6 B1c).
- * "عائده للمطور" (ه for ة), "الدراسة التي أجرتها الشركة" (conducted) cost a page check: the safe side.
+ * Claude r8 B1a / B1b), ات with any of them after it on إيجار and عائد, as on إيراد: عائداتك, عائداتكم, عائداتنا, عائداتي,
+ * عائداتهما, إيجاراتك, إيجاراتكم, إيجاراتنا, إيجاراتي (r10 #1, Claude r9 B2). The short-stay rates past RENT_PERIOD, for
+ * this check only (statesMoney keeps its list): بالليلة, في الليلة, كل ليلة, "/ ليلة", باليوم, في الأسبوع, بالأسبوع (r9 #2,
+ * Claude r8 B1c), "daily", "سعر الليلة", لليوم, للأسبوع, ليلياً, التأجيرية (r10 #1, Claude r9 NB4 = Codex r9 NB2) — and
+ * "a night", "a week", "per day", "كل يوم" only after a figure on the same line: "SAR 700 a night", "700 SAR a week",
+ * "60,000 ريال كل يوم", never "Move in within a week" or "Housekeeping twice a week" (r10 #1, Codex r9 #3 = Claude r9
+ * NB5). A word that only contains one is none: مدخل / مدخلها / تدخل (an entrance, enters), عائدة (belongs to), سريع
+ * (Codex r6 #7, Claude r6 B1c). "عائده للمطور" (ه for ة), "الدراسة التي أجرتها الشركة" (conducted) cost a page check: the
+ * safe side.
  */
 const RENT_SUFFIX = 'ه|ها|هم|هما|نا|ات|اتها|اته|اتهم|ك|كم|ي';
+/** After a figure on the same line, within 15 characters: "SAR 700 a night", "60,000 ريال كل يوم" (r10 #1). */
+const AFTER_FIGURE = String.raw`(?<=[\d٠-٩۰-۹][^\n]{0,15}?)`;
 const RENT_WORDING_RE = new RegExp([
-  String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|returns?|roi|revenues?|tenant(?:s|ed)?|tenancy|let\s+at|a\s+(?:night|week))\b`,
-  arabicWords(String.raw`[إاأ]يجار(?:ي|ية|يه|يا|ا|${RENT_SUFFIX})?|استئجار|تأجير|تاجير|أجرة|اجرة|أجره|اجره|[أا]جرت(?:ه|ها|هم)|مؤجر|مؤجرة|مؤجره|مؤجرا|`
-    + String.raw`موجر|موجرة|مستأجر|مستأجرة|دخل(?:ا|${RENT_SUFFIX})?|عائد(?:ا|${RENT_SUFFIX})?|عوائد(?:ا|${RENT_SUFFIX})?|[إا]يراد(?:ات)?(?:ا|${RENT_SUFFIX})?|`
+  String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|returns?|roi|revenues?|tenant(?:s|ed)?|tenancy|let\s+at|daily)\b`,
+  String.raw`${AFTER_FIGURE}\b(?:a\s+(?:night|week)|per\s+day)\b`,
+  arabicWords(String.raw`[إاأ]يجار(?:ات)?(?:ي|ية|يه|يا|ا|${RENT_SUFFIX})?|استئجار|تأجير|تاجير|أجرة|اجرة|أجره|اجره|[أا]جرت(?:ه|ها|هم)|مؤجر|مؤجرة|مؤجره|مؤجرا|`
+    + String.raw`موجر|موجرة|مستأجر|مستأجرة|دخل(?:ا|${RENT_SUFFIX})?|عائد(?:ات)?(?:ا|${RENT_SUFFIX})?|عوائد(?:ا|${RENT_SUFFIX})?|[إا]يراد(?:ات)?(?:ا|${RENT_SUFFIX})?|`
     + String.raw`ريع(?:ا|${RENT_SUFFIX})?|مردود(?:ا|${RENT_SUFFIX})?`, { ka: true }),
-  arabicWords(String.raw`بالليل[ةه]|في\s+الليل[ةه]|كل\s+ليل[ةه]|باليوم|في\s+(?:الأسبوع|الاسبوع)|بال[أا]سبوع`),
+  arabicWords(String.raw`بالليل[ةه]|في\s+الليل[ةه]|كل\s+ليل[ةه]|باليوم|في\s+(?:الأسبوع|الاسبوع)|بال[أا]سبوع|`
+    + String.raw`سعر\s+الليل[ةه]|لليوم|لل[أا]سبوع|ليليا|ت[أا]جيري[ةه]`),
+  AFTER_FIGURE + arabicWords(String.raw`كل\s+يوم`),
   String.raw`\/\s*ليل[ةه](?!${AR_LETTER})`,
   RENT_PERIOD,
 ].join('|'), 'i');
@@ -265,29 +275,6 @@ const RENT_WORDING_RE = new RegExp([
  */
 const foldRent = (s) => foldYeh(s.normalize('NFKC').replace(/[\u0640\u064b-\u0652\u0670]/g, ''));
 const rentWorded = (s) => typeof s === 'string' && RENT_WORDING_RE.test(foldRent(s));
-/**
- * The weak rent words — a frequency word an amenity prints too: "Weekly housekeeping included", "Nightly security
- * patrols", "PA system", "تنظيف أسبوعياً" (r9 #2, Codex r8 #3). An income word (return, ROI, revenue, مردود) is never
- * weak: "Expected return" or "صافي المردود" over a lone figure is an income card, so "High ROI" beside a sale price
- * costs one sale check (Claude r8 NB6, accepted) rather than letting an income figure settle as the price (r9 verifier).
- */
-const WEAK_RENT_G = new RegExp(String.raw`\b(?:weekly|nightly|daily|p\/?a)\b|` + arabicWords(String.raw`يوميا|[أا]سبوعيا`), 'gi');
-/** All a card label prints beside its weak word, if anything: rate or price words ("Nightly rate", "Return Rates"). */
-const RATE_LABEL_REST = /^[\s\p{P}\p{S}]*(?:(?:rates?|prices?|tariffs?|سعر|السعر|أسعار|اسعار|الأسعار|الاسعار)[\s\p{P}\p{S}]*)*$/iu;
-/**
- * Is a NEIGHBOUR line of a sale figure worded as its rent label (r9 #2)? Its weak words (WEAK_RENT_G) are cut first: it
- * is one if the rest is still rent wording ("Rental yield", "Per night", "لليلة الواحدة", "Weekly rent"), or if a weak
- * word was cut and the rest holds only rate or price words, or nothing — a card label: "Nightly rate", "Weekly", "Return
- * Rates", "أسبوعياً". "Weekly housekeeping included" beside "Sale price SAR 450,000" is none, so a spent quota never
- * sends that price on request. On the figure's own line and in the reading's quote every weak word still
- * counts (rentWorded): "SAR 60,000 weekly", "Return SAR 60,000".
- */
-const rentLabelWorded = (s) => {
-  if (typeof s !== 'string') return false;
-  const folded = foldRent(s);
-  const rest = folded.replace(WEAK_RENT_G, ' ');
-  return RENT_WORDING_RE.test(rest) || (rest !== folded && RATE_LABEL_REST.test(rest));
-};
 /** "starting / starts / from / يبدأ / ابتداء": money beside a figure of four digits or more (r3 #1). */
 const FROM_WORD_RE = new RegExp(String.raw`\b(?:starting|starts?|from)\b|` + arabicWords('يبدأ|تبدأ|ابتداء|ابتداءً|إبتداء|ابتداءا'), 'i');
 /** A figure of four digits or more, ungrouped. */
@@ -1320,8 +1307,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // A neighbour with an amount of its own (ownAmount: "Annual rent 12,000", "Annual rent SAR 12,000") labels that
     // amount; a unit, a year, a bedroom count or a yield is no amount, so "Annual rent — Unit 4", "Annual rent 2025",
     // "Rental yield 7%", "Rental yield 7.125%" are still labels (r8 #6, Codex r7 #2 = Claude r7 NB8; r9 #2, Codex r8
-    // NB1). A neighbour's weak frequency words are cut first (rentLabelWorded: r9 #2, Codex r8 #3): "Weekly
-    // housekeeping included" is no label, "Nightly rate" or "Weekly" alone is, and so is any income word ("High ROI"). Neighbours are looked for
+    // NB1). Every rent word counts in a neighbour as on the figure's own line, a frequency word too (r10 #1, Claude r9
+    // B1 = Codex r9 #1): "Weekly rate (SAR)", "Nightly rate per villa", "Season | Nightly | Weekly" are labels, so
+    // "Weekly housekeeping included" beside a correct sale price costs one sale check (the TAQEEM-safe side; under a
+    // spent quota, on request), and so does an income word ("High ROI"). Neighbours are looked for
     // on the figure's own page, or in the caption, never across a page break (r8 #6, Codex r7 #3, Claude r7 NB9): a page
     // ending "Rental income" labels nothing on the next. The text layer cannot tell a rent from an asking price: only
     // its page settles it (asked as a sale's, as every check of a sale is). A sale with no period, printed with no
@@ -1330,7 +1319,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       for (let j = i + step; j >= 0 && j < lines.length; j += step) if (lines[j].trim()) return lines[j];
       return '';
     };
-    const rentLabel = (line) => rentLabelWorded(line) && !ownAmount(line);
+    const rentLabel = (line) => rentWorded(line) && !ownAmount(line);
     const saleMayBeRent = !listingPeriod && (Boolean(price.period) || rentWorded(ai.priceEvidence?.quote)
       || [...textPages, caption.text || ''].some((block) => {
         const lines = String(block ?? '').split('\n');
