@@ -196,9 +196,15 @@ const MEASURE_NEXT = new RegExp(String.raw`^(?:[.,٫]\d{1,2})?[ \t\u00a0\u202f\u
 /**
  * …and a measure that ends right BEFORE the figure, spaces, a colon or a dash between at most: the Arabic text layer
  * comes in visual order, so "1,000,000 م²" reads "² م1,000,000" (AC53D4FF p5); "م² 1,000,000", "متر مربع 1,000,000",
- * "Area sqm: 1,000,000" too. Such a figure is an area as well (r10 #2, Claude r9 NB1). Read on the NFKC-folded head.
+ * "Area sqm: 1,000,000" too. Such a figure is an area as well (r10 #2, Claude r9 NB1). A unit with its own figure right
+ * before it measures THAT figure — a table row Model | Area | Price, "Villa A 250 m² 1,250,000 SAR", "تسليم 2022م
+ * 1,500,000" — so it is no measure of the next one (r10 #4, r10 verifier). The Arabic units are read on the NFKC-folded
+ * head ("²" folds to "2"); the Latin ones on the head as printed, where only "m²", "sqm" or "sq. m" is a unit: a typed
+ * "M2" before a figure is a model code ("Villa M2 450,000 SAR", the mirror of Codex r9 #2), "Item2" a word.
  */
-const MEASURE_BEFORE = new RegExp(String.raw`(?:م\s?2|2\s?م|م²|²\s?م|متر(?:\s+مربع)?|أمتار|امتار|هكتار|sqm|sq\.?\s?m|m2|m²)[\s:：\-–—]*$`, 'i');
+const NO_FIGURE_BEFORE = String.raw`(?<![\d٠-٩۰-۹][ \t\u00a0\u202f\u2009]{0,2})`;
+const MEASURE_BEFORE = new RegExp(String.raw`${NO_FIGURE_BEFORE}(?:م\s?2|2\s?م|متر(?:\s+مربع)?|أمتار|امتار|هكتار)[\s:：\-–—]*$`);
+const MEASURE_BEFORE_LATIN = new RegExp(String.raw`${NO_FIGURE_BEFORE}(?<![A-Za-z])(?:m²|sqm|sq\.?\s?m)[\s:：\-–—]*$`, 'i');
 
 /** The countries where a bare riyal is not the Saudi one: their own currency is a riyal or rial too. */
 const OWN_RIYALS = Object.freeze(['OMR', 'QAR', 'YER', 'IRR']);
@@ -238,7 +244,7 @@ export function printedInCurrency(text, amount, currency, { bareCounts = true, h
       const tail = t.slice(m.index + m[0].length, m.index + m[0].length + 32);
       // An area or a length is no price, whatever mark is near it: only its page can settle the figure (r9 #1). The
       // unit may come before it too, in the visual-order Arabic text layer (r10 #2).
-      if (MEASURE_NEXT.test(tail.normalize('NFKC')) || MEASURE_BEFORE.test(head.normalize('NFKC'))) continue;
+      if (MEASURE_NEXT.test(tail.normalize('NFKC')) || MEASURE_BEFORE.test(head.normalize('NFKC')) || MEASURE_BEFORE_LATIN.test(head)) continue;
       const marksBy = ({ before, after }) => [...marksIn(head, before), ...marksIn(tail, after)].map((c) => (c === RIYAL ? riyal : c));
       // A mark directly beside the figure decides it — the one before first ("$ 1,250,000 SAR 4,687,500": the SAR
       // is 4,687,500's), else the one after; other marks on the line do not count for it (r3 #5).

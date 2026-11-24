@@ -491,6 +491,16 @@ describe('r10 #2: printedInCurrency — a model code is no m², m² is no millio
       assert.equal(sar(t, 1e6), true, t);
     }
   });
+  it('r10 #4 (r10 verifier): a unit with its own figure before it, a model code or a year is no measure of the next figure', () => {
+    // A table row Model | Area | Price: the unit belongs to the area before it, not to the price after it. "M2" typed as
+    // a model code (the mirror of C#2), "Item2" and the year suffix in "2022م" are no unit either.
+    for (const [t, n] of [
+      ['Villa A 250 m² 1,250,000 SAR', 1.25e6], ['Villa A 250 m2 1,250,000 SAR', 1.25e6], ['Villa A 250 sqm 1,250,000', 1.25e6],
+      ['Type B 180 m² - 450,000 SAR', 450000], ['فيلا أ 250 م² 1,250,000 ريال', 1.25e6], ['فيلا أ 250 متر مربع 1,250,000 ريال', 1.25e6],
+      ['فيلا أ ٢٥٠ م² 1,250,000 ريال', 1.25e6], ['Villa M2 450,000 SAR', 450000], ['Type M2 450,000', 450000], ['Item2 450,000 ريال', 450000],
+      ['تسليم 2022م 1,500,000 ريال', 1.5e6],
+    ]) assert.equal(sar(t, n), true, t);
+  });
 });
 
 // r9 #3 (Codex r8 #2): in a model NAME a tight dotted pair with letters glued after it is initials ("د.إبراهيم": r8 #2),
