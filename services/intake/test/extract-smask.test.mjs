@@ -236,6 +236,8 @@ doc.save(sys.argv[1])
 // small (a second repeat on that page). "raise" and "lower": a form XObject drawn FIRST whose own picture (a new one) is
 // also named fzImg0, over the page with A at a quarter ("raise"), or small with A over the page ("lower"). "ocg": A over
 // the page inside an OFF optional-content layer, then A small.
+// r9 #4: "tiles" draws A's own xref at a quarter of page 8 among 1000 tiles, each a 2x2 picture of its own under its
+// own page-level name (/tile0../tile999), all drawn.
 // Every mode ends with page 9, which draws page 4's and page 5's pictures again (their own xrefs, neither one kept).
 const MAKE_CAP_WORK = `
 import sys, io, json, hashlib, pymupdf
@@ -297,6 +299,19 @@ elif sys.argv[2] == 'ocg':
     doc.xref_set_key(int(doc.xref_get_key(page.xref, 'Resources')[1].split()[0]), 'Properties', f'<</oc1 {ocg} 0 R>>')
     c = page.get_contents()[0]
     doc.update_stream(c, b'/OC /oc1 BDC q 765 0 0 595 38.5 0 cm /fzImg0 Do Q EMC\\n' + doc.xref_stream(c))
+elif sys.argv[2] == 'tiles':
+    page = doc.new_page(width=842, height=595)
+    page.insert_image(pymupdf.Rect(0, 0, 421, 297.5), xref=xa)
+    res = int(doc.xref_get_key(page.xref, 'Resources')[1].split()[0])
+    tiles = []
+    for t in range(1000):
+        x = doc.get_new_xref()
+        doc.update_object(x, '<</Type/XObject/Subtype/Image/Width 2/Height 2/ColorSpace/DeviceRGB/BitsPerComponent 8>>')
+        doc.update_stream(x, t.to_bytes(12, 'big'))
+        tiles.append(f'/tile{t} {x} 0 R')
+    doc.xref_set_key(res, 'XObject', f'<</fzImg0 {xa} 0 R {" ".join(tiles)}>>')
+    c = page.get_contents()[-1]
+    doc.update_stream(c, doc.xref_stream(c) + b''.join(b'q 2 0 0 2 %d %d cm /tile%d Do Q\\n' % (t % 400 * 2, 300 + t // 400 * 2, t) for t in range(1000)))
 else:
     put(doc, a)
 page = doc.new_page(width=842, height=595)
@@ -313,13 +328,15 @@ print(json.dumps({'same_xref': x1 == x8, 'same_raw': raw(x1) == raw(x8), 'size1'
                   'draws8': doc[7].read_contents().count(b'/fzImg0 Do'),
                   'shown8': len(doc[7].get_image_rects(x1)) if sys.argv[2] == 'ocg' else None,
                   'layers_on': [o['on'] for o in doc.get_ocgs().values()],
-                  'decode': [doc.xref_get_key(x, 'Decode')[1] for x in (x1, x8)]}))
+                  'decode': [doc.xref_get_key(x, 'Decode')[1] for x in (x1, x8)],
+                  'do8': doc[7].read_contents().count(b' Do')}))
 `;
 
 // Runs extract_pdf.py as a module with call counters on extract_image, colour_ratio, flatten_on_white,
 // placement_coverage, repeat_coverage and raw_key, and (r7 #8) on what decodes a picture inside PyMuPDF: Pixmap(doc, xref),
 // Page.get_image_rects and MuPDF's fz_get_pixmap_from_image, and (r8 #7) on the content-stream pass that places a picture
 // by its name (JM_image_reporter). A call counts as "past the cap" once images/ holds the 3 kept files (--max-candidates 3).
+// With "count" after the paths (r9 #4), `cmp` holds the name comparisons made inside each repeat_coverage() call.
 const CAP_WORK_HARNESS = `
 import sys, io, os, json, contextlib, importlib.util
 script, pdf, out = sys.argv[1:4]
@@ -352,11 +369,34 @@ pymupdf.Pixmap.__init__ = wrap('pixmap_xref', pymupdf.Pixmap.__init__,
 pymupdf.Page.get_image_rects = wrap('get_image_rects', pymupdf.Page.get_image_rects, lambda page, *r: page.number + 1)
 pymupdf.mupdf.fz_get_pixmap_from_image = wrap('decode', pymupdf.mupdf.fz_get_pixmap_from_image, lambda *a: 1)
 pymupdf.JM_image_reporter = wrap('reporter', pymupdf.JM_image_reporter, lambda *a: 1)
+cmp = []
+if sys.argv[4:] == ['count']:
+    # r9 #4: every get_images() name compares through a counter, and each repeat_coverage() call records its count.
+    seen = [0]
+    class Name(str):
+        __hash__ = str.__hash__
+        def __eq__(self, o):
+            seen[0] += 1
+            return str.__eq__(self, o)
+        def __ne__(self, o):
+            seen[0] += 1
+            return str.__ne__(self, o)
+    page_images = pymupdf.Document.get_page_images
+    pymupdf.Document.get_page_images = lambda self, *a, **k: [
+        tuple(Name(v) if i == 7 else v for i, v in enumerate(item)) for item in page_images(self, *a, **k)]
+    rc_fn = x.repeat_coverage
+    def counted(page, info):
+        n = seen[0]
+        try:
+            return rc_fn(page, info)
+        finally:
+            cmp.append(seen[0] - n)
+    x.repeat_coverage = counted
 sys.argv = ['extract_pdf.py', pdf, out, '--min-side', '300', '--max-candidates', '3']
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     rc = x.main()
-print(json.dumps({'rc': rc, 'res': json.loads(buf.getvalue().strip().split('\\n')[-1]), 'past': past, 'before': before}))
+print(json.dumps({'rc': rc, 'res': json.loads(buf.getvalue().strip().split('\\n')[-1]), 'past': past, 'before': before, 'cmp': cmp}))
 `;
 
 function capWork(mode) {
@@ -369,7 +409,8 @@ function capWork(mode) {
     assert.equal(mk.status, 0, mk.stderr);
     const fixture = JSON.parse(mk.stdout.trim().split('\n').pop());
     const out = path.join(dir, 'out');
-    const run = spawnSync('uv', ['run', ...WITH, 'python', '-I', '-c', CAP_WORK_HARNESS, SCRIPT, pdf, out], { encoding: 'utf8' });
+    const run = spawnSync('uv', ['run', ...WITH, 'python', '-I', '-c', CAP_WORK_HARNESS, SCRIPT, pdf, out,
+      ...(mode === 'tiles' ? ['count'] : [])], { encoding: 'utf8' });
     assert.equal(run.status, 0, run.stderr);
     const r = JSON.parse(run.stdout.trim().split('\n').pop());
     return { fixture, files: fs.readdirSync(path.join(out, 'images')).sort(), ...r };
@@ -610,5 +651,21 @@ describe('extract_pdf.py - transparent images', { skip: !UV && 'uv not installed
     assert.deepEqual(r.fixture.decode, ['null', '[1 0 1 0 1 0]'], '... read through an inverting /Decode');
     assertNoWorkPastCap(r, { placed: [] });
     assert.deepEqual(r.res.candidates.map((c) => c.coverage), COVERAGE_UNPLACED);
+  });
+
+  it('r9 #4 (Codex r8 #5): past the cap a repeat on a page of 1000 tiles is placed by its name with names counted once per page, not once per draw', () => {
+    const r = capWork('tiles');
+    assert.equal(r.fixture.same_xref, true, 'page 8 draws the xref kept on page 1');
+    assert.equal(r.fixture.names8.length, 1001, 'A and 1000 tiles on page 8');
+    assert.equal(new Set(r.fixture.names8.map(([n, inForm]) => `${n} ${inForm}`)).size, 1001, '... each under its own page-level name');
+    assert.ok(r.fixture.names8.every(([, inForm]) => !inForm), '... none inside a form XObject');
+    assert.equal(r.fixture.do8, 1001, '... and every one of them is drawn');
+    assert.deepEqual(r.res.candidates.map((c) => c.coverage), COVERAGE_QUARTER, 'A covers a quarter of page 8');
+    assertNoWorkPastCap(r, { placed: [8] });
+    assert.deepEqual(r.past.reporter, [1], 'one content-stream pass places the repeat');
+    // names.count(n) per drawn name made 1001 x 1001 + 1 = 1,002,002 comparisons here (46fbd05); one Counter per page
+    // makes one lookup per drawn name.
+    assert.equal(r.cmp.length, 1, 'repeat_coverage() runs once');
+    assert.ok(r.cmp[0] < 10 * 1001, `${r.cmp[0]} name comparisons inside repeat_coverage(): linear in the page's pictures, not quadratic`);
   });
 });

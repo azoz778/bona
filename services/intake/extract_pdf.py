@@ -66,6 +66,7 @@ The caller (lib/pdf.mjs) is responsible for the default-deny classification.
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
 import io
 import json
@@ -331,12 +332,15 @@ def repeat_coverage(page, info):
     `info` is the image's get_images(full=True) item. get_image_rects() builds a Pixmap of the image and hashes every
     image on the page at full size, so an image the page draws itself (info[-1] == 0) is placed by its resource name in
     the page's content stream instead: one JM_image_reporter() pass per page (the pass get_image_bbox() makes), cached
-    on the page object, lists every draw with its name and decodes nothing. Like placement_coverage(), the LARGEST draw
-    of the name counts: a picture drawn small, then over the page, is a whole page. The pass knows draws by name only,
-    inside form XObjects too, and it also lists draws on an OFF optional-content layer, so it is used only when no other
-    get_images() item on the page carries the name and the document has no optional content. Otherwise (an image drawn
-    inside a form XObject, a shared name, any layer), on an exception, or with no usable rect, placement_coverage()
-    places it.
+    on the page object, lists the draws it sees with their names and decodes nothing. Like placement_coverage(), the
+    LARGEST draw of the name counts: a picture drawn small, then over the page, is a whole page. The pass does not see a
+    draw through a tiling pattern (a WeasyPrint CSS background), in an annotation's appearance stream (/AP) or inside a
+    form XObject with no /Resources of its own: a kept picture also drawn one of those ways is placed by its other
+    draws only, so its coverage can come out low (0.23-0.25 against a true 1.0; no owner PDF does this, Claude r8
+    NB10). The pass knows draws by name only, inside form XObjects too, and it also lists draws on an OFF
+    optional-content layer, so it is used only when no other get_images() item on the page carries the name (the
+    page's names are counted once, r9 #4) and the document has no optional content. Otherwise (an image drawn inside a
+    form XObject, a shared name, any layer), on an exception, or with no usable rect, placement_coverage() places it.
     """
     if info[-1] == 0:
         try:
@@ -345,11 +349,11 @@ def repeat_coverage(page, info):
                 page._bona_placed = {}  # until the pass succeeds: every repeat on the page goes to placement_coverage()
                 if not page.parent.get_ocgs():
                     import pymupdf  # noqa: PLC0415
-                    names = [x[7] for x in page.get_images(full=True)]
+                    names = collections.Counter(x[7] for x in page.get_images(full=True))
                     draws = {}
                     for name, quad in pymupdf.JM_image_reporter(page._pdf_page()):
                         draws.setdefault(name, []).append(pymupdf.Quad(quad).rect)
-                    page._bona_placed = {n: rects for n, rects in draws.items() if names.count(n) == 1}
+                    page._bona_placed = {n: rects for n, rects in draws.items() if names[n] == 1}
                 placed = page._bona_placed
             rects = [r for r in placed.get(info[7], ()) if not r.is_empty and not r.is_infinite]
             area = page.rect.width * page.rect.height
