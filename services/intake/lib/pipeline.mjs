@@ -1037,6 +1037,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // an unfinished check (enrichListing). Nothing after a quota error.
   const PLAN_WORDS = { phone: 'a phone number', email: 'an email address', website: 'a website', social: 'a social-media handle', qr: 'a QR code', logo: 'a logo or brand name', price: 'a price' };
   const modelName = (i) => String(ai.models?.[i]?.name?.en ?? `model ${i + 1}`).replace(/\s+/g, ' ').trim().slice(0, 60);
+  // Why each model's plan was left out, by model position — for the named plan losses of an enrichment (r6 #5).
+  const planWhy = new Map();
   const checkFloorPlans = async () => {
     const models = Array.isArray(ai.models) ? ai.models : [];
     if (!floorPlanTargets(extraction.candidates, models, 'plan-check').some((t) => t.cand)) return;
@@ -1047,7 +1049,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // A plan that could not be prepared here was never checked: it is left out now, so a later write that
     // succeeds can never stage it and a dry run never previews it (r5 #6).
     if (written.skipped?.length) {
-      for (const { model } of written.skipped) models[model].floorPlan = null;
+      for (const { model } of written.skipped) { models[model].floorPlan = null; planWhy.set(model, 'could not be prepared'); }
       if (!report.warningCodes.includes('images-skipped')) report.warningCodes.push('images-skipped');
       report.warnings.push(`${written.skipped.length} floor plan(s) could not be processed and were left out`);
       log.warn('intake.floor_plans_skipped', { skipped: written.skipped });
@@ -1063,7 +1065,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     };
     const res = await checkPlanImages(written.map((p) => ({ model: p.model, file: p.file })), { ask });
     for (const { model } of res.dirty) models[model].floorPlan = null;
-    for (const model of res.unchecked) models[model].floorPlan = null;
+    for (const model of res.unchecked) { models[model].floorPlan = null; planWhy.set(model, 'not checked'); }
     report.planCheck = {
       plans: written.length, clean: res.clean.length, calls: res.calls, fatal: res.fatal, errors: res.errors,
       leftOut: res.dirty.map(({ model, found }) => ({ model, found })), unchecked: res.unchecked,
@@ -1078,6 +1080,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       const what = !flagged ? 'no clear answer from the check'
         : `shows ${found.length ? found.map((w) => PLAN_WORDS[w]).join(', ') : 'contact or brand details'}`;
       byReason.set(what, [...(byReason.get(what) ?? []), modelName(model)]);
+      planWhy.set(model, flagged ? `flagged: ${what}` : what);
     }
     if (res.dirty.length) {
       const n = res.dirty.length;
@@ -1099,7 +1102,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // dropped before the checks (3c): there is no copy guard to run. Its plans are checked here, after its
     // (model) price checks, before anything is staged (r5 #4).
     await checkFloorPlans();
-    return enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target: enrichTarget, started, currencyDrop, force: enrich.force });
+    return enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target: enrichTarget, started, currencyDrop, force: enrich.force, planWhy });
   }
 
   // Under the owner's caption price the model's own figure is not published as the price — but if
@@ -1377,9 +1380,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
  * reading, its model prices and floor plans as they will be published) against `existing`. `before` /
  * `after` count the unit models, their published price figures (regular and Sakani) and their floor
  * plans, and name the fact lists carried; `losses` says, in words, every count that would go down, every
- * fact list that would go and, when the plan count does not go down, every model that would lose its plan.
+ * fact list that would go and, when the plan count does not go down, every model that would lose its plan,
+ * and why: `why` maps a new model's position to the reason its plan was left out (r6 #5).
  */
-export function compareEnrichment(existing, built) {
+export function compareEnrichment(existing, built, why = new Map()) {
   const list = (models) => (Array.isArray(models) ? models : []);
   const figures = (models) => list(models).flatMap((m) => [m?.price, m?.subsidisedPrice]).filter(isFigure).length;
   const hasPlan = (m) => Boolean(m?.floorPlan && typeof m.floorPlan === 'object' && typeof m.floorPlan.src === 'string');
@@ -1393,16 +1397,27 @@ export function compareEnrichment(existing, built) {
   if (after.prices < before.prices) losses.push(`confirmed model prices ${before.prices} → ${after.prices}`);
   // Plans are lost per model (Codex r4 #6): a model that carries a plan and would have none (flagged, unchecked,
   // skipped, not found, or the model itself gone) is a loss even when another model gains one and the count holds.
-  // Models are matched by their English name; two of one name are counted, never merged.
-  const key = (m) => String(m?.name?.en ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
-  const planned = new Map();
-  for (const m of list(built?.models).filter(hasPlan)) planned.set(key(m), (planned.get(key(m)) ?? 0) + 1);
+  // A new model with a plan covers an old one (r6 #5) when their English names are equal and each unique on its
+  // side ("Al Zumurrud 2" is "Zumurrud 2"), or their Arabic names are, or English, Arabic and area are all equal;
+  // it covers one at most. A loss says why: the reason its new model's plan was left out, else no plan was read.
+  const olds = list(existing?.models);
+  const news = list(built?.models);
+  const en = (m) => String(m?.name?.en ?? '').trim().replace(/\s+/g, ' ').toLowerCase().replace(/^(?:al |al-|the )/, '');
+  const ar = (m) => String(m?.name?.ar ?? '').replace(/\u0640/g, '').trim().replace(/\s+/g, ' ');
+  const tally = (models, f) => models.reduce((n, m) => n.set(f(m), (n.get(f(m)) ?? 0) + 1), new Map());
+  const [oldEn, newEn, oldAr, newAr] = [tally(olds, en), tally(news, en), tally(olds, ar), tally(news, ar)];
+  const same = (o, n) => (en(o) !== '' && en(o) === en(n) && oldEn.get(en(o)) === 1 && newEn.get(en(n)) === 1)
+    || (ar(o) !== '' && ar(o) === ar(n) && oldAr.get(ar(o)) === 1 && newAr.get(ar(n)) === 1)
+    || (en(o) === en(n) && ar(o) === ar(n) && (o?.areaSqm ?? null) === (n?.areaSqm ?? null));
+  const used = new Set();
   const planDropped = [];
-  list(existing?.models).forEach((m, i) => {
+  olds.forEach((m, i) => {
     if (!hasPlan(m)) return;
-    if (planned.get(key(m))) { planned.set(key(m), planned.get(key(m)) - 1); return; }
-    const name = String(m?.name?.en ?? '').trim() || `model ${i + 1}`;
-    if (!planDropped.includes(name)) planDropped.push(name);
+    const j = news.findIndex((n, k) => !used.has(k) && hasPlan(n) && same(m, n));
+    if (j >= 0) { used.add(j); return; }
+    const k = news.findIndex((n) => !hasPlan(n) && same(m, n));
+    const lost = `${String(m?.name?.en ?? '').trim() || `model ${i + 1}`} (${(k >= 0 && why.get(k)) || 'no plan in the new reading'})`;
+    if (!planDropped.includes(lost)) planDropped.push(lost);
   });
   if (after.plans < before.plans) losses.push(`floor plans ${before.plans} → ${after.plans}`);
   else if (planDropped.length) losses.push(`floor plan${planDropped.length === 1 ? '' : 's'} dropped: ${planDropped.join(', ')}`);
@@ -1424,7 +1439,7 @@ const PLAN_FILE_RE = /^plan-\d{2,3}(?:\.jpg|-thumb\.webp)$/;
  * rolled back from git (resetTree), so the listing is exactly as it was. A dry run reports what would
  * change and writes nothing.
  */
-async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target, started, currencyDrop = null, force = false }) {
+async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dryRun, withdrawals, target, started, currencyDrop = null, force = false, planWhy = new Map() }) {
   report.stage = 'enrich';
   const existing = target.listing;
   const { id, slug } = existing;
@@ -1445,6 +1460,7 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   } else {
     floorPlans = await writeFloorPlans(extraction.candidates, ai.models ?? [], stageDir, slug);
     if (floorPlans.skipped?.length) {
+      for (const { model } of floorPlans.skipped) planWhy.set(model, 'could not be prepared');
       report.warningCodes.push('images-skipped');
       report.warnings.push(`${floorPlans.skipped.length} floor plan(s) could not be processed and were left out`);
       log.warn('intake.floor_plans_skipped', { skipped: floorPlans.skipped });
@@ -1461,7 +1477,7 @@ async function enrichListing({ report, ai, extraction, cfg, caption, workDir, dr
   const head = enrichHeadline(existing, models, aligned, { currencyMismatch: currencyDrop?.decision === 'currency-mismatch' });
   if (head.dropModelPrices) for (const m of models) { m.price = null; m.subsidisedPrice = null; }
   const priceChanged = !isDeepStrictEqual(head.price, existing.price);
-  const compare = compareEnrichment(existing, built);
+  const compare = compareEnrichment(existing, built, planWhy);
   // Never write over a listing with less than it carries. An incomplete price check (a page that did
   // not render, a failed call, a quota) is ours, not the brochure's: when the listing already carries
   // model prices it could lose, nothing changes — try again later; a listing with none to lose gets the
