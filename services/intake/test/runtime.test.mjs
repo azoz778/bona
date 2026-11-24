@@ -532,3 +532,59 @@ describe('pdf.mjs — the python command is argv, not a shell line', () => {
     }
   });
 });
+
+// r9 #6 (NB16) — the extractor prints its JSON with ensure_ascii=False, so an Arabic page
+// text reaches pdf.mjs as raw UTF-8. A pipe hands it over in chunks of at most 64 KB, and a
+// chunk decoded on its own turns a two-byte letter cut at the boundary into U+FFFD. The
+// fake extractor below writes the first 65,536 bytes, waits so they are read on their own,
+// then writes the rest; the byte at 65,536 is the second half of an Arabic letter.
+describe('pdf.mjs — the extractor output is one UTF-8 stream, not one decode per pipe chunk', () => {
+  const CUT = 65536;
+  const FAKE = `import fs from 'node:fs';
+import path from 'node:path';
+const pdf = process.argv[3];                       // node fake-py.mjs extract_pdf.py <pdf> <outDir> ...
+const read = (name) => { const f = path.join(path.dirname(pdf), name); return fs.existsSync(f) ? fs.readFileSync(f) : Buffer.alloc(0); };
+const send = (stream, buf, then) => {
+  if (buf.length <= ${CUT}) return stream.write(buf, then);
+  stream.write(buf.subarray(0, ${CUT}), () => setTimeout(() => stream.write(buf.subarray(${CUT}), then), 200));
+};
+send(process.stdout, read('stdout.bin'), () => send(process.stderr, read('stderr.bin'), () => { process.exitCode = Number(read('code.txt').toString() || 0); }));
+`;
+  // Pad with ASCII until a two-byte letter sits across the cut (byte CUT is its continuation byte).
+  const straddling = (head, body, tail) => {
+    for (let pad = 0; pad < 4; pad++) {
+      const buf = Buffer.from(head + ' '.repeat(pad) + body + tail, 'utf8');
+      if ((buf[CUT - 1] & 0xc0) === 0xc0 && (buf[CUT] & 0xc0) === 0x80) return { buf, text: ' '.repeat(pad) + body };
+    }
+    throw new Error('no letter straddles the cut');
+  };
+  const rig = (files) => {
+    const pdfPath = path.join(dir, 'brochure.pdf');
+    fs.writeFileSync(pdfPath, '%PDF-1.4 stand-in');
+    fs.writeFileSync(path.join(dir, 'fake-py.mjs'), FAKE);
+    for (const [name, data] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), data);
+    return { pdfPath, pyCmd: [process.execPath, path.join(dir, 'fake-py.mjs')] };
+  };
+
+  it('an Arabic page text whose letter straddles byte 65,536 of stdout arrives whole', async () => {
+    const { extractPdf } = await import('../lib/pdf.mjs');
+    const body = 'السعر ٤٬٥٠٠٬٠٠٠ ريال للفيلا نموذج أ '.repeat(2200);
+    const { buf, text } = straddling('{"ok":true,"pageText":["', body, '"]}\n');
+    assert.ok(buf.length > CUT + 1000);
+    const { pdfPath, pyCmd } = rig({ 'stdout.bin': buf });
+    const res = await extractPdf(pdfPath, path.join(dir, 'out'), { pyCmd, timeoutMs: 60000 });
+    assert.equal(res.ok, true, res.error);
+    assert.equal(res.pageText[0].includes('�'), false, 'a letter cut at the chunk boundary became U+FFFD');
+    assert.equal(res.pageText[0], text);
+  });
+
+  it('an Arabic error on stderr whose letter straddles byte 65,536 is quoted whole', async () => {
+    const { extractPdf } = await import('../lib/pdf.mjs');
+    const { buf } = straddling('x'.repeat(CUT - 1), 'خطأ في قراءة الصفحة ٣', '\n');
+    const { pdfPath, pyCmd } = rig({ 'stderr.bin': buf, 'code.txt': '1' });
+    const res = await extractPdf(pdfPath, path.join(dir, 'out'), { pyCmd, timeoutMs: 60000 });
+    assert.equal(res.ok, false);
+    assert.equal(res.error.includes('�'), false, 'a letter cut at the chunk boundary became U+FFFD');
+    assert.match(res.error, /^extract_pdf\.py failed \(exit 1\): x+خطأ في قراءة الصفحة ٣$/);
+  });
+});
