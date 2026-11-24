@@ -153,6 +153,13 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     // r8 #2 (Codex r7 #4): a tight dotted mark glued to the word before it is a mark when a figure follows.
     'الاشتراكر.س 2000', 'الاشتراكر.س2000', 'الاشتراكر.س. 2000', 'الاشتراكر.ع 750', 'الاشتراكر.ق 750', 'الاشتراكد.إ 750',
     'الاشتراكد.ك 750',
+    // r8 #4 (Claude r7 NB1): one dot may stand between a Latin code and its figure, as in the name and copy guards.
+    'Gym membership Dhs. 4500', 'SAR.750', 'USD. 750',
+    // r8 #4 (Codex r7 NB2): a spaced "p. a." is one rent period, never a sentence end between "p." and "a".
+    'Floors 1–3, 4500 p. a.', 'Floors 1–3, 4500 p. a', 'Floors 1–3, 4500 P. A.', 'Club membership 4500 p.  a.',
+    // r8 #4 (Codex r7 #7 = Claude r7 NB6, not fixed): a known over-drop, kept on the TAQEEM-safe side. A dot before a
+    // figure joins two sentences (r7 #4); narrowing that join reopens the two leaks after it.
+    'No booking required. 3 tennis courts.', 'Deposit required. 75', 'Down payment required. 10% on signing',
   ];
   const NOT_MONEY = [
     'Handover starts 2027', 'No maintenance fees for 2 years', 'ضمان 10 سنوات … مقدم من المطور', 'خدمات مقدمة … 24 ساعة',
@@ -171,6 +178,9 @@ describe('r3 #1: the free-text money rule (statesMoney) — the whole contract i
     'Ground to sixth floor. 2 lifts',
     // r8 #2: a glued tight pair with no figure right after it is a word; a spaced pair after a letter is a sentence end.
     'مُر.سعيد 2000', 'الدار. س 2: هل يوجد موقف؟',
+    // r8 #4: the dot before a figure follows a Latin CODE only — after a letter or a currency word it ends a sentence;
+    // only a standalone "p." joins a spaced "a".
+    'Tower B. 12 floors', 'Quoted in US dollars. 2027 handover', 'Gym on the top floor. A pool with 2 lanes', 'Step. A 3 bedroom plan',
   ];
   it('MONEY', () => { for (const t of MONEY) assert.equal(statesMoney(t), true, t); });
   it('NOT MONEY', () => { for (const t of NOT_MONEY) assert.equal(statesMoney(t), false, t); });

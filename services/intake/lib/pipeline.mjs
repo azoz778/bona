@@ -142,10 +142,12 @@ function refusedFigureIn(segments, refused, published) {
 const CUR = MONEY_MARKS.any;
 /**
  * A currency next to a figure: "SAR 1,500", "1,500 riyals", "$ 750", "750 SR", "4500SAR" (r5 #1: a code glued to its
- * figure), "750 Saudi Riyals" (r6 #1: a country between the figure and its currency).
+ * figure), "750 Saudi Riyals" (r6 #1: a country between the figure and its currency). One dot may stand between a Latin
+ * code and its figure, as in the name and copy guards: "Dhs. 4500", "SAR.750", "USD. 750" (r8 #4, Claude r7 NB1) — a
+ * code's only: after a letter or a currency word the dot ends a sentence, "Tower B. 12 floors", "in US dollars. 2027".
  */
-const CURRENCY_BY_FIGURE_RE = new RegExp(String.raw`${CUR}\s*[:\-–—=]?\s*\d|\d(?:[.,٫]\d{1,2})?\s*(?:\/-\s*)?`
-  + String.raw`(?:${MONEY_MARKS.countries}\s+)?${CUR}`, 'i');
+const CURRENCY_BY_FIGURE_RE = new RegExp(String.raw`(?:(?<![A-Za-z])${MONEY_MARKS.codes}\.|${CUR})\s*[:\-–—=]?\s*\d`
+  + String.raw`|\d(?:[.,٫]\d{1,2})?\s*(?:\/-\s*)?(?:${MONEY_MARKS.countries}\s+)?${CUR}`, 'i');
 /**
  * A dotted currency mark — "ر.س", "ر. س.", "ر.ع", "ر.ق", "د.إ", "د.ك", "S.R.", "SR." — whose dot would end the sentence
  * and part the mark from its figure (Codex r5 #1). statesMoney reads it as " SAR " before the split. The Arabic letters
@@ -155,6 +157,11 @@ const CURRENCY_BY_FIGURE_RE = new RegExp(String.raw`${CUR}\s*[:\-–—=]?\s*\d|
 const DOTTED_MARK_G = new RegExp(MONEY_MARKS.dotted + String.raw`|(?<![A-Za-z])(?:S\.\s?R\.?|SR\.)(?![A-Za-z])`, 'gi');
 /** "approx." / "incl." / "excl." — an abbreviation's dot is no sentence end ("Deposit approx. 750": r6 #1). */
 const ABBREVIATION_DOT_G = /(?<![A-Za-z])(approx|incl|excl)\./gi;
+/**
+ * A spaced "p. a." closed up to "p.a" before the split, so its first dot never parts it from its figure and RENT_PERIOD
+ * reads it: "4500 p. a.", "4500 P. A." (r8 #4, Codex r7 NB2). Only a standalone "p." joins: "Step. A 3 bedroom plan" is two.
+ */
+const SPACED_PA_G = /(?<![A-Za-z])p\.\s+a(?![A-Za-z])/gi;
 /**
  * A currency's name or symbol anywhere, or its code by an amount — what a model NAME may not carry (r2 #4). Only a LETTER
  * continues a code or a name, as in CUR: "Studio 4500SAR", "Studio SAR4500", "Villa 1,250,000SAR" (r6 #2); one dot may
@@ -261,14 +268,16 @@ const YEAR_G = /(?<![\d.,٫٬])(?:19|20)\d{2}(?![\d]|[.,٫٬]\d)/g;
 /**
  * statesMoney's sentence end: SENTENCE_END, except dots followed by a space and a figure — "Booking fee min. 2000",
  * "Deposit est. 750", "Deposit... 750" are one sentence (r7 #4). publishedText and the copy guard keep SENTENCE_END.
+ * It joins "No booking required. 3 tennis courts." too, a known over-drop (Codex r7 #7, Claude r7 NB6: not fixed): narrowing
+ * the join — to abbreviations, or to bigger figures — reopens "Deposit required. 75" and "Down payment required. 10% on signing".
  */
 const MONEY_SENTENCE_END = /(?<!\bsq)(?!\.+\s+[\d٠-٩۰-۹])[.!?؟؛;\n]+(?=\s|$)/i;
 
 /**
  * Does `text` state money? THE rule for free text — a unit model's rooms and availability, every amenities /
  * nearby / warranties item (r3 #1, r5 #1, r6 #1; its whole contract is one table in price-pages.test.mjs). Tatweel
- * goes first, and a dotted mark, "approx." / "incl." / "excl." or a dot before a figure ("min. 2000") never ends a
- * sentence. Sentence by sentence:
+ * goes first, and a dotted mark, "approx." / "incl." / "excl.", a spaced "p. a." or a dot before a figure ("min. 2000")
+ * never ends a sentence. Sentence by sentence:
  *   - a currency next to a figure ("Club fee SAR 1,500"), looked for BEFORE anything is cut ("SAR 4.5 M" is no
  *     4.5 metres, "SAR 4,500 month" no duration: r6 #1);
  * then, once measurements (withoutMeasures) and durations ("2 years", "24 ساعة") are cut out (a lone year, "2027",
@@ -284,8 +293,10 @@ const MONEY_SENTENCE_END = /(?<!\bsq)(?!\.+\s+[\d٠-٩۰-۹])[.!?؟؛;\n]+(?=\s|
  */
 export function statesMoney(text) {
   // Sentences only — a comma never sets a figure apart from its word ("Deposit, 750": r5 #1). Tatweel out, and a dotted
-  // mark or an abbreviation closed up first, so no dot parts "ر. س" / "S.R." / "approx." from its figure (r6 #1).
-  const folded = String(text ?? '').replace(/\u0640/g, '').replace(DOTTED_MARK_G, ' SAR ').replace(ABBREVIATION_DOT_G, '$1 ');
+  // mark or an abbreviation closed up first, so no dot parts "ر. س" / "S.R." / "approx." from its figure (r6 #1), nor
+  // "p." from "a." (r8 #4).
+  const folded = String(text ?? '').replace(/\u0640/g, '').replace(DOTTED_MARK_G, ' SAR ').replace(ABBREVIATION_DOT_G, '$1 ')
+    .replace(SPACED_PA_G, 'p.a');
   return folded.split(MONEY_SENTENCE_END).some((clause) => {
     const w = westernise(clause);
     // The currency before any cut: "SAR 4.5 M" is no 4.5 metres, "SAR 4,500 month" no duration (r6 #1).
