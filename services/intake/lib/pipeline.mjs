@@ -167,14 +167,22 @@ const DOTTED_MARK_G = new RegExp(MONEY_MARKS.dotted + String.raw`|(?<![A-Za-z])(
 /** "approx." / "incl." / "excl." — an abbreviation's dot is no sentence end ("Deposit approx. 750": r6 #1). */
 const ABBREVIATION_DOT_G = /(?<![A-Za-z])(approx|incl|excl)\./gi;
 /**
- * A currency's name or symbol anywhere, or its code by a figure — what a model NAME may not carry (r2 #4). Only a LETTER
- * continues a code or a name, as in CUR: "Studio 4500SAR", "Studio SAR4500", "Villa 1,250,000SAR" (r6 #2). Every mark
- * CUR reads is here too, from the same list (r7 #2): "S.R. 4500", "4500Dhs", "4500 pounds", "ر.ق 2000", "د.إ 2000",
- * "د. ك 2000" — the Arabic letters standing alone, as in DOTTED_MARK_G ("د. إبراهيم" is a name).
+ * A currency's name or symbol anywhere, or its code by an amount — what a model NAME may not carry (r2 #4). Only a LETTER
+ * continues a code or a name, as in CUR: "Studio 4500SAR", "Studio SAR4500", "Villa 1,250,000SAR" (r6 #2); one dot may
+ * stand between a code and its figure: "Studio SR. 750", "Studio SAR.750" (r7 #3, Codex r6 #2). Every mark CUR reads is
+ * here too, from the same list (r7 #2): "S.R. 4500", "4500Dhs", "4500 pounds", "ر.ق 2000", "د.إ 2000", "د. ك 2000" — the
+ * Arabic letters standing alone, as in DOTTED_MARK_G ("د. إبراهيم" is a name). A Latin code counts only beside an
+ * amount-shaped figure (r7 #3, Claude r6 B4): three digits or more, grouped ("1,250,000", "1 250 000"), decimal ("4.5",
+ * "0,95", ".95") or scaled ("2m", "5 k", "2 million") — the unit codes a brochure prints, "Type SR2", "Villa DH 1",
+ * "Unit 2 DH", "Villa S.R. 2", are names. Arabic marks, currency words and symbols refuse a name anywhere.
  */
 const NAME_CODE = `(?<![A-Za-z])${MONEY_MARKS.codes}(?![A-Za-z])`;
-const NAME_CURRENCY_RE = new RegExp(String.raw`${NAME_CODE}\s*\d|\d\s*${NAME_CODE}|(?<![A-Za-z])${MONEY_MARKS.words}(?![A-Za-z])`
-  + `|${MONEY_MARKS.arabic}|${MONEY_MARKS.abbreviations}|${MONEY_MARKS.symbols}`, 'i');
+const NAME_SCALE_WORD = String.raw`\s*(?:k|m|mn|bn|millions?|thousands?|billions?)(?![a-z²\d])`;
+/** The figure right after a code ("SR 750", "SR 4.5m", "SR .95m"), and the one right before ("4500SAR", "4.5 SR", "2m SAR"). */
+const NAME_AMOUNT_AFTER = String.raw`(?:\d{3}|\d+[.,٫٬]\d|\d{1,3}[ \u00a0\u202f\u2009]\d{3}(?!\d)|(?<=\s)[.٫]\d|\d+${NAME_SCALE_WORD})`;
+const NAME_AMOUNT_BEFORE = String.raw`(?:\d{3}|\d[.,٫٬]\d+|(?<![A-Za-z])[.٫]\d+|\d${NAME_SCALE_WORD})`;
+const NAME_CURRENCY_RE = new RegExp(String.raw`${NAME_CODE}\.?\s*${NAME_AMOUNT_AFTER}|${NAME_AMOUNT_BEFORE}\s*${NAME_CODE}`
+  + String.raw`|(?<![A-Za-z])${MONEY_MARKS.words}(?![A-Za-z])|${MONEY_MARKS.arabic}|${MONEY_MARKS.abbreviations}|${MONEY_MARKS.symbols}`, 'i');
 /**
  * Arabic words as whole words, with the clitics و / ف, ب / ل / لل and ال in front (a tatweel may follow one:
  * "فـحجز"): "السعر", "بسعر", "للإيجار" — never inside another word ("رسوم" is not in "رسومات"). Only a LETTER
@@ -258,24 +266,35 @@ const statesFigure = (text, figures) => figures.length > 0 && typeof text === 's
   && figures.some((n) => priceAppearsIn(withoutMeasures(westernise(text)), n));
 /**
  * A scaled token in a model NAME (r6 #2, Claude r5 B4, Codex r5 #1): its digits — "." or "٫" as the decimal mark,
- * trailing zeros or not, thousands grouped by "," or "٬" — then m / mn / million / مليون / ملايين or k / thousand /
- * ألف / الف / آلاف / الاف. "m" and "k" only written solid ("20 m" is metres, as in price.mjs). The word ends at a
- * letter, never at Arabic punctuation ("٤٫٥ مليون،"). Name-only: price.mjs, which also confirms prices, is unchanged.
+ * trailing zeros or not, a leading dot (".95m": r7 #3), "," or "٬" between digits — then m / mn / million(s) /
+ * مليون / ملايين or k / thousand(s) / ألف / الف / آلاف / الاف. "m" only written solid ("20 m" is metres, as in price.mjs);
+ * "k" spaced too ("4500 K": r7 #3). The word ends at a letter, never at Arabic punctuation ("٤٫٥ مليون،"). Name-only:
+ * price.mjs, which also confirms prices, is unchanged.
  */
-const NAME_SCALED_G = new RegExp(String.raw`(?<!\d[.,٫٬]?)(\d{1,3}(?:[,٬]\d{3})+|\d+)(?:[.٫](\d+))?`
-  + String.raw`(?:(m|k)|\s*(million|mn|thousand|مليون|ملايين|ألف|الف|آلاف|الاف))(?![a-z²\d]|[\u0620-\u065f\u066e-\u06d3\u06d5-\u06ff])`, 'gi');
+const NAME_SCALED_G = new RegExp(String.raw`(?<!\d[.,٫٬]?)(\d+(?:[,٬]\d+)*(?:[.٫]\d+)?|[.٫]\d+)`
+  + String.raw`(?:(m)|\s*(k|millions?|mn|thousands?|مليون|ملايين|ألف|الف|آلاف|الاف))(?![a-z²\d]|[\u0620-\u065f\u066e-\u06d3\u06d5-\u06ff])`, 'gi');
 const NAME_SCALE = { m: 1e6, mn: 1e6, million: 1e6, 'مليون': 1e6, 'ملايين': 1e6, k: 1e3, thousand: 1e3, 'ألف': 1e3, 'الف': 1e3, 'آلاف': 1e3, 'الاف': 1e3 };
+/**
+ * A scaled token's digits as numbers: a comma between digits as grouping ("4,500k"), and — one comma, no decimal dot —
+ * as a decimal mark too ("0,95m": r7 #3, Claude r6 B5d). Either reading that comes to a figure refuses the name.
+ */
+const nameTokenValues = (token) => {
+  const t = token.replace(/٫/g, '.').replace(/٬/g, ',');
+  const values = [Number(t.replace(/,/g, ''))];
+  if (/^\d+,\d+$/.test(t)) values.push(Number(t.replace(',', '.')));
+  return values;
+};
 /** Does a scaled token in `text` come to one of `figures` ("Penthouse 4.50m", "Townhouse 0.95m", "Penthouse 4500K": r6 #2)? */
 const statesScaledFigure = (text, figures) => figures.length > 0 && typeof text === 'string'
-  && [...withoutMeasures(text).matchAll(NAME_SCALED_G)].some(([, whole, frac, solid, word]) => {
-    const n = Math.round(Number(`${whole.replace(/[,٬]/g, '')}.${frac ?? '0'}`) * NAME_SCALE[(solid ?? word).toLowerCase()]);
-    return figures.some((f) => Math.round(f) === n);
+  && [...withoutMeasures(text).matchAll(NAME_SCALED_G)].some(([, token, solid, word]) => {
+    const scale = NAME_SCALE[(solid ?? word).toLowerCase().replace(/s$/, '')];
+    return nameTokenValues(token).some((v) => figures.some((f) => Math.round(f) === Math.round(v * scale)));
   });
 /**
  * A model NAME states money by a currency or a payment word, or by a price the reading carries (`figures`: its
  * model prices, Sakani prices and headline — r3 #3), in any form ("Penthouse 4.5m" against 4,500,000: r5 #3;
- * "4.50m", "0.95m", "4500K", "٤٫٥ مليون،": r6 #2). "Villa 15m", "Plot 10000", "Penthouse 4,250" are names when the
- * reading has no such price.
+ * "4.50m", "0.95m", "4500K", "٤٫٥ مليون،": r6 #2; "4500 K", "4.5 millions", ".95m", "0,95m": r7 #3). "Villa 15m",
+ * "Plot 10000", "Penthouse 4,250" are names when the reading has no such price.
  */
 const nameStatesMoney = (text, figures = []) => typeof text === 'string'
   && (NAME_CURRENCY_RE.test(westernise(text)) || PAYMENT_RE.test(text) || statesFigure(text, figures) || statesScaledFigure(text, figures));

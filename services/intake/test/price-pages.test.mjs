@@ -229,6 +229,63 @@ describe('r7 #2: one currency-mark list — every guard reads every mark price.m
   });
 });
 
+// r7 #3 (Codex r6 #2, Claude r6 B4 / B5d) — the model-name guard: a dot may stand between a code and its figure; a Latin
+// code beside a figure counts only when the figure is amount-shaped (3+ digits, grouped, decimal, scaled), so the unit
+// codes a brochure prints ("Type SR2", "Villa DH 1") are names again; and a reading price as "4500 K", "4.5 millions",
+// ".95m" or "0,95m" refuses the name. Arabic marks and currency words stay refused anywhere.
+describe('r7 #3: the model-name guard — dotted codes, amount-shaped figures beside a code, more scaled forms', () => {
+  const nameOf = (en, ar, figures = []) => dropMoneyText({ models: [{ name: { en, ar } }] }, { figures }).name;
+  // enrich-dry6/work/ai.json: the 8 names and all 18 figures the reading carries (models, Sakani, headline).
+  const W023 = [
+    ['Lulu 2', 'نموذج لؤلؤ 2', 319015, 270425], ['Nawras 2', 'نموذج نورس 2', 419994, 356024], ['Saif 2', 'نموذج سيف 2', 491819, 416910],
+    ['Saif 3', 'نموذج سيف 3', 511615, 433690], ['Marafi 3', 'نموذج مرافئ 3', 593719, 503288], ['Zumurrud 2', 'نموذج الزمرد 2', 673245, 559261],
+    ['Fairouz 1', 'نموذج الفيروز 1', 636245, 519928], ['Kahraman 2', 'نموذج كهرمان 2', 752914, 625442],
+  ];
+  const W023_FIGURES = [...W023.flatMap(([, , p, s]) => [p, s]), 319015, 270425];
+  it('a dot between a code and its figure refuses the name: "Studio SR. 750", "Studio SAR. 750" (Codex r6 #2)', () => {
+    for (const [en, ar] of [
+      ['Studio SR. 750', 'نموذج'], ['Studio SR.750', 'نموذج'], ['Studio SAR. 750', 'نموذج'], ['Studio AED. 750', 'نموذج'],
+      ['Studio Dhs. 750', 'نموذج'], ['Studio', 'نموذج SR. 750'],
+    ]) assert.equal(nameOf(en, ar), 'models[0].name', `${en} / ${ar}`);
+  });
+  it('a printed unit code beside a short figure is a name: "Type SR2", "Villa DH 1", "Unit 2 DH" (Claude r6 B4)', () => {
+    for (const code of ['Type SR2', 'Villa DH 1', 'Duplex DH 3', 'Type 2SR', 'Unit 2 DH', 'Type EUR3', 'Villa S.R. 2']) {
+      for (const [en, ar] of [[code, 'نموذج'], ['Studio', `نموذج ${code}`]]) {
+        assert.equal(nameOf(en, ar), null, `${en} / ${ar}`);
+        assert.equal(nameOf(en, ar, W023_FIGURES), null, `${en} / ${ar} (W023 figures)`);
+      }
+    }
+  });
+  it('a Latin code beside an amount-shaped figure still refuses the name: 3+ digits, grouped, decimal, scaled', () => {
+    for (const en of [
+      'Studio 4500SAR', 'Studio SAR4500', 'Villa 1,250,000SAR', 'Penthouse SR 4.5m', 'Studio SR. 750', 'Studio SR 750', 'Studio 750 SR',
+      'Villa SAR 1 250 000', 'Villa SR 0,95', 'Villa 4.5 SR', 'Villa SR 2m', 'Villa SR 5 k', 'Villa SR 2 million', 'Villa 2m SAR',
+      'Villa 2 million SAR', 'Villa SR .95m', 'Villa .95 SR',
+    ]) assert.equal(nameOf(en, 'نموذج'), 'models[0].name', en);
+  });
+  it('Arabic marks and currency words stay refused anywhere, whatever the figure', () => {
+    for (const [en, ar] of [
+      ['Villa riyals', 'نموذج'], ['Villa 2 dirhams', 'نموذج'], ['Studio', 'نموذج ريال'], ['Studio', 'نموذج ر.س 2'], ['Studio', 'نموذج 2 درهم'],
+      ['Studio', 'نموذج د.إ 2'], ['Studio $2', 'نموذج'],
+    ]) assert.equal(nameOf(en, ar), 'models[0].name', `${en} / ${ar}`);
+  });
+  it('a reading price as "4500 K", "4.5 millions", ".95m" or "0,95m" refuses the name (Claude r6 B5d)', () => {
+    for (const [en, n] of [
+      ['Penthouse 4500 K', 4500000], ['Penthouse 4500 k', 4500000], ['Penthouse 4.5 millions', 4500000], ['Penthouse 4.5 Millions', 4500000],
+      ['Studio 750 thousands', 750000], ['Townhouse .95m', 950000], ['Townhouse 0,95m', 950000], ['Penthouse 4,5m', 4500000],
+    ]) assert.equal(nameOf(en, 'نموذج', [n]), 'models[0].name', en);
+    // a comma between digits is read both ways: as grouping too ("4,500k" is 4,500,000).
+    assert.equal(nameOf('Penthouse 4,500k', 'نموذج', [4500000]), 'models[0].name');
+  });
+  it('still names: "Villa 15m", "Plot 10000", "Penthouse 4,250", "Block SR-2", "Tower B. 12 floors", "د. إبراهيم", the 8 W023 names', () => {
+    for (const [en, ar] of [
+      ['Villa 15m', 'فيلا 15م'], ['Plot 10000', 'نموذج'], ['Penthouse 4,250', 'نموذج'], ['Type A 12m frontage', 'نموذج'], ['Block SR-2', 'نموذج'],
+      ['Tower B. 12 floors', 'نموذج'], ['Villa Ibrahim', 'فيلا د. إبراهيم 2'], ['Villa 20 m', 'نموذج'], ['Townhouse 95m', 'نموذج'],
+    ]) assert.equal(nameOf(en, ar, [4500000, 950000, ...W023_FIGURES]), null, `${en} / ${ar}`);
+    for (const [en, ar] of W023) assert.equal(nameOf(en, ar, W023_FIGURES), null, en);
+  });
+});
+
 describe('pricePagesToRender', () => {
   it('returns the 1-based pages that need a look, in order', () => {
     assert.deepEqual(pricePagesToRender([LOCATION_PAGE, 'شقة بغرفتين', PRICE_PAGE, '', PRICE_PAGE]), [3, 5]);
