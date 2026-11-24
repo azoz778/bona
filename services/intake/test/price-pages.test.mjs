@@ -2024,7 +2024,7 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     assert.deepEqual(o.price, { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false });
   });
 
-  it('r9 #2 (Codex r8 #3 / NB1, Claude r8 NB6 / NB13): a weak word makes a neighbour a rent label only as a card label, a percentage is no amount, and every ownAmount branch is pinned', async () => {
+  it('r9 #2 (Codex r8 #3 / NB1, Claude r8 NB6 / NB13): a weak frequency word makes a neighbour a rent label only as a card label, an income word always does, a percentage is no amount, and every ownAmount branch is pinned', async () => {
     const sale = (amount) => {
       const a = withModels([], { price: { amount, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence: null });
       a.listing.category = 'buy';
@@ -2038,12 +2038,9 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
         return { evidence: report.priceEvidence, price: report.listingPreview.price, texts: report.warnings, checks: r.calls().filter((c) => c.tool === 'claude-confirm') };
       } finally { r.cleanup(); }
     };
-    // An amenity or a selling point beside the sale price, its weak word (weekly, nightly, PA, ROI, returns, مردود,
-    // أسبوعياً) cut, says no rent: no rent label, no check — so a spent quota never sends a correct price on request.
-    for (const amenity of [
-      'Weekly housekeeping included', 'Nightly security patrols', 'PA system in the lobby', 'High ROI', 'Guaranteed returns of 8%',
-      'العربون غير مردود', 'تنظيف أسبوعياً',
-    ]) {
+    // An amenity beside the sale price, its weak frequency word (weekly, nightly, PA, أسبوعياً) cut, says no rent: no
+    // rent label, no check — so a spent quota never sends a correct price on request.
+    for (const amenity of ['Weekly housekeeping included', 'Nightly security patrols', 'PA system in the lobby', 'تنظيف أسبوعياً']) {
       for (const p3 of [`${amenity}\nSale price SAR 450,000`, `Sale price SAR 450,000\n${amenity}`]) {
         const o = await outcome({ listing: sale(450000), pageText: pages(p3), confirm: [], confirmFail: 'quota' });
         assert.deepEqual(o.evidence, { inText: true, confirmed: null }, p3);
@@ -2052,12 +2049,16 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       }
     }
     // Still rent labels: a weak word alone or with only a rate or price word (a card label), a rent wording with no weak
-    // word, a yield with three decimals or a spaced "%" (a percentage is no amount: Codex r8 NB1), and a rent label whose
-    // only figure is an area (the measure cut: Claude r8 NB13). One sale check, which refuses: on request, and why.
+    // word, an income heading — return, ROI, revenue, مردود are income words, never weak ones (r9 verifier: "Expected
+    // return" over a lone figure is an income card) — a yield with three decimals or a spaced "%" (a percentage is no
+    // amount: Codex r8 NB1), and a rent label whose only figure is an area (the measure cut: Claude r8 NB13). One sale
+    // check, which refuses: on request, and why.
     const labels = [
       ['Nightly rate', 'SAR 60,000'], ['Weekly', 'SAR 60,000'], ['Return Rates', 'SAR 60,000'], ['Per night', 'SAR 60,000'],
       ['لليلة الواحدة', '60,000 ريال'], ['أسبوعياً', '60,000 ريال'], ['Rental yield 7.125%', 'SAR 60,000'], ['Net yield 6.875 %', 'SAR 60,000'],
       ['العائد الإيجاري ٧.١٢٥٪', '60,000 ريال'], ['Rental income — Building 2 (10,500 sqm)', 'SAR 60,000'],
+      ['Expected return', 'SAR 60,000'], ['Annual return', 'SAR 60,000'], ['Annual revenue', 'SAR 60,000'], ['Net ROI', 'SAR 60,000'],
+      ['Investment Returns', 'SAR 60,000'], ['صافي المردود', '60,000 ريال'], ['المردود المتوقع', '60,000 ريال'],
     ];
     for (const p3 of labels.flatMap(([label, fig]) => [`${label}\n${fig}`, `${fig}\n${label}`])) {
       const o = await outcome({ listing: sale(60000), pageText: pages(p3), confirm: [] });
@@ -2067,6 +2068,14 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       assert.equal(o.price.amount, null, p3);
       const line = o.texts.find((w) => /price on request/.test(w)) ?? '';
       assert.match(line, /the figure read may be a rent or income, not the sale price/, p3);
+    }
+    // A selling point with an income word beside a correct sale price costs one sale check, which confirms it: the
+    // price is published (Claude r8 NB6 — the cost is accepted; the TAQEEM-safe side of "Expected return").
+    for (const point of ['High ROI', 'Guaranteed returns of 8%', 'العربون غير مردود']) {
+      const p3 = `${point}\nSale price SAR 450,000`;
+      const o = await outcome({ listing: sale(450000), pageText: pages(p3), confirm: [450000] });
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.period, c.sale]), [[450000, null, true]], p3);
+      assert.deepEqual(o.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
     }
     // Controls: a rent line that prints an amount of its own labels that amount — beside its yield (the percentage cut
     // leaves the amount), and through each ownAmount branch (Claude r8 NB13): a currency by its figure read before

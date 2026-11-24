@@ -266,19 +266,20 @@ const RENT_WORDING_RE = new RegExp([
 const foldRent = (s) => foldYeh(s.normalize('NFKC').replace(/[\u0640\u064b-\u0652\u0670]/g, ''));
 const rentWorded = (s) => typeof s === 'string' && RENT_WORDING_RE.test(foldRent(s));
 /**
- * The weak rent words — a frequency or an income word an amenity or a selling point prints too: "Weekly housekeeping
- * included", "Nightly security patrols", "PA system", "High ROI", "Guaranteed returns of 8%", "العربون غير مردود",
- * "تنظيف أسبوعياً" (r9 #2, Codex r8 #3, Claude r8 NB6).
+ * The weak rent words — a frequency word an amenity prints too: "Weekly housekeeping included", "Nightly security
+ * patrols", "PA system", "تنظيف أسبوعياً" (r9 #2, Codex r8 #3). An income word (return, ROI, revenue, مردود) is never
+ * weak: "Expected return" or "صافي المردود" over a lone figure is an income card, so "High ROI" beside a sale price
+ * costs one sale check (Claude r8 NB6, accepted) rather than letting an income figure settle as the price (r9 verifier).
  */
-const WEAK_RENT_G = new RegExp(String.raw`\b(?:weekly|nightly|daily|p\/?a|returns?|roi|revenues?)\b|` + arabicWords(String.raw`يوميا|[أا]سبوعيا|مردود`), 'gi');
+const WEAK_RENT_G = new RegExp(String.raw`\b(?:weekly|nightly|daily|p\/?a)\b|` + arabicWords(String.raw`يوميا|[أا]سبوعيا`), 'gi');
 /** All a card label prints beside its weak word, if anything: rate or price words ("Nightly rate", "Return Rates"). */
 const RATE_LABEL_REST = /^[\s\p{P}\p{S}]*(?:(?:rates?|prices?|tariffs?|سعر|السعر|أسعار|اسعار|الأسعار|الاسعار)[\s\p{P}\p{S}]*)*$/iu;
 /**
  * Is a NEIGHBOUR line of a sale figure worded as its rent label (r9 #2)? Its weak words (WEAK_RENT_G) are cut first: it
  * is one if the rest is still rent wording ("Rental yield", "Per night", "لليلة الواحدة", "Weekly rent"), or if a weak
  * word was cut and the rest holds only rate or price words, or nothing — a card label: "Nightly rate", "Weekly", "Return
- * Rates", "أسبوعياً". "Weekly housekeeping included" or "High ROI" beside "Sale price SAR 450,000" is none, so a spent
- * quota never sends that price on request. On the figure's own line and in the reading's quote every weak word still
+ * Rates", "أسبوعياً". "Weekly housekeeping included" beside "Sale price SAR 450,000" is none, so a spent quota never
+ * sends that price on request. On the figure's own line and in the reading's quote every weak word still
  * counts (rentWorded): "SAR 60,000 weekly", "Return SAR 60,000".
  */
 const rentLabelWorded = (s) => {
@@ -1319,8 +1320,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // A neighbour with an amount of its own (ownAmount: "Annual rent 12,000", "Annual rent SAR 12,000") labels that
     // amount; a unit, a year, a bedroom count or a yield is no amount, so "Annual rent — Unit 4", "Annual rent 2025",
     // "Rental yield 7%", "Rental yield 7.125%" are still labels (r8 #6, Codex r7 #2 = Claude r7 NB8; r9 #2, Codex r8
-    // NB1). A neighbour's weak words are cut first (rentLabelWorded: r9 #2, Codex r8 #3, Claude r8 NB6): "Weekly
-    // housekeeping included" or "High ROI" is no label, "Nightly rate" or "Weekly" alone is. Neighbours are looked for
+    // NB1). A neighbour's weak frequency words are cut first (rentLabelWorded: r9 #2, Codex r8 #3): "Weekly
+    // housekeeping included" is no label, "Nightly rate" or "Weekly" alone is, and so is any income word ("High ROI"). Neighbours are looked for
     // on the figure's own page, or in the caption, never across a page break (r8 #6, Codex r7 #3, Claude r7 NB9): a page
     // ending "Rental income" labels nothing on the next. The text layer cannot tell a rent from an asking price: only
     // its page settles it (asked as a sale's, as every check of a sale is). A sale with no period, printed with no
