@@ -1010,11 +1010,19 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       leftOut: res.dirty.map(({ model, found }) => ({ model, found })), unchecked: res.unchecked,
     };
     log.info('intake.plan_checked', { plans: written.length, clean: res.clean.length, leftOut: res.dirty.length, unchecked: res.unchecked.length, fatal: res.fatal });
+    // Every plan it left out in ONE warning, its models grouped by reason (r5 #10): the WhatsApp reply shows only
+    // the first 3 warnings, and a warning per plan would push the later ones — and their model names — out. It
+    // is pushed here, after every price check, so the price warnings stay ahead of it in that reply.
+    // "shows …" only for a plan really flagged; a duplicate or malformed answer is no clear answer (r5 #5).
+    const byReason = new Map();
     for (const { model, found, flagged } of res.dirty) {
-      // "shows …" only for a plan really flagged; a duplicate or malformed answer is no clear answer (r5 #5).
-      const what = !flagged ? 'the contact check gave no clear answer about it'
-        : `it shows ${found.length ? found.map((w) => PLAN_WORDS[w]).join(', ') : 'contact or brand details'}`;
-      report.warnings.push(`the floor plan of ${modelName(model)} was left out: ${what} (the floor-plan contact check)`);
+      const what = !flagged ? 'no clear answer from the check'
+        : `shows ${found.length ? found.map((w) => PLAN_WORDS[w]).join(', ') : 'contact or brand details'}`;
+      byReason.set(what, [...(byReason.get(what) ?? []), modelName(model)]);
+    }
+    if (res.dirty.length) {
+      const n = res.dirty.length;
+      report.warnings.push(`${n} floor plan${n === 1 ? '' : 's'} left out by the contact check (${[...byReason].map(([what, names]) => `${names.join(', ')}: ${what}`).join('; ')})`);
     }
     if (res.unchecked.length && !enrich) {
       report.warnings.push(`${res.unchecked.length} floor plan(s) could not be checked for contact details (${res.fatal ? 'the AI quota ran out' : 'the check failed'}), `

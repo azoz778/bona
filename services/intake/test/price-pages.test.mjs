@@ -2612,6 +2612,43 @@ describe('processPdf: the floor-plan contact check (r4)', { timeout: 120000 }, (
     } finally { r.cleanup(); }
   });
 
+  it('r5 #10: the WhatsApp reply keeps the price warnings in its first 3 lines, then ONE line for every plan left out', async () => {
+    // Two price warnings compete for the reply's 3 warning lines: two unit-model prices not confirmed on their page,
+    // and a Sakani price not confirmed beside a confirmed headline. Then the contact check flags two plans.
+    const sale = withPlans(3);
+    sale.listing.price = { ...PRICE };
+    sale.priceEvidence = { page: 3, quote: '319,015' };
+    sale.subsidisedPriceEvidence = { page: 3, quote: '270,425' };
+    Object.assign(sale.models[0], { price: 400000, evidence: { page: 3, quote: '400000' } });
+    Object.assign(sale.models[1], { price: 450000, evidence: { page: 3, quote: '450000' } });
+    const warningsOf = (reply) => reply.split('\n').filter((l) => l.startsWith('⚠️ '));
+    const expectReply = (reply, planLine) => {
+      const shown = warningsOf(reply);
+      assert.equal(shown.length, 3, reply);
+      assert.match(shown[0], /2 unit-model price\(s\) could not be confirmed/, reply);
+      assert.match(shown[1], /subsidised \(Sakani\) price could not be confirmed/, reply);
+      assert.equal(shown[2], `⚠️ ${planLine}`, reply);
+      assert.equal(shown.filter((l) => /floor plan/.test(l)).length, 1, reply);
+    };
+    const r = await rig({ listing: sale, candidateCount: 9, modelConfirm: [], confirm: [319015], planCheck: { 'plan-01': 'phone', 'plan-03': 'phone' } });
+    try {
+      const dry = await r.run();
+      assert.deepEqual(plansOf(dry).map(Boolean), [false, true, false]);
+      expectReply(msg.dryRunSummary(dry), '2 floor plans left out by the contact check (Type A, Type C: shows a phone number)');
+      const live = await r.publish();
+      assert.deepEqual(live.listing.models.map((m) => Boolean(m.floorPlan)), [false, true, false]);
+      expectReply(msg.published(live), '2 floor plans left out by the contact check (Type A, Type C: shows a phone number)');
+    } finally { r.cleanup(); }
+    // Different reasons: grouped by reason, still one line — a plan with no clear answer is never said to show anything.
+    const d = await rig({ listing: structuredClone(sale), candidateCount: 9, modelConfirm: [], confirm: [319015], planCheck: { 'plan-02': 'logo', 'plan-03': 'phone' }, planReply: 'duplicate' });
+    try {
+      const dry = await d.run();
+      assert.deepEqual(plansOf(dry).map(Boolean), [false, false, false]);
+      expectReply(msg.dryRunSummary(dry),
+        '3 floor plans left out by the contact check (Type A: no clear answer from the check; Type B: shows a logo or brand name; Type C: shows a phone number)');
+    } finally { d.cleanup(); }
+  });
+
   it('no plans: no call', async () => {
     const a = withPlans(2);
     for (const m of a.models) m.floorPlan = null;
