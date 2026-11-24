@@ -748,15 +748,15 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
    * 'render' — a whole-property check whose page could not be rendered (printedWhole) — or 'call', one whose
    * second-model call failed (a timeout, a crash: printedWhole, r2 #2).
    */
-  const printed = async (amount, evidence, { subsidised = false, whole = false, pageCheck = false, sale = false } = {}) => {
+  const printed = async (amount, evidence, { subsidised = false, whole = false, pageCheck = false } = {}) => {
     // In the text: printed IN the price's currency, or bare where bare figures are in it (printedInCurrency).
     // "£1,250,000" is a price in pounds, never "1,250,000 SAR". `whole`: the figure must be the whole
     // property's price — which the text layer cannot tell from a floor's or a model's, so only a page can.
     // `pageCheck`: only a page settles it, the same way, without the whole-property wording — a rental's headline,
-    // whose period the text layer cannot tell (r3 #4); `sale`, a sale's headline that may be a rent, asked as a sale (r6 #3).
+    // whose period the text layer cannot tell (r3 #4), or a sale's headline that may be a rent (r6 #3).
     const out = { inText: subsidised || whole || pageCheck ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency, home: local }), confirmed: null };
     if (out.inText) return out;
-    if (whole || pageCheck) return printedWhole(amount, evidence, { subsidised, out, whole, sale });
+    if (whole || pageCheck) return printedWhole(amount, evidence, { subsidised, out, whole });
     if (!pageImages.length) return out;
     // The model's citation when it names a rendered page; otherwise the rendered page whose text
     // carries the number. Either way the second model looks at the page before anything counts.
@@ -776,8 +776,13 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     if (check.fatal) return { ...out, unchecked: true, uncheckedWhy: 'quota' };
     return out;
   };
-  /** One second-model look at a rendered page (confirmPriceEvidence). A quota error sets quotaHit. */
-  const askPage = async (page, amount, quote, { subsidised, whole, inferred, sale = false }) => {
+  /**
+   * One second-model look at a rendered page (confirmPriceEvidence). A quota error sets quotaHit. On a listing that
+   * is not a rental, every look is asked as a sale's (r7 #6, Claude r6 B2a): a rent, an income, a fee, a deposit or an
+   * instalment is not its price — also where the text layer cannot show the figure's rent wording (the W023 font, an
+   * image-only page). No extra call: the same look, one more line in its prompt.
+   */
+  const askPage = async (page, amount, quote, { subsidised, whole, inferred }) => {
     const check = await confirmPriceEvidence({
       pageImage: page.abs,
       amount,
@@ -791,7 +796,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       subject: ai.listing?.title?.en,
       unit: ai.listing?.unit ?? null,
       period: listingPeriod,
-      sale,
+      sale: !listingPeriod,
       bin: cfg.claudeBin,
       model: cfg.claudeModel,
       cwd: workDir,
@@ -809,7 +814,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
    * another page confirms it, unchecked ("try again later"), never "the brochure does not print it". So is a
    * check after a quota error, rendered page or not (final review M5): nothing more can be looked at.
    */
-  const printedWhole = async (amount, evidence, { subsidised, out, whole = true, sale = false }) => {
+  const printedWhole = async (amount, evidence, { subsidised, out, whole = true }) => {
     const pages = wholeCheckPages(amount, evidence);
     // A quota first, page or no page (r3 #10): nothing more can be looked at — "try again later".
     if (quotaHit) {
@@ -830,7 +835,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         continue;
       }
       const page = pageImages.find((p) => p.page === n);
-      const check = await askPage(page, amount, n === evidence?.page ? evidence.quote : String(amount), { subsidised, whole, inferred: n !== evidence?.page, sale });
+      const check = await askPage(page, amount, n === evidence?.page ? evidence.quote : String(amount), { subsidised, whole, inferred: n !== evidence?.page });
       out.confirmed = check.confirmed;
       if (check.fatal) return { ...out, unchecked: true, uncheckedWhy: 'quota' };
       if (check.confirmed) return out;
@@ -1003,9 +1008,12 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       },
       confirm: async ({ page, abs, items }) => {
         // IN the currency the reading established, the figures printed in another one refused; a bare
-        // figure counts only in the property's own country's currency. A rental's: FOR the listing's period.
+        // figure counts only in the property's own country's currency. A rental's: FOR the listing's period. Any
+        // other listing's: asked as a sale's (r7 #6, Claude r6 B2c) — a rent printed per model is no model price,
+        // and no "From" headline, on a publish or an --enrich alike.
         const res = await confirmModelPrices({
           pageImage: abs, items, currency: readingCurrency, bareCounts: readingCurrency !== null && readingCurrency === home, home: local, period: listingPeriod,
+          sale: !listingPeriod,
           bin: cfg.claudeBin, model: cfg.claudeModel, cwd: workDir, addDirs: [workDir], settingsPath: confinement.file,
         });
         log.info('intake.model_price_evidence', { page, models: items.length, answers: res.answers.length, error: res.error, fatal: res.fatal });
@@ -1207,12 +1215,21 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // period — with unit models or without (r3 #4). An ordinary sale without models keeps the text layer.
     const rentHeadline = Boolean(caption.period || readingPeriod || listingPeriod);
     // A sale's headline that may be a rent (r6 #3, Codex r5 #3): the reading gives it a period, or a line of the
-    // text printing it, or the reading's quote of it, speaks of rent or income. The text layer cannot tell a rent
-    // from an asking price: only its page settles it, asked as a sale's price. A sale with no period, printed on a
-    // line with no such words, keeps the text layer.
+    // text printing it, or the reading's quote of it, speaks of rent or income — or the line printing it has a
+    // neighbour, the non-empty line just above or below, that does and prints no figure of its own: a label on a line
+    // of its own, as a card or a table cell splits "Annual rent" / "SAR 60,000" (r7 #6, Claude r6 B2b = Codex r6 NB1).
+    // A neighbour with a figure of its own labels that figure. The text layer cannot tell a rent from an asking
+    // price: only its page settles it (asked as a sale's, as every check of a sale is). A sale with no period,
+    // printed with no such words on or beside its line, keeps the text layer.
+    const lines = haystack.split('\n');
+    const near = (i, step) => {
+      for (let j = i + step; j >= 0 && j < lines.length; j += step) if (lines[j].trim()) return lines[j];
+      return '';
+    };
+    const rentLabel = (line) => !/\p{Nd}/u.test(line) && rentWorded(line);
     const saleMayBeRent = !listingPeriod && (Boolean(price.period) || rentWorded(ai.priceEvidence?.quote)
-      || haystack.split('\n').some((line) => rentWorded(line) && priceAppearsIn(line, price.amount)));
-    report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: pageOnly, pageCheck: rentHeadline || saleMayBeRent, sale: saleMayBeRent });
+      || lines.some((line, i) => priceAppearsIn(line, price.amount) && (rentWorded(line) || rentLabel(near(i, -1)) || rentLabel(near(i, 1)))));
+    report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: pageOnly, pageCheck: rentHeadline || saleMayBeRent });
     const fromWords = ownPriceOnly ? startingFromWords() : null;
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
       log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency, unchecked: report.priceEvidence.unchecked === true, why: report.priceEvidence.uncheckedWhy ?? null, whole: pageOnly });
@@ -1225,7 +1242,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         ? `the price could not be checked on the brochure (${uncheckedWhy(report.priceEvidence)}), so the listing says "price on request" for now — try again later, or send \`price <id> <amount>\` to set one`
         : ownPriceOnly
           ? 'the price read was the lowest unit-model price, which the brochure does not print as this single property\'s own price (a property is not "From" its cheapest model), so the listing says "price on request" — send `price <id> <amount>` to set one'
-          : 'the price was not printed in the brochure, so the listing says "price on request" — send `price <id> <amount>` to set one');
+          // Its page refused a figure that may be a rent (Claude r6 NB1): the reply says so, not only "not printed".
+          : `the price was not printed in the brochure${saleMayBeRent ? ' (the figure read may be a rent or income, not the sale price)' : ''}, so the listing says "price on request" — send \`price <id> <amount>\` to set one`);
     } else if (fromWords) {
       price.from = true;
       rankedWarning(report, 'price', `the price read was its one unit model's; confirmed on its page as the property's own price, and shown "From" as the brochure words it (its evidence: "${fromWords}")`);

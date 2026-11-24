@@ -763,6 +763,16 @@ describe('confirmModelPrices', () => {
     assert.doesNotMatch(f.calls[2].prompt, /a rent per/, 'a sale has no period');
   });
 
+  it('r7 #6 (Claude r6 B2c): `sale` — confirmPriceEvidence\'s sale line: a rent, rental income, service fee, deposit or instalment is not a price', async () => {
+    const f = fakeSpawn([{ envelope: envelope([]) }, { envelope: envelope([]) }]);
+    await confirmModelPrices({ ...opts, sale: true, spawnImpl: f.spawnImpl });
+    assert.equal(f.calls.length, 1, 'one call, as without it');
+    assert.match(f.calls[0].prompt, /The listing is for sale: a rent, a rental income, a service fee, a deposit or an instalment printed on the page is NOT its asking price —\nanswer false for such a figure\./);
+    assert.doesNotMatch(f.calls[0].prompt, /rent per/, 'a sale has no period');
+    await confirmModelPrices({ ...opts, spawnImpl: f.spawnImpl });
+    assert.doesNotMatch(f.calls[1].prompt, /for sale/, 'no sale line unless asked');
+  });
+
   it('without a currency the site prints there is nothing to check the figures in: no call, an error', async () => {
     for (const currency of [undefined, null, 'GBP', 'sar', '']) {
       const f = fakeSpawn([{ envelope: envelope([{ i: 0, price: true, subsidisedPrice: true }]) }]);

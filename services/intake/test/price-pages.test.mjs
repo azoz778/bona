@@ -445,7 +445,9 @@ if (prompt.includes('the floor-plan images to check>>>')) {
     .map(({ i, price, subsidisedPrice }) => ({ i, price, subsidisedPrice }));
   // The rent period the prompt asks the figures to be printed for (Codex r1 #2), or null: not asked, any counts.
   const per = (prompt.match(/Every figure is a rent per (month|year)/) || [])[1] ?? null;
-  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-model-confirm', page, items, currency, period: per, bare: /may be taken as/.test(prompt) }) + '\\n');
+  // r7 #6: the prompt says the listing is for sale (a rent, an income, a fee, a deposit or an instalment is not its price).
+  const sale = /The listing is for sale: a rent/.test(prompt);
+  fs.appendFileSync(log, JSON.stringify({ tool: 'claude-model-confirm', page, items, currency, period: per, bare: /may be taken as/.test(prompt), sale }) + '\\n');
   // modelConfirmDelayMs: the call takes this long, and records when it ran (the concurrency test).
   if (cfg.modelConfirmDelayMs) {
     const t0 = Date.now();
@@ -468,6 +470,15 @@ if (prompt.includes('the floor-plan images to check>>>')) {
     // e.per: the rent period printed for the figure ('month' | 'year'; none = the page shows none).
     const on = (it, sub, fig) => facts(page).some((e) => !!e.sub === sub && e.fig === fig && e.model === names[it.i] && factIn(e, currency) && (!per || !e.per || e.per === per));
     answer = items.map((it) => ({ i: it.i, price: on(it, false, it.price), subsidisedPrice: on(it, true, it.subsidisedPrice) }));
+  }
+  // cfg.rents (r7 #6): figures the page prints as a rent or an income — a second model told the listing is for sale
+  // refuses them; one not told takes them for the model's price, as \`modelConfirm\` says.
+  if (sale) {
+    const rent = (fig) => (cfg.rents ?? []).includes(fig);
+    answer = answer.map((a) => {
+      const it = items.find((x) => x.i === a.i) ?? {};
+      return { ...a, price: a.price && !rent(it.price), subsidisedPrice: a.subsidisedPrice && !rent(it.subsidisedPrice) };
+    });
   }
 } else if (prompt.includes('VISIBLY PRINT')) {
   const [, amountText, currency = null] = prompt.match(/VISIBLY PRINT[^\\d]*(\\d+)(?: ([A-Z]{3}))?/) || [];
@@ -497,6 +508,8 @@ if (prompt.includes('the floor-plan images to check>>>')) {
     answer = { confirmed: facts(page).some((e) => !!e.sub === subsidised && e.fig === amount && factIn(e, currency) && (e.kind === 'whole' || (project && e.kind === 'model'))
       && (!per || !e.per || e.per === per)) };
   }
+  // cfg.rents (r7 #6): a figure the page prints as a rent or an income — refused by a second model told the listing is for sale.
+  if ((cfg.rents ?? []).includes(amount) && /The listing is for sale: a rent/.test(prompt)) answer = { confirmed: false };
 } else {
   fs.appendFileSync(log, JSON.stringify({ tool: 'claude-listing', prompt }) + '\\n');
   answer = cfg.listing;
@@ -548,14 +561,14 @@ const answer = ({ price, priceEvidence = null, subsidisedPriceEvidence = null, u
 const PRICE = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
 const BROCHURE = ['مشروع سكني — شقق بغرفتي نوم وثلاث غرف نوم في حي الحمدانية', LOCATION_PAGE, PRICE_PAGE, 'غرفة نوم 03', PRICE_PAGE];
 
-async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, printedIn = 'SAR', facts = null, cfgExtra = {}, build = '', candidateCount = 6, planCheck = null, planReply = null, healOnPlanCheck = false, links = [] }) {
+async function rig({ pageText = BROCHURE, listing, confirm = [], confirmSub = null, confirmFail = null, modelConfirm = null, modelConfirmFail = null, modelConfirmDelayMs = 0, failPageDir = null, broken = [], brochureFail = false, printedIn = 'SAR', facts = null, cfgExtra = {}, build = '', candidateCount = 6, planCheck = null, planReply = null, healOnPlanCheck = false, links = [], rents = [] }) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-price-pages-')));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   const photo = path.join(bin, 'photo.jpg');
   const sharp = (await import('sharp')).default;
   await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
-  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail, printedIn, facts, candidateCount, planCheck, planReply, healOnPlanCheck, links }));
+  fs.writeFileSync(path.join(bin, 'fake.json'), JSON.stringify({ photo, pageText, listing, confirm, confirmSub, confirmFail, modelConfirm, modelConfirmFail, modelConfirmDelayMs, failPageDir, broken, brochureFail, printedIn, facts, candidateCount, planCheck, planReply, healOnPlanCheck, links, rents }));
   fs.writeFileSync(path.join(bin, 'fake-py.mjs'), FAKE_PY);
   fs.writeFileSync(path.join(bin, 'fake-claude.mjs'), FAKE_CLAUDE);
   fs.writeFileSync(path.join(bin, 'fake-brochure.mjs'), FAKE_BROCHURE);
@@ -1423,14 +1436,19 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     assert.deepEqual(yearly.evidence, { inText: false, confirmed: true });
     assert.deepEqual(yearly.checks.map((c) => [c.amount, c.period, c.whole, c.sale]), [[60000, null, false, true]]);
     assert.deepEqual(yearly.price, plain.price);
-    // Printed on a page only: the page check is the ordinary one, with no rent period in its prompt — the sale line
-    // only for the reading that carries a period.
+    // r7 #6 (Claude r6 B8): the comparisons the r6 #3 rewrite dropped — the period adds no warning.
+    assert.deepEqual(yearly.warnings, plain.warnings);
+    // Printed on a page only: the page check is the ordinary one, with no rent period in its prompt — and, like every
+    // price check on a listing for sale, asked as a sale (r7 #6, Claude r6 B2a: before, only a reading with a period was).
     const paged = await outcome({ listing: sale(null, 319015, '319015'), confirm: [319015] });
-    assert.deepEqual(paged.checks.map((c) => [c.amount, c.period, c.whole, c.sale]), [[319015, null, false, false]]);
+    assert.deepEqual(paged.checks.map((c) => [c.amount, c.period, c.whole, c.sale]), [[319015, null, false, true]]);
     assert.equal(paged.price.amount, 319015);
     const monthly = await outcome({ listing: sale('month', 319015, '319015'), confirm: [319015] });
     assert.deepEqual(monthly.checks.map((c) => [c.amount, c.period, c.whole, c.sale]), [[319015, null, false, true]]);
     assert.deepEqual(monthly.price, paged.price);
+    // r7 #6 (Claude r6 B8): …and the same evidence and warnings as without the period.
+    assert.deepEqual(monthly.evidence, paged.evidence);
+    assert.deepEqual(monthly.warnings, paged.warnings);
   });
 
   it('r6 #3: a sale headline read with a period, or printed or quoted as a rent or income, is settled only on its page, asked as a sale', async () => {
@@ -1533,6 +1551,113 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     const rental = await outcome({ listing: sale('year', 'Annual rent SAR 60,000', 'rent'), pageText: pages('Annual rent SAR 60,000'), confirm: [60000] });
     assert.deepEqual(rental.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, 'year', false]]);
     assert.deepEqual(rental.price, { amount: 60000, currency: 'SAR', from: false, period: 'year', onRequest: false });
+  });
+
+  it('r7 #6 (Claude r6 B2a): on a listing for sale every headline check of a page is asked as a sale — unreadable digits, the whole property, the Sakani price', async () => {
+    const sale = (amount, quote, category = 'buy') => {
+      const period = category === 'rent' ? 'year' : null;
+      const a = withModels([], { price: { amount, currency: 'SAR', from: false, period, onRequest: false }, priceEvidence: { page: 3, quote } });
+      a.listing.category = category;
+      return a;
+    };
+    const pages = (p3) => ['Overview\nA residential compound for sale. A residential compound for sale.', 'Location', p3, 'Specification', 'Contact'];
+    const outcome = async (opts, run = (r) => r.run()) => {
+      const r = await rig(opts);
+      try {
+        const report = await run(r);
+        return { evidence: report.priceEvidence, price: report.listingPreview.price, codes: report.warningCodes, texts: report.warnings, checks: r.calls().filter((c) => c.tool === 'claude-confirm') };
+      } finally { r.cleanup(); }
+    };
+    // The W023 font: "Annual rent SAR DIB,FDG" — the text layer cannot show the figure beside its rent words, so the
+    // page is checked. The second model, told the listing is for sale, refuses the rent: on request, never SAR 60,000.
+    const scrambled = await outcome({ listing: sale(60000, '60,000'), pageText: pages('Annual rent SAR DIB,FDG'), confirm: [60000], rents: [60000] });
+    assert.deepEqual(scrambled.checks.map((c) => [c.amount, c.period, c.whole, c.sale]), [[60000, null, false, true]]);
+    assert.equal(scrambled.price.onRequest, true);
+    assert.equal(scrambled.price.amount, null);
+    assert.ok(scrambled.codes.includes('price-not-printed'));
+    // Nothing tied the figure to a rent wording, so the reply does not say it may be one.
+    assert.ok(!scrambled.texts.some((w) => /may be a rent/.test(w)), scrambled.texts.join(' | '));
+    // An image-only page (the default brochure's scrambled price pages), off-plan: the headline and its Sakani price.
+    const w023 = await outcome({ listing: answer({ price: PRICE, priceEvidence: { page: 3, quote: '319,015' }, subsidisedPriceEvidence: { page: 3, quote: '270,425' } }), confirm: [319015, 270425] });
+    assert.deepEqual(w023.checks.map((c) => [c.amount, c.subsidised, c.sale]), [[319015, false, true], [270425, true, true]]);
+    assert.deepEqual(w023.price, { ...PRICE });
+    // A single villa priced per floor: its headline, the lowest floor, is checked as the whole villa's price — as a sale.
+    const floors = withModels([model('Ground floor', 60000, null, 3), model('First floor', 75000, null, 3)], {
+      price: { amount: 60000, currency: 'SAR', from: true, period: null, onRequest: false }, priceEvidence: { page: 3, quote: '60,000' },
+    });
+    floors.listing.category = 'buy';
+    floors.listing.project = null;
+    const whole = await outcome({ listing: floors, confirm: [60000] });
+    assert.deepEqual(whole.checks.map((c) => [c.amount, c.period, c.whole, c.sale]), [[60000, null, true, true]]);
+    // A rental: its page, for its period, never the sale line.
+    const rental = await outcome({ listing: sale(60000, '60,000', 'rent'), pageText: pages('Annual rent SAR DIB,FDG'), confirm: [60000], rents: [60000] });
+    assert.deepEqual(rental.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, 'year', false]]);
+    assert.equal(rental.price.amount, 60000);
+  });
+
+  it('r7 #6 (Claude r6 B2c, r5 NB2): the unit-model check on a listing for sale is asked as a sale — rents printed per model are no model prices and no "From" headline', async () => {
+    const reading = (category) => {
+      const a = withModels([{ ...model('Type A', 60000, null, 3), evidence: { page: 3, quote: 'Annual rent SAR 60,000' } },
+        { ...model('Type B', 75000, null, 3), evidence: { page: 3, quote: 'Annual rent SAR 75,000' } }]);
+      a.listing.category = category;
+      return a;
+    };
+    const pageText = ['Overview', 'Location', 'Annual rent\nType A SAR 60,000\nType B SAR 75,000', 'Specification', 'Contact'];
+    const r = await rig({ listing: reading('buy'), pageText, rents: [60000, 75000] });
+    try {
+      const report = await r.run();
+      assert.deepEqual(modelCalls(r).map((c) => [c.page, c.period, c.sale]), [[3, null, true]], 'one call, as before: the sale line costs none');
+      assert.deepEqual(report.listingPreview.models.map((m) => m.price), [null, null]);
+      assert.equal(report.listingPreview.price.onRequest, true, 'no SAR 60,000 "From" headline');
+      assert.ok(report.warningCodes.includes('model-price-not-printed'));
+    } finally { r.cleanup(); }
+    // Off-plan is a sale too; a rental's models are its rents, for its period, with no sale line.
+    for (const [category, sale, period] of [['off-plan', true, null], ['rent', false, 'year']]) {
+      const o = await rig({ listing: reading(category), pageText });
+      try {
+        await o.run();
+        assert.deepEqual(modelCalls(o).map((c) => [c.period, c.sale]), [[period, sale]], category);
+      } finally { o.cleanup(); }
+    }
+  });
+
+  it('r7 #6 (Claude r6 B2b = Codex r6 NB1): a rent label on the line above or below the figure, with no figure of its own, sends a sale headline to its page', async () => {
+    const sale = (amount) => {
+      const a = withModels([], { price: { amount, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence: null });
+      a.listing.category = 'buy';
+      return a;
+    };
+    const pages = (p3) => ['Overview\nA residential compound for sale. A residential compound for sale.', 'Location', p3, 'Specification', 'Contact'];
+    const outcome = async (opts) => {
+      const r = await rig(opts);
+      try {
+        const report = await r.run();
+        return { evidence: report.priceEvidence, price: report.listingPreview.price, codes: report.warningCodes, texts: report.warnings, checks: r.calls().filter((c) => c.tool === 'claude-confirm') };
+      } finally { r.cleanup(); }
+    };
+    // Period null, no quote: the label and the figure on two text-layer lines (a card, a table cell), either order,
+    // a blank line between or not — one page check, asked as a sale, which refuses: on request, and the reply says why.
+    for (const p3 of [
+      'Annual rent\nSAR 60,000', 'SAR 60,000\nAnnual rent', 'الإيجار السنوي\n60,000 ريال', '60,000 ريال\nالإيجار السنوي',
+      'Annual rent\n\nSAR 60,000', 'SAR 60,000\n\nAnnual rent', 'الإيجار السنوي\n\n60,000 ريال', '60,000 ريال\n\nالإيجار السنوي',
+    ]) {
+      const o = await outcome({ listing: sale(60000), pageText: pages(p3), confirm: [] });
+      assert.equal(o.evidence.inText, false, p3);
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, null, true]], p3);
+      assert.equal(o.price.onRequest, true, p3);
+      assert.ok(o.codes.includes('price-not-printed'), p3);
+      // Claude r6 NB1: the figure read may be a rent, not a price the brochure forgot.
+      const line = o.texts.find((w) => /price on request/.test(w)) ?? '';
+      assert.match(line, /the figure read may be a rent or income, not the sale price/, p3);
+      assert.match(line, /send `price <id> <amount>`/, p3);
+    }
+    // Controls: a plain price label, and a rent line that prints a figure of its own — the text layer settles it.
+    for (const p3 of ['Price\nSAR 450,000', 'Annual rent 12,000\nPrice SAR 450,000']) {
+      const o = await outcome({ listing: sale(450000), pageText: pages(p3), confirm: [] });
+      assert.deepEqual(o.evidence, { inText: true, confirmed: null }, p3);
+      assert.deepEqual(o.checks, [], p3);
+      assert.deepEqual(o.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
+    }
   });
 
   it('r2 #3: caption "rent per month", the brochure prints only SAR 60,000 a year — no monthly headline', async () => {
@@ -3277,6 +3402,19 @@ describe('processPdf --enrich: unit models + brochure on a published listing, no
       assert.deepEqual(after.price, PRICED);
       assert.equal(JSON.stringify(without(after, [...ENRICHED, 'price'])), JSON.stringify(without(before, [...ENRICHED, 'price'])));
       assert.deepEqual(checkListing(after), []);
+    } finally { r.cleanup(); }
+  });
+
+  it('(c2) r7 #6 (Claude r5 NB2 / r6 B2c): a listing for sale on request never adopts rents printed per model — the model check is asked as a sale', async () => {
+    // The page prints every model figure as a rent: a second model told the listing is for sale refuses them all.
+    const r = await rig({ listing: reading(), rents: [419994, 356024, 319015, 270425] });
+    try {
+      seed(r, { price: { ...ON_REQUEST } });
+      const report = await enrich(r);
+      assert.deepEqual(r.calls().filter((c) => c.tool === 'claude-model-confirm').map((c) => [c.page, c.period, c.sale]), [[3, null, true]], 'one call, as before');
+      assert.notEqual(report.enrich.headline, 'adopted');
+      assert.deepEqual(saved(r).price, ON_REQUEST);
+      assert.deepEqual(saved(r).models.map((m) => [m.price ?? null, m.subsidisedPrice ?? null]), [[null, null], [null, null]]);
     } finally { r.cleanup(); }
   });
 
