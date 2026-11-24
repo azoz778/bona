@@ -1706,6 +1706,23 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       ['60,000 ريال يوميا', '60,000 ريال', 'buy'], ['60,000 ريال يومياً', '60,000 ريال', 'buy'], ['60,000 ريال يوميًا', '60,000 ريال', 'buy'],
       ['60,000 ريال في اليوم', '60,000 ريال', 'buy'], ['60,000 ريال لليلة', '60,000 ريال', 'buy'], ['60,000 ريال أسبوعيا', '60,000 ريال', 'buy'],
       ['60,000 ريال اسبوعياً', '60,000 ريال', 'buy'],
+      // r9 #2 (Claude r8 B1a): the rest of the forms e892790 caught — the suffixes اته / اتهم, ك / كم and ي on دخل / عائد /
+      // إيجار…
+      ['مجمع للبيع إيجاراته 60,000 ريال', '60,000 ريال', 'buy'], ['عائداته 60,000 ريال', '60,000 ريال', 'buy'],
+      ['إيجاراتهم 60,000 ريال', '60,000 ريال', 'buy'], ['دخلك 60,000 ريال', '60,000 ريال', 'buy'], ['إيجارك 60,000 ريال', '60,000 ريال', 'buy'],
+      ['عائدكم 60,000 ريال', '60,000 ريال', 'buy'], ['عائدك المتوقع 60,000 ريال', '60,000 ريال', 'buy'], ['دخلي 60,000 ريال', '60,000 ريال', 'buy'],
+      // …(B1b) the income words r8 #5 added, with the same suffixes and the ا of tanween, and أجرت- with its pronoun…
+      ['عمارة للبيع إيراداتها 60,000 ريال', '60,000 ريال', 'buy'], ['إيراداته 60,000 ريال', '60,000 ريال', 'buy'],
+      ['ريعها 60,000 ريال', '60,000 ريال', 'buy'], ['مردودها 60,000 ريال', '60,000 ريال', 'buy'], ['عوائدها 60,000 ريال', '60,000 ريال', 'buy'],
+      ['أجرتها 60,000 ريال', '60,000 ريال', 'buy'], ['أجرته 60,000 ريال', '60,000 ريال', 'buy'], ['اجرتها 60,000 ريال', '60,000 ريال', 'buy'],
+      ['يحقق إيراداً 60,000 ريال', '60,000 ريال', 'buy'],
+      // …and (B1c) the short-stay variants: "a night", "a week", بالليلة, في الليلة, كل ليلة, "/ ليلة", باليوم, في الأسبوع,
+      // بالأسبوع.
+      ['SAR 60,000 a night', 'SAR 60,000', 'buy'], ['SAR 60,000 a week', 'SAR 60,000', 'buy'], ['60,000 ريال بالليلة', '60,000 ريال', 'buy'],
+      ['60,000 ريال بالليله', '60,000 ريال', 'buy'], ['60,000 ريال في الليلة', '60,000 ريال', 'buy'], ['60,000 ريال كل ليلة', '60,000 ريال', 'buy'],
+      ['60,000 ريال / ليلة', '60,000 ريال', 'buy'], ['60,000 ريال/ليلة', '60,000 ريال', 'buy'], ['60,000 ريال باليوم', '60,000 ريال', 'buy'],
+      ['60,000 ريال في الأسبوع', '60,000 ريال', 'buy'], ['60,000 ريال في الاسبوع', '60,000 ريال', 'buy'], ['60,000 ريال بالأسبوع', '60,000 ريال', 'buy'],
+      ['60,000 ريال بالاسبوع', '60,000 ريال', 'buy'],
     ]) {
       const o = await outcome({ listing: sale(null, quote, category), pageText: pages(p3), confirm: [] });
       assert.deepEqual(o.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, null, true]], p3);
@@ -1984,6 +2001,64 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     assert.deepEqual(o.evidence, { inText: true, confirmed: null });
     assert.deepEqual(o.checks, []);
     assert.deepEqual(o.price, { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false });
+  });
+
+  it('r9 #2 (Codex r8 #3 / NB1, Claude r8 NB6 / NB13): a weak word makes a neighbour a rent label only as a card label, a percentage is no amount, and every ownAmount branch is pinned', async () => {
+    const sale = (amount) => {
+      const a = withModels([], { price: { amount, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence: null });
+      a.listing.category = 'buy';
+      return a;
+    };
+    const pages = (p3) => ['Overview\nA residential compound for sale. A residential compound for sale.', 'Location', p3, 'Specification', 'Contact'];
+    const outcome = async (opts) => {
+      const r = await rig(opts);
+      try {
+        const report = await r.run();
+        return { evidence: report.priceEvidence, price: report.listingPreview.price, texts: report.warnings, checks: r.calls().filter((c) => c.tool === 'claude-confirm') };
+      } finally { r.cleanup(); }
+    };
+    // An amenity or a selling point beside the sale price, its weak word (weekly, nightly, PA, ROI, returns, مردود,
+    // أسبوعياً) cut, says no rent: no rent label, no check — so a spent quota never sends a correct price on request.
+    for (const amenity of [
+      'Weekly housekeeping included', 'Nightly security patrols', 'PA system in the lobby', 'High ROI', 'Guaranteed returns of 8%',
+      'العربون غير مردود', 'تنظيف أسبوعياً',
+    ]) {
+      for (const p3 of [`${amenity}\nSale price SAR 450,000`, `Sale price SAR 450,000\n${amenity}`]) {
+        const o = await outcome({ listing: sale(450000), pageText: pages(p3), confirm: [], confirmFail: 'quota' });
+        assert.deepEqual(o.evidence, { inText: true, confirmed: null }, p3);
+        assert.deepEqual(o.checks, [], p3);
+        assert.deepEqual(o.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
+      }
+    }
+    // Still rent labels: a weak word alone or with only a rate or price word (a card label), a rent wording with no weak
+    // word, a yield with three decimals or a spaced "%" (a percentage is no amount: Codex r8 NB1), and a rent label whose
+    // only figure is an area (the measure cut: Claude r8 NB13). One sale check, which refuses: on request, and why.
+    const labels = [
+      ['Nightly rate', 'SAR 60,000'], ['Weekly', 'SAR 60,000'], ['Return Rates', 'SAR 60,000'], ['Per night', 'SAR 60,000'],
+      ['لليلة الواحدة', '60,000 ريال'], ['أسبوعياً', '60,000 ريال'], ['Rental yield 7.125%', 'SAR 60,000'], ['Net yield 6.875 %', 'SAR 60,000'],
+      ['العائد الإيجاري ٧.١٢٥٪', '60,000 ريال'], ['Rental income — Building 2 (10,500 sqm)', 'SAR 60,000'],
+    ];
+    for (const p3 of labels.flatMap(([label, fig]) => [`${label}\n${fig}`, `${fig}\n${label}`])) {
+      const o = await outcome({ listing: sale(60000), pageText: pages(p3), confirm: [] });
+      assert.equal(o.evidence.inText, false, p3);
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, null, true]], p3);
+      assert.equal(o.price.onRequest, true, p3);
+      assert.equal(o.price.amount, null, p3);
+      const line = o.texts.find((w) => /price on request/.test(w)) ?? '';
+      assert.match(line, /the figure read may be a rent or income, not the sale price/, p3);
+    }
+    // Controls: a rent line that prints an amount of its own labels that amount — beside its yield (the percentage cut
+    // leaves the amount), and through each ownAmount branch (Claude r8 NB13): a currency by its figure read before
+    // anything is cut ("SAR 4.5 M" is no 4.5 metres), five digits or more, a solid k. No check, the text layer settles it.
+    for (const p3 of [
+      'Annual rent 12,000 (7.125%)\nPrice SAR 450,000', 'Annual rent SAR 4.5 M\nPrice SAR 450,000', 'Annual rent SAR 900\nPrice SAR 450,000',
+      'Annual rent 12000\nPrice SAR 450,000', 'Annual rent 12k\nPrice SAR 450,000',
+    ]) {
+      const o = await outcome({ listing: sale(450000), pageText: pages(p3), confirm: [], confirmFail: 'quota' });
+      assert.deepEqual(o.evidence, { inText: true, confirmed: null }, p3);
+      assert.deepEqual(o.checks, [], p3);
+      assert.deepEqual(o.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
+    }
   });
 
   it('r2 #3: caption "rent per month", the brochure prints only SAR 60,000 a year — no monthly headline', async () => {
