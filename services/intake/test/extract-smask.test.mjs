@@ -199,6 +199,33 @@ for i, (stream, small) in enumerate([(a, True), (png(noisy((40, 200, 40))), Fals
 doc.save(sys.argv[1])
 `;
 
+// r5 #8: the same as MAKE_TWICE, past the candidate cap. Page 1 draws bitmap A as a small preview, pages 2-4 fill
+// their page with three other pictures, page 5 fills its page with A again. Run with --max-candidates 3: pages 1-3 are
+// the three kept candidates, page 4's picture is one too many, and page 5 is A again, not a new candidate.
+const MAKE_CAPPED = `
+import sys, io, pymupdf
+from PIL import Image
+w, h = 900, 700
+def noisy(block):
+    im = Image.new('RGB', (w, h))
+    px = im.load()
+    for x in range(w):
+        for y in range(h):
+            px[x, y] = (x * 7 % 256, y * 9 % 256, (x + y) * 5 % 256)
+    im.paste(Image.new('RGB', (300, 200), block), (100, 100))
+    return im
+def png(im):
+    b = io.BytesIO(); im.save(b, 'PNG'); return b.getvalue()
+doc = pymupdf.open()
+a = png(noisy((200, 40, 40)))
+others = [png(noisy(c)) for c in ((40, 200, 40), (40, 40, 200), (200, 200, 40))]
+for stream, small in [(a, True), (others[0], False), (others[1], False), (others[2], False), (a, False)]:
+    page = doc.new_page(width=842, height=595)
+    page.insert_image(pymupdf.Rect(40, 40, 200, 160) if small else page.rect, stream=stream)
+    page.insert_text((40, 580), 'Floor plan apartment bedroom')
+doc.save(sys.argv[1])
+`;
+
 describe('extract_pdf.py - transparent images', { skip: !UV && 'uv not installed' }, () => {
   it('flattens soft-masked images onto white with straight alpha (rgba, 50 %, gray, cmyk, half-size mask), and leaves a plain one alone', () => {
     // Under ~/.cache, never straight in $HOME (and not /tmp, which is RAM on this host).
@@ -301,6 +328,26 @@ describe('extract_pdf.py - transparent images', { skip: !UV && 'uv not installed
       assert.equal(res.candidates[0].page, 1, 'first seen on page 1');
       // Page 4 draws it at 765 x 595 pt on an 842 x 595 pt page (its aspect ratio kept): 0.9086 — not page 1's 0.037.
       assert.ok(res.candidates[0].coverage >= 0.85, `coverage ${res.candidates[0].coverage}: the page-4 placement covers its page`);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('r5 #8: past the candidate cap a repeat of a kept bitmap still raises its coverage, and the cap still keeps out new pictures', () => {
+    const base = path.join(os.homedir(), '.cache', 'bona-tests');
+    fs.mkdirSync(base, { recursive: true });
+    const dir = fs.mkdtempSync(path.join(base, 'capped-'));
+    try {
+      const pdf = path.join(dir, 'capped.pdf');
+      const mk = spawnSync('uv', ['run', ...WITH, 'python', '-I', '-c', MAKE_CAPPED, pdf], { encoding: 'utf8' });
+      assert.equal(mk.status, 0, mk.stderr);
+      const out = path.join(dir, 'out');
+      const run = spawnSync('uv', ['run', ...WITH, 'python', '-I', SCRIPT, pdf, out, '--min-side', '300', '--max-candidates', '3'], { encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+      const res = JSON.parse(run.stdout.trim().split('\n').pop());
+      assert.equal(res.rendered, false, 'three embedded candidates: no page-render fallback');
+      assert.deepEqual(res.candidates.map((c) => c.page), [1, 2, 3], 'the cap keeps the first three pictures, and page 4 stays out');
+      assert.deepEqual(fs.readdirSync(path.join(out, 'images')).sort(), ['000.png', '001.png', '002.png'], 'nothing past the cap is written');
+      // Page 5 draws A at 765 x 595 pt on an 842 x 595 pt page: 0.9086, not page 1's 0.037.
+      assert.ok(res.candidates[0].coverage >= 0.85, `coverage ${res.candidates[0].coverage}: the page-5 placement, past the cap, covers its page`);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });

@@ -516,6 +516,10 @@ def main() -> int:
             if coverage is not None and (first["coverage"] is None or coverage > first["coverage"]):
                 first["coverage"] = coverage
             return
+        if len(candidates) >= args.max_candidates:
+            # The cap counts NEW pictures only. It sits after the dedupe above, so a kept preview drawn over a
+            # whole page past the cap still gets that page's coverage (r5 #8).
+            return
         seen[digest] = len(candidates)
         idx = len(candidates)
         name = f"{idx:03d}.{ext}"
@@ -546,8 +550,6 @@ def main() -> int:
             images = []
         embedded_total += len(images)
         for info in images:
-            if len(candidates) >= args.max_candidates:
-                break
             xref = info[0]
             try:
                 ext_img = doc.extract_image(xref)
