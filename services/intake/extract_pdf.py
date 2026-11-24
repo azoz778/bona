@@ -326,21 +326,38 @@ def placement_coverage(page, xref: int):
 
 
 def repeat_coverage(page, info):
-    """placement_coverage() for a repeat of a kept picture past the candidate cap, with nothing decoded (r7 #8).
+    """placement_coverage() for a repeat of a kept picture past the candidate cap, with nothing decoded (r7 #8, r8 #7).
 
     `info` is the image's get_images(full=True) item. get_image_rects() builds a Pixmap of the image and hashes every
     image on the page at full size, so an image the page draws itself (info[-1] == 0) is placed by its resource name in
-    the page's content stream instead (get_image_bbox: no Pixmap, no hash). An image drawn inside a form XObject, or one
-    whose rect cannot be read that way (an exception, an empty or infinite rect), falls back to placement_coverage().
+    the page's content stream instead: one JM_image_reporter() pass per page (the pass get_image_bbox() makes), cached
+    on the page object, lists every draw with its name and decodes nothing. Like placement_coverage(), the LARGEST draw
+    of the name counts: a picture drawn small, then over the page, is a whole page. The pass knows draws by name only,
+    inside form XObjects too, and it also lists draws on an OFF optional-content layer, so it is used only when no other
+    get_images() item on the page carries the name and the document has no optional content. Otherwise (an image drawn
+    inside a form XObject, a shared name, any layer), on an exception, or with no usable rect, placement_coverage()
+    places it.
     """
     if info[-1] == 0:
         try:
-            r = page.get_image_bbox(info)
+            placed = getattr(page, "_bona_placed", None)
+            if placed is None:
+                page._bona_placed = {}  # until the pass succeeds: every repeat on the page goes to placement_coverage()
+                if not page.parent.get_ocgs():
+                    import pymupdf  # noqa: PLC0415
+                    names = [x[7] for x in page.get_images(full=True)]
+                    draws = {}
+                    for name, quad in pymupdf.JM_image_reporter(page._pdf_page()):
+                        draws.setdefault(name, []).append(pymupdf.Quad(quad).rect)
+                    page._bona_placed = {n: rects for n, rects in draws.items() if names.count(n) == 1}
+                placed = page._bona_placed
+            rects = [r for r in placed.get(info[7], ()) if not r.is_empty and not r.is_infinite]
+            area = page.rect.width * page.rect.height
+            if rects and area > 0:
+                r = max(rects, key=lambda r: r.width * r.height)
+                return round(min(1.0, (r.width * r.height) / area), 4)
         except Exception:
-            r = None
-        area = page.rect.width * page.rect.height
-        if r is not None and not r.is_empty and not r.is_infinite and area > 0:
-            return round(min(1.0, (r.width * r.height) / area), 4)
+            pass
     return placement_coverage(page, info[0])
 
 
@@ -600,9 +617,10 @@ def main() -> int:
                 # Past the cap a picture costs nothing unless it repeats a kept one, known by its xref or by its raw
                 # (still compressed) bytes and dictionary, hashed once per xref. Then only its placement is looked up,
                 # and the kept candidate keeps its LARGEST coverage (r5 #8). Nothing is extracted, decoded or flattened
-                # past the cap (r6 #7), and a repeat the page draws itself is placed by its name with nothing decoded;
-                # one drawn inside a form XObject is placed by placement_coverage(), which decodes it and hashes the
-                # page's images (r7 #8).
+                # past the cap (r6 #7). A repeat the page draws itself, under a name no other image on the page carries,
+                # in a document with no optional content, is placed by its largest draw under that name with nothing
+                # decoded (one content-stream pass per page); any other repeat is placed by placement_coverage(), which
+                # decodes it and hashes the page's images (r7 #8, r8 #7).
                 k = xref_seen.get(xref)
                 if k is None:
                     if xref not in raw_memo:
