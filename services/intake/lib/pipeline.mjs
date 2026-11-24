@@ -604,8 +604,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // headline and every model row with the listing's period: on an enrichment the listing's own; on a publish
   // what buildListing() gives it (the owner's caption period, else the reading's, else a year). A sale has
   // none. Every figure a second model checks is confirmed FOR that period, the headline's too, and an
-  // enrichment whose reading has another period keeps no model price.
-  const readingPeriod = price?.period ?? null;
+  // enrichment whose reading has another period keeps no model price. The reading's period counts only on a
+  // rental: a sale's stray period is no period at all — no page-only check, no prompt (r5 #9).
+  const readingPeriod = (enrichTarget ? enrichTarget.listing.category : (caption.category || ai.listing?.category)) === 'rent' ? (price?.period ?? null) : null;
   const listingPeriod = enrichTarget
     ? (enrichTarget.listing.category === 'rent' ? (enrichTarget.listing.price?.period ?? null) : null)
     : (caption.category || ai.listing?.category) === 'rent' ? (caption.period || readingPeriod || 'year') : null;
