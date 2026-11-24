@@ -278,6 +278,22 @@ const DISTANCE_WORD_RE = /\b(?:run|runs|running|jog|jogging|walk|walking|track|t
 /** Cut out before the test (r3 #1): a duration right after its number, and a year 1900–2099 standing alone. */
 const DURATION_G = /(?<![\d.,٫٬])\d+(?:[.,٫]\d+)?\s*(?:years?|yrs?|months?|weeks?|days?|hours?|hrs?|minutes?|mins?|سنة|سنوات|سنين|عام|أعوام|اعوام|شهر|شهور|أشهر|اشهر|أسبوع|أسابيع|يوم|أيام|ايام|ساعة|ساعات|دقيقة|دقائق)(?![a-z\u0600-\u06ff])/gi;
 const YEAR_G = /(?<![\d.,٫٬])(?:19|20)\d{2}(?![\d]|[.,٫٬]\d)/g;
+/** SOLID_K_G without the g flag, for .test(): a /g regex keeps its lastIndex between calls. */
+const SOLID_K_RE = new RegExp(SOLID_K_G.source, 'i');
+/**
+ * Does `line` print an AMOUNT of its own, as statesMoney reads one — the partner of rentWorded in the sale-line rent
+ * check (r8 #6, Codex r7 #2 = Claude r7 NB8)? A currency beside a figure (looked for before anything is cut, "SAR 4.5 M"),
+ * then, once measurements and durations are cut out: grouped thousands, five digits or more, a scaled figure or a solid
+ * k ("Annual rent 12,000", "Annual rent SAR 12,000", "Annual income 1.2m", "12k"). A unit, a floor, a bedroom count, a
+ * year, a yield, an area or a term is none: "Annual rent — Unit 4", "Annual rent (2 BR)", "Annual rent 2025", "Rental
+ * yield 7%", "Unit 4 (120 m²)", "Lease term 3 years". No price word counts here, unlike statesMoney: "rent" is the label.
+ */
+const ownAmount = (line) => {
+  const w = westernise(String(line ?? '').replace(/\u0640/g, '').replace(DOTTED_MARK_G, ' SAR '));
+  if (CURRENCY_BY_FIGURE_RE.test(w)) return true;
+  const t = withoutMeasures(w).replace(DURATION_G, ' ');
+  return CURRENCY_BY_FIGURE_RE.test(t) || GROUPED_RE.test(t) || /(?<![\d.,٫٬])\d{5,}/.test(t) || SCALED_RE.test(t) || SOLID_K_RE.test(t);
+};
 /**
  * statesMoney's sentence end: SENTENCE_END, except dots followed by a space and a figure — "Booking fee min. 2000",
  * "Deposit est. 750", "Deposit... 750" are one sentence (r7 #4). publishedText and the copy guard keep SENTENCE_END.
@@ -755,8 +771,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // A page that mentions subsidy beneficiaries prints TWO prices per unit. A number found in its
   // text layer proves the number is printed, not WHICH price it is — so text found only on such
   // pages never settles a price; the page image does (those pages are always rendered, see
-  // price-pages.mjs). The caption is the owner's own words and always counts.
-  const plainText = pageText.length ? pageText.filter((t) => !isSubsidyPricePage(t)).join('\n') : (extraction.text || '');
+  // price-pages.mjs). The caption is the owner's own words and always counts. `textPages`: the text layer page by
+  // page (the whole text when there is none per page), for the sale-line rent check (r8 #6).
+  const textPages = pageText.length ? pageText.filter((t) => !isSubsidyPricePage(t)) : [extraction.text || ''];
+  const plainText = textPages.join('\n');
   const haystack = `${plainText}\n${caption.text || ''}`;
   // The country the property is in — the listing's own on an enrichment — and the currency it prices in,
   // when the site prints that one (model-prices.mjs homeCurrency). A figure printed with no currency at all
@@ -1261,19 +1279,25 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     const rentHeadline = Boolean(caption.period || readingPeriod || listingPeriod);
     // A sale's headline that may be a rent (r6 #3, Codex r5 #3): the reading gives it a period, or a line of the
     // text printing it, or the reading's quote of it, speaks of rent or income — or the line printing it has a
-    // neighbour, the non-empty line just above or below, that does and prints no figure of its own: a label on a line
+    // neighbour, the non-empty line just above or below, that does and prints no AMOUNT of its own: a label on a line
     // of its own, as a card or a table cell splits "Annual rent" / "SAR 60,000" (r7 #6, Claude r6 B2b = Codex r6 NB1).
-    // A neighbour with a figure of its own labels that figure. The text layer cannot tell a rent from an asking
-    // price: only its page settles it (asked as a sale's, as every check of a sale is). A sale with no period,
-    // printed with no such words on or beside its line, keeps the text layer.
-    const lines = haystack.split('\n');
-    const near = (i, step) => {
+    // A neighbour with an amount of its own (ownAmount: "Annual rent 12,000", "Annual rent SAR 12,000") labels that
+    // amount; a unit, a year, a bedroom count or a yield is no amount, so "Annual rent — Unit 4", "Annual rent 2025",
+    // "Rental yield 7%" are still labels (r8 #6, Codex r7 #2 = Claude r7 NB8). Neighbours are looked for on the
+    // figure's own page, or in the caption, never across a page break (r8 #6, Codex r7 #3, Claude r7 NB9): a page
+    // ending "Rental income" labels nothing on the next. The text layer cannot tell a rent from an asking price: only
+    // its page settles it (asked as a sale's, as every check of a sale is). A sale with no period, printed with no
+    // such words on or beside its line, keeps the text layer.
+    const near = (lines, i, step) => {
       for (let j = i + step; j >= 0 && j < lines.length; j += step) if (lines[j].trim()) return lines[j];
       return '';
     };
-    const rentLabel = (line) => !/\p{Nd}/u.test(line) && rentWorded(line);
+    const rentLabel = (line) => rentWorded(line) && !ownAmount(line);
     const saleMayBeRent = !listingPeriod && (Boolean(price.period) || rentWorded(ai.priceEvidence?.quote)
-      || lines.some((line, i) => priceAppearsIn(line, price.amount) && (rentWorded(line) || rentLabel(near(i, -1)) || rentLabel(near(i, 1)))));
+      || [...textPages, caption.text || ''].some((block) => {
+        const lines = String(block ?? '').split('\n');
+        return lines.some((line, i) => priceAppearsIn(line, price.amount) && (rentWorded(line) || rentLabel(near(lines, i, -1)) || rentLabel(near(lines, i, 1))));
+      }));
     report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: pageOnly, pageCheck: rentHeadline || saleMayBeRent });
     const fromWords = ownPriceOnly ? startingFromWords() : null;
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {

@@ -1840,6 +1840,97 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     }
   });
 
+  it('r8 #6 (Codex r7 #2 = Claude r7 NB8): a rent label counts unless it prints an AMOUNT of its own — a unit, a year, a bedroom count or a yield is no amount', async () => {
+    const sale = (amount, priceEvidence = null) => {
+      const a = withModels([], { price: { amount, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence });
+      a.listing.category = 'buy';
+      return a;
+    };
+    const pages = (p3) => ['Overview\nA residential compound for sale. A residential compound for sale.', 'Location', p3, 'Specification', 'Contact'];
+    const outcome = async (opts) => {
+      const r = await rig(opts);
+      try {
+        const report = await r.run();
+        return { evidence: report.priceEvidence, price: report.listingPreview.price, codes: report.warningCodes, texts: report.warnings, checks: r.calls().filter((c) => c.tool === 'claude-confirm') };
+      } finally { r.cleanup(); }
+    };
+    // A label carrying a figure that is no amount — a unit, a bedroom count, a year, a yield — is still the rent label of
+    // the figure beside it: one page check, asked as a sale, which refuses — on request, and the reply says why.
+    const labels = [
+      ['Annual rent — Unit 4', 'SAR 60,000'], ['Annual rent (2 BR)', 'SAR 60,000'], ['Year 1 rental income', 'SAR 60,000'],
+      ['Annual rent 2025', 'SAR 60,000'], ['Annual rent — Unit 104', 'SAR 60,000'], ['Rental yield 7%', 'SAR 60,000'],
+      ['الإيجار السنوي – الوحدة 4', '60,000 ريال'], ['الإيجار السنوي — وحدة ٤', '60,000 ريال'], ['الإيجار السنوي (2 غرف)', '60,000 ريال'],
+      ['دخل الإيجار — السنة 1', '60,000 ريال'], ['الإيجار السنوي 2025', '60,000 ريال'], ['الإيجار السنوي — الوحدة 104', '60,000 ريال'],
+      ['العائد الإيجاري 7%', '60,000 ريال'],
+    ];
+    const rows = [...labels.flatMap(([label, fig]) => [[`${label}\n${fig}`, null], [`${fig}\n${label}`, null]]),
+      // …with the reading's quote of the figure alone.
+      ['Annual rent — Unit 4\nSAR 60,000', { page: 3, quote: 'SAR 60,000' }], ['Annual rent — Unit 4\nSAR 60,000', { page: 3, quote: '60,000' }]];
+    for (const [p3, evidence] of rows) {
+      const o = await outcome({ listing: sale(60000, evidence), pageText: pages(p3), confirm: [] });
+      assert.equal(o.evidence.inText, false, p3);
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, null, true]], p3);
+      assert.equal(o.price.onRequest, true, p3);
+      assert.equal(o.price.amount, null, p3);
+      const line = o.texts.find((w) => /price on request/.test(w)) ?? '';
+      assert.match(line, /the figure read may be a rent or income, not the sale price/, p3);
+    }
+    // Controls: a neighbour that prints an amount of its own (a currency by a figure, grouped thousands, a scaled figure)
+    // labels that amount, and a plain price label is none — the text layer settles it, no check.
+    for (const p3 of [
+      'Annual rent 12,000\nPrice SAR 450,000', 'Price\nSAR 450,000', 'Annual rent SAR 12,000\nSAR 450,000', 'Annual income 1.2m\nPrice SAR 450,000',
+      'الإيجار السنوي 12,000 ريال\nالسعر 450,000 ريال', 'A S K I N G P R I C E\nSAR 450,000\nالسعر المطلوب',
+    ]) {
+      const o = await outcome({ listing: sale(450000), pageText: pages(p3), confirm: [] });
+      assert.deepEqual(o.evidence, { inText: true, confirmed: null }, p3);
+      assert.deepEqual(o.checks, [], p3);
+      assert.deepEqual(o.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
+    }
+    // The cost, pinned: a rent label with no amount beside a real sale price costs one check, asked as a sale — which
+    // confirms it, so the price is published.
+    const yieldBeside = await outcome({ listing: sale(450000), pageText: pages('Rental yield 7%\nPrice SAR 450,000'), confirm: [450000] });
+    assert.deepEqual(yieldBeside.checks.map((c) => [c.amount, c.period, c.sale]), [[450000, null, true]]);
+    assert.deepEqual(yieldBeside.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false });
+  });
+
+  it('r8 #6 (Codex r7 #3, Claude r7 NB9): the rent-label neighbour is looked for on the figure\'s own page (or in the caption), never across a page break', async () => {
+    const sale = (amount) => {
+      const a = withModels([], { price: { amount, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence: null });
+      a.listing.category = 'buy';
+      return a;
+    };
+    const overview = 'Overview\nA residential compound for sale. A residential compound for sale.';
+    const outcome = async (opts, caption = {}) => {
+      const r = await rig(opts);
+      try {
+        const report = await processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption, workDir: path.join(r.repo, '..', 'work'), dryRun: true });
+        return { evidence: report.priceEvidence, price: report.listingPreview.price, checks: r.calls().filter((c) => c.tool === 'claude-confirm') };
+      } finally { r.cleanup(); }
+    };
+    // A page ends with a rent line and the next one starts with the sale price (or the other way round, or in Arabic,
+    // or with an image-only page between): no neighbours — the text layer settles it, no check, so a spent quota never
+    // sends it on request.
+    for (const [pageText, caption] of [
+      [[overview, 'Investment\nRental income', 'Sale price SAR 450,000', 'Specification', 'Contact'], {}],
+      [[overview, 'Sale price SAR 450,000', 'Rental income\nInvestment', 'Specification', 'Contact'], {}],
+      [[overview, 'الاستثمار\nالدخل الإيجاري', 'سعر البيع 450,000 ريال', 'Specification', 'Contact'], {}],
+      [[overview, 'Investment\nRental income', '', 'Sale price SAR 450,000', 'Contact'], {}],
+      // …and the owner's caption is no neighbour of the last page.
+      [[overview, 'Location', 'Specification', 'Contact', 'Sale price SAR 450,000'], { text: 'Rental income' }],
+    ]) {
+      const o = await outcome({ listing: sale(450000), pageText, confirm: [], confirmFail: 'quota' }, caption);
+      const why = JSON.stringify([pageText, caption]);
+      assert.deepEqual(o.evidence, { inText: true, confirmed: null }, why);
+      assert.deepEqual(o.checks, [], why);
+      assert.deepEqual(o.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false }, why);
+    }
+    // On the same page the label still sends it to its page: one sale check (here the quota is spent: on request).
+    const same = await outcome({ listing: sale(60000), pageText: [overview, 'Location', 'Annual rent\nSAR 60,000', 'Specification', 'Contact'], confirm: [], confirmFail: 'quota' });
+    assert.equal(same.evidence.inText, false);
+    assert.deepEqual(same.checks.map((c) => [c.amount, c.period, c.sale]), [[60000, null, true]]);
+    assert.equal(same.price.onRequest, true);
+  });
+
   it('r2 #3: caption "rent per month", the brochure prints only SAR 60,000 a year — no monthly headline', async () => {
     const a = withModels([model('Villa', 60000, null, 3)], { price: { amount: 60000, currency: 'SAR', from: true, period: 'year', onRequest: false }, priceEvidence: { page: 3, quote: 'SAR 60,000 per year' } });
     a.listing.category = 'rent';
