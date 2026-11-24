@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { checkListing, replaceMetaFor, writeInboxListing } from '../lib/listing.mjs';
 import { compareEnrichment, dropMoneyText, processPdf, statesMoney } from '../lib/pipeline.mjs';
 import { copyProblems } from '../lib/claude.mjs';
-import { printedInCurrency } from '../lib/price.mjs';
+import { priceAppearsIn, printedInCurrency } from '../lib/price.mjs';
 import { classifyRun, planBackfill } from '../lib/backfill.mjs';
 import * as msg from '../lib/messages.mjs';
 
@@ -347,6 +347,73 @@ describe('r8 #2: glued dotted marks before a figure; site and other codes and gl
     }
     // a tatweel draws the mark out, it does not make it a word: "ر.سـ 2000" stays refused.
     for (const ar of ['نموذج ر.س 2000', 'نموذجر.س 2000', 'نموذج ر.س', 'نموذج ر.سـ 2000']) assert.equal(nameOf('Studio', ar), 'models[0].name', ar);
+  });
+});
+
+// r8 #3 (Claude r7 B2 / NB3, Codex r7 #5b) — the listing-copy guard (claude.mjs PRICE_IN_COPY_RE) reads the figure shapes
+// brochures print: digits grouped by "،", a space or a no-break space; "/-" after a figure; "SAR:" / "SAR -" before one;
+// plural scales ("4.5 millions"), which price.mjs figurePatterns reads too, so refusedFigureIn finds a refused figure
+// written that way. "m²", "m2", "m³" after a figure are an area, never "m" for million (in the name guard too). A dot
+// after a mark belongs to a code only: "in US dollars. 2027 handover" is a sentence end.
+describe('r8 #3: the copy guard — "،" / space grouping, "/-", "SAR:", plural scales; m² is no scale; a dot after a code only', () => {
+  const copyStates = (en, ar) => {
+    const bad = copyProblems({ description: { en: [en], ar: [ar] } });
+    return [bad.some((p) => p.startsWith('description.en[0] states a price')), bad.some((p) => p.startsWith('description.ar[0] states a price'))];
+  };
+  const nameOf = (en, ar, figures = []) => dropMoneyText({ models: [{ name: { en, ar } }] }, { figures }).name;
+  it('a price in the copy in each shape brochures print, in English and in Arabic copy (Claude r7 B2)', () => {
+    for (const [en, ar] of [
+      ['Villas from 850،000 SAR.', 'فلل بسعر ٨٥٠،٠٠٠ ر.س'],
+      ['Villas from SAR 850،000.', 'فلل تبدأ من ر.س ٨٥٠،٠٠٠.'],
+      ['Villas from 850 000 SAR.', 'فلل تبدأ من 850 000 ريال.'],
+      ['Villas from 850 000 SAR.', 'فلل تبدأ من ٨٥٠ ٠٠٠ ريال.'],
+      ['Villas from 1 250 000 dirhams.', 'فلل تبدأ من 1 250 000 درهم.'],
+      ['Townhouses from 850,000/- SAR.', 'تاون هاوس تبدأ من 850,000/- ريال.'],
+      ['Townhouses from 850000/- SAR.', 'تاون هاوس تبدأ من 850000 /- ر.س'],
+      ['Villas from SAR: 850,000.', 'فلل تبدأ من ر.س: 850,000.'],
+      ['Villas from SAR - 850,000.', 'فلل تبدأ من ريال - 850,000.'],
+      ['Villas from SR. = 850,000.', 'فلل تبدأ من ريال: ٨٥٠٠٠٠.'],
+      ['Townhouses from SAR 4.5 millions.', 'تاون هاوس تبدأ من SAR 4.5 millions.'],
+      ['Townhouses from 4.5 millions SAR.', 'تاون هاوس تبدأ من 4.5 millions ريال.'],
+      ['Studios from SAR 850 thousands.', 'استوديو يبدأ من 850 thousands ريال.'],
+      ['Studios from SAR 850 thousand.', 'استوديو يبدأ من ر.س 850 thousand.'],
+      ['Land from SAR 1.2 billions.', 'أرض تبدأ من 1.2 billions ريال.'],
+    ]) assert.deepEqual(copyStates(en, ar), [true, true], `${en} / ${ar}`);
+  });
+  it('a refused figure written with a plural scale is found in the copy: "4.5 millions", "850 thousands" (Claude r7 B2)', () => {
+    assert.ok(priceAppearsIn('Townhouses from SAR 4.5 millions.', 4500000));
+    assert.ok(priceAppearsIn('Townhouses from 4.5 Millions.', 4500000));
+    assert.ok(priceAppearsIn('Studios from 850 thousands.', 850000));
+    assert.equal(priceAppearsIn('Townhouses from 14.5 millions.', 4500000), false);
+  });
+  it('an area after a code is no price: "SR. 120 m²", "SAR 2 m²", "SR 2 m2", "S.R. 120 m²", "AED 120 m²", "SR 120 m³" (Codex r7 #5b)', () => {
+    for (const en of [
+      'Studio SR. 120 m² of living space.', 'Studio SR 120 m² of living space.', 'Plots of SAR 2 m² each.', 'SAR. 2 m²', 'plots of SR 2 m2',
+      'plots of SR. 2 m2', 'Studio S.R. 120 m² of living space.', 'Studio AED 120 m² of living space.', 'Studio Dhs. 120 m² of living space.',
+      'Type SR 120 m³ of storage.', 'Studio TL 120 m² of living space.',
+    ]) assert.deepEqual(copyStates(en, 'اثنان.'), [false, false], en);
+    // …in a model name too: the name guard keeps it, and the copy guard (which reads names) raises nothing.
+    for (const name of ['Villa SR 2 m²', 'Villa SR 2 m2', 'Villa SR 2 m³', 'Villa TL 120 m²']) {
+      assert.equal(nameOf(name, 'نموذج'), null, name);
+      assert.deepEqual(copyProblems({}, { models: [{ name: { en: name, ar: 'نموذج' } }] }), [], name);
+    }
+  });
+  it('…and a scaled or grouped figure after a code is still a price (Codex r7 #5b)', () => {
+    for (const en of [
+      'From SAR 2.5m', 'From AED. 2.5m', 'From SAR 2 m.', 'From SAR 4.5 m', 'AED 2.5 million', 'SAR 3m, ready now', 'From SR. 850,000',
+      'From SR 2 mn', 'SAR 1,200 m²', 'From SR 2m', 'from Dhs. 850,000', 'From SAR 1.2m 2-bedroom flats',
+    ]) assert.deepEqual(copyStates(en, 'اثنان.'), [true, false], en);
+    for (const name of ['Villa SR 2m', 'Villa SR 2 million', 'Villa SR 4.5 m']) assert.equal(nameOf(name, 'نموذج'), 'models[0].name', name);
+  });
+  it('a dot after a currency word or symbol is a sentence end, after a code it is the code\'s (Claude r7 NB3)', () => {
+    for (const [en, ar] of [
+      ['Prices are quoted in US dollars. 2027 handover is planned.', 'الأسعار بالريال. 2026 موعد التسليم.'],
+      ['Prices are in riyals. 2026 handover.', 'الأسعار بالدولار. 2027 موعد التسليم.'],
+      ['Prices are in euros. 2027 handover.', 'الأسعار بالدرهم. 2027 موعد التسليم.'],
+    ]) assert.deepEqual(copyStates(en, ar), [false, false], `${en} / ${ar}`);
+    for (const en of ['From SR. 850,000', 'Dhs. 850,000', 'From USD. 850,000', 'Club membership SAR.4500 a year.']) {
+      assert.deepEqual(copyStates(en, 'اثنان.'), [true, false], en);
+    }
   });
 });
 
@@ -1048,6 +1115,16 @@ describe('processPdf: round-3 review cases', { timeout: 120000 }, () => {
     const r = await rig({ pageText, listing: a, confirm: [] });
     try {
       await assert.rejects(r.run(), (err) => err.stage === 'price' && /copy states the price 1,250,000/.test(err.reason));
+    } finally { r.cleanup(); }
+  });
+
+  it('r8 #3 (Claude r7 B2): …nor written with a plural scale, "from 4.5 millions"', async () => {
+    const pageText = [`مشروع سكني${PAD}`, `غرفتا نوم ودورتا مياه${PAD}`];
+    const a = answer({ price: { amount: 4500000, currency: 'SAR', from: true, period: null, onRequest: false } });
+    a.listing.description.en = ['Townhouses from 4.5 millions.', 'Two.']; // no currency: the copy guard lets it by, refusedFigureIn must not
+    const r = await rig({ pageText, listing: a, confirm: [] });
+    try {
+      await assert.rejects(r.run(), (err) => err.stage === 'price' && /copy states the price 4,500,000/.test(err.reason));
     } finally { r.cleanup(); }
   });
 

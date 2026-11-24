@@ -10,8 +10,9 @@ const SEP = '[\\s.,،\'’ ٫٬  ]*';
 
 /**
  * Every way `amount` can be printed, as a regular expression over westernised text: the exact digit
- * run with any thousands separators between digits, then "4.5m" / "4.5 million" / "٤٫٥ مليون" /
- * "990k" / "٩٩٠ ألف". `flags` adds `g` for the callers that want every occurrence.
+ * run with any thousands separators between digits, then "4.5m" / "4.5 million" / "4.5 millions" / "٤٫٥ مليون" /
+ * "990k" / "٩٩٠ ألف". `flags` adds `g` for the callers that want every occurrence. (The plurals, as the copy guard reads
+ * them, so pipeline.mjs refusedFigureIn finds a refused figure written "from 4.5 millions": r8 #3, Claude r7 B2.)
  */
 function figurePatterns(amount, flags = '') {
   const out = [];
@@ -20,7 +21,7 @@ function figurePatterns(amount, flags = '') {
   // 319,015 inside 319,015,000.
   // ("SAR 1,250,000.00" and "ر.س.1,250,000" still count: a decimal tail or a dot before the figure is not more digits.)
   out.push(new RegExp(`(?<!\\d[.,٫٬'’]?)${body}(?![\\d]|[,٬'’]\\d|[.٫]\\d{3})`, flags));
-  for (const [div, words] of [[1e6, ['m', 'mn', 'million', 'مليون', 'ملايين']], [1e3, ['k', 'thousand', 'ألف', 'الف', 'آلاف', 'الاف']]]) {
+  for (const [div, words] of [[1e6, ['m', 'mn', 'millions?', 'مليون', 'ملايين']], [1e3, ['k', 'thousands?', 'ألف', 'الف', 'آلاف', 'الاف']]]) {
     const v = amount / div;
     if (!(v >= 1 && v < 1000)) continue;
     const s = Number(v.toFixed(3)).toString().replace('.', '[.,٫]');

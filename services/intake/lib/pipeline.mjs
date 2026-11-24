@@ -173,7 +173,8 @@ const ABBREVIATION_DOT_G = /(?<![A-Za-z])(approx|incl|excl)\./gi;
  */
 const NAME_SITE_CODE = `(?<![A-Za-z])${MONEY_MARKS.siteCodes}(?![A-Za-z])`;
 const NAME_OTHER_CODE = `(?<![A-Za-z])(?-i:${MONEY_MARKS.otherCodes})(?![A-Za-z])`;
-const NAME_SCALE_WORD = String.raw`\s*(?:k|m|mn|bn|millions?|thousands?|billions?)(?![a-z²\d])`;
+/** A scale word ends where no letter, "²", "³" or digit follows: "SR 2 m²", "SR 2 m2", "SR 2 m³" are areas (r8 #3, Codex r7 #5b). */
+const NAME_SCALE_WORD = String.raw`\s*(?:k|m|mn|bn|millions?|thousands?|billions?)(?![a-z²³\d])`;
 /**
  * The figure right after a code ("SR 750", "SR 4.5m", "SR .95m"), and the one right before ("4500SAR", "4.5 SR", "2m SAR"):
  * `whole` digits, grouped ("1,250,000", "1 250 000"), decimal or scaled.
