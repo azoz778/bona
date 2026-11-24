@@ -7,7 +7,7 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  askPlanContacts, buildPrompt, confirmModelPrices, confirmPriceEvidence, copyProblems, FENCE, HYPE_WORDS, PROMPT_TEMPLATE, ROOM_KEYS, runListingAi, validateAiResult,
+  askPlanContacts, buildPrompt, confirmModelPrices, confirmPriceEvidence, copyProblems, FENCE, HYPE_WORDS, PROMPT_TEMPLATE, ROOM_KEYS, runClaudeOnce, runListingAi, validateAiResult,
 } from '../lib/claude.mjs';
 import { checkModelPrices } from '../lib/model-prices.mjs';
 import { ORDINARY_COPY } from '../../../scripts/test/ordinary-copy-fixture.mjs';
@@ -578,6 +578,32 @@ function fakeSpawn(responses) {
 }
 
 const envelope = (result, extra = {}) => ({ is_error: false, result: typeof result === 'string' ? result : JSON.stringify(result), total_cost_usd: 0.03, duration_ms: 1000, num_turns: 2, session_id: 's', ...extra });
+
+describe('runClaudeOnce reads the reply as one UTF-8 stream (r9 #8)', () => {
+  // A pipe hands the reply over in chunks; a chunk can end inside an Arabic letter. Decoded chunk by chunk, that letter
+  // became U+FFFD in the reading — and from there in the published Arabic copy (the r9 #6 twin, found by its fixer).
+  it('an Arabic letter cut between two chunks arrives whole', async () => {
+    const reply = Buffer.from(JSON.stringify(envelope({ title: { en: 'Villa', ar: 'فيلا للإيجار في جدة' } })));
+    const cut = reply.indexOf(Buffer.from('إ')) + 1;                 // between the two bytes of "إ"
+    assert.ok(cut > 0 && reply[cut] >= 0x80 && reply[cut] < 0xc0, 'the cut falls inside a letter');
+    const spawnImpl = () => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = { end() {} };
+      child.kill = () => {};
+      setImmediate(() => {
+        child.stdout.emit('data', reply.subarray(0, cut));
+        child.stdout.emit('data', reply.subarray(cut));
+        child.emit('close', 0);
+      });
+      return child;
+    };
+    const { result } = await runClaudeOnce({ prompt: 'p', cwd: '/tmp', model: 'sonnet', spawnImpl });
+    assert.equal(result.title.ar, 'فيلا للإيجار في جدة');
+    assert.ok(!JSON.stringify(result).includes('\ufffd'));
+  });
+});
 
 describe('runListingAi', () => {
   const opts = { prompt: 'p', cwd: '/tmp', model: 'sonnet', fallbackModel: 'opus', candidateCount: 2 };

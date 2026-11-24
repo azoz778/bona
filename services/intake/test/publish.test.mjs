@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import {
-  ALLOWED_PATHS, assertCleanTree, gitCommitPush, gitPull, gitStatus, resetTree,
+  ALLOWED_PATHS, assertCleanTree, gitCommitPush, gitPull, gitStatus, resetTree, run,
 } from '../lib/publish.mjs';
 
 const git = (cwd, ...args) => execFileSync('git', args, {
@@ -388,5 +388,18 @@ describe('the entry points pull before they write, and never after', () => {
     const waitAt = shutdown.indexOf('waitForIdle');
     assert.ok(waitAt > 0 && exitAt > waitAt, 'the exit must come after the wait');
     assert.ok(!/setTimeout\([^)]*process\.exit/.test(src), 'no timer-based exit');
+  });
+});
+
+describe('run reads a child\'s output as one UTF-8 stream (r9 #8)', () => {
+  // Two writes with a pause between: the pipe hands them over as two chunks, the first ending inside "إ".
+  it('an Arabic letter cut between two chunks arrives whole, on stdout and on stderr', async () => {
+    const script = `const b = Buffer.from('للإيجار'); const cut = b.indexOf(Buffer.from('إ')) + 1;
+      for (const s of [process.stdout, process.stderr]) s.write(b.subarray(0, cut));
+      setTimeout(() => { for (const s of [process.stdout, process.stderr]) s.write(b.subarray(cut)); }, 150);`;
+    const { code, out, err } = await run(process.execPath, ['-e', script]);
+    assert.equal(code, 0);
+    assert.equal(out, 'للإيجار');
+    assert.equal(err, 'للإيجار');
   });
 });

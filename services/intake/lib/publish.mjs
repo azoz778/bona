@@ -33,6 +33,9 @@ export function run(cmd, args, { cwd, timeoutMs = 600000, env } = {}) {
     let out = '';
     let err = '';
     const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+    // One UTF-8 decoder per stream: a pipe chunk can end inside an Arabic letter (r9 #8, as pdf.mjs r9 #6).
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { err += d; });
     child.on('error', (e) => { clearTimeout(timer); resolve({ code: -1, out, err: String(e.message) }); });

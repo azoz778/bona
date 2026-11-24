@@ -27,6 +27,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { StringDecoder } from 'node:string_decoder';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
 import { bilingualListProblems, FORBIDDEN as COPY_FORBIDDEN, forbiddenHits, HYPE_WORDS as SHARED_HYPE_WORDS, isImageFocus as isFocus, MODEL_LIMITS } from '../../../scripts/curate/rules.mjs';
 import { MONEY_MARKS, riyalOf } from './price.mjs';
@@ -201,11 +202,17 @@ export function runClaudeOnce({ prompt, cwd, model, bin = 'claude', addDirs = []
     let out = '';
     let err = '';
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`claude -p timed out after ${timeoutMs}ms`)); }, timeoutMs);
-    child.stdout.on('data', (d) => { out += d; });
-    child.stderr.on('data', (d) => { err += d; });
+    // One UTF-8 decoder per stream: a pipe chunk can end inside an Arabic letter, and a chunk decoded on its own turns
+    // that letter into U+FFFD in the reading (r9 #8, the twin of pdf.mjs r9 #6).
+    const outText = new StringDecoder('utf8');
+    const errText = new StringDecoder('utf8');
+    child.stdout.on('data', (d) => { out += typeof d === 'string' ? d : outText.write(d); });
+    child.stderr.on('data', (d) => { err += typeof d === 'string' ? d : errText.write(d); });
     child.on('error', (e) => { clearTimeout(timer); reject(e); });
     child.on('close', (code) => {
       clearTimeout(timer);
+      out += outText.end();
+      err += errText.end();
       // A failing `claude -p` still prints its JSON envelope, and the useful part is
       // `result` (e.g. "You've hit your session limit"). Parse before giving up so the
       // owner never sees a slice of the middle of a JSON blob.
