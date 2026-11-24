@@ -684,14 +684,15 @@ const unitLabel = (u) => {
  * `price` (which the TAQEEM check may have cleared), so a figure in the prose could outlive it. Only a
  * letter continues a code, so one glued to its figure counts: "from 4500SAR", "SAR4500" (r6 #2). Every mark price.mjs
  * MARKS reads, from its one list (r7 #2): "650,000 dirhams", "درهم", "د.إ", "ر.ع", "Dhs", "S.R.", "US$"; a country may
- * stand between a figure and its currency ("4500 Saudi Riyals").
+ * stand between a figure and its currency ("4500 Saudi Riyals"). A code's dot may stand before its figure: "SR. 850,000",
+ * "Dhs. 850,000", as in the name guard (r7 #3).
  */
 const CUR = MONEY_MARKS.any;
 const COUNTRY = `(?:${MONEY_MARKS.countries}\\s+)?`;
 const SCALE = '(?:k|m|mn|million|bn|billion|ألف|الف|آلاف|الاف|مليون|ملايين|مليار)';
 const PRICE_IN_COPY_RE = new RegExp([
-  `${CUR}\\s*(?:[\\d٠-٩]{1,3}(?:[,٬.\\s][\\d٠-٩]{3})+|[\\d٠-٩]{4,})`,         // SAR 319,015 / SAR 8500 — not "SR 15"
-  `${CUR}\\s*[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*${SCALE}(?![a-z])`,           // SAR 2.5m
+  `${CUR}\\.?\\s*(?:[\\d٠-٩]{1,3}(?:[,٬.\\s][\\d٠-٩]{3})+|[\\d٠-٩]{4,})`,      // SAR 319,015 / SAR 8500 / SR. 850,000 — not "SR 15"
+  `${CUR}\\.?\\s*[\\d٠-٩]+(?:[.,٫][\\d٠-٩]+)?\\s*${SCALE}(?![a-z])`,        // SAR 2.5m / AED. 2.5m
 
   `[\\d٠-٩]{1,3}(?:[,٬.][\\d٠-٩]{3})+\\s*${COUNTRY}${CUR}`,       // 319,015 ريال / 319,015 Saudi Riyals (r7 #2)
   `[\\d٠-٩]{4,}\\s*${COUNTRY}${CUR}`,                                    // 319015 SAR / 4500SAR, as "SAR 8500" (r6 #2) / 4500 Saudi Riyals (r7 #2)

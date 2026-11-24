@@ -387,6 +387,19 @@ describe('copyProblems — owner rules', () => {
       assert.ok(bad.some((p) => p.startsWith('description.ar[0] states a price')), ar);
     }
   });
+  it('a code with a dot before its figure is a price in the copy too: "SR. 850,000", "Dhs. 850,000", "SAR.4500" (r7 verifier)', () => {
+    // The name guard's twin (r7 #3, Codex r6 #2): these were accepted, and the copy printed the figure.
+    for (const text of ['Apartments from SR. 850,000.', 'From Dhs. 850,000', 'From SAR. 850,000', 'From USD. 850,000', 'Club membership SAR.4500 a year.', 'From AED. 2.5m']) {
+      const l = structuredClone(GOOD.listing);
+      l.description.en = [text, 'Two.'];
+      assert.ok(copyProblems(l).some((p) => p.startsWith('description.en[0] states a price')), text);
+    }
+    for (const text of ['Tower B. 1200 sqm of retail.', 'Plots of 850 sqm.', 'Studio SR. 15 minutes away.']) {
+      const l = structuredClone(GOOD.listing);
+      l.description.en = [text, 'Two.'];
+      assert.ok(!copyProblems(l).some((p) => /states a price/.test(p)), text);
+    }
+  });
 
   it('catches a phone number', () => {
     const l = structuredClone(GOOD.listing);
