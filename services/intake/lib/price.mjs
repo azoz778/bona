@@ -187,11 +187,13 @@ const marksIn = (slice, table) => {
  * A measure straight after a figure — after its decimal tail and spaces, an "of" / "من" and an "ال" at most: "4.5 million
  * square feet", "4,500,000 sq ft", "4.5 millions of square feet", "٤٫٥ ملايين م²", "4.5 مليون متر مربع". Such a figure is
  * an area or a length, never a printed price (r9 #1, Codex r8 #1): printedInCurrency skips it. Read on NFKC-folded text
- * ("²" folds to "2", presentation forms to letters). "m2" with a letter or digit after it is a model code ("SAR 450,000
- * M2A Villa": r10 #2, Codex r9 #2 = Claude r9 NB6), not m².
+ * ("²" folds to "2", presentation forms to letters). "m2" with a digit or ONE letter after it is a model code ("SAR
+ * 450,000 M2A Villa", "M2B2": r10 #2, Codex r9 #2 = Claude r9 NB6), not m²; with a word after it, it is the unit glued to
+ * the next cell ("30,000 m²Built-up", "450,000 m²of land": r11 #2, Claude r10 B2 = Codex r10 #2). A price per unit area
+ * is no total either: "SAR 4,500 / m²", "4,500 per sqm" (r11 #2, Codex r10 NB1).
  */
-const MEASURE_NEXT = new RegExp(String.raw`^(?:[.,٫]\d{1,2})?[ \t\u00a0\u202f\u2009]*(?:(?:of|من)\s+)?(?:ال)?`
-  + String.raw`(?:m²|m2(?![\da-z])|sq\.?\s?(?:m|ft|yds?)\b|sqm\b|sqft\b|square\s+(?:met|feet|foot|yards?)|met(?:re|er)s?\b|ft\b|feet\b|hectares?\b|acres?\b|km\b|`
+const MEASURE_NEXT = new RegExp(String.raw`^(?:[.,٫]\d{1,2})?[ \t\u00a0\u202f\u2009]*(?:(?:of|من)\s+)?(?:(?:\/|per|لكل)\s*)?(?:ال)?`
+  + String.raw`(?:m²|m2(?!\d|[a-z](?![a-z]))|sq\.?\s?(?:m|ft|yds?)\b|sqm\b|sqft\b|square\s+(?:met|feet|foot|yards?)|met(?:re|er)s?\b|ft\b|feet\b|hectares?\b|acres?\b|km\b|`
   + String.raw`م²|م2|متر|أمتار|امتار|هكتار|كم(?![\u0600-\u06ff]))`, 'i');
 /**
  * …and a measure that ends right BEFORE the figure, spaces, a colon or a dash between at most: the Arabic text layer
@@ -200,11 +202,15 @@ const MEASURE_NEXT = new RegExp(String.raw`^(?:[.,٫]\d{1,2})?[ \t\u00a0\u202f\u
  * before it measures THAT figure — a table row Model | Area | Price, "Villa A 250 m² 1,250,000 SAR", "تسليم 2022م
  * 1,500,000" — so it is no measure of the next one (r10 #4, r10 verifier). The Arabic units are read on the NFKC-folded
  * head ("²" folds to "2"); the Latin ones on the head as printed, where only "m²", "sqm" or "sq. m" is a unit: a typed
- * "M2" before a figure is a model code ("Villa M2 450,000 SAR", the mirror of Codex r9 #2), "Item2" a word.
+ * "M2" before a figure is a model code ("Villa M2 450,000 SAR", the mirror of Codex r9 #2), "Item2" a word. The visual
+ * "² م" glued before its figure is that figure's unit whatever stands before it ("قطعة 12 ² م1,000,000": r11 #2, Codex
+ * r10 #3 = Claude r10 NB1); "م 2" at the end of a word is no unit ("فيلا رقم 2 1,250,000"); and the unit must end on
+ * the figure's own line, never on the line or page above (r11 #2, Claude r10 NB5 = Codex r10 #4).
  */
-const NO_FIGURE_BEFORE = String.raw`(?<![\d٠-٩۰-۹][ \t\u00a0\u202f\u2009]{0,2})`;
-const MEASURE_BEFORE = new RegExp(String.raw`${NO_FIGURE_BEFORE}(?:م\s?2|2\s?م|متر(?:\s+مربع)?|أمتار|امتار|هكتار)[\s:：\-–—]*$`);
-const MEASURE_BEFORE_LATIN = new RegExp(String.raw`${NO_FIGURE_BEFORE}(?<![A-Za-z])(?:m²|sqm|sq\.?\s?m)[\s:：\-–—]*$`, 'i');
+const NO_FIGURE_BEFORE = String.raw`(?<![\d٠-٩۰-۹][ \t\u00a0\u202f\u2009]*)`;
+const ON_THE_LINE = String.raw`[ \t\u00a0\u202f\u2009:：\-–—]*$`;
+const MEASURE_BEFORE = new RegExp(String.raw`(?:(?<![\d٠-٩۰-۹])2\s?م|${NO_FIGURE_BEFORE}(?<![\u0621-\u064a])(?:م\s?2|متر(?:\s+مربع)?|أمتار|امتار|هكتار))${ON_THE_LINE}`);
+const MEASURE_BEFORE_LATIN = new RegExp(String.raw`${NO_FIGURE_BEFORE}(?<![A-Za-z])(?:m²|sqm|sq\.?\s?m)${ON_THE_LINE}`, 'i');
 
 /** The countries where a bare riyal is not the Saudi one: their own currency is a riyal or rial too. */
 const OWN_RIYALS = Object.freeze(['OMR', 'QAR', 'YER', 'IRR']);

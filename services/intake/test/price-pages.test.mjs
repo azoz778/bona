@@ -501,6 +501,21 @@ describe('r10 #2: printedInCurrency — a model code is no m², m² is no millio
       ['تسليم 2022م 1,500,000 ريال', 1.5e6],
     ]) assert.equal(sar(t, n), true, t);
   });
+  it('r11 #2 (Claude r10 B2 / NB1 / NB5 / NB6, Codex r10 #2 / #3 / #4 / NB1): m² glued to a word, a visual unit after a lot number, a per-m² price; a word ending in م, a unit on its own line', () => {
+    // An area: m² glued to the next word (a one-letter tail is a model code, a word the next cell); the visual-order
+    // "² م" glued to its figure whatever stands before it; a price per m² is no total; "SQM" in capitals is a unit.
+    for (const [t, n] of [
+      ['Land 30,000 m²Built-up 12,000 m²', 30000], ['Plot area: 450,000 m²of land', 450000], ['GFA 4.5 million m²Total', 4.5e6],
+      ['Land 30,000 m2Built-up', 30000], ['قطعة 12 ² م1,000,000', 1e6], ['ريال 15,000,000 ² م30,000', 30000],
+      ['SAR 4,500 / m²', 4500], ['Price SAR 4,500 per sqm', 4500], ['سعر المتر 4,500 / م²', 4500], ['Area SQM 1,000,000', 1e6],
+    ]) assert.equal(sar(t, n), false, t);
+    // A price: a model code with one letter (and a digit) after m2; "رقم 2" before the figure is no m2; a unit on a
+    // line of its own, or at the end of the line above, measures nothing on the next line; a price per villa.
+    for (const [t, n] of [
+      ['Sale price SAR 450,000 M2A Villa', 450000], ['Sale price SAR 450,000 M2B2 villa', 450000], ['فيلا رقم 2 1,250,000 ريال', 1.25e6],
+      ['Villa A\n250\nm²\n1,250,000 SAR', 1.25e6], ['Built-up area sqm\n1,250,000 SAR', 1.25e6], ['SAR 4,500,000 / villa', 4.5e6],
+    ]) assert.equal(sar(t, n), true, t);
+  });
 });
 
 // r9 #3 (Codex r8 #2): in a model NAME a tight dotted pair with letters glued after it is initials ("د.إبراهيم": r8 #2),
@@ -526,6 +541,14 @@ describe('r9 #3: a glued dotted pair right after a figure refuses a model name',
 // r10 #3 (Codex r9 #4 = Claude r9 NB7): that pair counts after a figure of two digits or more only, so a one-digit model
 // number before a person's initials is a name, "فيلا ٣ د.إبراهيم" — refusing it refused the whole run. A pair whose
 // word ends still refuses after any figure ("نموذج ٣ ر.س").
+describe('r11 #3 (Codex r10 #5 = Claude r10 NB4): a decimal figure right before a glued dotted pair refuses a model name', () => {
+  const nameOf = (en, ar, figures = []) => dropMoneyText({ models: [{ name: { en, ar } }] }, { figures }).name;
+  it('the figure counts whole, its decimal part too; a one-digit model number before initials stays a name', () => {
+    for (const ar of ['نموذج ٧٥٠٫٥ر.سشهريًا', 'نموذج ١٬٢٥٠٫٥ر.سشهريًا', 'نموذج 7.5ر.سشهريا']) assert.equal(nameOf('Studio', ar, [850000]), 'models[0].name', ar);
+    for (const ar of ['فيلا ٣ د.إبراهيم', 'نموذج 2 ر.قاسم']) assert.equal(nameOf('Villa', ar, [850000]), null, ar);
+  });
+});
+
 describe('r10 #3: a glued dotted pair after a one-digit model number is initials', () => {
   const nameOf = (en, ar, figures = []) => dropMoneyText({ models: [{ name: { en, ar } }] }, { figures }).name;
   it('still refused: two digits or more, then the pair with letters glued after it; a pair whose word ends', () => {
@@ -2219,6 +2242,23 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       ...['سعر الليلة', 'لليوم', 'للأسبوع', 'للاسبوع', 'ليلياً', 'القيمة التأجيرية']
         .flatMap((form) => [[`${form} 60,000 ريال`, '60,000 ريال'], [`60,000 ريال ${form}`, '60,000 ريال']]),
     ]) await sentToPage(p3, 60000, quote);
+    // r11 #1 (Claude r10 B1 = Codex r10 #1, Claude r10 NB2 / NB3 = Codex r10 NB2): "a night" / "a week" / "a day" are
+    // rates on a label line or before the figure too — only a prose lead-in ("within", "in", "twice", "days", "hours")
+    // makes them a timeline or a frequency; "per day" / "كل يوم" count with a figure before or after them on the line,
+    // or alone on their line; and the other per-period forms.
+    for (const [p3, amount, quote] of [
+      ['SAR 1,200\na night', 1200], ['SAR 4,500\na week', 4500], ['a night\nSAR 1,200', 1200], ['A week in the chalet from SAR 4,500', 4500, 'SAR 4,500'],
+      ['A week from SAR 4,500', 4500, 'SAR 4,500'], ["A night's stay from SAR 60,000", 60000, 'SAR 60,000'], ['SAR 1,200 (incl. breakfast) a night', 1200, 'SAR 1,200'],
+      ['Chalet A\nSAR 60,000\na night', 60000], ['SAR 700 a day', 700, 'SAR 700'], ['60,000 ريال للعام', 60000, '60,000 ريال'],
+      ['60,000 ريال كل عام', 60000, '60,000 ريال'], ['4,500 ريال / أسبوع', 4500, '4,500 ريال'], ['4,500 ريال لكل أسبوع', 4500, '4,500 ريال'],
+      ['60,000 ريال / عام', 60000, '60,000 ريال'], ['700 ريال / الليلة', 700, '700 ريال'], ['700 ريال / اليوم', 700, '700 ريال'],
+      ['SAR 700/day', 700, 'SAR 700'], ['السعر اليومي 700 ريال', 700, '700 ريال'], ['Weekend rate\nSAR 60,000', 60000],
+      ['Per day\nSAR 60,000', 60000], ['ريال كل يوم1,500', 1500, '1,500'], ['كل يوم 1,500 ريال', 1500, '1,500 ريال'],
+    ]) await sentToPage(p3, amount, quote ?? null);
+    for (const prose of ['Open 7 days a week', 'Gym open 24 hours a day, 7 days a week', 'Handover in a week', '2BR ready in a week']) {
+      await settled(`${prose}\nSale price SAR 450,000`);
+      await settled(`Sale price SAR 450,000\n${prose}`);
+    }
   });
 
   it('r2 #3: caption "rent per month", the brochure prints only SAR 60,000 a year — no monthly headline', async () => {

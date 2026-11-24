@@ -199,7 +199,7 @@ const NAME_WORD_ENDS = String.raw`(?![\u0640\u064b-\u065f\u0670]*[\u0620-\u063f\
 const NAME_CURRENCY_RE = new RegExp(String.raw`${NAME_SITE_CODE}\.?\s*${nameAmountAfter(String.raw`\d{3}`)}|${nameAmountBefore(String.raw`\d{3}`)}\s*${NAME_SITE_CODE}`
   + String.raw`|${NAME_OTHER_CODE}\.?\s*${nameAmountAfter(String.raw`\d{4}`)}|${nameAmountBefore(String.raw`\d{4}`)}\s*${NAME_OTHER_CODE}`
   + String.raw`|(?<![A-Za-z])${MONEY_MARKS.words}(?![A-Za-z])|${MONEY_MARKS.arabic}|${MONEY_MARKS.abbreviations}${NAME_WORD_ENDS}`
-  + String.raw`|(?<=\d{2}[ \t\u00a0\u202f\u2009]*)${MONEY_MARKS.abbreviations}|${MONEY_MARKS.symbols}`, 'i');
+  + String.raw`|(?<=\d[.,٫٬]?\d[ \t\u00a0\u202f\u2009]*)${MONEY_MARKS.abbreviations}|${MONEY_MARKS.symbols}`, 'i');
 /**
  * Arabic words as whole words, with the clitics و / ف, ب / ل / لل and ال in front (a tatweel may follow one:
  * "فـحجز"): "السعر", "بسعر", "للإيجار" — never inside another word ("رسوم" is not in "رسومات"). Only a LETTER
@@ -248,26 +248,34 @@ const PRICE_WORD_RE = new RegExp([
  * Claude r8 B1a / B1b), ات with any of them after it on إيجار and عائد, as on إيراد: عائداتك, عائداتكم, عائداتنا, عائداتي,
  * عائداتهما, إيجاراتك, إيجاراتكم, إيجاراتنا, إيجاراتي (r10 #1, Claude r9 B2). The short-stay rates past RENT_PERIOD, for
  * this check only (statesMoney keeps its list): بالليلة, في الليلة, كل ليلة, "/ ليلة", باليوم, في الأسبوع, بالأسبوع (r9 #2,
- * Claude r8 B1c), "daily", "سعر الليلة", لليوم, للأسبوع, ليلياً, التأجيرية (r10 #1, Claude r9 NB4 = Codex r9 NB2) — and
- * "a night", "a week", "per day", "كل يوم" only after a figure on the same line: "SAR 700 a night", "700 SAR a week",
- * "60,000 ريال كل يوم", never "Move in within a week" or "Housekeeping twice a week" (r10 #1, Codex r9 #3 = Claude r9
- * NB5). A word that only contains one is none: مدخل / مدخلها / تدخل (an entrance, enters), عائدة (belongs to), سريع
+ * Claude r8 B1c), "daily", "سعر الليلة", لليوم, للأسبوع, ليلياً, التأجيرية (r10 #1, Claude r9 NB4 = Codex r9 NB2),
+ * للعام, كل عام, لكل أسبوع, "/ أسبوع", "/ عام", "/ اليوم", "/ الليلة", "/day", "السعر اليومي", "Weekend rate" (r11 #1,
+ * Claude r10 NB2 = Codex r10 NB2). "a night" / "a week" / "a day" anywhere — a label line ("SAR 1,200" / "a night"), before
+ * the figure ("A week from SAR 4,500") — but after a prose lead-in: "Move in within a week", "Housekeeping twice a
+ * week", "Open 7 days a week", "24 hours a day" are a timeline or a frequency (r11 #1, Claude r10 B1 = Codex r10 #1;
+ * r10 #1's after-figure gate let a rate split from its figure through). "per day" / "كل يوم" with a figure before or
+ * after them on the line, or alone on their line: "SAR 60,000 per day", "ريال كل يوم1,500", "Per day" — never
+ * "Housekeeping once per day" or "تنظيف كل يوم" (r10 #1, Codex r9 #3 = Claude r9 NB5; r11 #1, Claude r10 NB3). A word that only contains one is none: مدخل / مدخلها / تدخل (an entrance, enters), عائدة (belongs to), سريع
  * (Codex r6 #7, Claude r6 B1c). "عائده للمطور" (ه for ة), "الدراسة التي أجرتها الشركة" (conducted) cost a page check: the
  * safe side.
  */
 const RENT_SUFFIX = 'ه|ها|هم|هما|نا|ات|اتها|اته|اتهم|ك|كم|ي';
-/** After a figure on the same line, within 15 characters: "SAR 700 a night", "60,000 ريال كل يوم" (r10 #1). */
-const AFTER_FIGURE = String.raw`(?<=[\d٠-٩۰-۹][^\n]{0,15}?)`;
+/** A figure on the same line, within 15 characters before or after: "SAR 700 per day", "ريال كل يوم1,500" (r10 #1, r11 #1). */
+const NEAR_FIGURE = (re) => String.raw`(?:(?<=[\d٠-٩۰-۹][^\n]{0,15}?)(?:${re})|(?:${re})(?=[^\n]{0,15}?[\d٠-٩۰-۹])|(?<=^|\n)[ \t]*(?:${re})[ \t]*(?=$|\n))`;
+/** The prose lead-ins of "a night" / "a week" / "a day": a timeline or a frequency, no rate (r11 #1). */
+const PROSE_LEAD_IN = String.raw`(?<!\b(?:within|in|twice|once|thrice|times|days|hours|day|nights|weeks)\s+)`;
 const RENT_WORDING_RE = new RegExp([
-  String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|returns?|roi|revenues?|tenant(?:s|ed)?|tenancy|let\s+at|daily)\b`,
-  String.raw`${AFTER_FIGURE}\b(?:a\s+(?:night|week)|per\s+day)\b`,
+  String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|returns?|roi|revenues?|tenant(?:s|ed)?|tenancy|let\s+at|daily|weekend\s+rates?)\b`,
+  String.raw`${PROSE_LEAD_IN}\ba\s+(?:night|week|day)\b`,
+  NEAR_FIGURE(String.raw`\bper\s+day\b`),
+  String.raw`\/\s*(?:day|night|week)\b`,
   arabicWords(String.raw`[إاأ]يجار(?:ات)?(?:ي|ية|يه|يا|ا|${RENT_SUFFIX})?|استئجار|تأجير|تاجير|أجرة|اجرة|أجره|اجره|[أا]جرت(?:ه|ها|هم)|مؤجر|مؤجرة|مؤجره|مؤجرا|`
     + String.raw`موجر|موجرة|مستأجر|مستأجرة|دخل(?:ا|${RENT_SUFFIX})?|عائد(?:ات)?(?:ا|${RENT_SUFFIX})?|عوائد(?:ا|${RENT_SUFFIX})?|[إا]يراد(?:ات)?(?:ا|${RENT_SUFFIX})?|`
     + String.raw`ريع(?:ا|${RENT_SUFFIX})?|مردود(?:ا|${RENT_SUFFIX})?`, { ka: true }),
   arabicWords(String.raw`بالليل[ةه]|في\s+الليل[ةه]|كل\s+ليل[ةه]|باليوم|في\s+(?:الأسبوع|الاسبوع)|بال[أا]سبوع|`
-    + String.raw`سعر\s+الليل[ةه]|لليوم|لل[أا]سبوع|ليليا|ت[أا]جيري[ةه]`),
-  AFTER_FIGURE + arabicWords(String.raw`كل\s+يوم`),
-  String.raw`\/\s*ليل[ةه](?!${AR_LETTER})`,
+    + String.raw`سعر\s+الليل[ةه]|لليوم|لل[أا]سبوع|ليليا|ت[أا]جيري[ةه]|للعام|كل\s+عام|لكل\s+[أا]سبوع|سعر\s+اليومي`),
+  NEAR_FIGURE(arabicWords(String.raw`كل\s+يوم`)),
+  String.raw`\/\s*(?:ال)?(?:ليل[ةه]|يوم|[أا]سبوع|عام)(?!${AR_LETTER})`,
   RENT_PERIOD,
 ].join('|'), 'i');
 /**
