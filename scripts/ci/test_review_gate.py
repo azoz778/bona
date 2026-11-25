@@ -1,4 +1,5 @@
 """Tests for review_gate.py. Run: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v"""
+import http.client
 import io
 import json
 import os
@@ -105,7 +106,7 @@ class Main(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         # One (head, comments) snapshot per evaluation; each read of the PR moves to the next one.
-        self.posts, self.snapshots, self.now = [], [(HEAD, [])], None
+        self.posts, self.snapshots, self.now, self.retries = [], [(HEAD, [])], None, []
         real_api = g.api
         self.addCleanup(setattr, g, "api", real_api)
         g.api = self.fake_api
@@ -114,7 +115,8 @@ class Main(unittest.TestCase):
             self.addCleanup(lambda k=k, old=old: os.environ.pop(k) if old is None else os.environ.__setitem__(k, old))
             os.environ[k] = v
 
-    def fake_api(self, path, token, method="GET", body=None):
+    def fake_api(self, path, token, method="GET", body=None, retry=True):
+        self.retries.append((method, (body or {}).get("state"), retry))
         if method == "POST":
             self.posts.append((path, body))
             return {}
@@ -179,7 +181,7 @@ class Main(unittest.TestCase):
         self.assertEqual([b["state"] for _, b in self.posts], ["pending", "error"])
 
     def test_first_read_fails_job_fails(self):
-        def broken(path, token, method="GET", body=None):
+        def broken(path, token, method="GET", body=None, retry=True):
             if method == "POST":
                 self.posts.append((path, body))
                 return {}
@@ -188,6 +190,54 @@ class Main(unittest.TestCase):
         with self.assertRaises(OSError):
             self.run_main({"issue": {"number": 5, "pull_request": {"url": "u"}}})
         self.assertEqual(self.posts, [])
+
+    def test_success_write_is_not_retried(self):
+        self.snapshots = [(HEAD, self.ship())]
+        self.run_main({"pull_request": {"number": 5}})
+        self.assertEqual([(m, st, r) for m, st, r in self.retries if m == "POST"],
+                         [("POST", "pending", True), ("POST", "success", False)])
+
+    def test_failed_success_write_leaves_error(self):
+        self.snapshots = [(HEAD, self.ship())]
+        fake = self.fake_api
+
+        def flaky(path, token, method="GET", body=None, retry=True):
+            if method == "POST" and body["state"] == "success":
+                self.posts.append((path, body))
+                raise OSError("HTTP 502")
+            return fake(path, token, method, body, retry)
+        g.api = flaky
+        with self.assertRaises(OSError):
+            self.run_main({"pull_request": {"number": 5}})
+        self.assertEqual([b["state"] for _, b in self.posts], ["pending", "success", "error"])
+
+    def test_waits_for_the_triggering_comment(self):
+        fix = dict(self.raw(f"Codex review: FIX {HEAD[:7]}", at="2026-11-21T12:00:00Z"), id=99)
+        event = {"action": "created", "issue": {"number": 5, "pull_request": {"url": "u"}},
+                 "comment": {"id": 99, "body": fix["body"]}}
+        # The list read first does not show the FIX yet (only the two SHIPs): read again, then judge.
+        self.snapshots = [(HEAD, []), (HEAD, self.ship())]
+        reads = [self.ship(), self.ship() + [fix]]
+        real_pages = g.pages
+
+        def pages(path, token):
+            return reads.pop(0) if "comments" in path else []
+        g.pages = pages
+        self.addCleanup(setattr, g, "pages", real_pages)
+        with mock.patch.object(g.time, "sleep"):
+            self.run_main(event)
+        self.assertEqual([b["state"] for _, b in self.posts], ["pending", "pending"])
+        self.assertIn("Codex not SHIP", self.posts[-1][1]["description"])
+
+    def test_comment_list_behind_stays_pending(self):
+        event = {"action": "deleted", "issue": {"number": 5, "pull_request": {"url": "u"}},
+                 "comment": {"id": 7, "body": "x"}}
+        ship = [dict(c, id=7) for c in self.ship()[:1]] + self.ship()[1:]
+        self.snapshots = [(HEAD, ship)]
+        with mock.patch.object(g.time, "sleep"):
+            self.run_main(event)
+        self.assertEqual(self.posts[-1][1]["state"], "pending")
+        self.assertIn("behind", self.posts[-1][1]["description"])
 
     def test_plain_issue_comment_writes_nothing(self):
         self.run_main({"issue": {"number": 5}})
@@ -201,7 +251,7 @@ class Main(unittest.TestCase):
 class Retry(unittest.TestCase):
     """api() retries 5xx/429 and network errors a few times, nothing else."""
 
-    def call(self, errors):
+    def call(self, errors, retry=True):
         calls = []
 
         class Response:
@@ -219,12 +269,28 @@ class Retry(unittest.TestCase):
             return Response()
         with mock.patch.object(g.urllib.request, "urlopen", urlopen), mock.patch.object(g.time, "sleep"):
             try:
-                return g.api("/x", "t"), len(calls)
+                return g.api("/x", "t", retry=retry), len(calls)
             except Exception as e:  # noqa: BLE001
                 return e, len(calls)
 
     def test_retries_then_succeeds(self):
         self.assertEqual(self.call([502, 429, urllib.error.URLError("down")]), ({"ok": 1}, 4))
+        self.assertEqual(self.call([ConnectionResetError(), http.client.RemoteDisconnected("closed"),
+                                    http.client.IncompleteRead(b"{")]), ({"ok": 1}, 4))
+        self.assertEqual(self.call([json.JSONDecodeError("x", "<html>", 0)]), ({"ok": 1}, 2))
+
+    def test_rate_limit_403_retried_other_403_not(self):
+        def limited():
+            return urllib.error.HTTPError("u", 403, "rate", {"Retry-After": "5"}, None)
+        self.assertEqual(self.call([limited()]), ({"ok": 1}, 2))
+        result, n = self.call([403])
+        self.assertIsInstance(result, urllib.error.HTTPError)
+        self.assertEqual(n, 1)
+
+    def test_no_retry_when_asked(self):
+        result, n = self.call([502], retry=False)
+        self.assertIsInstance(result, urllib.error.HTTPError)
+        self.assertEqual(n, 1)
 
     def test_client_errors_not_retried(self):
         result, n = self.call([404])

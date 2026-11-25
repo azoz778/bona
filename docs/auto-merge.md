@@ -3,6 +3,10 @@
 Every pull request into `main` gets two checks. The `main` ruleset requires both, so a PR can merge itself
 (GitHub auto-merge) as soon as they are green, and nobody has to watch it.
 
+Rollout order (2026-11-25): this file and the two checks landed first; the repo settings below were applied
+right after, then the owner's local helper was installed and the flow was tested live on throwaway PRs. The
+helper refuses to arm anything unless GitHub's rules for `main` require both checks, so it cannot run early.
+
 | Check | Where | Green when |
 |---|---|---|
 | `ci` | `.github/workflows/ci.yml` | the deploy build job's checks pass on the PR's code: `npm test`, intake tests, review-gate tests, `validate.mjs`, `gen-llms`, `build`, `test:dist` (no TK sync, no Pages). About 6 minutes. |
@@ -10,9 +14,12 @@ Every pull request into `main` gets two checks. The `main` ruleset requires both
 
 ## The flow
 
-1. Open the PR. Turn auto-merge on right away:
-   `gh pr merge <N> -R azoz778/bona --auto --squash --match-head-commit <full head sha>`
-   (the owner's local merge guard allows exactly this form while the PR's merge state is BLOCKED).
+1. Open the PR. Turn auto-merge on right away (Claude, on the owner's PC):
+   `~/.claude/scripts/automerge-on.py azoz778/bona <N> <full head sha>`.
+   It arms GitHub auto-merge (squash, pinned to that head) only for a same-repo PR into `main` that GitHub
+   reports as blocked, when the rules require both checks; it never merges anything itself. The owner's local
+   merge guard keeps refusing `gh pr merge` (with or without `--auto`) until CI and both verdicts are in.
+   A person can use the "Enable auto-merge" button instead.
 2. Claude and Codex review that head. Post both verdicts as PR **comments**, one line each.
 3. `two-model-review` turns green; once `ci` is green too, GitHub merges, and `deploy.yml` deploys `main`.
 4. A new commit resets the gate: the new head has no `two-model-review` status at all ("Expected"), so the PR
@@ -20,7 +27,7 @@ Every pull request into `main` gets two checks. The `main` ruleset requires both
 
 ## Stopping a PR
 
-- `gh pr merge <N> -R azoz778/bona --disable-auto`, or close the PR. These stop it at once.
+- `gh pr merge <N> -R azoz778/bona --disable-auto` (as the whole command), or close the PR. These stop it at once.
 - Posting a `FIX` verdict or deleting a `SHIP` re-runs the gate, but it is not an instant stop: a run that was
   already reading can still write green just before (see limits). Disable auto-merge when it matters.
 - **Before changing or deleting the ruleset, disable auto-merge on every open PR.** Without the ruleset, an
@@ -37,9 +44,13 @@ Every pull request into `main` gets two checks. The `main` ruleset requires both
 ## When the gate looks stuck
 
 - `two-model-review` says pending with the reason (e.g. "Codex missing"). Post the missing verdict.
-- It says `error`: GitHub's API failed during the run. Re-run that workflow run (Actions tab, or
-  `gh run rerun <id> -R azoz778/bona`); every run reads the current state.
-- Each run first sets `pending`, so a run that dies leaves the PR blocked, never wrongly green.
+- It says `error`, or pending because "GitHub's comment list is behind": re-run that workflow run (Actions
+  tab, or `gh run rerun <id> -R azoz778/bona`); every run reads the current state.
+- No `two-model-review` status at all on the head ("Expected"): nothing has run for this head yet, e.g. the
+  verdicts were posted while GitHub still showed an older head. Any new owner comment (or editing one)
+  re-runs the gate.
+- Once a run has written `pending` (its first write), a run that dies later leaves the PR blocked, never
+  wrongly green. A run that fails before that (checkout, no runner, GitHub down) changes nothing.
 
 ## Known limits (a process check, not a security boundary)
 
@@ -49,8 +60,10 @@ Every pull request into `main` gets two checks. The `main` ruleset requires both
 - One gate run at a time per PR (job-level concurrency after the owner-only `if`). That a skipped run (someone
   else's comment) never takes the slot or cancels a queued owner run is assumed, not documented by GitHub and
   not tested live.
-- If GitHub's API fails for all four attempts at the start of a run (before it can write `pending`), the run
-  fails and an earlier green stays until the next owner comment. Use `--disable-auto` to stop a PR.
+- A run that fails before its first write (GitHub's API down for all retries, a checkout or runner failure)
+  leaves an earlier green in place until the next owner comment. Use `--disable-auto` to stop a PR.
+- GitHub keeps at most 1,000 statuses per commit and context; each gate run writes two. Not reachable in
+  practice (about 500 owner comments on one commit).
 - Verdict lines in review bodies count (as in the local guard), but only comments re-run the gate.
 - Any workflow in a same-repo PR could post `two-model-review` itself, and a PR can change its own `ci.yml`.
   The Claude and Codex reviews of the diff are what catch that; the owner's token can also bypass the ruleset.

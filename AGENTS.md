@@ -12,10 +12,10 @@ Owner rules, written down 2026-11-21. They apply to every change in this repo.
    `Claude review: SHIP <sha7>` and `Codex review: SHIP <sha7>`.
    A new commit needs fresh verdicts. If the two models disagree, tell the owner what each said.
    If Codex is out of quota, mark the review OWED and wait. Never use a local model instead.
-3. **Merge only with evidence that the head commit works.** This repo has no PR CI yet. On the PR head run
-   the same checks the deploy runs, paste the output in the PR, and let the owner merge:
-   `npm test`, `node --test services/intake/test/*.test.mjs`, `node scripts/curate/validate.mjs`,
-   `npm run build`, `npm run test:dist`.
+3. **Merge only with evidence that the head commit works.** Every PR runs two required checks: `ci` (the
+   deploy's tests and build on the PR's code) and `two-model-review` (green only when both rule-2 verdicts
+   name the current head). Arm auto-merge when you open the PR and GitHub merges it once both are green; a
+   new commit needs fresh verdicts. How it works, how to stop a PR, and its limits: `docs/auto-merge.md`.
 4. **No secrets in git.** There is no secret scan on commit in this repo: before each commit run
    `gitleaks git --staged --redact --no-banner .` (or check the diff yourself if gitleaks is not installed).
    Secrets live in the owner's secrets vault, never in this repo.

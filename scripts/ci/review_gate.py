@@ -20,6 +20,7 @@ head share it; a branch reset to an approved commit is green again until this re
 bodies count but only comments trigger a re-check; and any workflow in a same-repo PR could post this
 status, so this is a process check that the two reviews of the diff back up, not a security boundary.
 """
+import http.client
 import json
 import os
 import re
@@ -115,10 +116,13 @@ def pr_number(event):
     return None
 
 
-RETRY_WAITS = (3, 10, 30)  # seconds between attempts when GitHub answers 5xx/429 or the network fails
+RETRY_WAITS = (3, 10, 30)  # seconds between attempts when GitHub or the network fails
+CATCH_UP_WAIT = 5  # seconds before reading the comments again when they do not show this run's event yet
 
 
-def api(path, token, method="GET", body=None):
+def api(path, token, method="GET", body=None, retry=True):
+    """JSON from the GitHub API. With retry, transient failures are tried again: 5xx, 429, a rate-limit 403,
+    network errors, a dropped connection, a cut-off or non-JSON body."""
     req = urllib.request.Request(API + path, method=method,
                                  data=None if body is None else json.dumps(body).encode(),
                                  headers={"Authorization": f"Bearer {token}",
@@ -126,14 +130,16 @@ def api(path, token, method="GET", body=None):
                                           "Content-Type": "application/json",
                                           "X-GitHub-Api-Version": "2022-11-28",
                                           "User-Agent": "bona-review-gate"})
-    for wait in RETRY_WAITS + (None,):
+    for wait in (RETRY_WAITS if retry else ()) + (None,):
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
-                return json.load(r)
-        except urllib.error.HTTPError as e:
-            if wait is None or not (e.code >= 500 or e.code == 429):
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:  # before OSError: HTTPError is one
+            headers = e.headers or {}
+            limited = e.code == 403 and (headers.get("Retry-After") or headers.get("X-RateLimit-Remaining") == "0")
+            if wait is None or not (e.code >= 500 or e.code == 429 or limited):
                 raise
-        except (urllib.error.URLError, TimeoutError):
+        except (OSError, http.client.HTTPException, ValueError):
             if wait is None:
                 raise
         time.sleep(wait)
@@ -149,11 +155,29 @@ def pages(path, token):
         page += 1
 
 
-def evaluate(repo, number, token):
+def caught_up(event, comments):
+    """False when the comments read from the API do not show yet the comment event that started this run
+    (created/edited: present with that body; deleted: gone)."""
+    c = event.get("comment") or {}
+    if not c.get("id"):
+        return True
+    found = [x for x in comments if x.get("id") == c["id"]]
+    if event.get("action") == "deleted":
+        return not found
+    return bool(found) and (found[0].get("body") or "") == (c.get("body") or "")
+
+
+def evaluate(repo, number, token, event):
     """(current head sha, state, description) from the PR's comments and reviews."""
     pr = api(f"/repos/{repo}/pulls/{number}", token)  # the CURRENT head, not the one in the event
     head = pr["head"]["sha"]
-    items = [from_comment(c) for c in pages(f"/repos/{repo}/issues/{number}/comments", token)]
+    comments = pages(f"/repos/{repo}/issues/{number}/comments", token)
+    if not caught_up(event, comments):
+        time.sleep(CATCH_UP_WAIT)
+        comments = pages(f"/repos/{repo}/issues/{number}/comments", token)
+        if not caught_up(event, comments):
+            return head, "pending", "GitHub's comment list is behind the comment that started this run; re-run it"
+    items = [from_comment(c) for c in comments]
     items += [from_review(r) for r in pages(f"/repos/{repo}/pulls/{number}/reviews", token)]
     return (head,) + decide(items, head)
 
@@ -169,19 +193,21 @@ def main():
     run_url = f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/{repo}/actions/runs/{os.environ.get('GITHUB_RUN_ID', '')}"
 
     def post(sha, state, description):
+        # A success is written once, never retried: a retry could land after a verdict was withdrawn.
         api(f"/repos/{repo}/statuses/{sha}", token, "POST",
-            {"state": state, "context": CONTEXT, "description": description[:140], "target_url": run_url})
+            {"state": state, "context": CONTEXT, "description": description[:140], "target_url": run_url},
+            retry=state != "success")
 
     head = None  # an issue_comment event carries no head sha; api() retries before giving up
     try:
         # Pending first: if this run dies (API error, timeout), the head is left blocked, never green.
         head = api(f"/repos/{repo}/pulls/{number}", token)["head"]["sha"]
         post(head, "pending", "Checking the Claude and Codex verdicts")
-        head, state, description = evaluate(repo, number, token)
+        head, state, description = evaluate(repo, number, token, event)
         if state == "success":
             # Read everything again right before writing success: a verdict deleted or a commit pushed while
             # this run was reading must not be overwritten by a green status (that event's run waits behind us).
-            head2, state, description = evaluate(repo, number, token)
+            head2, state, description = evaluate(repo, number, token, event)
             if head2 != head:
                 head, state, description = head2, "pending", f"The head moved to {head2[:7]} during the check"
         post(head, state, description)
