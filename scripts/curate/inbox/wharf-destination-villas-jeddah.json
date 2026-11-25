@@ -105,6 +105,106 @@
       "ضمان هيكلي 10 سنوات"
     ]
   },
+  "models": [
+    {
+      "name": {
+        "en": "Sa'a",
+        "ar": "نموذج سعة"
+      },
+      "bedrooms": 4,
+      "bathrooms": 5,
+      "areaSqm": 224.3,
+      "rooms": {
+        "en": [
+          "Living hall",
+          "Kitchen",
+          "Open kitchen",
+          "Majlis",
+          "Family majlis",
+          "Dining area",
+          "Dressing room",
+          "Terrace",
+          "Roof",
+          "Open parking for one car"
+        ],
+        "ar": [
+          "صالة معيشة",
+          "مطبخ",
+          "مطبخ مفتوح",
+          "مجلس",
+          "مجلس عائلي",
+          "ركن طعام",
+          "غرفة ملابس",
+          "تراس",
+          "سطح",
+          "موقف مفتوح لسيارة واحدة"
+        ]
+      },
+      "availability": null,
+      "price": null,
+      "subsidisedPrice": null,
+      "floorPlan": {
+        "src": "/listings/wharf-destination-villas-jeddah/plan-01.jpg",
+        "thumb": "/listings/wharf-destination-villas-jeddah/plan-01-thumb.webp"
+      }
+    }
+  ],
+  "amenities": {
+    "en": [
+      "Green spaces and parks",
+      "Planned pedestrian network",
+      "10 schools",
+      "7 mosques and 5 Friday mosques",
+      "2 health centres",
+      "21 commercial centres",
+      "Social centre",
+      "Security centre"
+    ],
+    "ar": [
+      "مساحات خضراء وحدائق",
+      "شبكة مشاة مخططة",
+      "10 مدارس",
+      "7 مساجد و5 جوامع",
+      "مركزان صحيان",
+      "21 مركزًا تجاريًا",
+      "مركز اجتماعي",
+      "مركز أمني"
+    ]
+  },
+  "nearby": {
+    "en": [
+      "Jeddah city centre",
+      "Main city entrances",
+      "Historic Jeddah",
+      "Business centres"
+    ],
+    "ar": [
+      "قلب مدينة جدة",
+      "مداخل المدينة الرئيسية",
+      "جدة التاريخية",
+      "مراكز الأعمال"
+    ]
+  },
+  "warranties": {
+    "en": [
+      "10-year concrete structure warranty",
+      "10-year building warranty",
+      "10-year insulation warranty",
+      "10-year soil anti-insect treatment warranty",
+      "1-year final finishes warranty",
+      "1-year plumbing warranty",
+      "1-year electrical works warranty"
+    ],
+    "ar": [
+      "ضمان الهيكل الخرساني 10 سنوات",
+      "ضمان المباني 10 سنوات",
+      "ضمان العزل 10 سنوات",
+      "ضمان معالجة التربة ضد الحشرات 10 سنوات",
+      "ضمان التشطيبات النهائية سنة كاملة",
+      "ضمان السباكة سنة كاملة",
+      "ضمان أعمال الكهرباء سنة كاملة"
+    ]
+  },
   "virtualTourUrl": null,
   "brochureUrl": "https://bona-real-estate.com/listings/wharf-destination-villas-jeddah/brochure.pdf",
   "project": {
