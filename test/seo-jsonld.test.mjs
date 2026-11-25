@@ -414,7 +414,10 @@ for (const [route, lang] of [['/properties/darco-prime-waterfront-al-shati/', 'e
     assert.ok(p.title.startsWith(src.seoTitle[lang]), `${route}: title "${p.title}" should start with the seoTitle`);
     if (live) {
       assert.match(p.html, /data-project-details/, 'units block missing while the sheet is live');
-      const rows = [...p.html.matchAll(/<tr[^>]*>\s*<th scope="row"[^>]*>([\s\S]*?)<\/th>/g)].map((m) => text(m[1]));
+      // Rows of the units block only: a listing with unit models also has a "Residences & prices" table
+      // (its own rows) earlier on the page.
+      const block = p.html.match(/<section[^>]*data-project-details[^>]*>([\s\S]*?)<\/section>/)?.[1] ?? '';
+      const rows = [...block.matchAll(/<tr[^>]*>\s*<th scope="row"[^>]*>([\s\S]*?)<\/th>/g)].map((m) => text(m[1]));
       assert.equal(rows.length, live.rows.length + 1, 'one row per summary row, plus the total');
       const note = text(p.html.match(/<p[^>]*data-units-note[^>]*>([\s\S]*?)<\/p>/)[1]);
       assert.ok(note.includes(sheetDateText(live.updated, lang)), `sheet note "${note}" should carry the sheet date`);
