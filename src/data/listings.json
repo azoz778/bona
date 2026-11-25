@@ -6937,6 +6937,164 @@
         "تصميم متكيف مناخيًا وذاتي التظليل"
       ]
     },
+    "models": [
+      {
+        "name": {
+          "en": "The Chatsworth",
+          "ar": "نموذج تشاتسوورث"
+        },
+        "bedrooms": 5,
+        "bathrooms": null,
+        "areaSqm": 557.88,
+        "rooms": {
+          "en": [
+            "Double-height entrance foyer",
+            "Private lift",
+            "Semi-open kitchen",
+            "Lounge",
+            "Gym",
+            "Master dressing room",
+            "Master jacuzzi",
+            "Maid's room with bathroom",
+            "Driver's room with bathroom",
+            "Laundry",
+            "Climate-controlled shaded terrace",
+            "Private temperature-controlled pool"
+          ],
+          "ar": [
+            "ردهة مدخل بارتفاع طابقين",
+            "مصعد خاص",
+            "مطبخ شبه مفتوح",
+            "صالة جلوس",
+            "صالة رياضية",
+            "غرفة ملابس للجناح الرئيسي",
+            "جاكوزي في الجناح الرئيسي",
+            "غرفة خادمة مع حمام",
+            "غرفة سائق مع حمام",
+            "غرفة غسيل",
+            "تراس مظلل بتحكم في الحرارة",
+            "مسبح خاص بتحكم في الحرارة"
+          ]
+        },
+        "availability": {
+          "en": "31 units",
+          "ar": "31 وحدة"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "The Blenheim",
+          "ar": "نموذج بلينهايم"
+        },
+        "bedrooms": 6,
+        "bathrooms": null,
+        "areaSqm": 836.78,
+        "rooms": {
+          "en": [
+            "Triple-height grand entrance",
+            "Private lift",
+            "Chef's kitchen",
+            "Show kitchen",
+            "Wellness lounge with indoor jacuzzi",
+            "Gym, convertible to cinema",
+            "Guest bedroom",
+            "Master suite lounge",
+            "Maid's room with bathroom",
+            "Driver's room with bathroom",
+            "Shaded terrace with kitchenette",
+            "Private temperature-controlled pool"
+          ],
+          "ar": [
+            "مدخل رئيسي بارتفاع ثلاثة طوابق",
+            "مصعد خاص",
+            "مطبخ للطهاة",
+            "مطبخ عرض",
+            "صالة عافية مع جاكوزي داخلي",
+            "صالة رياضية قابلة للتحويل إلى سينما",
+            "غرفة نوم للضيوف",
+            "صالة جلوس في الجناح الرئيسي",
+            "غرفة خادمة مع حمام",
+            "غرفة سائق مع حمام",
+            "تراس مظلل مع مطبخ صغير",
+            "مسبح خاص بتحكم في الحرارة"
+          ]
+        },
+        "availability": {
+          "en": "15 units: 13 units plus 2 corner units",
+          "ar": "15 وحدة: 13 وحدة إضافة إلى وحدتين على الزاوية"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      }
+    ],
+    "amenities": {
+      "en": [
+        "Swimmable Sunrise Lagoon",
+        "The Ripple Water Café",
+        "Outdoor cinema",
+        "Kids' aqua park",
+        "Outdoor jacuzzi area",
+        "BBQ and smokehouse pavilion",
+        "Jogging track",
+        "Aqua sunbeds",
+        "Sikka walkway linking to Phase 1",
+        "EV charging facilities",
+        "Shaded parking spaces",
+        "Solar water heaters",
+        "UV-proof double glazing",
+        "Lagoon water treatment and filtration"
+      ],
+      "ar": [
+        "بحيرة الشروق المخصصة للسباحة",
+        "مقهى ذا ريبل المائي",
+        "سينما في الهواء الطلق",
+        "حديقة مائية للأطفال",
+        "منطقة جاكوزي خارجية",
+        "جناح للشواء وتدخين الأطعمة",
+        "مضمار للجري",
+        "أسرّة تشمّس داخل الماء",
+        "سكة مشاة تصل إلى المرحلة الأولى",
+        "نقاط شحن للسيارات الكهربائية",
+        "مواقف سيارات مظللة",
+        "سخانات مياه بالطاقة الشمسية",
+        "زجاج مزدوج يحجب الأشعة فوق البنفسجية",
+        "معالجة مياه البحيرة وترشيحها"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Crystal swimmable lagoon, 3-minute walk",
+        "Meydan Racecourse",
+        "Downtown Dubai",
+        "Business Bay",
+        "DIFC",
+        "Museum of the Future",
+        "Dubai International Airport",
+        "North London Collegiate School Dubai"
+      ],
+      "ar": [
+        "البحيرة الكريستالية للسباحة على بعد 3 دقائق سيرًا",
+        "مضمار ميدان لسباق الخيل",
+        "وسط مدينة دبي",
+        "الخليج التجاري",
+        "مركز دبي المالي العالمي",
+        "متحف المستقبل",
+        "مطار دبي الدولي",
+        "مدرسة نورث لندن كوليجيت في دبي"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "10-year waterproofing warranty (The Blenheim)"
+      ],
+      "ar": [
+        "ضمان 10 سنوات على العزل المائي (نموذج بلينهايم)"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/knightsbridge-villas-meydan-district-11/brochure.pdf",
     "project": {
