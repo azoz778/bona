@@ -5,16 +5,17 @@ name: Two-model review gate
 # head (scripts/ci/review_gate.py). The `main` ruleset requires it, so an auto-merge waits for it.
 #
 # Safety: pull_request_target and issue_comment run with a write token, so this job checks out ONLY
-# the default branch's copy of the gate script (never the PR's code) and runs nothing else.
-# pull_request_target also means a PR cannot change the gate it is judged by.
+# the default branch's copy of the gate script (never the PR's code) and runs nothing else. Both events
+# run this file and the script from the default branch, so editing them in a PR does not change how that
+# PR is judged. It is a process check, not a security boundary: any workflow in a same-repo PR could
+# post this status itself, which the Claude and Codex reviews of the diff are there to catch.
+# Verdicts go in PR comments. Verdict lines in review bodies count, but a review does not re-run the gate.
 
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
   issue_comment:
     types: [created, edited, deleted]
-  pull_request_review:
-    types: [submitted, edited, dismissed]
 
 permissions:
   contents: read
@@ -22,17 +23,17 @@ permissions:
   pull-requests: read
   issues: read
 
-concurrency:
-  # One run at a time per PR; a newer event replaces a queued one, and every run reads fresh state.
-  group: review-gate-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
   gate:
     # Comments: only PR comments by the owner's account can change the result.
     if: >-
       github.event_name != 'issue_comment' ||
       (github.event.issue.pull_request && github.event.comment.user.login == 'azoz778')
+    # On the job, after the `if`, so a skipped run (someone else's comment) can never replace a queued one.
+    # One run at a time per PR; a newer run replaces a queued one, and every run reads fresh state.
+    concurrency:
+      group: review-gate-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

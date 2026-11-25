@@ -14,6 +14,11 @@ Change both together.
 
 Runs from the default branch (.github/workflows/review-gate.yml). It reads comments over the API and
 never checks out or runs code from the pull request. Python standard library only.
+
+Known limits (docs/auto-merge.md): a commit status belongs to a commit, not to a PR (two PRs with the same
+head share it; a branch reset to an approved commit is green again until this re-runs); verdicts in review
+bodies count but only comments trigger a re-check; and any workflow in a same-repo PR could post this
+status, so this is a process check that the two reviews of the diff back up, not a security boundary.
 """
 import json
 import os
@@ -62,6 +67,8 @@ def verdicts(items, head):
             clean = re.sub(r"^(?:>\s*)+", "", clean)
             clean = re.sub(r"[*_`]", "", clean)
             clean = re.sub(r"^(?:[-+•|#]+\s*|\d+[.)]\s*)+", "", clean).strip()
+            if not (re.search(r"claude|codex", clean, re.I) and re.search(r"review|verdict", clean, re.I)):
+                continue  # VERDICT_START cannot match without both; skipping its slow backtracking changes nothing
             m = VERDICT_START.match(clean)
             if not m:
                 continue
@@ -112,6 +119,7 @@ def api(path, token, method="GET", body=None):
                                  data=None if body is None else json.dumps(body).encode(),
                                  headers={"Authorization": f"Bearer {token}",
                                           "Accept": "application/vnd.github+json",
+                                          "Content-Type": "application/json",
                                           "X-GitHub-Api-Version": "2022-11-28",
                                           "User-Agent": "bona-review-gate"})
     with urllib.request.urlopen(req, timeout=30) as r:
@@ -128,6 +136,15 @@ def pages(path, token):
         page += 1
 
 
+def evaluate(repo, number, token):
+    """(current head sha, state, description) from the PR's comments and reviews."""
+    pr = api(f"/repos/{repo}/pulls/{number}", token)  # the CURRENT head, not the one in the event
+    head = pr["head"]["sha"]
+    items = [from_comment(c) for c in pages(f"/repos/{repo}/issues/{number}/comments", token)]
+    items += [from_review(r) for r in pages(f"/repos/{repo}/pulls/{number}/reviews", token)]
+    return (head,) + decide(items, head)
+
+
 def main():
     token, repo = os.environ["GITHUB_TOKEN"], os.environ["GITHUB_REPOSITORY"]
     with open(os.environ["GITHUB_EVENT_PATH"]) as f:
@@ -136,14 +153,32 @@ def main():
     if not number:
         print("not a pull request event; nothing to do")
         return 0
-    pr = api(f"/repos/{repo}/pulls/{number}", token)  # the CURRENT head, not the one in the event
-    head = pr["head"]["sha"]
-    items = [from_comment(c) for c in pages(f"/repos/{repo}/issues/{number}/comments", token)]
-    items += [from_review(r) for r in pages(f"/repos/{repo}/pulls/{number}/reviews", token)]
-    state, description = decide(items, head)
     run_url = f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/{repo}/actions/runs/{os.environ.get('GITHUB_RUN_ID', '')}"
-    api(f"/repos/{repo}/statuses/{head}", token, "POST",
-        {"state": state, "context": CONTEXT, "description": description[:140], "target_url": run_url})
+
+    def post(sha, state, description):
+        api(f"/repos/{repo}/statuses/{sha}", token, "POST",
+            {"state": state, "context": CONTEXT, "description": description[:140], "target_url": run_url})
+
+    head = None
+    try:
+        # Pending first: if this run dies (API error, timeout), the head is left blocked, never green.
+        head = api(f"/repos/{repo}/pulls/{number}", token)["head"]["sha"]
+        post(head, "pending", "Checking the Claude and Codex verdicts")
+        head, state, description = evaluate(repo, number, token)
+        if state == "success":
+            # Read everything again right before writing success: a verdict deleted or a commit pushed while
+            # this run was reading must not be overwritten by a green status (that event's run waits behind us).
+            head2, state, description = evaluate(repo, number, token)
+            if head2 != head:
+                head, state, description = head2, "pending", f"The head moved to {head2[:7]} during the check"
+        post(head, state, description)
+    except Exception:
+        if head:
+            try:
+                post(head, "error", "The review gate could not read GitHub; re-run it")
+            except Exception:
+                pass
+        raise
     print(f"PR #{number} head {head}: {state}: {description}")
     return 0
 
