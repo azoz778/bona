@@ -122,7 +122,7 @@ describe('parsePriceHint', () => {
       ['Villa SAR 4.5m, 300m from the beach', 4500000],
       ['Land 30m x 40m, SAR 2.5m', 2500000],
       ['Villa 4.5m on a 30m-wide street', 4500000],
-      ['850 ألف ريال 3.5m ceilings', 850000],
+      ['850 ألف ريال, 3.5m ceilings', 850000],
       ['Villa 2.8m SAR, 25m frontage', 2800000],
     ]) {
       assert.equal(parsePriceHint(caption)?.amount, amount, caption);
@@ -131,12 +131,58 @@ describe('parsePriceHint', () => {
 
   // r2 review: a currency between two figures was taken by the first ("Floor 12 AED 2,000,000" read SAR,
   // "Built 2019 SAR 4,500,000 متر" read SAR 2,019).
+  // r3 review (Claude): a guess may only ever lose a price, never hand its slot to a smaller figure.
+  it('never lets a figure set aside on a guess hand its slot to a smaller one', () => {
+    for (const caption of [
+      'Villa for sale 4.5m from the owner directly, service charge 15,000 SAR yearly',
+      'Price 4.5M high floor, maintenance 20,000 SAR',
+      'Residential plot 2,500,000, commission 2.5% = 62,500',
+      'Apartment in Al Olaya area 1,200,000, service charge SAR 12,000/year',
+    ]) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    for (const [caption, amount] of [
+      ['SAR 4.5m by owner, service charge 12,000', 4500000],
+      ['شقة مدعومة من الإسكان 850,000 ريال والعربون 20,000 ريال', 850000],
+      ['أرض 625 متر مربع 2.5 مليون، العربون 100 ألف', 2500000],
+      ['Villa 450 sqm price SAR 4,500,000, deposit SAR 50,000', 4500000],
+      ['فيلا للبيع\nالمساحة 450 متر مربع\n4,500,000 ريال\nالعربون 50,000 ريال', 4500000],
+      ['Land 1,250 sqm, SAR 3,600 per sqm\n4,500,000 SAR total\nDeposit 100,000 SAR', 4500000],
+      ['Price 4,500,000 (per sqm 7,200), deposit 50,000', 4500000],
+      ['Handover 30.06.2027, price 1.2M', 1200000],
+      ['Apartment 1.2M 2 bedrooms', 1200000],
+      ['Villa 4.5m 2 floors, annual maintenance 6,000 SAR', 4500000],
+      ['Villa 2.8m SAR, Frontage 25m', 2800000],
+      ['Plot dimensions 25m by 40m, 2.5m SAR', 2500000],
+      ['Apartment 4.5M x 2 payments, deposit 50,000', 4500000],
+      ['Area: 12,000\nPrice: SAR 4,500,000', 4500000],
+    ]) {
+      assert.equal(parsePriceHint(caption)?.amount, amount, caption);
+    }
+    for (const caption of ['• Price per sqm:\n• SAR 3,500', 'Price per sqm:\n\nSAR 3,500']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+  });
+
+  it('never takes a deposit, fee or income figure as the price, even when it is larger', () => {
+    for (const [caption, amount] of [
+      ['Price SAR 85,000 yearly العربون 100 ألف', 85000],
+      ['شقة تمليك السعر: ٦٥ ألف سنوي\n- العربون 100 ألف', 65000],
+      ['Rent 45,000 per year, deposit 50,000', 45000],
+      ['Office SAR 120,000 yearly, service charge SAR 150,000', 120000],
+      ['Building SAR 5.5m, annual income 6,000,000', 5500000],
+    ]) {
+      assert.equal(parsePriceHint(caption)?.amount, amount, caption);
+    }
+    assert.equal(parsePriceHint('Deposit 50,000'), null);
+  });
+
   it('gives a currency to the figure it belongs to', () => {
     assert.equal(hint('Floor 12 AED 2,000,000'), 'AED 2000000');
     assert.equal(hint('Bedrooms 4 AED 450,000'), 'AED 450000');
     assert.equal(hint('4,500,000 AED 5 bedrooms'), 'AED 4500000');
     assert.equal(hint('4,500,000 AED, 5 bedrooms'), 'AED 4500000');
-    assert.equal(hint('Built 2019 SAR 4,500,000 متر'), 'SAR 4500000');
+    assert.equal(parsePriceHint('Built 2019 SAR 4,500,000 متر'), null);
     assert.equal(parsePriceHint('Built 2019 SAR 4 500 000'), null);
   });
 
@@ -152,8 +198,33 @@ describe('parsePriceHint', () => {
     assert.equal(hint('Corner villa, streets 20m and 15m wide, 4.5m'), 'SAR 4500000');
   });
 
+  // r3 review (Codex): rules meant for figures with no currency reached money, and a currency went astray.
+  it('keeps money money: the metre and label rules never touch a figure with a currency', () => {
+    assert.equal(hint('Villa asking AED 4.5m from the developer, deposit AED 50,000'), 'AED 4500000');
+    assert.equal(hint('Villa in Al Olaya area\n4,500,000\nDeposit 50,000'), 'SAR 4500000');
+    assert.equal(hint('AED 1000000000'), 'AED 1000000000');
+  });
+
+  it('hands a currency back to the figure before it, whatever it reached', () => {
+    assert.equal(hint('8,500 AED 3 bedrooms, deposit AED 2,000'), 'AED 8500');
+    // a currency between a figure and an area, rate or metres is the figure's before
+    assert.equal(hint('450,000 AED 1,200 sqm'), 'AED 450000');
+    assert.equal(hint('450,000 AED 450/m2'), 'AED 450000');
+    assert.equal(hint('Dubai Marina 1,250,000 USD 2,400 sqft'), 'USD 1250000');
+    assert.equal(hint('850 ألف ريال 3.5m ceilings'), 'SAR 850000');
+    assert.equal(hint('4,500,000  AED 5 bedrooms'), 'AED 4500000');
+    assert.equal(hint('Price 4,500,000 SAR 450 m²'), 'SAR 4500000');
+    assert.equal(hint('Price:\n2,500,000\nAED'), 'AED 2500000');
+    assert.equal(hint('Service charge 12,000 SAR 20m street / Big size villa 1.2M USD cash'), 'USD 1200000');
+    assert.equal(hint('سعر المتر 3500 ريال 2,000,000 AED (negotiable)'), 'AED 2000000');
+    assert.equal(hint('Price 450,000 AED 3,500,000 USD'), 'USD 3500000');
+    assert.equal(hint('Unit A12 price: AED\n450,000'), 'AED 450000');
+    assert.equal(parsePriceHint('Price per m2: AED\n12,000'), null);
+  });
+
   it('reads no price at all when a figure is unclear, rather than a smaller one', () => {
-    for (const caption of ['Villa 4.5m 2 floors, annual maintenance 6,000 SAR', 'SAR 4,500 000', 'SAR 1,250 000 negotiable', 'SAR 4,500, 000, service charge 12,000 SAR']) {
+    for (const caption of ['Villa 450 m 2, annual maintenance 6,000 SAR', 'SAR 4,500 000', 'SAR 1,250 000 negotiable', 'SAR 4,500, 000, service charge 12,000 SAR',
+      'Price: SAR 4500 000', 'Price: AED 1 200 000, deposit AED 50,000']) {
       assert.equal(parsePriceHint(caption), null, caption);
     }
   });
@@ -227,6 +298,11 @@ describe('parsePriceHint', () => {
   it('takes a currency written at the end of the line above the figure', () => {
     assert.equal(hint('Price: AED\n450,000'), 'AED 450000');
     assert.equal(hint('Price: EUR\u202F450,000'), 'EUR 450000');
+    assert.equal(hint('450,000\nAED'), 'AED 450000');
+    assert.equal(hint('Price 450,000\nAED\nVilla in Obhur'), 'AED 450000');
+    // a currency line between two figure lines: whose is it? no caption price
+    assert.equal(parsePriceHint('Price 450,000\nAED\n3 bedrooms'), null);
+    assert.equal(parsePriceHint('Floor 3\nAED\n450,000'), null);
   });
 
   it('keeps a large price written in groups even though it is long', () => {
