@@ -168,6 +168,17 @@ describe('buildListing', () => {
     assert.equal('subsidisedAmount' in plain.price, false, 'an ordinary listing gets no new key');
   });
 
+  it('a caption price with no currency of its own keeps the brochure\'s currency', () => {
+    const aed = structuredClone(AI);
+    aed.listing.price = { amount: 4200000, currency: 'AED', from: false, period: null, onRequest: false };
+    const slug = 'jeddah-heights-residential-community-jeddah';
+    const picks = orderedPicks(AI.images);
+    const kept = buildListing({ ai: structuredClone(aed), images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { price: { amount: 4500000, currency: null } }, meta: {} });
+    assert.deepEqual([kept.price.amount, kept.price.currency], [4500000, 'AED']);
+    const written = buildListing({ ai: structuredClone(aed), images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { price: { amount: 4500000, currency: 'USD' } }, meta: {} });
+    assert.deepEqual([written.price.amount, written.price.currency], [4500000, 'USD']);
+  });
+
   it('the local checks refuse a subsidised price that is not below the headline price', () => {
     const l = base();
     l.price.subsidisedAmount = l.price.amount;

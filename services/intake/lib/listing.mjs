@@ -281,7 +281,8 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
   if (!kind) throw new Error(`no kind mapping for type "${l.type}"`);
 
   const price = { ...l.price };
-  if (caption.price) { price.amount = caption.price.amount; price.currency = caption.price.currency; price.onRequest = false; }
+  // The owner's figure; its currency only when he wrote one, else the brochure's own stands.
+  if (caption.price) { price.amount = caption.price.amount; price.currency = caption.price.currency || price.currency || 'SAR'; price.onRequest = false; }
   if (caption.category) l.category = caption.category;
   if (l.category === 'rent') price.period = caption.period || price.period || 'year';
   else price.period = null;

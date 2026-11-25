@@ -20,10 +20,10 @@ const CATEGORY_HINTS = [
 ];
 
 const PERIOD_HINTS = [
-  [/\b(per|\/)\s*(year|yr|annum)\b/i, 'year'],
+  [/\b(per|\/)\s*(year|yr|annum)\b|\b(?:yearly|annually|a year)\b/i, 'year'],
   [/(سنوي|سنويا|سنوياً|\/ ?سنة|في السنة)/, 'year'],
-  [/\b(per|\/)\s*(month|mo)\b/i, 'month'],
-  [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر)/, 'month'],
+  [/\b(per|\/)\s*(month|mo)\b|\b(?:monthly|a month)\b/i, 'month'],
+  [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر|الشهر)/, 'month'],
 ];
 
 // The caption price overrides the PDF's, so it is read STRICTLY: the caption sets a price only when it
@@ -46,10 +46,12 @@ const CURRENCY_WORDS = [
   ['AED', String.raw`AED|DHS?|dirhams?|د\.إ|(?:بال|ال)?درهم(?:ا)?(?: (?:ال)?إماراتي)?`],
   ['USD', String.raw`USD|US\$|\$|(?:us )?dollars?|(?:بال|ال)?دولار(?:ا)?(?: (?:ال)?أمريكي)?`],
   ['EUR', String.raw`EUR|€|euros?|(?:بال|ال)?يورو`],
+  // (US$, $ and € are also matched as bare symbols, see CURRENCY_TOKEN_RE)
 ];
-// A currency token: a whole word (or a symbol), so "European" is no EUR.
+// A currency token: a whole word, so "European" is no EUR; a symbol stands anywhere ("Price$450,000").
 const tokenRe = (body) => String.raw`(?<![A-Za-z${AR}])(?:${body})(?![A-Za-z${AR}])`;
-const CURRENCY_TOKEN_RE = new RegExp(CURRENCY_WORDS.map(([, re]) => tokenRe(re)).join('|'), 'gi');
+const CURRENCY_SYMBOL = String.raw`US\$|\$|€`;
+const CURRENCY_TOKEN_RE = new RegExp(String.raw`${CURRENCY_SYMBOL}|` + CURRENCY_WORDS.map(([, re]) => tokenRe(re)).join('|'), 'gi');
 // The words a price-only caption may hold besides the figure, its multiplier and its currency.
 const ALLOWED_WORD_RE = new RegExp(tokenRe(String.raw`price|prices|asking|total|for|sale|rent|rental|lease|is|of|at|a|an|per|year|years|yearly|annum|annually|month|monthly|only|net|cash|final|firm|negotiable|السعر|سعر|بسعر|المطلوب|هو|ب|للبيع|بيع|للإيجار|للايجار|إيجار|ايجار|الإيجار|الايجار|في|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية|فقط|كاش|نهائي|قابل|للتفاوض`), 'gi');
 // Every run of digits, with the separators that join it, is one figure.
@@ -59,7 +61,16 @@ const DIGIT_RUN_RE = /[0-9]+(?:[,،٬.٫][0-9]+)*/g;
 const FIGURE_RE = /^(?:[0-9]{1,3}([,،٬])[0-9]{3}(?:\1[0-9]{3})*|[0-9]+)(?:[.٫][0-9]+)?$/;
 // A multiplier right after the figure ("4.5m", "1.2 million", "850k", "٤٫٥ مليون", "٨٥٠ ألف").
 const MULTIPLIER_RE = new RegExp(String.raw`^ ?(?:(?<lmult>millions?|mln|mil|mn|m|thousands?|k)|(?<amult>مليون|ملايين|ألف|الف)(?:ا)?)(?:(?![A-Za-z0-9${AR}])|(?=(?:SAR|AED|USD|EUR|OMR|SR|RO|DHS?)(?![A-Za-z])|[$€]))`, 'i');
-const OTHER_SYMBOL_RE = /[£₹₺¥₩₽₪]/;
+// What may be left once the figure, its multiplier, its currency and the allowed words are taken out:
+// white space and ordinary punctuation. Any other letter (in any script), symbol or emoji ("฿", "📏")
+// means the caption says more than a price.
+const LEFTOVER_OK_RE = /^[\s.,،;؛:!?؟()[\]{}"'`«»“”‘’\-–—_/\\|*•·…~≈+=&]*$/;
+// A period ("per year", "شهرياً") makes the figure a rent; on a caption with no rent word it is an
+// instalment or an income ("3,500 ريال شهرياً فقط", "Net SAR 450,000 per year"), not the price.
+const PERIOD_WORD_RE = new RegExp(tokenRe(String.raw`per|year|years|yearly|annum|annually|month|monthly|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية`), 'i');
+const RENT_WORD_RE = new RegExp(String.raw`(?<![A-Za-z])(?:rent|rental|lease|for-?rent)(?![A-Za-z])|(?:لل|ال)?[إا]يجار`, 'i');
+// Dollars of other countries ("A$ 1.2m", "HK$ 1.2m"): no caption price.
+const OTHER_DOLLAR_RE = /(?<![A-Za-z])(?:A|AU|C|CA|NZ|HK|S|NT|R|MX)\$/i;
 const FLAG_TAG_RE = /#(?:test|dry|draft|brochure|pdf|nobrochure|nopdf|no-brochure|no-pdf|hidden|private|rent|rental|forrent|for-rent|sale|forsale|for-sale|buy|offplan|off-plan|international|overseas)(?![A-Za-z0-9_-])/gi;
 // Direction marks, the tatweel and the vowel marks are invisible ("عُماني" is "عماني", "بـ" is "ب").
 const INVISIBLE_RE = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069\u0640\u064B-\u0652]/g;
@@ -69,13 +80,16 @@ const INVISIBLE_RE = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069\u0640\u064B-
  * figure. Returns null unless the caption is nothing but that price (see above).
  */
 export function parsePriceHint(caption) {
-  // NFKC turns fullwidth and other compatibility digits into 0-9; any other digit is not ours to
-  // read. All white space, line breaks included, is one space. The bot's flags and categories
-  // ("#test", "#rent") are read by parseCaption and are not words here; any other hashtag is its
-  // word ("#Deposit 50,000" is a deposit).
-  const text = westernise(String(caption || '').normalize('NFKC')).replace(INVISIBLE_RE, '')
-    .replace(FLAG_TAG_RE, ' ').replace(/#/g, ' ').replace(/\s+/g, ' ').trim();
-  if (/\p{Nd}/u.test(text.replace(/[0-9]/g, '')) || OTHER_SYMBOL_RE.test(text)) return null;
+  // Fullwidth characters ("４．５m") become their ASCII forms; any other non-ASCII digit, a superscript
+  // or a footnote mark ("450000¹") included, is not ours to read. All white space, line breaks included,
+  // is one space. The bot's flags and categories ("#test", "#rent") are read by parseCaption and are not
+  // words here, nor is a hashtag holding a digit ("#250000", "#2BR"); any other hashtag is its word
+  // ("#Deposit 50,000" is a deposit).
+  const folded = String(caption || '').replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  const text = westernise(folded).replace(INVISIBLE_RE, '')
+    .replace(FLAG_TAG_RE, ' ').replace(/#[^\s#]*[0-9][^\s#]*/g, ' ').replace(/#/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/[\p{Nd}\p{No}]/u.test(text.replace(/[0-9]/g, '')) || OTHER_DOLLAR_RE.test(text)) return null;
+  if (PERIOD_WORD_RE.test(text) && !RENT_WORD_RE.test(westernise(folded))) return null;
   const runs = [...text.matchAll(DIGIT_RUN_RE)];
   if (runs.length !== 1) return null;
   const [run] = runs;
@@ -86,7 +100,7 @@ export function parsePriceHint(caption) {
   // ".5 million", "-450,000": a mark or a sign glued to the figure (a hyphen after a word is a
   // separator: "Price-4,500,000").
   const before = text.slice(0, run.index);
-  if (new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$`).test(before)) return null;
+  if (new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$|(?:^|[^A-Za-z${AR}0-9])[+\-−–] ?(?:US\$|\$|€|SAR|AED|USD|EUR|OMR|SR|RO|DHS?) ?$`, 'i').test(before)) return null;
   let after = text.slice(run.index + num.length);
   const mult = MULTIPLIER_RE.exec(after);
   if (mult) after = after.slice(mult[0].length);
@@ -97,7 +111,7 @@ export function parsePriceHint(caption) {
     currencies.add((CURRENCY_WORDS.find(([, re]) => new RegExp(String.raw`^(?:${re})$`, 'i').test(c)) || ['?'])[0]);
     return ' ';
   }).replace(ALLOWED_WORD_RE, ' ');
-  if (new RegExp(String.raw`[0-9A-Za-z${AR}]`).test(rest)) return null;
+  if (!LEFTOVER_OK_RE.test(rest)) return null;
   if (currencies.size > 1 || currencies.has('?')) return null;
   const currency = currencies.size ? [...currencies][0] : null;
 
@@ -113,8 +127,9 @@ export function parsePriceHint(caption) {
   // A bare "450 m" is as likely metres as millions: with no currency, it is millions only below 100.
   if (word === 'm' && !currency && amount >= 100) return null;
   // The amount as typed; a multiplier's float noise (2.05 x 1e6 = 2049999.9999999998) rounded away.
+  if (factor === 1e6 && amount >= 1000) return null;
   const value = factor === 1 ? amount : Math.round(amount * factor * 1000) / 1000;
-  if (!Number.isFinite(value) || value > 1e11) return null;
+  if (!Number.isFinite(value) || value > 1e10) return null;
   // A bare number only counts as a price when it is plausibly one (>= 10,000) —
   // otherwise "3 bedrooms" would become a price.
   if (!currency && factor === 1 && value < 10000) return null;
@@ -158,7 +173,9 @@ export function parseCaption(caption) {
     noBrochure: has('nobrochure') || has('nopdf') || has('no-brochure') || has('no-pdf'),
     hidden: has('hidden') || has('private'),
     category,
-    price: price ? { amount: price.amount, currency: price.currency } : null,
+    // A currency only when the owner wrote one: otherwise the brochure's own currency stands (an AED
+    // listing priced "4.5m" stays in AED).
+    price: price ? { amount: price.amount, currency: price.explicitCurrency ? price.currency : null } : null,
     period,
   };
 }
@@ -266,7 +283,8 @@ export function parseCommand(text) {
       if (/^\s*(on ?request|onrequest|عند الطلب)\s*$/i.test(rest)) return { cmd: 'price', id, onRequest: true };
       const p = parsePriceHint(rest);
       if (!p) return { cmd: 'error', message: 'usage: price BONA-W001 4500000  |  price BONA-W001 onrequest' };
-      return { cmd: 'price', id, amount: p.amount, currency: p.currency, onRequest: false };
+      // A currency only when the owner wrote one: setPrice keeps the listing's own otherwise.
+      return { cmd: 'price', id, amount: p.amount, currency: p.explicitCurrency ? p.currency : null, onRequest: false };
     }
     case 'brochure':
     case 'pdf': {

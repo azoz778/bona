@@ -206,6 +206,34 @@ describe('parsePriceHint', () => {
     assert.equal(parseCommand('price BONA-W001 450 m2').cmd, 'error');
   });
 
+  // r13 review (Codex)
+  it('round 13: symbols and scripts that are not ours, footnote digits, digit hashtags', () => {
+    assert.equal(hint('Price$450,000'), 'USD 450000');
+    for (const caption of ['450,000 SAR€', '#international ฿4,500,000', '#international 4,500,000 บาท', '📏 30 m', 'SAR 450000¹', '#250000', 'Villa 450 m²']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    assert.equal(hint('#2BR 4.5m'), 'SAR 4500000');
+  });
+
+  // r13 review (Claude)
+  it('round 13 (Claude): a period without a rent word, other dollars, signs, huge multiples', () => {
+    for (const caption of ['3,500 ريال شهرياً فقط', 'Net SAR 450,000 per year', 'A$ 1.2m', 'HK$ 1.2m', '-SAR 50,000', '4,500 مليون', 'Price 15,000m SAR']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    for (const [caption, want] of [['#rent 120,000 per year', 'SAR 120000'], ['Rent AED 5,000 monthly', 'AED 5000'], ['إيجار الشهر 4,500 ريال', 'SAR 4500']]) {
+      assert.equal(hint(caption), want, caption);
+    }
+    assert.equal(parseCaption('4.5m').price.currency, null);
+    assert.equal(parseCaption('SAR 4.5m').price.currency, 'SAR');
+    assert.equal(parseCaption('إيجار الشهر 4,500 ريال').period, 'month');
+  });
+
+  it('reads monthly and yearly as the rent period', () => {
+    assert.equal(parseCaption('Rent AED 5,000 monthly').period, 'month');
+    assert.equal(parseCaption('#rent 120,000 yearly').period, 'year');
+    assert.equal(parseCaption('For rent: AED 45,000 annually\nParking AED 1,200 monthly').period, 'year');
+  });
+
   it('runs in linear time on long captions', () => {
     const t0 = performance.now();
     for (const s of ['1 '.repeat(20000), ' '.repeat(100000) + '4.5m', 'Price AED 450,000' + '\r\n'.repeat(5000) + 'x', 'ً'.repeat(60000) + ' 4.5m',
@@ -255,7 +283,9 @@ describe('parseCommand', () => {
   });
 
   it('parses price, including on-request', () => {
-    assert.deepEqual(parseCommand('price BONA-W003 4500000'), { cmd: 'price', id: 'BONA-W003', amount: 4500000, currency: 'SAR', onRequest: false });
+    // no currency written: none passed, so the listing keeps its own (an AED listing stays in AED)
+    assert.deepEqual(parseCommand('price BONA-W003 4500000'), { cmd: 'price', id: 'BONA-W003', amount: 4500000, currency: null, onRequest: false });
+    assert.deepEqual(parseCommand('price BONA-W003 SAR 4,500,000'), { cmd: 'price', id: 'BONA-W003', amount: 4500000, currency: 'SAR', onRequest: false });
     assert.deepEqual(parseCommand('price BONA-W003 onrequest'), { cmd: 'price', id: 'BONA-W003', onRequest: true });
     assert.deepEqual(parseCommand('price BONA-W003 on request'), { cmd: 'price', id: 'BONA-W003', onRequest: true });
     assert.equal(parseCommand('price BONA-W003').cmd, 'error');
