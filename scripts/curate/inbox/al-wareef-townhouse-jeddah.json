@@ -105,6 +105,111 @@
       "قرب سير من المدارس والمساجد والمراكز الصحية"
     ]
   },
+  "models": [
+    {
+      "name": {
+        "en": "Maren townhouse",
+        "ar": "تاون هاوس مرن"
+      },
+      "bedrooms": 3,
+      "bathrooms": 4,
+      "areaSqm": 192,
+      "rooms": {
+        "en": [
+          "Majlis",
+          "Family majlis",
+          "Living room",
+          "Dining area",
+          "Kitchen",
+          "Master bedroom",
+          "Dressing room",
+          "Two terraces",
+          "Roof (82.40 sqm)",
+          "Open parking space"
+        ],
+        "ar": [
+          "مجلس",
+          "مجلس عائلي",
+          "صالة معيشة",
+          "منطقة طعام",
+          "مطبخ",
+          "غرفة نوم رئيسية",
+          "غرفة ملابس",
+          "تراسان",
+          "سطح بمساحة 82.40 م²",
+          "موقف سيارة مفتوح"
+        ]
+      },
+      "availability": {
+        "en": "134 townhouses",
+        "ar": "134 تاون هاوس"
+      },
+      "price": null,
+      "subsidisedPrice": null,
+      "floorPlan": {
+        "src": "/listings/al-wareef-townhouse-jeddah/plan-01.jpg",
+        "thumb": "/listings/al-wareef-townhouse-jeddah/plan-01-thumb.webp"
+      }
+    }
+  ],
+  "amenities": {
+    "en": [
+      "21 commercial centres",
+      "10 schools",
+      "7 mosques",
+      "5 Friday mosques",
+      "2 health centres",
+      "Community centre",
+      "Security centre",
+      "1.3 million sqm of green spaces and parks",
+      "Planned safe pedestrian network"
+    ],
+    "ar": [
+      "21 مركزًا تجاريًا",
+      "10 مدارس",
+      "7 مساجد",
+      "5 جوامع",
+      "مركزان صحيان",
+      "مركز اجتماعي",
+      "مركز أمني",
+      "1.3 مليون م² من المساحات الخضراء والحدائق",
+      "شبكة مشي آمنة ومخططة"
+    ]
+  },
+  "nearby": {
+    "en": [
+      "Historic Jeddah",
+      "Jeddah city centre",
+      "Main city entrances",
+      "Business centres"
+    ],
+    "ar": [
+      "جدة التاريخية",
+      "قلب مدينة جدة",
+      "مداخل المدينة الرئيسية",
+      "مراكز الأعمال"
+    ]
+  },
+  "warranties": {
+    "en": [
+      "10-year concrete structure warranty",
+      "10-year building warranty",
+      "10-year insulation warranty",
+      "10-year anti-termite soil treatment warranty",
+      "1-year final finishes warranty",
+      "1-year plumbing warranty",
+      "1-year electrical works warranty"
+    ],
+    "ar": [
+      "ضمان الهيكل الخرساني 10 سنوات",
+      "ضمان المباني 10 سنوات",
+      "ضمان العزل 10 سنوات",
+      "ضمان معالجة التربة ضد الحشرات 10 سنوات",
+      "ضمان التشطيبات النهائية سنة كاملة",
+      "ضمان السباكة سنة كاملة",
+      "ضمان أعمال الكهرباء سنة كاملة"
+    ]
+  },
   "virtualTourUrl": null,
   "brochureUrl": "https://bona-real-estate.com/listings/al-wareef-townhouse-jeddah/brochure.pdf",
   "project": {
