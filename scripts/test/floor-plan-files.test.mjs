@@ -62,13 +62,15 @@ test('build.mjs refuses a unit model whose floor plan or its thumbnail is not in
   const dir = tree(listing.slug);
   try {
     const file = path.join(dir, 'scripts/curate/inbox', name);
-    // The plan must be missing at first, so take the first plan number the listing does not have on
-    // disk: once a listing is enriched its own plan-01.jpg is there, and the build rightly accepts it.
-    const pub = path.join(ROOT, 'public/listings', listing.slug);
-    let n = 1;
-    const nn = () => String(n).padStart(2, '0');
-    while (n < 999 && (fs.existsSync(path.join(pub, `plan-${nn()}.jpg`)) || fs.existsSync(path.join(pub, `plan-${nn()}-thumb.webp`)))) n += 1;
-    const plan = { src: `/listings/${listing.slug}/plan-${nn()}.jpg`, thumb: `/listings/${listing.slug}/plan-${nn()}-thumb.webp` };
+    // The plan must be missing at first, so take the first plan number the copy's own listing folder
+    // does not hold (as a file or a link): once a listing is enriched its own plan-01.jpg is there, and
+    // the build rightly accepts it. The files are created with 'wx', so a write can never follow a link
+    // into the repository.
+    const taken = new Set(fs.readdirSync(path.join(dir, 'public/listings', listing.slug)));
+    const nn = Array.from({ length: 99 }, (_, i) => String(i + 1).padStart(2, '0'))
+      .find((k) => !taken.has(`plan-${k}.jpg`) && !taken.has(`plan-${k}-thumb.webp`));
+    assert.ok(nn, `a plan number ${listing.slug} does not use yet`);
+    const plan = { src: `/listings/${listing.slug}/plan-${nn}.jpg`, thumb: `/listings/${listing.slug}/plan-${nn}-thumb.webp` };
     fs.writeFileSync(file, JSON.stringify({
       ...listing,
       models: [{ name: { en: 'A1', ar: 'نموذج A1' }, bedrooms: 2, bathrooms: 2, areaSqm: 120, rooms: null, availability: null, price: null, subsidisedPrice: null, floorPlan: plan }],
@@ -78,12 +80,12 @@ test('build.mjs refuses a unit model whose floor plan or its thumbnail is not in
     assert.notEqual(none.status, 0, 'no plan file: no build');
     assert.match(none.stderr, new RegExp(`inbox/${name}: models\\[0\\]\\.floorPlan\\.src missing: public${plan.src}`));
 
-    fs.writeFileSync(path.join(dir, 'public', plan.src), 'jpg');
+    fs.writeFileSync(path.join(dir, 'public', plan.src), 'jpg', { flag: 'wx' });
     const noThumb = build(dir);
     assert.notEqual(noThumb.status, 0, 'the plan without its thumbnail: no build');
     assert.match(noThumb.stderr, new RegExp(`inbox/${name}: models\\[0\\]\\.floorPlan\\.thumb missing: public${plan.thumb}`));
 
-    fs.writeFileSync(path.join(dir, 'public', plan.thumb), 'webp');
+    fs.writeFileSync(path.join(dir, 'public', plan.thumb), 'webp', { flag: 'wx' });
     const both = build(dir);
     assert.equal(both.status, 0, both.stderr);
     const out = JSON.parse(fs.readFileSync(path.join(dir, 'src/data/listings.json'), 'utf8'));
