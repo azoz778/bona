@@ -23,8 +23,6 @@ const PERIOD_HINTS = [
   [/\b(per|\/)\s*(year|yr|annum)\b/i, 'year'],
   [/(سنوي|سنويا|سنوياً|\/ ?سنة|في السنة)/, 'year'],
   [/\b(per|\/)\s*(month|mo)\b/i, 'month'],
-  // "/m" on a rent caption is per month (per square metre would be "/m2" or "/m²")
-  [/(?:\bper|\/)\s*m\b(?![ \t]*[2²^]|\.[ \t]*sq)/i, 'month'],
   [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر)/, 'month'],
 ];
 
@@ -82,13 +80,14 @@ const AREA_UNIT = String.raw`(?:bua\b|gfa\b|m2(?![0-9])|m[ \t]*²|m[ \t]*\^[ \t]
 const DISTANCE_UNIT = String.raw`(?:kms?|kilomet(?:er|re)s?|كم|كيلو)(?![A-Za-z${AR}])`;
 const AREA_AFTER_RE = new RegExp(String.raw`^[ \t]*(?:\([ \t]*)?(?:${AREA_UNIT}|${DISTANCE_UNIT})`, 'i');
 // ...unless the unit labels the next figure: "4,500,000 (sqm: 450)", "1.85M (sqm price AED 4,500)",
-// "3 مليون (المتر 1500 ريال)", "12,000 sqm: ...", "السعر 900,000 المتر 1500 ريال" (a rate: money follows).
-const AREA_LABEL_AFTER_RE = new RegExp(String.raw`^[ \t]*(?:\([ \t]*(?:${AREA_UNIT}|${DISTANCE_UNIT})[^)\n]{0,30}?[0-9]|(?:${AREA_UNIT}|${DISTANCE_UNIT})[ \t]*[:=：]|(?:${AREA_UNIT})[ \t]*(?:(?:${CURRENCY})[ \t]*[0-9]|[0-9][0-9,.٬٫]*[ \t]*(?:${CURRENCY})))`, 'i');
+// "3 مليون (المتر 1500 ريال)", "12,000 sqm: ...", and a rate idiom followed by money ("السعر 900,000 المتر
+// 1500 ريال", "sqm price AED 4,500"). A plain unit followed by money ("450,000 sqft USD 0.20/sqft") stays a unit.
+const AREA_LABEL_AFTER_RE = new RegExp(String.raw`^[ \t]*(?:\([ \t]*(?:${AREA_UNIT}|${DISTANCE_UNIT})[^)\n]{0,30}?[0-9]|(?:${AREA_UNIT}|${DISTANCE_UNIT})[ \t]*[:=：]|(?:(?:ال|لل)متر(?:[ \t]+(?:ال)?مربع)?|(?:sqm|sq\.?[ \t]*m|m2|m²|sqft)[ \t]+price)[ \t]*(?:(?:${CURRENCY})[ \t]*[0-9]|[0-9][0-9,.٬٫]*[ \t]*(?:${CURRENCY})))`, 'i');
 const RATE_AFTER_RE = new RegExp(String.raw`^[ \t]*(?:\([ \t]*)?(?:\/|per\b|لكل|لل)[ \t]*(?=(?<rateUnit>${AREA_UNIT}|m\b|ft\b))\k<rateUnit>(?![ \t]*[:=：]?[ \t]*(?:(?:${CURRENCY})[ \t]*)?[0-9])`, 'i');
 // "/m" or "per m" on its own may be per month: in a rent caption it is ("Rent AED 12,000 / m"), elsewhere
 // it is only a guess.
 const RENT_RE = new RegExp(String.raw`\b(?:rent|rental|lease|leasing)\b|(?:ال|لل)?[إا]يجار`, 'i');
-const RATE_PER_M_RE = /^[ \t]*(?:\([ \t]*)?(?:\/|per\b)[ \t]*m\b(?![ \t]*[2²^]|\.[ \t]*sq)/i;
+const RATE_PER_M_RE = /^[ \t]*(?:\([ \t]*)?(?:\/|per\b)[ \t]*m\b(?![ \t]*[2²^]|[ \t.]*sq)/i;
 // "450 m 2" or "4.5m 2 floors": a square metre, or 4.5 million and two of something. Unclear, unless
 // what follows is a count ("1.2M 2 bedrooms" is 1.2 million).
 const SPACED_M2_RE = /^[ \t]*m[ \t]+2(?![0-9])/i;
@@ -128,6 +127,9 @@ const CURRENCY_LINE_BETWEEN_FIGURES_RE = new RegExp(String.raw`${FIGURE_END}[ \t
 // SAR"): only a figure with its own written currency counts; the largest of those is the price.
 const ANY_CURRENCY_RE = new RegExp(String.raw`(?:(?<![A-Za-z${AR}])|(?<=[0-9](?:mill?ions?|mill|mln|mil|mn|m|k)))(${CURRENCY})`, 'gi');
 const normCurrency = (c) => { const u = (c || '').toUpperCase(); return u === 'ر.س' || u.startsWith('ريال') ? 'SAR' : CURRENCIES.includes(u) ? u : null; };
+
+// A price word right before a figure ("Asking 4,500,000 (sqm: 450)", "السعر 900,000 المتر 1500 ريال").
+const PRICE_WORD_BEFORE_RE = new RegExp(String.raw`(?:\b(?:price|asking|total|cost)|(?:^|[^${AR}])(?:ال)?سعر|بسعر|المطلوب|(?:ال)?[إا]جمالي)[ \t:：=\-–]*$`, 'i');
 
 // Direction marks and the tatweel are invisible: م2 behind a right-to-left mark, or م + tatweel + 2, must read as م2.
 const INVISIBLE_RE = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069\u0640]/g;
@@ -221,6 +223,9 @@ export function parsePriceHint(caption) {
         continue;
       }
       const unitLabelsNext = AREA_LABEL_AFTER_RE.test(afterNum) || AREA_LABEL_AFTER_RE.test(tail);
+      // A bare figure whose unit labels the next one ("Warehouse 12,000 sqm: suitable for logistics") may
+      // still be an area: a guess, unless a price word stands right before it.
+      if (unitLabelsNext && !money && !PRICE_WORD_BEFORE_RE.test(line.slice(Math.max(0, m.index - 100), m.index))) { guess(); continue; }
       if ((AREA_AFTER_RE.test(afterNum) || AREA_AFTER_RE.test(tail)) && !unitLabelsNext) {
         // A unit that starts right at the figure ("450 m ^ 2", "12,000 sqm") makes it an area; one after a
         // multiplier ("Land 1.2m sqm") is unusual enough to be a guess.
@@ -269,6 +274,9 @@ export function parsePriceHint(caption) {
       // handover") is the first's: the price comes first, its details after. A larger second figure may be
       // money itself ("2.4 million USD 654,000 approx."), so the currency stays with it. (An area, rate or metres
       // after it was dealt with above.)
+      // A bare figure, a currency, then a smaller figure of 10,000 or more ("2.4m AED 12,000 service charge",
+      // "2.4 million USD 654,000 approx."): the currency may be either's, so no caption price.
+      if (between && !post && value >= 10000 && value < last.amount && !(last.reading && last.reading.explicitCurrency)) return null;
       if (between && !post && value >= 1000 && value < 10000 && value < last.amount) {
         handBack();
         currency = null;

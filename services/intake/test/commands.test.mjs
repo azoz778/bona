@@ -264,7 +264,9 @@ describe('parsePriceHint', () => {
   it('round 6: per-metre rates in parentheses, "/m." at a sentence end, borrowed currencies', () => {
     assert.equal(hint('السعر 3 مليون (المتر 1500 ريال)'), 'SAR 3000000');
     assert.equal(hint('Price 1.85M (sqm price AED 4,500)'), 'SAR 1850000');
-    assert.equal(hint('من 780,000 حتى 850,000 (المتر 1850 ريال)'), 'SAR 850000');
+    // no price word before 850,000: the unit after it may make it an area, so a guess (no caption price)
+    assert.equal(parsePriceHint('من 780,000 حتى 850,000 (المتر 1850 ريال)'), null);
+    assert.equal(hint('السعر من 780,000 حتى السعر 850,000 (المتر 1850 ريال)'), 'SAR 850000');
     assert.equal(hint('Rent SAR 15,000/m. Parking SAR 1,500'), 'SAR 15000');
     assert.equal(hint('Apartment for rent AED 8,500/m.\nChiller AED 1,200'), 'AED 8500');
     assert.equal(hint('Monthly installment 15,000 SAR 2.15M USD 1,100 BUA'), 'USD 2150000');
@@ -274,10 +276,26 @@ describe('parsePriceHint', () => {
     assert.equal(parsePriceHint('Land 12,000 sqm 2 streets'), null);
   });
 
-  it('reads "/m" on a rent caption as per month', () => {
+  it('reads the rent figure before "/m" on a rent caption, and leaves the period alone', () => {
     const c = parseCaption('Apartment for rent: AED 12,000 / m');
-    assert.equal(c.period, 'month');
     assert.equal(c.price.amount, 12000);
+    // r7 review: a "/m" elsewhere (parking) must not turn a yearly rent monthly
+    assert.equal(parseCaption('For rent: AED 45,000 annually\nParking AED 1,200/m').period, 'year');
+  });
+
+  // r7 review (Codex)
+  it('round 7: a currency between a bare price and a large detail, plain units before money, "/ m sq"', () => {
+    assert.equal(parsePriceHint('Dubai villa 2.4m AED 12,000 service charge'), null);
+    assert.equal(hint('Land 450٬000 sqft USD 0.20/sqft\nAsking USD 90,000'), 'USD 90000');
+    assert.equal(parsePriceHint('For rent: AED 12,000 / m sq'), null);
+    assert.equal(hint('Villa AED 2.4m, AED 12,000 service charge'), 'AED 2400000');
+    // r7 review (Claude): a unit that labels the next figure keeps the area rule for a bare figure
+    assert.equal(parsePriceHint('Warehouse 12,000 sqm: suitable for logistics'), null);
+    assert.equal(parsePriceHint('Land 12,000 sqm SAR 1,500 per sqm'), null);
+    assert.equal(parsePriceHint('أرض 15000 م2 950 ريال للمتر'), null);
+    assert.equal(hint('Price 2,000,000 AED'), 'AED 2000000');
+    assert.equal(parsePriceHint('Price 2,000,000 AED 450,000 down payment'), null);
+    assert.equal(parsePriceHint('Villa for rent, SAR 120,000. Video: https://m.youtube.com/watch?v=abc') && parseCaption('Villa for rent, SAR 120,000. Video: https://m.youtube.com/watch?v=abc').period, 'year');
   });
 
   it('parses a caption full of spaces in linear time', () => {
@@ -330,7 +348,7 @@ describe('parsePriceHint', () => {
     assert.equal(hint('Price 450,000 AED 3,500,000 USD'), 'USD 3500000');
     // AED between 2,000,000 and 545,000 may be either's: no caption price
     assert.equal(parsePriceHint('Price 2,000,000 AED 545,000 USD 3 BR'), null);
-    assert.equal(hint('الأسعار بين 2.1 million و 2.4 million USD 654,000 approx.'), 'SAR 2400000');
+    assert.equal(parsePriceHint('الأسعار بين 2.1 million و 2.4 million USD 654,000 approx.'), null);
     assert.equal(hint('Penthouse Price SAR 6,200,000 (EUR 1,519,000)'), 'SAR 6200000');
     assert.equal(hint('Price: 2,500,000 AED / 2,553,000 SAR'), 'SAR 2553000');
     assert.equal(hint('Penthouse - Price: 2,500,000 AED 2,553,000 SAR 450 sqm'), 'SAR 2553000');
