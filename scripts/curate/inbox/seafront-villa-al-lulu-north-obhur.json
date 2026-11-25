@@ -144,6 +144,34 @@
       "أرضيات تيراكوتا وجسور خشبية"
     ]
   },
+  "amenities": {
+    "en": [
+      "Private swimming pool",
+      "Landscaped garden with palms and lawns",
+      "Balconies and terraces",
+      "Separate laundry and service passage"
+    ],
+    "ar": [
+      "مسبح خاص",
+      "حديقة منسقة بالنخيل والمسطحات الخضراء",
+      "شرفات وتراسات",
+      "غرفة غسيل وممر خدمة مستقل"
+    ]
+  },
+  "nearby": {
+    "en": [
+      "Obhur marinas",
+      "Beaches close by",
+      "Resorts close by",
+      "Coastal roads into Jeddah"
+    ],
+    "ar": [
+      "مراسي أبحر",
+      "شواطئ قريبة",
+      "منتجعات قريبة",
+      "طرق ساحلية إلى وسط جدة"
+    ]
+  },
   "virtualTourUrl": null,
   "brochureUrl": "https://bona-real-estate.com/listings/seafront-villa-al-lulu-north-obhur/brochure.pdf",
   "project": null,
