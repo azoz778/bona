@@ -1,0 +1,205 @@
+/* ==== 1 · TK brochure CSS =====================================================================
+   VERBATIM from the tk-property-brochure skill, scripts/build_brochure.py (its CSS = """…""" block),
+   byte for byte between this comment and the next. Do not edit it here: Bona changes go in
+   section 3, which overrides it. */
+@page { size: A4; margin: 0; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#fff; color:#000; }
+.page { width:210mm; height:297mm; position:relative; overflow:hidden;
+        page-break-after:always; background:#fff; }
+.page:last-child { page-break-after:auto; }
+.pad { padding:0 20mm; }
+
+.eyebrow { font-family:'Montserrat'; font-weight:500; font-size:6.6pt;
+           letter-spacing:.32em; text-transform:uppercase; }
+.eyebrow.muted { color:#767676; }
+.ar-lab { font-family:'Tajawal'; font-weight:400; font-size:7.4pt;
+          direction:rtl; color:#767676; }
+.display { font-family:'Cormorant Garamond'; font-weight:300; line-height:1.03;
+           letter-spacing:-.005em; }
+.ar-display { font-family:'Amiri'; font-weight:400; direction:rtl; }
+.body-en { font-family:'Montserrat'; font-weight:300; font-size:8.4pt;
+           line-height:1.85; color:#1c1c1c; }
+.body-ar { font-family:'Tajawal'; font-weight:300; font-size:9pt; line-height:2.0;
+           direction:rtl; text-align:right; color:#1c1c1c; }
+
+.runhead { position:absolute; top:14mm; left:20mm; right:20mm;
+           display:flex; justify-content:space-between; align-items:baseline; }
+.footer { position:absolute; bottom:11mm; left:20mm; right:20mm;
+          display:flex; justify-content:space-between; align-items:center;
+          font-family:'Montserrat'; font-weight:400; font-size:6pt;
+          letter-spacing:.26em; text-transform:uppercase; color:#8a8a8a; }
+
+/* flysheet */
+.title-page { background:#000; }
+.tp-mark { position:absolute; top:0; left:0; right:0; height:168mm; }
+.tp-mark img { position:absolute; bottom:0; left:50%; margin-left:-30.5mm; height:68mm; }
+.tp-rule { position:absolute; top:180mm; left:50%; margin-left:-18mm; width:36mm;
+           height:.4pt; background:#5a5a5a; }
+.tp-line { position:absolute; top:189mm; left:0; right:0; text-align:center;
+           font-family:'Montserrat'; font-weight:400; font-size:6.4pt;
+           letter-spacing:.42em; text-indent:.42em; text-transform:uppercase; color:#c9c9c9; }
+.tp-ar { position:absolute; top:197mm; left:0; right:0; text-align:center;
+         font-family:'Tajawal'; font-weight:300; font-size:8pt; direction:rtl; color:#8a8a8a; }
+.tp-foot { position:absolute; bottom:16mm; left:0; right:0; text-align:center;
+           font-family:'Montserrat'; font-weight:400; font-size:5.8pt;
+           letter-spacing:.3em; text-indent:.3em; text-transform:uppercase; color:#6a6a6a; }
+
+/* cover */
+.cover-img { position:absolute; top:0; left:0; width:210mm; height:178mm;
+             background-size:cover; background-position:center 58%; }
+.cover-body { position:absolute; top:200mm; left:20mm; right:20mm; }
+.cover-title { font-family:'Cormorant Garamond'; font-weight:300; font-size:41pt;
+               line-height:1.02; margin-top:7mm; }
+.cover-title-ar { font-family:'Amiri'; direction:rtl; font-size:23pt; margin-top:4mm;
+                  line-height:1.5; }
+.cover-meta { margin-top:9mm; padding-top:4.5mm; border-top:.4pt solid #000;
+              display:flex; justify-content:space-between; align-items:baseline; }
+
+/* overview */
+.lead { position:absolute; top:42mm; left:20mm; right:20mm; }
+.lead h1 { font-family:'Cormorant Garamond'; font-weight:300; font-size:34pt; line-height:1.04; }
+.lead .ar-h { font-family:'Amiri'; direction:rtl; font-size:19pt; margin-top:4mm; }
+.cols { display:flex; gap:11mm; margin-top:11mm; }
+.cols > div { flex:1; }
+
+/* specification ledger */
+.ledger { position:absolute; left:20mm; right:20mm; bottom:32mm; }
+.ledger-head { display:flex; justify-content:space-between; align-items:baseline;
+               padding-bottom:3mm; border-bottom:.4pt solid #000; }
+.ledger-row { display:flex; border-bottom:.4pt solid #c9c9c9; }
+.cell { flex:1; padding:6.5mm 0 5.5mm 0; border-right:.4pt solid #c9c9c9; text-align:center; }
+.cell:last-child { border-right:none; }
+.cell .fig { font-family:'Cormorant Garamond'; font-weight:300; font-size:34pt; line-height:1;
+             font-variant-numeric:lining-nums; font-feature-settings:'lnum' 1,'onum' 0; }
+.cell .fig sup { font-family:'Montserrat'; font-weight:400; font-size:8pt;
+                 letter-spacing:.1em; vertical-align:super; }
+.cell .lab { font-family:'Montserrat'; font-weight:500; font-size:5.8pt;
+             letter-spacing:.26em; text-transform:uppercase; margin-top:4mm; }
+.cell .lab-ar { font-family:'Tajawal'; font-weight:400; font-size:7pt;
+                direction:rtl; color:#8a8a8a; margin-top:1.4mm; }
+
+/* plates */
+.plate { background-size:cover; }
+.grid2 { display:flex; gap:6mm; }
+.grid2 > div { flex:1; }
+.cap { display:flex; justify-content:space-between; align-items:baseline;
+       margin-top:3mm; padding-top:2.6mm; border-top:.4pt solid #c9c9c9; }
+.cap .en { font-family:'Montserrat'; font-weight:500; font-size:6.2pt;
+           letter-spacing:.26em; text-transform:uppercase; }
+.cap .ar { font-family:'Tajawal'; font-weight:400; font-size:7.4pt;
+           direction:rtl; color:#767676; }
+
+/* inclusions */
+.spec-item { display:flex; justify-content:space-between; align-items:baseline;
+             padding:3.1mm 0; border-bottom:.4pt solid #dcdcdc; }
+.spec-item .en { font-family:'Montserrat'; font-weight:400; font-size:7.8pt; color:#111; }
+.spec-item .ar { font-family:'Tajawal'; font-weight:400; font-size:8.4pt;
+                 direction:rtl; color:#111; }
+.spec-group { display:flex; justify-content:space-between; align-items:baseline;
+              padding:0 0 2.2mm; margin-top:7mm; border-bottom:.4pt solid #000; }
+.spec-group:first-child { margin-top:0; }
+.spec-group .en { font-family:'Montserrat'; font-weight:500; font-size:6.2pt;
+                  letter-spacing:.34em; text-transform:uppercase; color:#111; }
+.spec-group .ar { font-family:'Tajawal'; font-weight:400; font-size:7.4pt;
+                  direction:rtl; color:#767676; }
+.terms { display:flex; gap:11mm; margin-top:12mm; }
+.terms > div { flex:1; border-top:.4pt solid #000; padding-top:3.5mm; }
+.terms .v { font-family:'Cormorant Garamond'; font-weight:300; font-size:17pt; margin-top:2mm;
+            font-variant-numeric:lining-nums; font-feature-settings:'lnum' 1,'onum' 0; }
+.terms .v-ar { font-family:'Tajawal'; font-weight:400; font-size:7.4pt;
+               direction:rtl; color:#767676; margin-top:1.5mm; }
+
+/* location */
+.loc { position:absolute; top:42mm; left:20mm; right:20mm; }
+.loc h1 { font-family:'Cormorant Garamond'; font-weight:300; font-size:32pt; line-height:1.05; }
+.loc .ar-h { font-family:'Amiri'; direction:rtl; font-size:18pt; margin-top:3mm; }
+.qr-block { display:flex; gap:12mm; margin-top:14mm; align-items:flex-start; }
+.qr-tile { width:48mm; }
+.qr-tile img { width:48mm; height:48mm; display:block; border:.4pt solid #000; }
+.qr-tile .cta { font-family:'Montserrat'; font-weight:500; font-size:5.8pt;
+                letter-spacing:.26em; text-transform:uppercase; margin-top:3.5mm;
+                text-align:center; }
+.qr-tile .cta-ar { font-family:'Tajawal'; font-weight:400; font-size:7pt; direction:rtl;
+                   color:#767676; margin-top:1.5mm; text-align:center; }
+.loc-facts { flex:1; padding-top:1mm; }
+.loc-fact { border-top:.4pt solid #c9c9c9; padding:3.5mm 0 4.5mm 0; }
+.loc-fact:first-child { border-top:.4pt solid #000; }
+.loc-fact .k { font-family:'Montserrat'; font-weight:500; font-size:5.8pt;
+               letter-spacing:.26em; text-transform:uppercase; color:#767676; }
+.loc-fact .k .sep { letter-spacing:0; margin:0 1.4mm 0 .4mm; color:#b8b8b8; }
+.loc-fact .k .k-ar { font-family:'Tajawal'; font-weight:400; font-size:7pt;
+                     letter-spacing:0; text-transform:none; direction:rtl;
+                     unicode-bidi:isolate; }
+.loc-fact .v { font-family:'Montserrat'; font-weight:300; font-size:8.4pt; margin-top:1.8mm;
+               color:#111; }
+.map-btn { display:flex; justify-content:space-between; align-items:center;
+           background:#000; color:#fff; text-decoration:none; padding:6.5mm 8mm;
+           margin-top:11mm; }
+.map-btn .l { font-family:'Montserrat'; font-weight:500; font-size:7.4pt;
+              letter-spacing:.26em; text-transform:uppercase; color:#fff; }
+.map-btn .r { font-family:'Tajawal'; font-weight:400; font-size:8.4pt;
+              direction:rtl; color:#c4c4c4; }
+
+/* enquiry */
+.enquiry { position:absolute; left:0; right:0; bottom:0; background:#000; color:#fff;
+           padding:13mm 20mm; }
+.enquiry .k { font-family:'Montserrat'; font-weight:500; font-size:6pt;
+              letter-spacing:.32em; text-transform:uppercase; color:#9a9a9a; }
+.enquiry h2 { font-family:'Cormorant Garamond'; font-weight:300; font-size:23pt;
+              color:#fff; margin-top:3.5mm; line-height:1.1; }
+.enquiry .ar { font-family:'Tajawal'; font-weight:300; font-size:8pt; direction:rtl;
+               color:#c4c4c4; margin-top:3mm; max-width:104mm; text-align:left; }
+.enquiry .lines { display:flex; gap:7mm; margin-top:9mm; }
+.enquiry .lines > div { flex:1; border-top:.4pt solid #4a4a4a; padding-top:3mm; }
+.enquiry .lines .k2 { font-family:'Montserrat'; font-weight:500; font-size:5.6pt;
+                      letter-spacing:.26em; text-transform:uppercase; color:#8a8a8a;
+                      min-height:5.6mm; }
+.enquiry .lines .v2 { font-family:'Montserrat'; font-weight:300; font-size:7.6pt;
+                      color:#fff; margin-top:2mm; line-height:1.6; }
+.enquiry .lines .v2 a { color:#fff; text-decoration:none; }
+.enq-logo { position:absolute; top:11mm; right:20mm; height:19mm; }
+/* ==== 2 · The approved Bona sample's extra components ===========================================
+   From the owner-approved sample (bona-debug-w023/dirs/tk_style.py, rendered as 4-tk-style.pdf). */
+.tp-mark img.wide { height:auto; width:112mm; margin-left:-56mm; }
+.units { width:100%; border-collapse:collapse; margin-top:12mm; }
+.units th { font-family:'Montserrat'; font-weight:500; font-size:5.8pt; letter-spacing:.26em; text-transform:uppercase;
+            text-align:right; padding:0 0 1.2mm; vertical-align:bottom; }
+.units th span { display:block; font-family:'Tajawal'; font-weight:400; font-size:7pt; letter-spacing:0; color:#8a8a8a; margin-top:1mm; }
+.units th:first-child, .units td:first-child { text-align:left; }
+.units thead tr { border-bottom:.4pt solid #000; }
+.units td { padding:4mm 0 3.6mm; border-bottom:.4pt solid #c9c9c9; text-align:right; font-family:'Montserrat'; font-weight:300; font-size:8.2pt;
+            font-variant-numeric:lining-nums tabular-nums; }
+.units td .nm { font-family:'Cormorant Garamond'; font-weight:400; font-size:14pt; }
+.units td .nm-ar { font-family:'Tajawal'; font-weight:400; font-size:7.6pt; color:#767676; margin-left:2mm; }
+.note { font-family:'Montserrat'; font-weight:300; font-size:6.6pt; line-height:1.7; color:#767676; margin-top:6mm; }
+.note-ar { font-family:'Tajawal'; font-weight:300; font-size:7.4pt; line-height:1.8; color:#767676; direction:rtl; text-align:right; margin-top:1.5mm; }
+.planbox { margin-top:10mm; height:118mm; display:flex; align-items:center; justify-content:center; }
+.planbox img { max-width:170mm; max-height:118mm; }
+.ledger.small .cell .fig { font-size:26pt; }
+.floors { font-family:'Montserrat'; font-weight:300; font-size:7.6pt; color:#111; margin-top:2mm; }
+/* ==== 3 · Bona additions =========================================================================
+   Fixed column widths (so measuring = printing), paragraph rhythm and small fixes. */
+.cols > div { flex:0 0 79.5mm; width:79.5mm; min-width:0; }
+.cols.cont { margin-top:0; }
+.body-en p + p { margin-top:1.85em; }
+.body-ar p + p { margin-top:2em; }
+.units { table-layout:fixed; }
+.units td { vertical-align:baseline; }
+.units td.nmc { padding-right:3mm; }
+.cap { gap:5mm; }
+.cap .ar { text-align:right; }
+.spec-item { gap:5mm; }
+.spec-item .ar { text-align:right; }
+.spec-group { gap:5mm; }
+.terms .v.long { font-size:13pt; line-height:1.2; }
+.terms .floors-ar { font-family:'Tajawal'; font-weight:400; font-size:7.4pt; direction:rtl; color:#767676; margin-top:1.5mm; }
+.loc-fact .v-ar { font-family:'Tajawal'; font-weight:300; font-size:8.4pt; direction:rtl; text-align:left; color:#767676; margin-top:1mm; }
+.enquiry { left:-.6mm; right:-.6mm; bottom:-.6mm; padding:13mm 20.6mm 13.6mm; }
+.enquiry .lines .v2 .v2-ar { display:block; font-family:'Tajawal'; font-weight:300; font-size:7.6pt;
+                             direction:rtl; text-align:left; color:#c4c4c4; margin-top:1mm; }
+.cover-img { left:-.6mm; top:-.6mm; width:211.2mm; height:178.6mm; }
+.title-page { background:#000; }
+.units td .nm { overflow-wrap:anywhere; }
+.cap .en, .cap .ar { white-space:nowrap; }
+.mw { display:inline-block; white-space:nowrap; }      /* measuring only: a caption's one-line width */

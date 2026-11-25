@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'extract_pdf.py');
-export const DEFAULT_PY_CMD = ['uv', 'run', '--with', 'pymupdf', 'python'];
+export const DEFAULT_PY_CMD = ['uv', 'run', '--with', 'pymupdf', '--with', 'pillow', 'python'];
 
 /** `pyCmd` is an argv ARRAY. A string is accepted for old configs and split on whitespace. */
 export function pyArgv(pyCmd) {
@@ -20,6 +20,10 @@ function run(cmd, args, { cwd, timeoutMs = 300000 } = {}) {
     let out = '';
     let err = '';
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`${cmd} timed out after ${timeoutMs}ms`)); }, timeoutMs);
+    // One UTF-8 decoder per stream: a pipe chunk can end inside an Arabic letter, and a chunk
+    // decoded on its own would turn that letter into U+FFFD.
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { err += d; });
     child.on('error', (e) => { clearTimeout(timer); reject(e); });

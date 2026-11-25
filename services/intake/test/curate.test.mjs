@@ -7,10 +7,11 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  FORBIDDEN, HYPE, INTAKE_ID_RE, isCalendarDate, isLocalSrc, licenceProblems, LICENCE_NUMBER_RE,
+  asciiDigits, DOMAIN_RE, FORBIDDEN, forbiddenHits, HYPE, INTAKE_ID_RE, isCalendarDate, isLocalSrc, licenceProblems, LICENCE_NUMBER_RE,
   LISTING_ID_RE, LOCAL_LAND_STILL, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, LOCAL_LISTING_VIDEO,
-  LOCAL_LISTING_VIDEO_POSTER, PHONE_RE, videoEntryProblems,
+  LOCAL_LISTING_VIDEO_POSTER, PHONE_RE, URL_RE, videoEntryProblems,
 } from '../../../scripts/curate/rules.mjs';
+import { ORDINARY_COPY } from '../../../scripts/test/ordinary-copy-fixture.mjs';
 import { checkListing } from '../lib/listing.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -219,11 +220,67 @@ describe('copy rules', () => {
     }
   });
 
-  it('leave real listing copy alone', () => {
-    for (const s of ['SAR 4,500,000', '537 sqm of built-up area', 'built in 2019', 'five bedrooms and 05 parking bays'.replace('05', 'five'), 'Jeddah 21589']) {
-      assert.ok(!PHONE_RE.test(s), `${s} must not look like a phone number`);
-      assert.ok(!HYPE.test(s));
+  it('leave real listing copy alone (the shared ORDINARY_COPY list)', () => {
+    for (const s of ORDINARY_COPY) {
+      assert.deepEqual(forbiddenHits(s), [], `${s} is not a contact detail or another brand`);
+      assert.ok(!HYPE.test(s), s);
     }
+  });
+
+  it('catch contact numbers written in Arabic-Indic or Persian digits', () => {
+    for (const s of ['الرقم الموحد ٩٢٠٠٠١٢٣٤', 'جوال ٠٥٥١٢٣٤٥٦٧', 'هاتف ٠١٢٦٦٠١٢٣٤', 'الرقم المجاني ٨٠٠١٢٤٤٤٤٤', '۰۵۵۱۲۳۴۵۶۷']) {
+      assert.ok(forbiddenHits(s).length > 0, `${s} must be caught`);
+    }
+  });
+
+  it('asciiDigits: one normaliser for Arabic-Indic and Persian digits and the Arabic number separators', () => {
+    assert.equal(asciiDigits('٠١٢٣٤٥٦٧٨٩ ۰۱۲۳۴۵۶۷۸۹'), '0123456789 0123456789');
+    assert.equal(asciiDigits('١٬٢٥٠٬٠٠٠ و ٤٫٥'), '1,250,000 و 4.5');
+    assert.equal(asciiDigits('No digits، here'), 'No digits، here', 'the Arabic comma between words is punctuation, not a number separator');
+    assert.equal(asciiDigits(null), '');
+    assert.equal(asciiDigits(905), '905');
+  });
+
+  it('domains: the TLD is lowercase, and .ae .co .io .info .me count too', () => {
+    for (const s of ['visit acme.sa', 'acme.com', 'ACME.com', 'acme.ae', 'acme.co', 'acme.io', 'acme.info', 'acme.me', 'sales.acme.com.sa']) {
+      assert.ok(DOMAIN_RE.test(s), `${s} must be caught`);
+    }
+    for (const s of ['3 bedrooms.Net area 180 m²', 'St.Regis', 'K.S.A', 'Phase 2.0', 'the co-op']) assert.ok(!DOMAIN_RE.test(s), `${s} is not a domain`);
+    assert.ok(URL_RE.test('WWW.ACME.COM'), 'an upper-case address is still caught by the www. rule');
+    assert.ok(forbiddenHits('see WWW.ACME.COM').length > 0);
+  });
+
+  it('domains: an ALL-CAPS TLD counts too; a mixed-case one is a missing space', () => {
+    for (const s of ['EXAMPLE.COM', 'call ACME-HOMES.SA', 'visit Acme.COM.SA', 'ACME.AE', 'sales.ACME.NET', 'acme.CO']) {
+      assert.ok(DOMAIN_RE.test(s), `${s} must be caught`);
+    }
+    for (const s of ['3 bedrooms.Net area 180 m²', 'Pool.Com munal', 'K.S.A', 'U.S.A', 'A.COM']) assert.ok(!DOMAIN_RE.test(s), `${s} is not a domain`);
+  });
+
+  it('domains: the label before the dot starts with a letter and has 2+ characters', () => {
+    for (const s of ['Building 2.co-working', 'Tower 9.com', 'Phase 2.CO', 'x.com']) assert.ok(!DOMAIN_RE.test(s), `${s} is not a domain`);
+    for (const s of ['b2.com', 'acme2.sa', 'ab.io']) assert.ok(DOMAIN_RE.test(s), `${s} must be caught`);
+  });
+
+  it('domains: a word glued to a lower-case TLD is caught, even when it was only a missing space (decided 2026-11-17)', () => {
+    // "more.info", "Bldg.me", "apt.io" read as addresses, and a listing never needs them: the copy
+    // is rewritten with the space. Recorded here so the choice is deliberate, not an accident.
+    for (const s of ['for more.info call us', 'Bldg.me', 'apt.io']) assert.ok(DOMAIN_RE.test(s), `${s} is treated as a domain`);
+  });
+
+  it('forbiddenHits reports the text as written, not the ASCII digits it tested', () => {
+    assert.deepEqual(forbiddenHits('جوال ٠٥٥١٢٣٤٥٦٧'), ['٠٥٥١٢٣٤٥٦٧']);
+    assert.deepEqual(forbiddenHits('هاتف ۰۱۲۶۶۰۱۲۳۴ للحجز'), ['۰۱۲۶۶۰۱۲۳۴']);
+    assert.deepEqual(forbiddenHits('ring 0551234567'), ['0551234567']);
+  });
+
+  it('forbiddenHits never throws: odd text is clean, odd rules fall back to FORBIDDEN', () => {
+    for (const t of [null, undefined, {}, [], Object.create(null), Symbol('x'), () => 1, true]) assert.deepEqual(forbiddenHits(t), [], String(typeof t));
+    assert.deepEqual(forbiddenHits(966551234567).length > 0, true, 'a number is read as its digits');
+    for (const rules of [null, undefined, 'FORBIDDEN', {}, 3]) assert.ok(forbiddenHits('ring 0551234567', rules).length > 0, `rules=${String(rules)} still tests FORBIDDEN`);
+    assert.deepEqual(forbiddenHits('a 0551234567', [null, 'x', { test: () => true }, /\d{10}/]), ['0551234567'], 'entries that are not a RegExp are skipped');
+    const g = /\d{10}/g;
+    assert.deepEqual([forbiddenHits('a 0551234567', [g]), forbiddenHits('a 0551234567', [g])], [['0551234567'], ['0551234567']], 'a global rule gives the same answer every time');
   });
 
   it('still catch the old brand', () => {
@@ -232,11 +289,40 @@ describe('copy rules', () => {
   });
 });
 
+describe('localFilesOf', () => {
+  it('lists every site-local file a listing points at, with the field that names it', () => {
+    const l = {
+      images: [{ src: '/listings/a/01.jpg', thumb: '/listings/a/01-thumb.webp' }, { src: 'https://cdn.example/x.jpg', thumb: null }],
+      videos: [{ src: '/listings/a/v-01.mp4', poster: '/listings/a/v-01-poster.jpg' }, { src: 'https://cdn.example/v.mp4', poster: null }],
+      models: [
+        { floorPlan: { src: '/listings/a/plan-01.jpg', thumb: '/listings/a/plan-01-thumb.webp' } },
+        { floorPlan: null }, null, {},
+      ],
+    };
+    assert.deepEqual(localFilesOf(l), [
+      { field: 'images[0].src', path: '/listings/a/01.jpg' },
+      { field: 'images[0].thumb', path: '/listings/a/01-thumb.webp' },
+      { field: 'videos[0].src', path: '/listings/a/v-01.mp4' },
+      { field: 'videos[0].poster', path: '/listings/a/v-01-poster.jpg' },
+      { field: 'models[0].floorPlan.src', path: '/listings/a/plan-01.jpg' },
+      { field: 'models[0].floorPlan.thumb', path: '/listings/a/plan-01-thumb.webp' },
+    ]);
+  });
+  it('copes with a listing that has none of them, or is not one', () => {
+    for (const l of [{}, null, undefined, { images: 'x', videos: {}, models: 3 }]) assert.deepEqual(localFilesOf(l), []);
+  });
+});
+
 describe('build.mjs', () => {
   const src = fs.readFileSync(path.join(REPO, 'scripts', 'curate', 'build.mjs'), 'utf8');
-  it('stats BOTH src and thumb for every site-local image', () => {
-    assert.match(src, /for \(const field of \['src', 'thumb'\]\)/);
-    assert.equal((src.match(/for \(const field of \['src', 'thumb'\]\)/g) || []).length, 2, 'the inbox loop and the published loop');
+  it('stats every site-local file (image src + thumb, video + poster, floor plan + thumb) in BOTH loops', () => {
+    assert.equal((src.match(/for \(const f of localFilesOf\((?:clean|l)\)\)/g) || []).length, 2, 'the inbox loop and the published loop');
+    assert.doesNotMatch(src, /for \(const field of \['src', 'thumb'\]\)/, 'no hand-written per-field loop left to fall out of step with localFilesOf');
+  });
+  it('validate.mjs --head stats the same files', () => {
+    const v = fs.readFileSync(path.join(REPO, 'scripts', 'curate', 'validate.mjs'), 'utf8');
+    const head = v.slice(v.indexOf('async function headCheck()'), v.indexOf('if (HEAD) await headCheck();'));
+    assert.match(head, /localFilesOf\(/);
   });
   it('reports the published set, not the pre-filter candidate list', () => {
     const line = /console\.log\(`wrote \$\{[^`]*`\)/.exec(src);
@@ -250,7 +336,7 @@ describe('build.mjs', () => {
 // Owner decision 2026-09-08: two named homes are off the public site. This replaced a
 // SAR 10,000,000 house cap the same day — the owner meant to remove two listings once, not
 // to install a standing rule that would hide every future luxury home.
-import { WITHHELD_LISTINGS, sarAmount, isPublishable } from '../../../scripts/curate/rules.mjs';
+import { localFilesOf, WITHHELD_LISTINGS, sarAmount, isPublishable } from '../../../scripts/curate/rules.mjs';
 
 describe('sarAmount', () => {
   it('passes a SAR price straight through', () => {

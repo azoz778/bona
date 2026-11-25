@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LISTINGS } from './listings.source.mjs';
 import { ROOMS } from './rooms.mjs';
-import { INTAKE_ID_RE, isLandPublic, isPublishable, LAND_PRICE_CAP, loadRegisterWithdrawals, photoNoteProblems, sarAmount, withdrawnAdvertising, WITHDRAWN_ADVERTISING, WITHHELD_LISTINGS } from './rules.mjs';
+import { INTAKE_ID_RE, isLandPublic, isPublishable, LAND_PRICE_CAP, loadRegisterWithdrawals, localFilesOf, photoNoteProblems, sarAmount, withdrawnAdvertising, WITHDRAWN_ADVERTISING, WITHHELD_LISTINGS } from './rules.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GALLERY = path.join(ROOT, 'scripts', 'tk-gallery-data.json');
@@ -145,25 +145,12 @@ if (fs.existsSync(INBOX)) {
     if (clean.brochureUrl) clean.brochureUrl = brochureUrlFor(clean.slug);
     // REGA licence fields travel with the inbox JSON (the intake's `licence` / `wafi` commands write them there).
     clean.licence = clean.licence ?? null;
-    for (const [i, im] of (clean.images ?? []).entries()) {
-      // BOTH src and thumb: a listing whose thumbnail is missing renders a broken card,
-      // and the site never regenerates one at build time.
-      for (const field of ['src', 'thumb']) {
-        const v = im[field];
-        if (typeof v === 'string' && v.startsWith('/') && !fs.existsSync(path.join(ROOT, 'public', v))) {
-          throw new Error(`inbox/${name}: images[${i}].${field} missing: public${v}`);
-        }
-      }
-    }
-    // The same rule for walkthrough clips: `{ src, poster }`, both site-local files that have
-    // to exist, or the page renders a player pointing at a 404.
-    for (const [i, v] of (clean.videos ?? []).entries()) {
-      for (const field of ['src', 'poster']) {
-        const p = v?.[field];
-        if (typeof p === 'string' && p.startsWith('/') && !fs.existsSync(path.join(ROOT, 'public', p))) {
-          throw new Error(`inbox/${name}: videos[${i}].${field} missing: public${p}`);
-        }
-      }
+    // Every site-local file has to exist (rules.mjs localFilesOf): each photo's src AND thumb — a
+    // listing whose thumbnail is missing renders a broken card, and the site never regenerates one
+    // at build time — each walkthrough clip and its poster, each unit model's floor plan and its
+    // thumbnail. Otherwise the page links a 404.
+    for (const f of localFilesOf(clean)) {
+      if (!fs.existsSync(path.join(ROOT, 'public', f.path))) throw new Error(`inbox/${name}: ${f.field} missing: public${f.path}`);
     }
     inbox.push(clean);
   }
@@ -251,25 +238,12 @@ for (const l of published) {
 }
 console.log(`REGA licences: ${licensed} of ${published.length} listings carry an advertisement or Wafi licence`);
 
-// Every site-local image must actually exist in public/ — src AND thumb, for the curated
-// set as well as the intake set, plus every video and its poster. A missing file is a broken
-// page, so it fails the build.
+// Every site-local file must actually exist in public/ — each image's src AND thumb, every video
+// and its poster, every unit model's floor plan and its thumbnail (rules.mjs localFilesOf), for the
+// curated set as well as the intake set. A missing file is a broken page, so it fails the build.
 for (const l of published) {
-  for (const [i, im] of (l.images ?? []).entries()) {
-    for (const field of ['src', 'thumb']) {
-      const v = im[field];
-      if (typeof v === 'string' && v.startsWith('/') && !fs.existsSync(path.join(ROOT, 'public', v))) {
-        throw new Error(`${l.id} (${l.slug}): images[${i}].${field} missing: public${v}`);
-      }
-    }
-  }
-  for (const [i, vid] of (l.videos ?? []).entries()) {
-    for (const field of ['src', 'poster']) {
-      const v = vid?.[field];
-      if (typeof v === 'string' && v.startsWith('/') && !fs.existsSync(path.join(ROOT, 'public', v))) {
-        throw new Error(`${l.id} (${l.slug}): videos[${i}].${field} missing: public${v}`);
-      }
-    }
+  for (const f of localFilesOf(l)) {
+    if (!fs.existsSync(path.join(ROOT, 'public', f.path))) throw new Error(`${l.id} (${l.slug}): ${f.field} missing: public${f.path}`);
   }
 }
 

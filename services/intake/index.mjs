@@ -702,7 +702,7 @@ async function publishEdit(jid, id, apply, commitMessage, replyText, { onPushed 
     let res;
     try {
       // `await`: most edits are synchronous file writes, but `brochure <id>` shells out to
-      // rebrand_pdf.py and must finish before the rebuild and the commit.
+      // brochure_pdf.py and must finish before the rebuild and the commit.
       res = await apply();
       // `duplicate`: the edit found its work already done (a replayed video) — nothing to commit.
       if (!res || res.error || res.duplicate) return res;
@@ -768,10 +768,12 @@ async function handleCommand({ group, command }) {
       if (!found) return reply(jid, msg.notFound(command.id));
       const res = await publishEdit(
         jid, command.id,
-        () => ({ listing: edits.removeListing(cfg.repo, command.id) }),
+        // A record or folder that is a symlink is refused, not removed through (r3 #9).
+        () => { const removed = edits.removeListing(cfg.repo, command.id); return removed?.error ? removed : { listing: removed }; },
         (r) => `intake: remove ${r.listing.title.en} (${command.id})`,
         (r) => msg.removed(command.id, r.listing.title.en),
       );
+      if (res?.error) return reply(jid, `✋ ${res.error}`);
       if (res) state.forgetPublished((info) => info.id === command.id);
       return undefined;
     }
@@ -790,11 +792,13 @@ async function handleCommand({ group, command }) {
     case 'price': {
       const found = edits.locate(cfg.repo, command.id);
       if (!found) return reply(jid, msg.notFound(command.id));
+      // The brochure prints the price: it is drawn again in the same commit, or taken off (Codex r1 #8).
+      const workDir = path.join(cfg.intakeDir, 'brochure', `${command.id}-${Date.now()}`);
       const res = await publishEdit(
         jid, command.id,
-        () => edits.setPrice(cfg.repo, command.id, command),
+        () => edits.setPriceWithBrochure(cfg.repo, command.id, command, { cfg, workDir }),
         () => `intake: price (${command.id})`,
-        (r) => msg.updated(command.id, command.onRequest ? 'Price on request' : `Price set to ${r.listing.price.currency} ${r.listing.price.amount.toLocaleString('en-US')}`, r.listing),
+        (r) => msg.updated(command.id, msg.priceChange(r.listing.price, { onRequest: command.onRequest, modelPricesCleared: r.modelPricesCleared, brochure: r.brochure, id: command.id }), r.listing),
       );
       if (res?.error) return reply(jid, `✋ ${res.error}`);
       return undefined;

@@ -3,7 +3,7 @@
 
 Run through uv so no system install is needed:
 
-    uv run --with pymupdf python services/intake/extract_pdf.py <in.pdf> <outdir> [--json]
+    uv run --with pymupdf --with pillow python services/intake/extract_pdf.py <in.pdf> <outdir>
 
 Writes candidate images to <outdir>/images/NNN.<ext> and prints one JSON object on
 stdout:
@@ -22,7 +22,8 @@ stdout:
       "candidates": [
         { "index": 0, "file": "images/000.jpg", "abs": "/…/000.jpg",
           "width": 1600, "height": 1067, "page": 2, "source": "embedded",
-          "sha256": "…", "bytes": 412233 }
+          "sha256": "…", "bytes": 412233,
+          "flattened": true }               # only present when a soft mask was composited onto white
       ]
     }
 
@@ -43,8 +44,10 @@ back onto the page:
                                          x0, y0, x1, y1}]}
 
 Decompression-bomb caps: an embedded bitmap over MAX_PIXELS (50 MP) is dropped in usable()
-BEFORE any Pixmap is built, and every page render is clamped to a long side in pixels
-(RENDER_LONG_SIDE) whatever DPI is asked for.
+BEFORE any Pixmap is built, its soft mask is flattened only when the mask's own dictionary says it
+is within the same cap and it is not JPEG 2000, whose codestream sets its own size (mask_fits —
+otherwise the raw stream is kept), and every page render is
+clamped to a long side in pixels (RENDER_LONG_SIDE) whatever DPI is asked for.
 
 Memory discipline (2026-09-06, after bona-intake was OOM-killed inside its 1 GB cgroup on the
 Sadana and Al Shati brochures): ONE page is rendered at a time, every Pixmap is written
@@ -53,7 +56,9 @@ it is dropped the moment the file is on disk, and MuPDF's own object store — w
 decoded source bitmap of a flattened page, 76 MB for the Sadana cover alone — is emptied after
 every page (`TOOLS.store_shrink(100)`). On top of that RENDER_MAX_PIXELS is a hard per-render
 pixel budget (12 MP): a 1080x10449 pt "story" page renders 1114x10776 instead of 1600x15481.
-Measured on the Sadana brochure: peak RSS 374 MB -> 233 MB.
+Measured on the Sadana brochure: peak RSS 374 MB -> 233 MB. Flattening a soft-masked image
+onto white (flatten_on_white) costs about 10 bytes per pixel at its peak (RGB + mask + output)
+and each intermediate is released as soon as it is used, so only one image's worth is live.
 
 Never raises for a bad PDF: prints {"ok": false, "error": "..."} and exits 1.
 The caller (lib/pdf.mjs) is responsible for the default-deny classification.
@@ -61,7 +66,9 @@ The caller (lib/pdf.mjs) is responsible for the default-deny classification.
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
+import io
 import json
 import os
 import re
@@ -113,6 +120,84 @@ def save_pixmap(pix, path: str, quality: int = 90) -> None:
     streams it out instead.
     """
     pix.save(path, jpg_quality=quality)
+
+
+def xref_int(doc, xref: int, key: str) -> int | None:
+    """An integer entry of a PDF object's dictionary, read without decoding its stream, or None."""
+    try:
+        kind, value = doc.xref_get_key(xref, key)
+        return int(value) if kind == "int" else None
+    except Exception:
+        return None
+
+
+def jpx_filtered(doc, xref: int) -> bool:
+    """Is this stream JPEG 2000 (a /JPXDecode filter, alone or in a filter array)? An unreadable
+    Filter counts as one: the caller then does not decode."""
+    try:
+        kind, value = doc.xref_get_key(xref, "Filter")
+    except Exception:
+        return True
+    return kind in ("name", "array") and "JPXDecode" in str(value)
+
+
+def mask_fits(doc, smask_xref: int, max_pixels: int = MAX_PIXELS) -> bool:
+    """May this soft mask be decoded? Only when its dictionary declares a Width and a Height whose
+    product is within `max_pixels` — the cap usable() puts on the image itself. The image is checked
+    before it is decoded, but its mask is a separate object with its own size: a small picture can
+    carry a 60000x60000 mask, and Pixmap(doc, xref) would build all of it. No readable size = no
+    decode (the image keeps its raw stream). Never a JPXDecode mask: a JPEG 2000 stream decodes to the
+    size in its own codestream and ignores the declared Width/Height, so the dictionary cannot bound it
+    (a mask declaring 900x700 decoded 3000x3000)."""
+    if jpx_filtered(doc, smask_xref):
+        return False
+    w, h = xref_int(doc, smask_xref, "Width"), xref_int(doc, smask_xref, "Height")
+    return w is not None and h is not None and w > 0 and h > 0 and w * h <= max_pixels
+
+
+def flatten_on_white(doc, image_bytes: bytes, smask_xref: int) -> bytes | None:
+    """PNG bytes of an image (its raw stream) composited over white using its soft mask, or None.
+
+    Straight alpha (rgb*a + white*(1-a)) via Pillow's paste with an "L" mask: MuPDF's
+    Pixmap(base, mask) is PREMULTIPLIED, which Pillow would treat as straight and darken every
+    semi-transparent pixel. Gray / CMYK bases go through RGB first, a mask of another size is
+    resized, and every intermediate is released as soon as it has been used. Pillow is imported
+    lazily so a pyCmd without it keeps the old behaviour (raw stream). A mask over MAX_PIXELS (by its
+    own dictionary, mask_fits) is never decoded: None, and the raw stream is kept.
+    """
+    if not mask_fits(doc, smask_xref):
+        return None
+    try:
+        import pymupdf  # noqa: PLC0415
+        from PIL import Image  # noqa: PLC0415
+        # Decoded from the stream, NOT Pixmap(doc, xref): colour_ratio() shrinks the doc's
+        # cached pixmap in place, which then no longer matches the mask's size.
+        base = pymupdf.Pixmap(image_bytes)
+        if base.alpha:
+            base = pymupdf.Pixmap(base, 0)                # drop alpha; the mask supplies it
+        if base.n != 3:                                   # gray / CMYK / other -> RGB
+            base = pymupdf.Pixmap(pymupdf.csRGB, base)
+        size = (base.width, base.height)
+        rgb = Image.frombytes("RGB", size, base.samples)  # samples read once
+        base = None
+        m = pymupdf.Pixmap(doc, smask_xref)
+        if m.n != 1:
+            return None
+        alpha = Image.frombytes("L", (m.width, m.height), m.samples)
+        m = None
+        if alpha.size != size:                            # PDF allows a differently sized SMask
+            alpha = alpha.resize(size)
+        out = Image.new("RGB", size, (255, 255, 255))
+        out.paste(rgb, (0, 0), alpha)                     # straight alpha: rgb*a + white*(1-a)
+        rgb = alpha = None
+        buf = io.BytesIO()
+        out.save(buf, "PNG")
+        out = None
+        return buf.getvalue()
+    except Exception:
+        return None
+    finally:
+        free_store()
 
 
 def collapse(s: str) -> str:
@@ -239,6 +324,65 @@ def placement_coverage(page, xref: int):
         return None
     biggest = max(rects, key=lambda r: r.width * r.height)
     return round(min(1.0, (biggest.width * biggest.height) / area), 4)
+
+
+def repeat_coverage(page, info):
+    """placement_coverage() for a repeat of a kept picture past the candidate cap, with nothing decoded (r7 #8, r8 #7).
+
+    `info` is the image's get_images(full=True) item. get_image_rects() builds a Pixmap of the image and hashes every
+    image on the page at full size, so an image the page draws itself (info[-1] == 0) is placed by its resource name in
+    the page's content stream instead: one JM_image_reporter() pass per page (the pass get_image_bbox() makes), cached
+    on the page object, lists the draws it sees with their names and decodes nothing. Like placement_coverage(), the
+    LARGEST draw of the name counts: a picture drawn small, then over the page, is a whole page. The pass does not see a
+    draw through a tiling pattern (a WeasyPrint CSS background), in an annotation's appearance stream (/AP) or inside a
+    form XObject with no /Resources of its own: a kept picture also drawn one of those ways is placed by its other
+    draws only, so its coverage can come out low (0.23-0.25 against a true 1.0; no owner PDF does this, Claude r8
+    NB10). The pass knows draws by name only, inside form XObjects too, and it also lists draws on an OFF
+    optional-content layer, so it is used only when no other get_images() item on the page carries the name (the
+    page's names are counted once, r9 #4) and the document has no optional content. Otherwise (an image drawn inside a
+    form XObject, a shared name, any layer), on an exception, or with no usable rect, placement_coverage() places it.
+    """
+    if info[-1] == 0:
+        try:
+            placed = getattr(page, "_bona_placed", None)
+            if placed is None:
+                page._bona_placed = {}  # until the pass succeeds: every repeat on the page goes to placement_coverage()
+                if not page.parent.get_ocgs():
+                    import pymupdf  # noqa: PLC0415
+                    names = collections.Counter(x[7] for x in page.get_images(full=True))
+                    draws = {}
+                    for name, quad in pymupdf.JM_image_reporter(page._pdf_page()):
+                        draws.setdefault(name, []).append(pymupdf.Quad(quad).rect)
+                    page._bona_placed = {n: rects for n, rects in draws.items() if names[n] == 1}
+                placed = page._bona_placed
+            rects = [r for r in placed.get(info[7], ()) if not r.is_empty and not r.is_infinite]
+            area = page.rect.width * page.rect.height
+            if rects and area > 0:
+                r = max(rects, key=lambda r: r.width * r.height)
+                return round(min(1.0, (r.width * r.height) / area), 4)
+        except Exception:
+            pass
+    return placement_coverage(page, info[0])
+
+
+def raw_key(doc, xref: int, smask: int, meta=()) -> str | None:
+    """sha256 of an image's raw (still compressed) stream, its dictionary, and its soft mask's raw stream, or None.
+
+    Nothing is decoded. Past the candidate cap this is how a picture is known as a repeat of a kept one (r6 #7). `meta`
+    is info[2:6] of its get_images(full=True) item (width, height, bits per component, colour-space name), hashed with
+    its /Decode after the raw bytes: the same bytes under another dictionary are another picture (r7 #8).
+    """
+    try:
+        raw = doc.xref_stream_raw(xref)
+        if not raw:
+            return None
+        h = hashlib.sha256(raw)
+        h.update(b"\0" + repr(tuple(meta)).encode() + b"\0" + repr(doc.xref_get_key(xref, "Decode")).encode())
+        if smask:
+            h.update(b"\0" + (doc.xref_stream_raw(smask) or b""))
+        return h.hexdigest()
+    except Exception:
+        return None
 
 
 def colour_ratio(doc, xref: int):
@@ -417,16 +561,30 @@ def main() -> int:
         print(json.dumps({"ok": True, "pages": pages, "mode": "views", "views": views}, ensure_ascii=False))
         return 0
 
-    seen: set[str] = set()
+    seen: dict[str, int] = {}      # sha256 -> candidate index
+    raw_seen: dict[str, int] = {}  # raw_key() of a kept or matched image -> candidate index (r6 #7)
+    xref_seen: dict[int, int] = {}  # xref of a kept or matched image -> candidate index (r6 #7)
+    raw_memo: dict[int, str | None] = {}  # past the cap: xref -> its raw_key(), hashed once per picture (r7 #8)
     candidates = []
     embedded_total = 0
 
     def add(data: bytes, ext: str, width: int, height: int, page: int, source: str,
-            colours: int | None = None, coverage: float | None = None) -> None:
+            colours: int | None = None, coverage: float | None = None,
+            flattened: bool = False) -> int | None:
+        """The index of the candidate these bytes were kept as or matched, or None past the cap."""
         digest = hashlib.sha256(data).hexdigest()
         if digest in seen:
-            return
-        seen.add(digest)
+            # The same bitmap drawn again: it keeps its LARGEST coverage. A whole-page picture first seen as a
+            # small preview is still a whole page, and never a floor plan (claude.mjs, r3 #6).
+            first = candidates[seen[digest]]
+            if coverage is not None and (first["coverage"] is None or coverage > first["coverage"]):
+                first["coverage"] = coverage
+            return seen[digest]
+        if len(candidates) >= args.max_candidates:
+            # The cap counts NEW pictures only. The embedded loop stops every picture past the cap before it gets
+            # here (r6 #7); this stays as a backstop.
+            return None
+        seen[digest] = len(candidates)
         idx = len(candidates)
         name = f"{idx:03d}.{ext}"
         path = os.path.join(img_dir, name)
@@ -446,18 +604,38 @@ def main() -> int:
             # Fraction of its page this bitmap is drawn over. 1.0 = the page IS this
             # picture, which is what a designed deck exported page-by-page looks like.
             "coverage": coverage,
+            **({"flattened": True} if flattened else {}),
         })
+        return idx
 
     for i in range(pages):
         try:
-            images = doc[i].get_images(full=True)
+            page = doc[i]  # loaded once per page; past the cap every repeat on it is placed on this one object
+            images = page.get_images(full=True)
         except Exception:
             images = []
         embedded_total += len(images)
         for info in images:
-            if len(candidates) >= args.max_candidates:
-                break
             xref = info[0]
+            if len(candidates) >= args.max_candidates:
+                # Past the cap a picture costs nothing unless it repeats a kept one, known by its xref or by its raw
+                # (still compressed) bytes and dictionary, hashed once per xref. Then only its placement is looked up,
+                # and the kept candidate keeps its LARGEST coverage (r5 #8). Nothing is extracted, decoded or flattened
+                # past the cap (r6 #7). A repeat the page draws itself, under a name no other image on the page carries,
+                # in a document with no optional content, is placed by its largest draw under that name with nothing
+                # decoded (one content-stream pass per page); any other repeat is placed by placement_coverage(), which
+                # decodes it and hashes the page's images (r7 #8, r8 #7).
+                k = xref_seen.get(xref)
+                if k is None:
+                    if xref not in raw_memo:
+                        raw_memo[xref] = raw_key(doc, xref, info[1], info[2:6])
+                    k = raw_seen.get(raw_memo[xref])
+                if k is not None:
+                    cov = repeat_coverage(page, info)
+                    first = candidates[k]
+                    if cov is not None and (first["coverage"] is None or cov > first["coverage"]):
+                        first["coverage"] = cov
+                continue
             try:
                 ext_img = doc.extract_image(xref)
             except Exception:
@@ -471,9 +649,26 @@ def main() -> int:
             ext = (ext_img.get("ext") or "png").lower()
             if ext not in ("jpg", "jpeg", "png", "webp", "tiff", "bmp"):
                 ext = "png"
-            add(ext_img["image"], ext, w, h, i + 1, "embedded", stats[0] if stats else None,
-                placement_coverage(doc[i], xref))
-            ext_img = None
+            data = ext_img["image"]
+            flat = None  # set only for an image with a soft mask; read for every image below
+            if info[1]:
+                # The image has a soft mask (transparency). extract_image() returns only the
+                # colour stream, which shows as BLACK where the picture is transparent: floor
+                # plans came out as black boxes. Composite onto white instead.
+                flat = flatten_on_white(doc, data, info[1])
+                if flat:
+                    data, ext = flat, "png"
+            # Below the cap each placement gets a page of its own, as before r7 #8. A page kept across its images
+            # hashes them all at the first placement, before colour_ratio() shrinks the next one's cached Pixmap in
+            # place, and that one then matches nothing: 30 of 40 coverages came out null on a 60-page gallery.
+            k = add(data, ext, w, h, i + 1, "embedded", stats[0] if stats else None,
+                    placement_coverage(doc[i], xref), flattened=bool(flat))
+            if k is not None:
+                xref_seen.setdefault(xref, k)
+                key = raw_key(doc, xref, info[1], info[2:6])
+                if key:
+                    raw_seen.setdefault(key, k)
+            ext_img = data = flat = None
         # colour_ratio() builds a Pixmap per candidate and MuPDF keeps every one of them in
         # its store; a 40-image brochure would otherwise carry all of them to the end.
         free_store()

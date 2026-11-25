@@ -84,6 +84,30 @@ describe('env parsing', () => {
     assert.equal(cfg.maxImages, 10);
     assert.match(cfg.site, /^https:\/\//);
   });
+
+  it('runs at most 2 unit-model page checks at once unless BONA_MODEL_PRICE_CONCURRENCY says otherwise (each is a node process; the unit has MemoryMax 2G)', () => {
+    const before = process.env.BONA_MODEL_PRICE_CONCURRENCY;
+    try {
+      delete process.env.BONA_MODEL_PRICE_CONCURRENCY;
+      assert.equal(loadConfig({ repo: '/tmp/repo' }).modelPriceConcurrency, 2);
+      process.env.BONA_MODEL_PRICE_CONCURRENCY = '1';
+      assert.equal(loadConfig({ repo: '/tmp/repo' }).modelPriceConcurrency, 1);
+    } finally {
+      if (before === undefined) delete process.env.BONA_MODEL_PRICE_CONCURRENCY; else process.env.BONA_MODEL_PRICE_CONCURRENCY = before;
+    }
+  });
+
+  it('bounds the unit-model price check: 12 pages unless BONA_MAX_MODEL_PRICE_PAGES says otherwise', () => {
+    const before = process.env.BONA_MAX_MODEL_PRICE_PAGES;
+    try {
+      delete process.env.BONA_MAX_MODEL_PRICE_PAGES;
+      assert.equal(loadConfig({ repo: '/tmp/repo' }).maxModelPricePages, 12);
+      process.env.BONA_MAX_MODEL_PRICE_PAGES = '4';
+      assert.equal(loadConfig({ repo: '/tmp/repo' }).maxModelPricePages, 4);
+    } finally {
+      if (before === undefined) delete process.env.BONA_MAX_MODEL_PRICE_PAGES; else process.env.BONA_MAX_MODEL_PRICE_PAGES = before;
+    }
+  });
 });
 
 describe('log redaction', () => {
@@ -114,6 +138,29 @@ describe('reply messages', () => {
       _intake: { images: [{ n: 1, room: 'pool' }] },
     },
   };
+
+  it('names the new bilingual brochure and the unit models', () => {
+    const withBrochure = {
+      ...report,
+      brochure: { pages: 12, bytes: 3 * 1048576 },
+      listing: { ...report.listing, brochureUrl: '/brochures/x.pdf', models: [{}, {}, {}] },
+    };
+    const text = msg.published(withBrochure);
+    assert.match(text, /📄 Bona brochure \(English \+ Arabic, 12 pages\) \(3\.0 MB\): \/brochures\/x\.pdf/);
+    assert.match(text, /🏢 3 unit models$/m, 'no floor plan claimed when none was published');
+    assert.doesNotMatch(text, /floor plan/);
+    assert.doesNotMatch(text, /re-published/);
+    assert.doesNotMatch(msg.published(report), /unit model/);
+  });
+
+  it('counts the floor plans actually published beside the unit models', () => {
+    const plan = (n) => ({ floorPlan: { src: `/listings/x/plan-0${n}.jpg`, thumb: `/listings/x/plan-0${n}-thumb.webp` } });
+    const withModels = (models) => msg.published({ ...report, listing: { ...report.listing, models } });
+    assert.match(withModels([plan(1), plan(2), {}]), /🏢 3 unit models · 2 floor plans$/m);
+    assert.match(withModels(Array.from({ length: 8 }, (_, i) => plan(i + 1))), /🏢 8 unit models · 8 floor plans$/m);
+    assert.match(withModels([plan(1)]), /🏢 1 unit model · 1 floor plan$/m);
+    assert.match(withModels([{ floorPlan: null }]), /🏢 1 unit model$/m);
+  });
 
   it('the success reply carries the URL, the count, the cover and the commands', () => {
     const text = msg.published(report, { live: true });

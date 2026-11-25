@@ -29,7 +29,11 @@
 @font-face { font-family: "Montserrat"; src: url("/fonts/montserrat-600.woff2") format("woff2"); font-weight: 600; font-style: normal; font-display: swap; }
 @font-face { font-family: "IBM Plex Arabic"; src: url("/fonts/plex-arabic-400.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
 @font-face { font-family: "IBM Plex Arabic"; src: url("/fonts/plex-arabic-500.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
-@font-face { font-family: "Amiri"; src: url("/fonts/amiri-700.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+/* The amiri subset carries "(" but not ")" (and no digits or other Latin), so without a range an RTL "(…)" drew its
+   opening bracket in Amiri and its closing one in the fallback font: ")سكني)". Arabic blocks only (plus the
+   space, no-break space and the joiner / direction marks U+200C–200F, so headings keep Amiri's spacing), so
+   brackets, digits and Latin fall through together. The plex-arabic subsets need no range: they hold no ASCII at all, only Arabic and spaces. */
+@font-face { font-family: "Amiri"; src: url("/fonts/amiri-700.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; unicode-range: U+0020, U+00A0, U+0600-06FF, U+0750-077F, U+08A0-08FF, U+200C-200F, U+FB50-FDFF, U+FE70-FEFF; }
 
 @layer base {
   html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }

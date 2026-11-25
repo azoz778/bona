@@ -127,6 +127,356 @@
       "ضمان الهيكل الإنشائي عشر سنوات"
     ]
   },
+  "models": [
+    {
+      "name": {
+        "en": "Lulu 2",
+        "ar": "لؤلؤ 2"
+      },
+      "bedrooms": 2,
+      "bathrooms": 2,
+      "areaSqm": 79.77,
+      "rooms": {
+        "en": [
+          "Living room",
+          "Kitchen",
+          "Laundry room"
+        ],
+        "ar": [
+          "صالة معيشة",
+          "مطبخ",
+          "غرفة غسيل"
+        ]
+      },
+      "availability": {
+        "en": "Buildings H–R, ground to sixth floor",
+        "ar": "المباني H–R، من الدور الأرضي إلى الدور السادس"
+      },
+      "price": 319015,
+      "subsidisedPrice": 270425,
+      "floorPlan": {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/plan-01.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-01-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Nawras 2",
+        "ar": "نورس 2"
+      },
+      "bedrooms": 3,
+      "bathrooms": 2,
+      "areaSqm": 105.02,
+      "rooms": {
+        "en": [
+          "Living room",
+          "Kitchen",
+          "Laundry room"
+        ],
+        "ar": [
+          "صالة معيشة",
+          "مطبخ",
+          "غرفة غسيل"
+        ]
+      },
+      "availability": {
+        "en": "Buildings G–P, first to seventh floor",
+        "ar": "المباني G–P، من الدور الأول إلى الدور السابع"
+      },
+      "price": 419994,
+      "subsidisedPrice": 356024,
+      "floorPlan": {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/plan-02.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-02-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Seif 2",
+        "ar": "سيف 2"
+      },
+      "bedrooms": 3,
+      "bathrooms": 2,
+      "areaSqm": 122.98,
+      "rooms": {
+        "en": [
+          "Living room",
+          "Dining room",
+          "Kitchen",
+          "Laundry room",
+          "Balcony"
+        ],
+        "ar": [
+          "صالة معيشة",
+          "غرفة طعام",
+          "مطبخ",
+          "غرفة غسيل",
+          "شرفة"
+        ]
+      },
+      "availability": {
+        "en": "Buildings H–R, first to sixth floor",
+        "ar": "المباني H–R، من الدور الأول إلى الدور السادس"
+      },
+      "price": 491819,
+      "subsidisedPrice": 416910,
+      "floorPlan": {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/plan-03.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-03-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Seif 3",
+        "ar": "سيف 3"
+      },
+      "bedrooms": 2,
+      "bathrooms": 3,
+      "areaSqm": 127.93,
+      "rooms": {
+        "en": [
+          "Majlis",
+          "Living room",
+          "Dressing room",
+          "Kitchen",
+          "Laundry"
+        ],
+        "ar": [
+          "مجلس",
+          "صالة معيشة",
+          "غرفة ملابس",
+          "مطبخ",
+          "مغسلة"
+        ]
+      },
+      "availability": {
+        "en": "Building E, ground, second, fifth, sixth and seventh floors",
+        "ar": "المبنى E، الأدوار الأرضي والثاني والخامس والسادس والسابع"
+      },
+      "price": 511615,
+      "subsidisedPrice": 433690,
+      "floorPlan": {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/plan-04.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-04-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Marafi 3",
+        "ar": "مرافئ 3"
+      },
+      "bedrooms": 3,
+      "bathrooms": 3,
+      "areaSqm": 148.46,
+      "rooms": {
+        "en": [
+          "Majlis",
+          "Living room",
+          "Dining room",
+          "Kitchen",
+          "Laundry room",
+          "Two entrances"
+        ],
+        "ar": [
+          "مجلس",
+          "صالة معيشة",
+          "غرفة طعام",
+          "مطبخ",
+          "غرفة غسيل",
+          "مدخلان"
+        ]
+      },
+      "availability": {
+        "en": "Buildings H–R, first to seventh floor",
+        "ar": "المباني H–R، من الدور الأول إلى الدور السابع"
+      },
+      "price": 593719,
+      "subsidisedPrice": 503288,
+      "floorPlan": {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/plan-05.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-05-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Al Zumurrud 2",
+        "ar": "الزمرد 2"
+      },
+      "bedrooms": 3,
+      "bathrooms": 4,
+      "areaSqm": 156.84,
+      "rooms": {
+        "en": [
+          "Majlis",
+          "Living room",
+          "Maid's room",
+          "Maid's bathroom",
+          "Dressing room",
+          "Kitchen"
+        ],
+        "ar": [
+          "مجلس",
+          "صالة معيشة",
+          "غرفة خادمة",
+          "دورة مياه الخادمة",
+          "غرفة ملابس",
+          "مطبخ"
+        ]
+      },
+      "availability": {
+        "en": "Building D, ground to second floor",
+        "ar": "المبنى D، من الدور الأرضي إلى الدور الثاني"
+      },
+      "price": 673245,
+      "subsidisedPrice": 559261,
+      "floorPlan": {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/plan-06.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-06-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Al Fairouz 1",
+        "ar": "الفيروز 1"
+      },
+      "bedrooms": 3,
+      "bathrooms": 4,
+      "areaSqm": 160.05,
+      "rooms": {
+        "en": [
+          "Majlis",
+          "Living room",
+          "Maid's room",
+          "Maid's bathroom",
+          "Dressing room",
+          "Kitchen"
+        ],
+        "ar": [
+          "مجلس",
+          "صالة معيشة",
+          "غرفة خادمة",
+          "دورة مياه الخادمة",
+          "غرفة ملابس",
+          "مطبخ"
+        ]
+      },
+      "availability": {
+        "en": "Building D, ground, second and fourth floors",
+        "ar": "المبنى D، الأدوار الأرضي والثاني والرابع"
+      },
+      "price": 636245,
+      "subsidisedPrice": 519928,
+      "floorPlan": {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/plan-07.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-07-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Kahraman 2",
+        "ar": "كهرمان 2"
+      },
+      "bedrooms": 3,
+      "bathrooms": 4,
+      "areaSqm": 175.4,
+      "rooms": {
+        "en": [
+          "Majlis",
+          "Living room",
+          "Dining room",
+          "Maid's room",
+          "Maid's bathroom",
+          "Kitchen",
+          "Balcony",
+          "Two entrances"
+        ],
+        "ar": [
+          "مجلس",
+          "صالة معيشة",
+          "غرفة طعام",
+          "غرفة خادمة",
+          "دورة مياه الخادمة",
+          "مطبخ",
+          "شرفة",
+          "مدخلان"
+        ]
+      },
+      "availability": {
+        "en": "Building F, ground, second and third floors",
+        "ar": "المبنى F، الأدوار الأرضي والثاني والثالث"
+      },
+      "price": 752914,
+      "subsidisedPrice": 625442,
+      "floorPlan": {
+        "src": "/listings/jeddah-heights-residential-community-jeddah/plan-08.jpg",
+        "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-08-thumb.webp"
+      }
+    }
+  ],
+  "amenities": {
+    "en": [
+      "Friday mosques",
+      "Neighbourhood mosques",
+      "Parks and green spaces",
+      "Educational facilities",
+      "Health centre",
+      "Commercial facilities",
+      "Health club",
+      "Children's nursery",
+      "Diwaniya social lounges",
+      "Retail shops",
+      "Outdoor seating areas"
+    ],
+    "ar": [
+      "جوامع لصلاة الجمعة",
+      "مساجد الأحياء",
+      "حدائق ومساحات خضراء",
+      "مرافق تعليمية",
+      "مركز صحي",
+      "مرافق تجارية",
+      "نادٍ صحي",
+      "حضانة أطفال",
+      "ديوانيات للجلسات الاجتماعية",
+      "محلات تجارية",
+      "جلسات خارجية"
+    ]
+  },
+  "nearby": {
+    "en": [
+      "King Abdulaziz International Airport",
+      "King Abdullah Sports City",
+      "Al Hamdaniyah Boulevard",
+      "Marina Avenue Mall",
+      "The Village Mall",
+      "Obhur Beach",
+      "Alexandria Beach"
+    ],
+    "ar": [
+      "مطار الملك عبدالعزيز الدولي",
+      "مدينة الملك عبدالله الرياضية",
+      "بوليفارد الحمدانية",
+      "مارينا أفينيو مول",
+      "ذا فيلج مول",
+      "شاطئ أبحر",
+      "شاطئ الإسكندرية"
+    ]
+  },
+  "warranties": {
+    "en": [
+      "Structural frame: 10 years",
+      "Waterproofing and insulation: 10 years",
+      "Plumbing installation: 1 year",
+      "Electrical installation: 1 year",
+      "Paintwork: 1 year"
+    ],
+    "ar": [
+      "الهيكل الإنشائي: عشر سنوات",
+      "العزل المائي والحراري: عشر سنوات",
+      "تأسيس السباكة: سنة واحدة",
+      "تأسيس الكهرباء: سنة واحدة",
+      "الدهانات: سنة واحدة"
+    ]
+  },
   "virtualTourUrl": null,
   "brochureUrl": "https://bona-real-estate.com/listings/jeddah-heights-residential-community-jeddah/brochure.pdf",
   "project": {

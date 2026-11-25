@@ -33,6 +33,7 @@ Array of listing objects:
   ],                                // images[0] is the hero; 4–10 images
   "description": { "en": "2–4 short paragraphs", "ar": "..." },
   "highlights": { "en": ["Private beach", "..."], "ar": ["شاطئ خاص", "..."] },
+  "models": [],                     // OPTIONAL — unit models; with "amenities", "nearby", "warranties": see "Unit models" below
   "virtualTourUrl": null,
   "brochureUrl": null,
   "videos": [],                     // optional; [{ src, poster }] walkthrough clips — see "Videos" below
@@ -54,6 +55,41 @@ Rules: prices are asking prices from TK only (never an estimate — TAQEEM rule)
   (`object-fit: cover`) uses it as `object-position` (`focusStyle()` in `src/lib/listings.ts`), so a tall
   façade shot in a wide frame keeps the building instead of the sky. Written by the intake's model; absent =
   centred, as before (`imageFocusProblems` in `scripts/curate/rules.mjs`).
+
+## Unit models and the project fact lists (2026-11-17)
+A development brochure prints several unit models, each with its own area, rooms, floor plan and prices.
+The WhatsApp intake publishes them; all four keys are optional and left out when there is nothing to say.
+
+```jsonc
+"models": [ { "name": { "en": "Nawras 2", "ar": "نورس 2" },          // ≤ 60 characters each; at most 24 models
+              "bedrooms": 3, "bathrooms": 2,                        // null, or a whole number 0–20
+              "areaSqm": 105.02,                                    // null, or 10–100000 (built-up / net, not the plot)
+              "rooms": { "en": ["Laundry"], "ar": ["غرفة غسيل"] },  // or null; ≤ 12 items of ≤ 40 characters
+              "availability": { "en": "Buildings G–P", "ar": "المباني G–P" }, // or null; ≤ 160 characters
+              "price": 419994, "subsidisedPrice": 356024,           // null = on request; in price.currency
+              "floorPlan": { "src": "/listings/<slug>/plan-01.jpg", "thumb": "/listings/<slug>/plan-01-thumb.webp" } } ], // or null
+"amenities":  { "en": ["Health club"], "ar": ["نادٍ صحي"] },          // ≤ 16 items
+"nearby":     { "en": ["King Abdulaziz International Airport"], "ar": ["مطار الملك عبدالعزيز الدولي"] }, // ≤ 8
+"warranties": { "en": ["Structure — 10 years"], "ar": ["الهيكل الإنشائي — 10 سنوات"] }      // ≤ 8
+```
+
+- One rule, `modelsProblems` in `scripts/curate/rules.mjs`, for the intake's `checkListing` and `validate.mjs`.
+  Lists are bilingual with equal lengths (`bilingualListProblems`); fact-list items are at most 80 characters.
+  A model carries only the fields above: the intake model's `evidence` citation is never published.
+- **Prices**: printed figures only (the TAQEEM check confirms each on its page). `subsidisedPrice` (Sakani)
+  needs the model's own `price`, is lower than it, and is for sales only. When any model has a price, the
+  headline of a whole development is the cheapest model: `price.amount` = the lowest model `price`,
+  `price.from` = true, and `price.subsidisedAmount` = the lowest model `subsidisedPrice` when that is below
+  the amount, otherwise absent. A whole development is a `project` with no `unit` and two models or more
+  (`headlineFollowsModels`): one specific unit, and a single property with one "model" or per-floor rows,
+  keep their own price (never "From …"). Every model price is in `price.currency`. The owner's own price
+  (caption at publish, or `price <id> …` on WhatsApp) clears every model price.
+- **Floor plans**: `public/listings/<slug>/plan-NN.jpg` (white ground, ≤ 1600 px, q85) + `plan-NN-thumb.webp`
+  (≤ 480 px), NN = the model's 1-based position when the intake wrote it; the path's slug must be the
+  listing's own (`LOCAL_PLAN_SRC` / `LOCAL_PLAN_THUMB`), and one plan belongs to one model. A floor plan is
+  never a gallery photo.
+- Every string (model names, rooms, availability, list items) passes the same copy rules as the rest of the
+  listing: no contact detail, no other agency's brand (`forbiddenHits`), no hype (`HYPE`).
 
 ## Round 2 additions (2026-09-05 17:00)
 - `kind`: `"house" | "apartment" | "land" | "building"` — REQUIRED on every listing. Derived from `type`: villa/mansion/duplex/palais → house; apartment/penthouse → apartment; land → land; building → building. The site has separate Houses and Apartments sections driven by this field.
@@ -133,7 +169,7 @@ this repo. Nothing else in the pipeline changes.
   - `_intake: { source, messageId, groupJid, pdfSha256, pdfFileName, caption, model, confidence,
     warnings, images[], createdAt, site }` — provenance, so a listing can always be traced back to
     the WhatsApp message and the PDF that produced it. `warnings` is an array of **codes** from a
-    fixed vocabulary (`not-enough-photos`, `price-not-printed`, `subsidised-price-not-printed`, `brochure-too-large`,
+    fixed vocabulary (`not-enough-photos`, `price-not-printed`, `subsidised-price-not-printed`, `model-price-not-printed`, `brochure-too-large`,
     `brochure-failed`, `images-skipped`, `model-flagged`) and never free text: the model's own
     `warnings` are model output about an untrusted document, so they stay in the run's `ai.json`
     and are not committed.
@@ -149,13 +185,11 @@ this repo. Nothing else in the pipeline changes.
 - **`sourceRef`**: `WA-<yyyymmdd>-<6 chars of the WhatsApp message id>`. It is deliberately NOT a
   TK reference, and `build.mjs` never looks it up in the TK API.
 - **`brochureUrl`**: `https://bona-real-estate.com/listings/<slug>/brochure.pdf` — the **default** for an
-  intake listing, not an opt-in. The brochure at that path is not the developer's file: it is
-  their document re-published under Bona's branding by `services/intake/rebrand_pdf.py`, with a
-  Bona cover in front of it, a footer strip (`bona-real-estate.com · +966 59 329 6933 · FAL 1100313556 ·
-  <id>`) on every one of their pages and a closing *Enquire* page carrying the listing URL, a QR
-  of it, the WhatsApp link, the opening hours and the licence line. Their own pages and branding
-  are left exactly as they are; nothing Bona adds may carry another agency, and any listing fact
-  that holds a rival broker, a phone number, an email or a link is dropped rather than printed.
+  intake listing, not an opt-in. The brochure at that path is not the developer's file: it is a
+  bilingual A4 brochure drawn from scratch by `services/intake/brochure_pdf.py` (TK design system,
+  Bona branded) out of this listing's own fields, its photos and floor plans, and `site.json` —
+  closing on the listing URL, a QR of it, the enquiry details and the licence line. Nothing of the
+  developer's PDF is re-published; the developer is named as text only.
   It is `null` when the owner captioned the PDF `#nobrochure`, or when the branded file could not
   be built or could not be squeezed under `BONA_MAX_BROCHURE_MB` (25 MB) — the listing then also
   carries `brochure-failed` or `brochure-too-large` in `_intake.warnings`, and `brochure <id>` in

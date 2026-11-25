@@ -48,6 +48,26 @@ export interface Listing {
   seoTitle?: Localised;
   /** Brochure-sourced project counts shown beside the unit sheet. */
   projectFacts?: { totalUnits?: number; buildings?: number } | null;
+  /** Unit models printed in a development brochure (WhatsApp intake, 2026-11-17; src/data/LISTING-SCHEMA.md →
+      "Unit models and the project fact lists"). Prices are in `price.currency`; null = on request.
+      `subsidisedPrice` = the price for housing-subsidy (Sakani) beneficiaries. Rendered by UnitModels.astro. */
+  models?: UnitModel[];
+  /** Brochure fact lists shown under the unit models; bilingual lists of equal length. */
+  amenities?: { en: string[]; ar: string[] };
+  nearby?: { en: string[]; ar: string[] };
+  warranties?: { en: string[]; ar: string[] };
+}
+
+export interface UnitModel {
+  name: Localised;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  areaSqm?: number | null;
+  rooms?: { en: string[]; ar: string[] } | null;
+  availability?: Localised | null;
+  price?: number | null;
+  subsidisedPrice?: number | null;
+  floorPlan?: { src: string; thumb?: string | null } | null;
 }
 
 export const listings: Listing[] = raw as Listing[];

@@ -5,12 +5,17 @@ import path from 'node:path';
 import { after, afterEach, before, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
-  buildListing, checkListing, inboxIds, nextListingId, orderedPicks, readIndex, replaceMetaFor, seqAfter, slugify,
-  takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing, findInbox, findByPdfSha, listInbox,
+  buildListing, checkListing, enrichHeadline, enrichMetaFor, ENRICH_KEYS, inboxIds, mergeEnrichment, nextListingId, orderedPicks,
+  readIndex, replaceMetaFor, seqAfter, slugify, takenSlugs, todayRiyadh, uniqueSlug, writeIndex, writeInboxListing, findInbox,
+  findByPdfSha, listInbox,
 } from '../lib/listing.mjs';
 import * as edits from '../lib/edits.mjs';
+import { PLAN_JPEG_QUALITY, THUMB_QUALITY, writeFloorPlans } from '../lib/images.mjs';
 import * as msg from '../lib/messages.mjs';
-import { licenceProblems, WITHHELD_LISTINGS } from '../../../scripts/curate/rules.mjs';
+import { alignHeadline } from '../lib/model-prices.mjs';
+import {
+  headlineFollowsModels, isLocalSrc, licenceProblems, LOCAL_LISTING_SRC, LOCAL_PLAN_SRC, LOCAL_PLAN_THUMB, modelsProblems, WITHHELD_LISTINGS,
+} from '../../../scripts/curate/rules.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -301,6 +306,328 @@ describe('buildListing', () => {
   });
 });
 
+// ---- unit models, floor plans and the project fact lists (2026-11-17) --------------------------
+describe('buildListing + checkListing — unit models, floor plans, amenities / nearby / warranties', () => {
+  const slug = 'jeddah-heights-al-hamdaniyah';
+  const picks = orderedPicks(AI.images);
+  const PLAN = { model: 0, src: `/listings/${slug}/plan-01.jpg`, thumb: `/listings/${slug}/plan-01-thumb.webp` };
+  const models = () => [
+    {
+      name: { en: 'Nawras 2', ar: 'نورس 2' }, bedrooms: 3, bathrooms: 2, areaSqm: 105.02,
+      rooms: { en: ['Laundry', 'Maid room'], ar: ['غرفة غسيل', 'غرفة خادمة'] },
+      availability: { en: 'Buildings G–P, first to seventh floor', ar: 'المباني G–P، من الأول إلى السابع' },
+      price: 419994, subsidisedPrice: 356024, evidence: { page: 10, quote: '419,994 / 356,024' }, floorPlan: 0,
+    },
+    {
+      name: { en: 'Lulu', ar: 'لؤلؤ' }, bedrooms: 2, bathrooms: 2, areaSqm: 88, rooms: null, availability: null,
+      price: 319015, subsidisedPrice: 270425, evidence: { page: 11, quote: '319,015' }, floorPlan: null,
+    },
+  ];
+  const projectAi = () => {
+    const ai = structuredClone(AI);
+    ai.listing.category = 'off-plan';
+    ai.listing.type = 'apartment';
+    ai.listing.project = { name: { en: 'Jeddah Heights', ar: 'جدة هايتس' }, developer: { en: 'NHC', ar: 'الوطنية للإسكان' } };
+    // What alignHeadline() leaves after the model-price check: the cheapest model, "from", and its Sakani price.
+    ai.listing.price = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
+    ai.models = models();
+    ai.amenities = { en: ['Health club', 'Kids play area'], ar: ['نادٍ صحي', 'منطقة ألعاب للأطفال'] };
+    ai.nearby = { en: [], ar: [] };
+    ai.warranties = { en: ['Structure — 10 years'], ar: ['الهيكل الإنشائي — 10 سنوات'] };
+    return ai;
+  };
+  const build = (ai = projectAi(), floorPlans = [PLAN]) => buildListing({
+    ai, images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: {}, meta: {}, floorPlans,
+  });
+
+  it('publishes each model\'s checked fields, its floor plan as { src, thumb }, and never the evidence', () => {
+    const l = build();
+    assert.deepEqual(l.models, [
+      {
+        name: { en: 'Nawras 2', ar: 'نورس 2' }, bedrooms: 3, bathrooms: 2, areaSqm: 105.02,
+        rooms: { en: ['Laundry', 'Maid room'], ar: ['غرفة غسيل', 'غرفة خادمة'] },
+        availability: { en: 'Buildings G–P, first to seventh floor', ar: 'المباني G–P، من الأول إلى السابع' },
+        price: 419994, subsidisedPrice: 356024, floorPlan: { src: PLAN.src, thumb: PLAN.thumb },
+      },
+      {
+        name: { en: 'Lulu', ar: 'لؤلؤ' }, bedrooms: 2, bathrooms: 2, areaSqm: 88, rooms: null, availability: null,
+        price: 319015, subsidisedPrice: 270425, floorPlan: null,
+      },
+    ]);
+    const json = JSON.stringify(l);
+    assert.ok(!json.includes('evidence') && !json.includes('419,994 / 356,024'), 'the model\'s citation is internal and never published');
+    assert.deepEqual(checkListing(l), []);
+  });
+
+  it('copies the answer: editing the AI result afterwards does not reach the listing', () => {
+    const ai = projectAi();
+    const l = build(ai);
+    ai.models[0].name.en = 'changed';
+    ai.models[0].rooms.en.push('Study');
+    ai.amenities.en.push('Spa');
+    assert.equal(l.models[0].name.en, 'Nawras 2');
+    assert.deepEqual(l.models[0].rooms.en, ['Laundry', 'Maid room']);
+    assert.deepEqual(l.amenities.en, ['Health club', 'Kids play area']);
+  });
+
+  it('leaves `models` out when the brochure prints none, and each fact list out when it is empty', () => {
+    for (const none of [undefined, null, []]) {
+      const ai = projectAi();
+      ai.models = none;
+      assert.equal('models' in build(ai, []), false, `models: ${JSON.stringify(none)}`);
+    }
+    const l = build();
+    assert.deepEqual(l.amenities, { en: ['Health club', 'Kids play area'], ar: ['نادٍ صحي', 'منطقة ألعاب للأطفال'] });
+    assert.deepEqual(l.warranties, { en: ['Structure — 10 years'], ar: ['الهيكل الإنشائي — 10 سنوات'] });
+    assert.equal('nearby' in l, false, 'an empty list is left out');
+    const plain = buildListing({ ai: structuredClone(AI), images: imagesFor(slug, picks), slug, id: 'BONA-W007', repo: REPO, caption: {}, meta: {} });
+    for (const k of ['models', 'amenities', 'nearby', 'warranties']) assert.equal(k in plain, false, `an ordinary listing gets no ${k} key`);
+  });
+
+  it('a model whose floor plan was not written gets null; a plan for a model that does not exist is ignored', () => {
+    const l = build(projectAi(), [{ model: 5, src: `/listings/${slug}/plan-06.jpg`, thumb: `/listings/${slug}/plan-06-thumb.webp` }]);
+    assert.deepEqual(l.models.map((m) => m.floorPlan), [null, null]);
+    assert.equal(l.models.length, 2);
+  });
+
+  it('a rental never carries a Sakani price, on a model any more than on the headline', () => {
+    const ai = projectAi();
+    ai.listing.category = 'rent';
+    ai.listing.price = { amount: 319015, currency: 'SAR', from: true, period: 'year', onRequest: false, subsidisedAmount: 270425 };
+    const l = build(ai);
+    assert.deepEqual(l.models.map((m) => m.subsidisedPrice), [null, null]);
+    assert.deepEqual(l.models.map((m) => m.price), [419994, 319015]);
+    assert.deepEqual(checkListing(l), []);
+  });
+
+  it('accepts models with no price beside a headline of its own, and one specific unit beside priced models', () => {
+    const ai = projectAi();
+    for (const m of ai.models) { m.price = null; m.subsidisedPrice = null; m.evidence = null; }
+    ai.listing.price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+    assert.deepEqual(checkListing(build(ai)), []);
+    // The pipeline never aligns one specific unit's price with the models (price-pages.test.mjs).
+    const unit = projectAi();
+    unit.listing.unit = { floor: 3, block: null, unitRef: 'A-12' };
+    unit.listing.price = { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false };
+    assert.deepEqual(checkListing(build(unit)), []);
+  });
+
+  it('a single villa (no project) with one priced model keeps its own headline: not "from", and the validator agrees', () => {
+    const ai = structuredClone(AI);   // a single villa: project null, SAR 4,500,000, not "from"
+    ai.models = [{ ...models()[1], name: { en: 'Villa', ar: 'فيلا' }, price: 4400000, subsidisedPrice: null }];
+    const l = build(ai, []);
+    assert.deepEqual(l.price, { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false });
+    assert.equal(l.models[0].price, 4400000);
+    assert.deepEqual(checkListing(l), []);
+    assert.deepEqual(modelsProblems(l), []);
+  });
+
+  it('per-floor rows of a single property, and a project with ONE model, are not a development: the headline rule does not apply', () => {
+    const floors = structuredClone(AI);
+    floors.models = [{ ...models()[1], name: { en: 'Ground floor', ar: 'الدور الأرضي' }, price: 2000000, subsidisedPrice: null },
+      { ...models()[1], name: { en: 'First floor', ar: 'الدور الأول' }, price: 2500000, subsidisedPrice: null }];
+    assert.deepEqual(checkListing(build(floors, [])), []);
+    const one = projectAi();
+    one.models = [{ ...models()[0], floorPlan: null }];
+    one.listing.price = { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false };
+    assert.deepEqual(checkListing(build(one, [])), []);
+  });
+
+  it('headlineFollowsModels: a project, no unit, two models or more', () => {
+    const base = { project: { name: { en: 'P', ar: 'م' } }, unit: null, models: [{}, {}] };
+    assert.equal(headlineFollowsModels(base), true);
+    assert.equal(headlineFollowsModels({ ...base, models: [{}, {}, {}] }), true);
+    for (const [label, over] of [['no project', { project: null }], ['a unit', { unit: { floor: 3 } }], ['one model', { models: [{}] }],
+      ['no models', { models: undefined }], ['models not a list', { models: { 0: {}, 1: {} } }]]) {
+      assert.equal(headlineFollowsModels({ ...base, ...over }), false, label);
+    }
+    assert.equal(headlineFollowsModels(null), false);
+  });
+
+  it('the headline rule is alignHeadline\'s: a lowest Sakani price at or above the lowest price leaves none on the headline', () => {
+    const ai = projectAi();
+    ai.models = [{ ...models()[1], price: 300000, subsidisedPrice: null }, models()[0]];
+    ai.listing.price = alignHeadline({ amount: null, currency: 'SAR', from: false, period: null, onRequest: true }, ai.models);
+    const l = build(ai, []);
+    assert.deepEqual(l.price, { amount: 300000, currency: 'SAR', from: true, period: null, onRequest: false });
+    assert.deepEqual(checkListing(l), []);
+  });
+
+  const refusals = [
+    ['a model price of 0', (l) => { l.models[1].price = 0; }, /models\[1\]\.price must be null or a number above 0/],
+    ['a negative model price', (l) => { l.models[1].price = -5; }, /models\[1\]\.price must be null or a number above 0/],
+    ['a model price written as text', (l) => { l.models[1].price = '319015'; }, /models\[1\]\.price must be null or a number above 0/],
+    ['a Sakani price equal to the price', (l) => { l.models[0].subsidisedPrice = 419994; }, /models\[0\]\.subsidisedPrice must be lower than its price/],
+    ['a Sakani price above the price', (l) => { l.models[0].subsidisedPrice = 500000; }, /models\[0\]\.subsidisedPrice must be lower than its price/],
+    ['a Sakani price with no price', (l) => { l.models[0].price = null; }, /models\[0\]\.subsidisedPrice needs the model's regular price/],
+    ['a floor plan of another listing', (l) => { l.models[0].floorPlan.src = '/listings/other-listing/plan-01.jpg'; }, /models\[0\]\.floorPlan\.src is not \/listings\/jeddah-heights-al-hamdaniyah\/plan-nn\.jpg/],
+    ['a floor plan in the photo shape', (l) => { l.models[0].floorPlan.src = `/listings/${slug}/01.jpg`; }, /models\[0\]\.floorPlan\.src/],
+    ['a remote floor plan', (l) => { l.models[0].floorPlan.src = 'https://example.org/listings/x/plan-01.jpg'; }, /models\[0\]\.floorPlan\.src/],
+    ['a floor-plan thumb in the plan shape', (l) => { l.models[0].floorPlan.thumb = `/listings/${slug}/plan-01.jpg`; }, /models\[0\]\.floorPlan\.thumb is not \/listings\/jeddah-heights-al-hamdaniyah\/plan-nn-thumb\.webp/],
+    ['a floor-plan thumb of another listing', (l) => { l.models[0].floorPlan.thumb = '/listings/other-listing/plan-01-thumb.webp'; }, /models\[0\]\.floorPlan\.thumb/],
+    ['a floor plan that is still a candidate index', (l) => { l.models[1].floorPlan = 3; }, /models\[1\]\.floorPlan must be null or \{ src, thumb \}/],
+    ['one floor plan shared by two models', (l) => { l.models[1].floorPlan = { ...l.models[0].floorPlan }; }, /models\[1\]\.floorPlan .*plan-01\.jpg is already used by another model/],
+    ['a floor-plan thumb of another plan', (l) => { l.models[0].floorPlan.thumb = `/listings/${slug}/plan-02-thumb.webp`; }, /models\[0\]\.floorPlan\.thumb \/listings\/jeddah-heights-al-hamdaniyah\/plan-02-thumb\.webp is not the thumbnail of \/listings\/jeddah-heights-al-hamdaniyah\/plan-01\.jpg/],
+    ['one floor-plan thumb shared by two models', (l) => { l.models[1].floorPlan = { src: `/listings/${slug}/plan-02.jpg`, thumb: l.models[0].floorPlan.thumb }; }, /models\[1\]\.floorPlan .*plan-01-thumb\.webp is already used by another model/],
+    ['the model\'s evidence, published', (l) => { l.models[0].evidence = { page: 10, quote: '419,994' }; }, /models\[0\] has an unknown field "evidence"/],
+    ['a headline that is not the lowest model price', (l) => { l.price.amount = 300000; }, /price\.amount must be the lowest unit-model price \(319,015\)/],
+    ['a headline on request beside model prices', (l) => { l.price = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true }; }, /price\.amount must be the lowest unit-model price \(319,015\).*on request/],
+    ['a headline not marked "from"', (l) => { l.price.from = false; }, /price\.from must be true/],
+    ['a Sakani headline that is not the lowest model Sakani price', (l) => { l.price.subsidisedAmount = 280000; }, /price\.subsidisedAmount must be the lowest unit-model Sakani price \(270,425\)/],
+    ['no Sakani headline beside model Sakani prices', (l) => { delete l.price.subsidisedAmount; }, /price\.subsidisedAmount must be the lowest unit-model Sakani price \(270,425\), not absent/],
+    ['a Sakani headline when no model has one', (l) => { for (const m of l.models) m.subsidisedPrice = null; }, /price\.subsidisedAmount must be absent: no unit model has a Sakani price/],
+    ['rooms of unequal length', (l) => { l.models[0].rooms.ar.pop(); }, /models\[0\]\.rooms\.en and \.ar must have the same length/],
+    ['amenities of unequal length', (l) => { l.amenities.ar.pop(); }, /amenities\.en and \.ar must have the same length/],
+    ['more than 8 nearby places', (l) => { l.nearby = { en: Array(9).fill('Airport'), ar: Array(9).fill('المطار') }; }, /nearby has 9 items — at most 8/],
+    ['more than 16 amenities', (l) => { l.amenities = { en: Array(17).fill('Gym'), ar: Array(17).fill('نادٍ') }; }, /amenities has 17 items — at most 16/],
+    ['a warranty over 80 characters', (l) => { l.warranties.en[0] = 'x'.repeat(81); }, /warranties\.en\[0\] is 81 characters — at most 80/],
+    ['a warranty list that is not { en, ar }', (l) => { l.warranties = ['Structure — 10 years']; }, /warranties must be \{ en:\[strings\], ar:\[strings\] \}/],
+    ['a model name with no Arabic', (l) => { l.models[0].name.ar = 'Nawras'; }, /models\[0\]\.name must be \{ en, ar \}/],
+    ['a model name over 60 characters', (l) => { l.models[0].name.en = 'N'.repeat(61); }, /models\[0\]\.name\.en is 61 characters — at most 60/],
+    ['a fractional bedroom count', (l) => { l.models[0].bedrooms = 2.5; }, /models\[0\]\.bedrooms must be null or a whole number 0–20/],
+    ['an area written as text', (l) => { l.models[0].areaSqm = '105'; }, /models\[0\]\.areaSqm must be null or a number between 10 and 100000/],
+    ['an availability with no Arabic', (l) => { l.models[0].availability.ar = 'Buildings G–P'; }, /models\[0\]\.availability must be \{ en, ar \}/],
+    ['more than 24 models', (l) => { l.models = Array.from({ length: 25 }, () => ({ ...l.models[1] })); }, /models has 25 entries — at most 24/],
+    ['models that are not an array', (l) => { l.models = { 0: l.models[0] }; }, /models must be an array/],
+    ['a Sakani model price on a rental', (l) => { l.category = 'rent'; l.price.period = 'year'; delete l.price.subsidisedAmount; }, /models\[0\]\.subsidisedPrice is for sales only/],
+  ];
+  for (const [label, mutate, re] of refusals) {
+    it(`checkListing refuses ${label}`, () => {
+      const l = build();
+      mutate(l);
+      const problems = checkListing(l);
+      assert.ok(problems.some((p) => re.test(p)), problems.join(' | ') || '(no problems)');
+    });
+  }
+
+  it('a Sakani price that is not valid against its own model price is ONE problem: it never sets the headline\'s Sakani price', () => {
+    const l = build();
+    l.models[0].price = null;
+    l.models[0].subsidisedPrice = 200000; // below the headline, but it has no price of its own
+    const problems = modelsProblems(l);
+    assert.ok(problems.some((p) => /models\[0\]\.subsidisedPrice needs the model's regular price/.test(p)), problems.join(' | '));
+    assert.ok(!problems.some((p) => /price\.subsidisedAmount/.test(p)), problems.join(' | '));
+    const above = build();
+    above.models[1].subsidisedPrice = 400000; // above its own 319,015
+    above.models[0].subsidisedPrice = null;
+    above.price.subsidisedAmount = undefined;
+    delete above.price.subsidisedAmount;
+    const p2 = modelsProblems(above);
+    assert.ok(p2.some((p) => /models\[1\]\.subsidisedPrice must be lower than its price/.test(p)), p2.join(' | '));
+    assert.ok(!p2.some((p) => /price\.subsidisedAmount/.test(p)), p2.join(' | '));
+  });
+
+  it('a headline with no amount beside model prices says "absent", never "undefined"', () => {
+    const l = build();
+    delete l.price.amount;
+    const problems = modelsProblems(l);
+    assert.ok(problems.some((p) => /price\.amount must be the lowest unit-model price \(319,015\) when the models carry prices, not absent/.test(p)), problems.join(' | '));
+    assert.ok(!problems.some((p) => /undefined/.test(p)), problems.join(' | '));
+  });
+
+  // Hand edits and the backfill never pass the AI step's copyProblems(), so the shared rule checks
+  // every model string and list item itself.
+  const leaks = [
+    ['a phone number in a model name', (l) => { l.models[0].name.en = 'Nawras 0551234567'; }, /models\[0\]\.name\.en mentions a contact detail or another brand: 0551234567/],
+    ['a phone number in Arabic-Indic digits in the rooms', (l) => { l.models[0].rooms.ar[0] = 'جوال ٠٥٥١٢٣٤٥٦٧'; }, /models\[0\]\.rooms\.ar\[0\] mentions a contact detail or another brand/],
+    ['a web address in the availability', (l) => { l.models[0].availability.en = 'See www.example.com'; }, /models\[0\]\.availability\.en mentions a contact detail or another brand: www\./],
+    ['the old brand in the amenities', (l) => { l.amenities.en[0] = 'TK Estates lounge'; }, /amenities\.en\[0\] mentions a contact detail or another brand/],
+    ['an e-mail address in a warranty', (l) => { l.warranties.en[0] = 'Claims: care@example.com'; }, /warranties\.en\[0\] mentions a contact detail or another brand: care@example\.com/],
+    ['hype in the nearby list', (l) => { l.nearby = { en: ['Stunning corniche'], ar: ['الكورنيش'] }; }, /nearby\.en\[0\] uses hype wording: "Stunning"/],
+    ['hype in a model name', (l) => { l.models[1].name.en = 'Dream home'; }, /models\[1\]\.name\.en uses hype wording/],
+  ];
+  for (const [label, mutate, re] of leaks) {
+    it(`checkListing refuses ${label}`, () => {
+      const l = build();
+      mutate(l);
+      const problems = checkListing(l);
+      assert.ok(problems.some((p) => re.test(p)), problems.join(' | ') || '(no problems)');
+    });
+  }
+
+  it('modelsProblems: a listing with none of the new fields is fine', () => {
+    assert.deepEqual(modelsProblems({ slug, price: { amount: 1, currency: 'SAR', from: false, period: null, onRequest: false } }), []);
+    assert.deepEqual(modelsProblems({ slug, models: null, amenities: null }), []);
+    assert.deepEqual(modelsProblems({ slug, models: [], nearby: { en: [], ar: [] } }), []);
+  });
+
+  it('LOCAL_PLAN_SRC / LOCAL_PLAN_THUMB: exactly the plan shapes, and a plan is never a gallery photo', () => {
+    for (const ok of ['/listings/jeddah-heights/plan-01.jpg', '/listings/a/plan-123.jpg']) assert.ok(LOCAL_PLAN_SRC.test(ok), ok);
+    for (const bad of ['/listings/a/plan-1.jpg', '/listings/a/01.jpg', '/listings/A/plan-01.jpg', '/listings/a/plan-01-thumb.webp', '/listings/a/plan-01.png', 'https://x/listings/a/plan-01.jpg']) {
+      assert.ok(!LOCAL_PLAN_SRC.test(bad), bad);
+    }
+    assert.ok(LOCAL_PLAN_THUMB.test('/listings/jeddah-heights/plan-01-thumb.webp'));
+    for (const bad of ['/listings/a/plan-01.jpg', '/listings/a/01-thumb.webp', '/listings/a/plan-01-thumb.jpg']) assert.ok(!LOCAL_PLAN_THUMB.test(bad), bad);
+    assert.ok(!LOCAL_LISTING_SRC.test('/listings/a/plan-01.jpg') && !isLocalSrc('/listings/a/plan-01.jpg'), 'a floor plan cannot be passed off as a photo');
+  });
+});
+
+// ---- the floor-plan files ------------------------------------------------------------------------
+describe('writeFloorPlans', () => {
+  let dir; let plan; let photo; let sharp;
+  before(async () => {
+    sharp = (await import('sharp')).default;
+    // Under ~/.cache, not /tmp (RAM on this host).
+    const base = path.join(os.homedir(), '.cache', 'bona-tests');
+    fs.mkdirSync(base, { recursive: true });
+    dir = fs.mkdtempSync(path.join(base, 'plans-'));
+    // A transparent plan, 2400 × 1200: the kind of image that came out on black before the extraction fix.
+    plan = path.join(dir, 'c007.png');
+    await sharp({ create: { width: 2400, height: 1200, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toFile(plan);
+    photo = path.join(dir, 'c003.jpg');
+    await sharp({ create: { width: 800, height: 600, channels: 3, background: '#4a6b8a' } }).jpeg().toFile(photo);
+  });
+  after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('writes plan-NN.jpg on white and plan-NN-thumb.webp, NN = the model\'s 1-based position', async () => {
+    const out = path.join(dir, 'publish', 'jeddah-heights');
+    const plans = await writeFloorPlans([{ index: 3, abs: photo }, { index: 7, abs: plan }], [{ floorPlan: null }, { floorPlan: 7 }, { floorPlan: 3 }], out, 'jeddah-heights');
+    assert.deepEqual(plans.map(({ model, index, src, thumb }) => ({ model, index, src, thumb })), [
+      { model: 1, index: 7, src: '/listings/jeddah-heights/plan-02.jpg', thumb: '/listings/jeddah-heights/plan-02-thumb.webp' },
+      { model: 2, index: 3, src: '/listings/jeddah-heights/plan-03.jpg', thumb: '/listings/jeddah-heights/plan-03-thumb.webp' },
+    ]);
+    assert.deepEqual(plans.skipped, []);
+    assert.equal(plans[0].file, path.join(out, 'plan-02.jpg'));
+    assert.equal(plans[0].thumbFile, path.join(out, 'plan-02-thumb.webp'));
+    assert.deepEqual(fs.readdirSync(out).sort(), ['plan-02-thumb.webp', 'plan-02.jpg', 'plan-03-thumb.webp', 'plan-03.jpg']);
+    const big = await sharp(path.join(out, 'plan-02.jpg')).metadata();
+    assert.deepEqual([big.format, big.width, big.height, big.hasAlpha], ['jpeg', 1600, 800, false], 'inside 1600, no alpha');
+    assert.equal(big.chromaSubsampling, '4:4:4', 'full-resolution colour: thin coloured lines and small text stay sharp');
+    const { data } = await sharp(path.join(out, 'plan-02.jpg')).raw().toBuffer({ resolveWithObject: true });
+    assert.ok(data[0] > 245 && data[1] > 245 && data[2] > 245, `the transparent ground is white, not black (got ${data[0]},${data[1]},${data[2]})`);
+    const thumb = await sharp(path.join(out, 'plan-02-thumb.webp')).metadata();
+    assert.deepEqual([thumb.format, thumb.width], ['webp', 480]);
+    assert.equal((await sharp(path.join(out, 'plan-03.jpg')).metadata()).width, 800, 'never enlarged');
+  });
+
+  it('names its qualities: plans JPEG q85, every thumbnail WebP q78', () => {
+    assert.deepEqual([PLAN_JPEG_QUALITY, THUMB_QUALITY], [85, 78]);
+    const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'images.mjs'), 'utf8');
+    assert.doesNotMatch(src, /quality: \d/, 'no bare quality number left in a sharp call');
+  });
+
+  it('skips a candidate it cannot decode, or that does not exist, and still writes the rest', async () => {
+    const bad = path.join(dir, 'c009.jpg');
+    fs.writeFileSync(bad, 'not an image');
+    const out = path.join(dir, 'publish', 'skips');
+    const plans = await writeFloorPlans([{ index: 9, abs: bad }, { index: 3, abs: photo }], [{ floorPlan: 9 }, { floorPlan: 3 }, { floorPlan: 42 }], out, 'skips');
+    assert.deepEqual(plans.map((p) => [p.model, p.src]), [[1, '/listings/skips/plan-02.jpg']]);
+    assert.deepEqual(plans.skipped.map((s) => [s.model, s.index]), [[0, 9], [2, 42]]);
+    assert.ok(plans.skipped.every((s) => typeof s.error === 'string' && s.error));
+    assert.deepEqual(fs.readdirSync(out).sort(), ['plan-02-thumb.webp', 'plan-02.jpg'], 'no half-written file is left behind');
+  });
+
+  it('writes nothing, and makes no folder, when no model has a floor plan', async () => {
+    const out = path.join(dir, 'publish', 'none');
+    for (const models of [[], [{ floorPlan: null }, {}], undefined]) {
+      const plans = await writeFloorPlans([{ index: 3, abs: photo }], models, out, 'none');
+      assert.deepEqual([...plans], []);
+      assert.deepEqual(plans.skipped, []);
+    }
+    assert.equal(fs.existsSync(out), false);
+  });
+});
+
 describe('checkListing — mirrors scripts/curate/validate.mjs', () => {
   const slug = 'five-bedroom-villa-al-khalidiyah';
   const picks = orderedPicks(AI.images);
@@ -406,6 +733,44 @@ describe('inbox + edits', () => {
     const p = edits.setPrice(tmp, 'BONA-W001', { amount: 330000, currency: 'SAR' }).listing.price;
     assert.equal(p.amount, 330000);
     assert.equal('subsidisedAmount' in p, false);
+  });
+
+  it('price also clears the unit-model prices: the owner\'s figure replaces the brochure\'s, as a caption price does', () => {
+    const found = findInbox(tmp, 'BONA-W001');
+    const before = structuredClone(found.listing);
+    found.listing.price = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
+    found.listing.models = [
+      { name: { en: 'Lulu', ar: 'لؤلؤ' }, bedrooms: 2, bathrooms: 2, areaSqm: 88, rooms: null, availability: null, price: 319015, subsidisedPrice: 270425, floorPlan: null },
+      { name: { en: 'Nawras', ar: 'نورس' }, bedrooms: 3, bathrooms: 2, areaSqm: 105, rooms: null, availability: null, price: 419994, subsidisedPrice: null, floorPlan: null },
+    ];
+    fs.writeFileSync(found.file, `${JSON.stringify(found.listing, null, 2)}\n`);
+    try {
+      for (const [args, cleared] of [[{ amount: 330000, currency: 'SAR' }, 2], [{ onRequest: true }, 0]]) {
+        const r = edits.setPrice(tmp, 'BONA-W001', args);
+        const l = r.listing;
+        assert.deepEqual(l.models.map((m) => [m.price, m.subsidisedPrice]), [[null, null], [null, null]]);
+        assert.deepEqual(l.models.map((m) => m.name.en), ['Lulu', 'Nawras'], 'the models themselves stay');
+        assert.deepEqual(modelsProblems(l), [], 'the shared rule accepts the edited listing (no headline left to align)');
+        assert.equal(r.modelPricesCleared, cleared, 'how many models lost their price (the second call finds none left)');
+      }
+    } finally {
+      fs.writeFileSync(found.file, `${JSON.stringify(before, null, 2)}\n`);
+    }
+  });
+
+  it('the price reply says when it took the unit-model prices off, and is unchanged otherwise', () => {
+    const sar = { currency: 'SAR', amount: 330000 };
+    assert.equal(msg.priceChange(sar), 'Price set to SAR 330,000');
+    assert.equal(msg.priceChange(sar, { modelPricesCleared: 0 }), 'Price set to SAR 330,000');
+    assert.equal(msg.priceChange(sar, { modelPricesCleared: 8 }), 'Price set to SAR 330,000 — 8 unit-model prices removed; the table now shows On request');
+    assert.equal(msg.priceChange(sar, { modelPricesCleared: 1 }), 'Price set to SAR 330,000 — 1 unit-model price removed; the table now shows On request');
+    assert.equal(msg.priceChange({ currency: 'SAR', amount: null }, { onRequest: true, modelPricesCleared: 2 }), 'Price on request — 2 unit-model prices removed; the table now shows On request');
+    const index = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'index.mjs'), 'utf8');
+    const priceCase = index.slice(index.indexOf("case 'price': {"), index.indexOf("case 'brochure': {"));
+    assert.match(priceCase, /msg\.priceChange\(r\.listing\.price, \{ onRequest: command\.onRequest, modelPricesCleared: r\.modelPricesCleared, brochure: r\.brochure, id: command\.id \}\)/, 'index.mjs replies with it');
+    // Codex r1 #8: the command rebuilds the brochure in the same edit (and commit), never setPrice alone.
+    assert.match(priceCase, /edits\.setPriceWithBrochure\(cfg\.repo, command\.id, command, \{ cfg, workDir \}\)/);
+    assert.doesNotMatch(priceCase, /edits\.setPrice\(/);
   });
 
   it('status and hidden are persisted', () => {
@@ -639,9 +1004,11 @@ describe('edits.setLicence / setWafi — REGA advertising licences', () => {
 describe('edits.addVideo — a video attaches to a listing that already exists', () => {
   let tmp;
   const slug = 'tmp-video-villa';
+  const preparedDirs = [];
   /** Stand-in for what prepareVideo() leaves behind: a transcoded clip, optionally a poster. */
   const prepared = (name, bytes, poster = null) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-prepared-'));
+    preparedDirs.push(dir);
     const file = path.join(dir, `${name}.mp4`);
     fs.writeFileSync(file, bytes);
     let posterFile = null;
@@ -664,7 +1031,10 @@ describe('edits.addVideo — a video attaches to a listing that already exists',
     writeInboxListing(tmp, seed());
     writeIndex(tmp, { nextSeq: 2, listings: { [slug]: 'BONA-W001' } });
   });
-  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    for (const dir of preparedDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
 
   it('copies the clip AND its poster in, and records both site-local paths on the listing', () => {
     const bytes = Buffer.from('fake mp4 bytes');
@@ -730,6 +1100,7 @@ describe('a PDF + a video together — the combination the owner actually sends'
   it('publishes from the PDF, then the video attaches to that same listing', () => {
     const slug = 'obhur-waterfront-villa';
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-pdf-video-'));
+    const media = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-prepared-'));
     try {
       fs.mkdirSync(path.join(tmp, 'scripts', 'curate', 'inbox'), { recursive: true });
       const picks = orderedPicks(AI.images);
@@ -746,7 +1117,6 @@ describe('a PDF + a video together — the combination the owner actually sends'
 
       // Step 2 — the video, captioned "video BONA-W020" (see findListingId in commands.mjs),
       // after lib/video.mjs prepareVideo() has re-encoded it and cut a poster out of it.
-      const media = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-prepared-'));
       fs.writeFileSync(path.join(media, 'clip.mp4'), 'a whole walkthrough clip');
       fs.writeFileSync(path.join(media, 'poster.jpg'), 'its first frame');
       const res = edits.addVideo(tmp, listing.id, { file: path.join(media, 'clip.mp4'), poster: path.join(media, 'poster.jpg') });
@@ -759,6 +1129,7 @@ describe('a PDF + a video together — the combination the owner actually sends'
       assert.deepEqual(findInbox(tmp, listing.id).listing.videos, expected);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
+      fs.rmSync(media, { recursive: true, force: true });
     }
   });
 });
@@ -839,5 +1210,275 @@ describe('replaceMetaFor (run-once --replace)', () => {
   it('refuses an id that is not in the inbox', () => {
     put(base());
     assert.throws(() => replaceMetaFor(tmp, 'BONA-W999'), /no inbox listing/);
+  });
+
+  it('unit models and the fact lists are rebuilt by the re-run, so they never block one', () => {
+    put(base({
+      models: [{ name: { en: 'Lulu', ar: 'لؤلؤ' }, bedrooms: 2, bathrooms: 2, areaSqm: 88, rooms: null, availability: null, price: null, subsidisedPrice: null, floorPlan: null }],
+      amenities: { en: ['Gym'], ar: ['نادٍ رياضي'] }, nearby: { en: ['Airport'], ar: ['المطار'] }, warranties: { en: ['Structure — 10 years'], ar: ['الهيكل — 10 سنوات'] },
+    }));
+    assert.equal(replaceMetaFor(tmp, 'BONA-W023').replace, true);
+  });
+});
+
+describe('run-once --enrich: enrichMetaFor, mergeEnrichment, enrichHeadline', () => {
+  let tmp;
+  const SHA = 'a'.repeat(64);
+  const PRICED = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false, subsidisedAmount: 270425 };
+  const ON_REQUEST = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
+  /** A published listing that was corrected by hand afterwards: every key a hand edit can add. */
+  const existing = (over = {}) => ({
+    id: 'BONA-W023', slug: 'jeddah-heights', sourceRef: 'WA-20261117-AC7D06', status: 'reserved', category: 'off-plan', type: 'apartment',
+    kind: 'apartment', featured: true, title: { en: 'Jeddah Heights (hand-fixed)', ar: 'جدة هايتس' },
+    location: { district: { en: 'Al Rehab', ar: 'الرحاب' }, city: { en: 'Jeddah', ar: 'جدة' } },
+    price: { ...ON_REQUEST }, specs: { beds: 2 }, images: [{ src: '/listings/jeddah-heights/01.jpg', thumb: null, alt: { en: 'a', ar: 'ب' } }],
+    videos: [{ src: '/listings/jeddah-heights/v-01.mp4', poster: null }], description: { en: 'One.\n\nTwo.', ar: 'واحد.\n\nاثنان.' },
+    highlights: { en: ['A', 'B', 'C', 'D'], ar: ['أ', 'ب', 'ج', 'د'] }, virtualTourUrl: null,
+    brochureUrl: 'https://bona-real-estate.com/listings/jeddah-heights/brochure.pdf',
+    project: { name: { en: 'Jeddah Heights', ar: 'جدة هايتس' } }, unit: null, map: null, mapPrecision: null, listedAt: '2026-11-01', hidden: false,
+    licence: { adNumber: '7200123', adExpiry: null, wafiNumber: null, escrowAccount: null },
+    photoNote: { en: 'Photos show the sister project', ar: 'الصور للمشروع الشقيق' }, faq: [{ q: 'x' }], seoTitle: { en: 'S', ar: 'س' },
+    _intake: { source: 'whatsapp', pdfSha256: SHA, warnings: ['map-unconfirmed'], edits: ['hero'] },
+    ...over,
+  });
+  const model = (en, price, subsidisedPrice = null) => ({
+    name: { en, ar: `نموذج ${en}` }, bedrooms: 2, bathrooms: 2, areaSqm: 88, rooms: null, availability: null, price, subsidisedPrice, floorPlan: null,
+  });
+  const put = (l) => { fs.rmSync(path.join(tmp, 'scripts', 'curate', 'inbox'), { recursive: true, force: true }); writeInboxListing(tmp, l); };
+  before(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-enrich-')); });
+  after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  it('names the listing to enrich: id, slug and the listing as it stands — hand-added fields are no obstacle', () => {
+    put(existing());
+    const meta = enrichMetaFor(tmp, 'bona-w023');
+    assert.deepEqual(Object.keys(meta), ['enrich']);
+    assert.equal(meta.enrich.id, 'BONA-W023');
+    assert.equal(meta.enrich.slug, 'jeddah-heights');
+    assert.deepEqual(meta.enrich.existing, existing());
+  });
+
+  const refused = [
+    ['an id that is not in the inbox', null, 'BONA-W999', /--enrich BONA-W999: no inbox listing/],
+    ['a withdrawn listing (its record)', { status: 'withdrawn' }, 'BONA-W023', /--enrich BONA-W023: .*withdrawn/],
+    ['a withdrawn project (rules.mjs)', { id: 'BONA-W009', slug: 'elvira-murjan-townhouses-in-al-murjan' }, 'BONA-W009', /--enrich BONA-W009: marketing permission withdrawn/],
+    ['a hidden listing', { hidden: true }, 'BONA-W023', /--enrich BONA-W023: it is hidden/],
+    ['a listing that records no source PDF', { _intake: { source: 'whatsapp' } }, 'BONA-W023', /--enrich BONA-W023: .*no source PDF/],
+  ];
+  for (const [label, over, id, re] of refused) {
+    it(`refuses ${label}`, () => {
+      put(existing(over ?? {}));
+      assert.throws(() => enrichMetaFor(tmp, id), re);
+    });
+  }
+
+  it('ENRICH_KEYS: the unit models and the three fact lists, nothing else', () => {
+    assert.deepEqual(ENRICH_KEYS, ['models', 'amenities', 'nearby', 'warranties']);
+  });
+
+  describe('mergeEnrichment', () => {
+    /** A buildListing() result for the same brochure: its copy, photos and price all differ from the listing's. */
+    const built = () => buildListing({
+      ai: {
+        ...AI,
+        listing: { ...AI.listing, category: 'off-plan', type: 'apartment', price: { ...PRICED } },
+        models: [model('Lulu', 319015, 270425)],
+        amenities: { en: ['Gym'], ar: ['نادٍ رياضي'] }, nearby: { en: [], ar: [] }, warranties: { en: ['Structure — 10 years'], ar: ['الهيكل — 10 سنوات'] },
+      },
+      images: imagesFor('jeddah-heights', [{ rank: 1, index: 4, room: 'pool' }]), slug: 'jeddah-heights', id: 'BONA-W023', repo: REPO, site: 'https://x',
+    });
+
+    it('changes ONLY the unit models and the fact lists; every other key is the listing\'s own, unchanged', () => {
+      const before = existing();
+      const b = built();
+      const merged = mergeEnrichment(before, b);
+      assert.deepEqual(before, existing(), 'the listing passed in is not changed');
+      assert.deepEqual(merged.models, b.models);
+      assert.deepEqual(merged.amenities, { en: ['Gym'], ar: ['نادٍ رياضي'] });
+      assert.deepEqual(merged.warranties, b.warranties);
+      assert.equal('nearby' in merged, false, 'an empty fact list is left out');
+      for (const k of Object.keys(before)) assert.deepEqual(merged[k], before[k], k);
+      assert.deepEqual(Object.keys(merged).filter((k) => !ENRICH_KEYS.includes(k)), Object.keys(before), 'same keys, same order');
+      merged.models[0].name.en = 'changed';
+      assert.equal(b.models[0].name.en, 'Lulu', 'nothing is shared with the built listing');
+      merged.title.en = 'changed';
+      assert.equal(before.title.en, 'Jeddah Heights (hand-fixed)', 'nothing is shared with the listing either');
+    });
+
+    it('puts new keys after the highlights, where a publish puts them, so the file keeps its shape', () => {
+      const keys = Object.keys(mergeEnrichment(existing(), built()));
+      const at = keys.indexOf('highlights');
+      assert.deepEqual(keys.slice(at, at + 4), ['highlights', 'models', 'amenities', 'warranties']);
+    });
+
+    it('replaces models and fact lists already there in their own place, and removes those the new run does not have', () => {
+      const before = existing({ nearby: { en: ['Airport'], ar: ['المطار'] }, models: [model('Old', null)] });
+      const merged = mergeEnrichment(before, built());
+      assert.equal('nearby' in merged, false);
+      assert.deepEqual(merged.models.map((m) => m.name.en), ['Lulu']);
+      const none = mergeEnrichment(before, { ...built(), models: undefined, amenities: undefined, warranties: undefined });
+      for (const k of ENRICH_KEYS) assert.equal(k in none, false, k);
+    });
+
+    it('takes the price only when told to, and never the built listing\'s brochureUrl', () => {
+      const b = built();
+      assert.deepEqual(mergeEnrichment(existing(), b).price, ON_REQUEST);
+      const adopted = mergeEnrichment(existing(), b, { price: { ...PRICED } });
+      assert.deepEqual(adopted.price, PRICED);
+      assert.equal(adopted.brochureUrl, existing().brochureUrl);
+      assert.deepEqual(adopted._intake, existing()._intake);
+    });
+  });
+
+  describe('enrichHeadline', () => {
+    const models = [model('Nawras', 419994, 356024), model('Lulu', 319015, 270425)];
+    const aligned = () => alignHeadline({ ...ON_REQUEST }, models);
+
+    it('the owner set the price by WhatsApp: his price stays and the models lose theirs', () => {
+      const l = existing({ price: { amount: 300000, currency: 'SAR', from: false, period: null, onRequest: false }, _intake: { pdfSha256: SHA, edits: ['hero', 'price'] } });
+      const h = enrichHeadline(l, models, aligned());
+      assert.equal(h.refuse, null);
+      assert.equal(h.dropModelPrices, true);
+      assert.deepEqual(h.price, l.price);
+    });
+
+    it('a listing on request adopts the models\' confirmed headline', () => {
+      const h = enrichHeadline(existing(), models, aligned());
+      assert.deepEqual(h, { price: PRICED, dropModelPrices: false, refuse: null, decision: 'adopted' });
+    });
+
+    it('a price that equals the lowest model price (and its Sakani line) is kept', () => {
+      const l = existing({ price: { ...PRICED } });
+      const h = enrichHeadline(l, models, aligned());
+      assert.deepEqual(h, { price: PRICED, dropModelPrices: false, refuse: null, decision: 'kept' });
+    });
+
+    it('the same figure not yet marked "from" is kept and marked "from" (the validator\'s rule)', () => {
+      const l = existing({ price: { ...PRICED, from: false } });
+      const h = enrichHeadline(l, models, aligned());
+      assert.equal(h.refuse, null);
+      assert.deepEqual(h.price, PRICED);
+    });
+
+    it('a different price is refused with both figures', () => {
+      const l = existing({ price: { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false } });
+      const h = enrichHeadline(l, models, aligned());
+      assert.equal(h.decision, 'refused');
+      assert.match(h.refuse, /BONA-W023 shows SAR 350,000 but the brochure's lowest model price is SAR 319,015/);
+      assert.match(h.refuse, /send `price BONA-W023 …` or re-run with --replace/);
+      assert.deepEqual(h.price, l.price, 'nothing changes');
+    });
+
+    it('the same price with a different Sakani line is refused too', () => {
+      for (const sub of [undefined, 280000]) {
+        const price = { ...PRICED };
+        if (sub === undefined) delete price.subsidisedAmount; else price.subsidisedAmount = sub;
+        const h = enrichHeadline(existing({ price }), models, aligned());
+        assert.equal(h.decision, 'refused', String(sub));
+        assert.match(h.refuse, /Sakani SAR 270,425/);
+      }
+    });
+
+    it('no model kept a price: the listing\'s price stays as it is, set or on request', () => {
+      const unpriced = [model('Lulu', null)];
+      for (const price of [{ ...ON_REQUEST }, { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false }]) {
+        const h = enrichHeadline(existing({ price }), unpriced, null);
+        assert.deepEqual(h, { price, dropModelPrices: false, refuse: null, decision: 'no-model-prices' });
+      }
+    });
+
+    it('one specific unit keeps its own price, and its models keep theirs (the validator exempts units)', () => {
+      const l = existing({ price: { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false }, unit: { floor: 3, block: 'H', unitRef: null } });
+      const h = enrichHeadline(l, models, aligned());
+      assert.deepEqual(h, { price: l.price, dropModelPrices: false, refuse: null, decision: 'unit' });
+    });
+
+    it('a single property (no project, or one model) keeps its own price and its models keep theirs (single-property)', () => {
+      const own = { amount: 350000, currency: 'SAR', from: false, period: null, onRequest: false };
+      for (const [label, l, m] of [['no project', existing({ price: own, project: null }), models], ['one model', existing({ price: own }), [models[1]]]]) {
+        const one = m.length === 1 ? alignHeadline({ ...ON_REQUEST }, m) : aligned();
+        assert.deepEqual(enrichHeadline(l, m, one), { price: own, dropModelPrices: false, refuse: null, decision: 'single-property' }, label);
+      }
+      // On request too: nothing is adopted from a single property's models.
+      const onReq = existing({ project: null });
+      assert.equal(enrichHeadline(onReq, models, aligned()).decision, 'single-property');
+      assert.equal(enrichHeadline(onReq, [model('Lulu', null)], null).decision, 'no-model-prices');
+    });
+
+    it('model prices in another currency than the listing\'s: the price stays and the models lose theirs (currency-mismatch)', () => {
+      for (const l of [existing(), existing({ price: { ...PRICED } }), existing({ price: { ...PRICED }, unit: { floor: 3, block: 'H', unitRef: null } })]) {
+        const h = enrichHeadline(l, models, aligned(), { currencyMismatch: true });
+        assert.deepEqual(h, { price: l.price, dropModelPrices: true, refuse: null, decision: 'currency-mismatch' });
+      }
+      // The owner's own price says more: his price stays, the models lose theirs, whatever their currency.
+      const own = existing({ price: { amount: 300000, currency: 'SAR', from: false, period: null, onRequest: false }, _intake: { pdfSha256: SHA, edits: ['price'] } });
+      assert.equal(enrichHeadline(own, models, aligned(), { currencyMismatch: true }).decision, 'owner-price');
+    });
+  });
+});
+
+describe('r3 #9: an inbox record that is a symlink, or a listing folder that is one — no edit writes through it', () => {
+  const slug = 'link-villa-test';
+  let tmp;
+  const record = () => path.join(tmp, 'repo', 'scripts', 'curate', 'inbox', `${slug}.json`);
+  const folder = () => path.join(tmp, 'repo', 'public', 'listings', slug);
+  const setup = ({ linkRecord = false, linkFolder = false } = {}) => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-link-'));
+    const repo = path.join(tmp, 'repo');
+    const l = {
+      id: 'BONA-W001', slug, status: 'available', hidden: false, title: { en: 'Link Villa', ar: 'فيلا' },
+      price: { amount: 1000000, currency: 'SAR', from: false, period: null, onRequest: false }, brochureUrl: null, videos: [],
+      images: [1, 2, 3, 4].map((n) => ({ src: `/listings/${slug}/0${n}.jpg`, thumb: null, alt: { en: 'x', ar: 'س' } })),
+      _intake: { images: [1, 2, 3, 4].map((n) => ({ n, room: 'view' })) },
+    };
+    writeInboxListing(repo, l);
+    fs.mkdirSync(folder(), { recursive: true });
+    for (const n of [1, 2, 3, 4]) fs.writeFileSync(path.join(folder(), `0${n}.jpg`), 'x');
+    if (linkRecord) {
+      fs.renameSync(record(), path.join(tmp, 'outside.json'));
+      fs.symlinkSync(path.join(tmp, 'outside.json'), record());
+    }
+    if (linkFolder) {
+      fs.renameSync(folder(), path.join(tmp, 'outside-folder'));
+      fs.symlinkSync(path.join(tmp, 'outside-folder'), folder());
+    }
+    return repo;
+  };
+  const snapshot = () => fs.readdirSync(tmp, { recursive: true }).sort().map((f) => {
+    const p = path.join(tmp, String(f));
+    return fs.lstatSync(p).isFile() ? `${f}:${fs.readFileSync(p, 'utf8')}` : String(f);
+  }).join('\n');
+  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  it('the record is a symlink: hero, price, status, hide, video, brochure, remove refuse — nothing changes', async () => {
+    const repo = setup({ linkRecord: true });
+    const clip = path.join(tmp, 'clip.mp4');
+    fs.writeFileSync(clip, 'mp4');
+    const before = snapshot();
+    const results = [
+      edits.setHero(repo, 'BONA-W001', 2), edits.setPrice(repo, 'BONA-W001', { amount: 5, currency: 'SAR' }),
+      await edits.setPriceWithBrochure(repo, 'BONA-W001', { onRequest: true }, { cfg: {}, workDir: path.join(tmp, 'w') }),
+      edits.setStatus(repo, 'BONA-W001', 'sold'), edits.setHidden(repo, 'BONA-W001', true), edits.addVideo(repo, 'BONA-W001', { file: clip }),
+      await edits.rebuildBrochure(repo, 'BONA-W001', { cfg: {}, workDir: path.join(tmp, 'w') }), edits.removeListing(repo, 'BONA-W001'),
+      edits.setLicence(repo, 'BONA-W001', { adNumber: '7200123456', adExpiry: '2027-01-01' }),
+    ];
+    for (const [i, r] of results.entries()) assert.match(String(r?.error), /symbolic link/, `call ${i}`);
+    assert.equal(snapshot(), before);
+  });
+
+  it('the listing folder is a symlink: hero, video and remove refuse — nothing changes', () => {
+    const repo = setup({ linkFolder: true });
+    const clip = path.join(tmp, 'clip.mp4');
+    fs.writeFileSync(clip, 'mp4');
+    const before = snapshot();
+    for (const r of [edits.setHero(repo, 'BONA-W001', 2), edits.addVideo(repo, 'BONA-W001', { file: clip }), edits.removeListing(repo, 'BONA-W001')]) {
+      assert.match(String(r?.error), /symbolic link/);
+    }
+    assert.equal(snapshot(), before);
+  });
+
+  it('index.mjs answers a refused `remove` instead of committing it', () => {
+    const index = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'index.mjs'), 'utf8');
+    const removeCase = index.slice(index.indexOf("case 'remove': {"), index.indexOf("case 'hero': {"));
+    assert.match(removeCase, /res\?\.error/);
   });
 });

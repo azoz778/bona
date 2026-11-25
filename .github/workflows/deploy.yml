@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - uses: actions/configure-pages@v6
         with:
@@ -66,7 +66,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
       - run: npm ci
       - run: node scripts/og/gen-llms.mjs && npm run build
       - name: IndexNow ping (non-fatal)
