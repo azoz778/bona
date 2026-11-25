@@ -18,8 +18,9 @@ over the API and never checks out or runs code from the pull request. Python sta
 
 Known limits (docs/auto-merge.md): a commit status belongs to a commit, not to a PR (two PRs with the same
 head share it; a branch reset to an approved commit is green again until this re-runs); verdicts in review
-bodies count but only comments trigger a re-check; and any workflow in a same-repo PR could post this
-status, so this is a process check that the two reviews of the diff back up, not a security boundary.
+bodies count but only comments trigger a re-check; and any workflow run in the repo (also a fork PR's) could
+satisfy the required check with a job of this name or by posting this status, so this is a process check, not a
+security boundary.
 """
 import http.client
 import json

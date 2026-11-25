@@ -30,13 +30,14 @@ during which #71 became the first real PR to merge itself. What the tests showed
    that GitHub reports as blocked, when the rules require both checks; it never merges anything itself. The owner's local
    merge guard keeps refusing `gh pr merge` (with or without `--auto`) until CI and both verdicts are in.
    The owner can use GitHub's "Enable auto-merge" button instead. It skips the helper's checks, so use it only
-   on a PR into `main` while the ruleset above is active, and never with the "bypass rules" option: the merge
-   must wait for green `ci` and both `SHIP` verdicts for the current head.
+   on a same-repo PR (never one from a fork) into `main` while the ruleset above is active, and never with the
+   "bypass rules" option: the merge must wait for green `ci` and both `SHIP` verdicts for the current head.
 2. Claude and Codex review that head. Post both verdicts as PR **comments**, one line each.
 3. `two-model-review` turns green; once `ci` is green too, GitHub merges, and `deploy.yml` deploys `main`.
 4. A new commit resets the gate: the new head has no `two-model-review` status at all ("Expected"), so the PR
    waits until fresh verdicts for that head are posted. The gate runs only on the owner's PR comments. The armed
-   auto-merge stays armed across the commit (tested). If `gh pr view <N> -R azoz778/bona --json autoMergeRequest`
+   auto-merge stays armed across a push by the owner's account (tested in #76 and #78); a push by someone
+   without write access turns it off. If `gh pr view <N> -R azoz778/bona --json autoMergeRequest`
    shows `null`, run the helper again with the new head, unless someone turned it off on purpose ("Stopping a
    PR"); if unsure, ask the owner. If a PR with both checks green has not merged after a few minutes, tell the
    owner rather than trying other ways to merge it.
@@ -87,11 +88,14 @@ during which #71 became the first real PR to merge itself. What the tests showed
 - GitHub keeps at most 1,000 statuses per commit and context; each gate run writes two. Not reachable in
   practice (about 500 owner comments on one commit).
 - Verdict lines in review bodies count (as in the local guard), but only comments re-run the gate.
-- Any workflow in this repo that asks for a token allowed to write commit statuses (`statuses: write`) could
-  post `two-model-review` itself (one in a same-repo PR, or one pushed on any other branch), and a PR can change
-  its own `ci.yml`. With auto-merge armed before the reviews, such a status
-  could merge a PR before anyone looks. It is a process check for agents that follow these rules, not a security
-  boundary; the owner's token can also bypass the ruleset.
+- The required checks are bound to the GitHub Actions app, not to these workflows. Any workflow run in this
+  repo can satisfy them: a job named `ci` or `two-model-review` gives a check run of that name, and a job allowed
+  to write commit statuses (`statuses: write`) can post the status. That includes a same-repo PR's own
+  workflows, one pushed on any other branch, and a **fork PR's** workflows (GitHub runs a fork PR's own workflow
+  files once a first-time contributor is approved), and a PR can change its own `ci.yml`. So green checks on a
+  fork PR prove nothing: never arm or merge a fork PR on its checks; the helper refuses forks. With auto-merge
+  armed before the reviews, such a check could merge a same-repo PR before anyone looks. It is a process check
+  for agents that follow these rules, not a security boundary; the owner's token can also bypass the ruleset.
 - A verdict withdrawn while a gate run is reading can be overwritten by that run's green (the window is the
   length of one read). Use `--disable-auto` to stop a PR.
 - A very long run of `-` or `'` on a comment line that also names a model and says "review" or "verdict" makes
