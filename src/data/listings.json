@@ -5758,6 +5758,46 @@
         "نظام منزل ذكي كريسترون"
       ]
     },
+    "amenities": {
+      "en": [
+        "Indoor pool with jacuzzi",
+        "Hammam and sauna",
+        "Lift serving all four levels",
+        "Crestron smart-home automation",
+        "Lutron lighting system",
+        "VRF climate control",
+        "Underfloor heating",
+        "Four fireplaces",
+        "Four offices",
+        "Parking for eight cars"
+      ],
+      "ar": [
+        "مسبح داخلي مع جاكوزي",
+        "حمام بخاري وساونا",
+        "مصعد يخدم المستويات الأربعة",
+        "منزل ذكي بنظام كريسترون",
+        "نظام إضاءة لوترون",
+        "تحكم مناخي بنظام VRF",
+        "تدفئة أرضية",
+        "أربع مدافئ",
+        "أربعة مكاتب",
+        "مواقف لثماني سيارات"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Hampstead Heath",
+        "The Bishops Avenue",
+        "Leading schools",
+        "Central London"
+      ],
+      "ar": [
+        "هامبستيد هيث",
+        "شارع ذا بيشوبس أفنيو",
+        "مدارس مرموقة",
+        "وسط لندن"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/baroque-palace-residence-hampstead/brochure.pdf",
     "project": null,
