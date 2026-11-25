@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { licenceProblems, loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
 import { brochureFileIn, brochureUrlFor, buildBrandedBrochure } from './brochure.mjs';
+import { riyalCurrency } from './commands.mjs';
 import { log } from './log.mjs';
 import { WARNING_CODES, addWarningCode, findInbox, isSlug, listingDirProblem, recordFileProblem } from './listing.mjs';
 import { removeListingImages } from './images.mjs';
@@ -90,14 +91,14 @@ export function setHero(repo, id, n) {
  * The `price` command. `{ listing, modelPricesCleared }`: how many unit models lost their price to
  * the owner's figure (the reply says so; 0 when none carried one), or `{ error }` / null.
  */
-export function setPrice(repo, id, { amount, currency, onRequest }) {
+export function setPrice(repo, id, { amount, currency, riyal, onRequest }) {
   const found = findInbox(repo, id);
   if (!found) return null;
   const refused = withdrawnRefusal(repo, found.listing) ?? editRefusal(repo, found);
   if (refused) return refused;
   const p = found.listing.price;
   if (onRequest) { p.onRequest = true; p.amount = null; p.from = false; }
-  else { p.onRequest = false; p.amount = amount; if (currency) p.currency = currency; }
+  else { p.onRequest = false; p.amount = amount; if (currency) p.currency = currency; else if (riyal) p.currency = riyalCurrency(p.currency); }
   // A Sakani price read from the brochure belonged to the brochure's headline price; once the
   // owner sets his own price it is stale (it could even be above the new one), so it goes.
   delete p.subsidisedAmount;

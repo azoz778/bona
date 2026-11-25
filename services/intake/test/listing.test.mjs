@@ -12,6 +12,7 @@ import {
 import * as edits from '../lib/edits.mjs';
 import { PLAN_JPEG_QUALITY, THUMB_QUALITY, writeFloorPlans } from '../lib/images.mjs';
 import * as msg from '../lib/messages.mjs';
+import { parseCaption } from '../lib/commands.mjs';
 import { alignHeadline } from '../lib/model-prices.mjs';
 import {
   headlineFollowsModels, isLocalSrc, licenceProblems, LOCAL_LISTING_SRC, LOCAL_PLAN_SRC, LOCAL_PLAN_THUMB, modelsProblems, WITHHELD_LISTINGS,
@@ -177,6 +178,19 @@ describe('buildListing', () => {
     assert.deepEqual([kept.price.amount, kept.price.currency], [4500000, 'AED']);
     const written = buildListing({ ai: structuredClone(aed), images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { price: { amount: 4500000, currency: 'USD' } }, meta: {} });
     assert.deepEqual([written.price.amount, written.price.currency], [4500000, 'USD']);
+    // a riyal with no country: SAR on an AED brochure, OMR on an Omani one
+    const riyalAed = buildListing({ ai: structuredClone(aed), images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { price: { amount: 190000, currency: null, riyal: true } }, meta: {} });
+    assert.deepEqual([riyalAed.price.amount, riyalAed.price.currency], [190000, 'SAR']);
+    const omr = structuredClone(aed);
+    omr.listing.price.currency = 'OMR';
+    const riyalOmr = buildListing({ ai: omr, images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { price: { amount: 190000, currency: null, riyal: true } }, meta: {} });
+    assert.deepEqual([riyalOmr.price.amount, riyalOmr.price.currency], [190000, 'OMR']);
+    // a rent caption price with no period written keeps the brochure's period (r15, Claude)
+    const monthly = structuredClone(aed);
+    monthly.listing.category = 'rent';
+    monthly.listing.price = { amount: 4000, currency: 'SAR', from: false, period: 'month', onRequest: false };
+    const rent = buildListing({ ai: monthly, images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { ...parseCaption('للإيجار 4,500 ريال'), text: 'للإيجار 4,500 ريال' }, meta: {} });
+    assert.deepEqual([rent.price.amount, rent.price.currency, rent.price.period], [4500, 'SAR', 'month']);
   });
 
   it('the local checks refuse a subsidised price that is not below the headline price', () => {
@@ -724,6 +738,16 @@ describe('inbox + edits', () => {
     const onReq = edits.setPrice(tmp, 'BONA-W001', { onRequest: true }).listing.price;
     assert.equal(onReq.onRequest, true);
     assert.equal(onReq.amount, null);
+  });
+
+  it('price keeps the listing\'s currency when none is written, and a bare riyal is the listing\'s riyal', () => {
+    const set = (args) => edits.setPrice(tmp, 'BONA-W001', args).listing.price;
+    set({ amount: 2500000, currency: 'OMR' });
+    assert.deepEqual([set({ amount: 190000, currency: null }).currency, set({ amount: 190000, currency: null, riyal: true }).currency], ['OMR', 'OMR']);
+    set({ amount: 2500000, currency: 'AED' });
+    assert.equal(set({ amount: 190000, currency: null }).currency, 'AED');
+    assert.equal(set({ amount: 190000, currency: null, riyal: true }).currency, 'SAR');
+    set({ amount: 2500000, currency: 'SAR' });
   });
 
   it('price and hero record that the owner edited the listing by hand', () => {

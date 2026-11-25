@@ -8,6 +8,7 @@ import {
   LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, modelsProblems, subsidisedPriceProblems, videoEntryProblems, withdrawnAdvertising, withdrawnNotice,
 } from '../../../scripts/curate/rules.mjs';
 import { isFigure } from './model-prices.mjs';
+import { riyalCurrency } from './commands.mjs';
 
 export const INBOX_DIR = path.join('scripts', 'curate', 'inbox');
 export const INDEX_FILE = '_index.json';
@@ -282,7 +283,11 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
 
   const price = { ...l.price };
   // The owner's figure; its currency only when he wrote one, else the brochure's own stands.
-  if (caption.price) { price.amount = caption.price.amount; price.currency = caption.price.currency || price.currency || 'SAR'; price.onRequest = false; }
+  if (caption.price) {
+    price.amount = caption.price.amount;
+    price.currency = caption.price.currency || (caption.price.riyal ? riyalCurrency(price.currency) : price.currency) || 'SAR';
+    price.onRequest = false;
+  }
   if (caption.category) l.category = caption.category;
   if (l.category === 'rent') price.period = caption.period || price.period || 'year';
   else price.period = null;

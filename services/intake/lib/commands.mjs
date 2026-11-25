@@ -9,7 +9,7 @@ export const CURRENCIES = ['SAR', 'AED', 'EUR', 'USD', 'OMR'];
 // JavaScript's \b is ASCII-only, so Arabic alternatives must live in their own patterns
 // without word boundaries — "للإيجار" would never match inside a \b(...)\b group.
 const CATEGORY_HINTS = [
-  [/#?\b(for[- ]?rent|rent|rental|lease|leasing)\b/i, 'rent'],
+  [/#?\b(for[- ]?rent|rent|rental)\b/i, 'rent'],
   [/(إيجار|للإيجار|للايجار|ايجار)/, 'rent'],
   [/#?\b(off[- ]?plan|under[- ]?construction)\b/i, 'off-plan'],
   [/(على ?الخارطة|تحت الإنشاء|على الخريطة)/, 'off-plan'],
@@ -67,7 +67,8 @@ const MULTIPLIER_RE = new RegExp(String.raw`^ ?(?:(?<lmult>millions?|mln|mil|mn|
 // What may be left once the figure, its multiplier, its currency and the allowed words are taken out:
 // white space and ordinary punctuation. Any other letter (in any script), symbol or emoji ("฿", "📏")
 // means the caption says more than a price.
-const LEFTOVER_OK_RE = /^[\s.,،;؛:!?؟()[\]{}"'`«»“”‘’\-–—_/\\|*•·…~≈+=&]*$/;
+// Not "~" (WhatsApp strikethrough, or "about"), "≈" or "+" ("4.5m+"): those qualify the figure.
+const LEFTOVER_OK_RE = /^[\s.,،;؛:!?؟()[\]{}"'`«»“”‘’\-–—_/\\|*•·…=&]*$/;
 // A period ("per year", "شهرياً") makes the figure a rent; on a caption with no rent word it is an
 // instalment or an income ("3,500 ريال شهرياً فقط", "Net SAR 450,000 per year"), not the price.
 const PERIOD_WORD_RE = new RegExp(tokenRe(String.raw`per|year|years|yearly|annum|annually|month|monthly|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية`), 'i');
@@ -75,8 +76,11 @@ const MONTH_WORD_RE = new RegExp(tokenRe(String.raw`month|monthly|شهر|الش�
 const YEAR_WORD_RE = new RegExp(tokenRe(String.raw`year|years|yearly|annum|annually|سنة|السنة|سنوي|سنويا|سنوية`), 'i');
 const RENT_WORD_RE = new RegExp(String.raw`(?<![A-Za-z])(?:rent|rental|lease|for-?rent)(?![A-Za-z])|(?:لل|ال)?[إا]يجار`, 'i');
 const SALE_WORD_RE = new RegExp(String.raw`(?<![A-Za-z])(?:sale|for-?sale|buy)(?![A-Za-z])|للبيع|(?<![${AR}])بيع(?![${AR}])`, 'i');
-// Dollars of other countries ("A$ 1.2m", "HK$ 1.2m"): no caption price.
-const OTHER_DOLLAR_RE = /(?<![A-Za-z])(?:A|AU|C|CA|NZ|HK|S|NT|R|MX)\$/i;
+// Dollars of other countries ("A$ 1.2m", "AUS$", "HK$"): letters on a "$" are US, or an allowed word
+// of three letters or more ("Price$450,000"); anything else is no caption price.
+const ALLOWED_WHOLE_RE = new RegExp(String.raw`^(?:${ALLOWED_WORD_RE.source})$`, 'i');
+const otherDollar = (text) => [...text.matchAll(/([A-Za-z]+)\$/g)]
+  .some(([, w]) => !/^us$/i.test(w) && !(w.length >= 3 && ALLOWED_WHOLE_RE.test(w)));
 const FLAG_TAG_RE = /#(?:test|dry|draft|brochure|pdf|nobrochure|nopdf|no-brochure|no-pdf|hidden|private|rent|rental|forrent|for-rent|sale|forsale|for-sale|buy|offplan|off-plan|international|overseas)(?![A-Za-z0-9_-])/gi;
 // Direction marks, the tatweel and the vowel marks are invisible ("عُماني" is "عماني", "بـ" is "ب").
 const INVISIBLE_RE = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069\u0640\u064B-\u0652]/g;
@@ -85,7 +89,10 @@ const INVISIBLE_RE = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069\u0640\u064B-
  * A price the OWNER typed in the caption. Never an estimate — this only reads an explicit
  * figure. Returns null unless the caption is nothing but that price (see above).
  */
-export function parsePriceHint(caption) {
+/** The currency a riyal with no country means on a listing priced in `listingCurrency`. */
+export const riyalCurrency = (listingCurrency) => (listingCurrency === 'OMR' ? 'OMR' : 'SAR');
+
+export function parsePriceHint(caption, { command = false } = {}) {
   // Fullwidth characters ("４．５m") become their ASCII forms; any other non-ASCII digit, a superscript
   // or a footnote mark ("450000¹") included, is not ours to read. All white space, line breaks included,
   // is one space. The bot's flags and categories ("#test", "#rent") are read by parseCaption and are not
@@ -95,8 +102,8 @@ export function parsePriceHint(caption) {
   const text = westernise(folded).replace(INVISIBLE_RE, '')
     .replace(FLAG_TAG_RE, ' ').replace(/#/g, ' ').replace(/\s+/g, ' ').trim();
   // A hashtag holding a digit ("#1stPayment", "#250000", "#2BR") may label or be the figure: no price.
-  if (/#[A-Za-z0-9_\-\u0621-\u064A]*[0-9]/.test(westernise(folded).replace(FLAG_TAG_RE, ' '))) return null;
-  if (/[\p{Nd}\p{No}]/u.test(text.replace(/[0-9]/g, '')) || OTHER_DOLLAR_RE.test(text)) return null;
+  if (/#[^\s#]*[0-9]/.test(westernise(folded).replace(INVISIBLE_RE, '').replace(FLAG_TAG_RE, ' '))) return null;
+  if (/[\p{Nd}\p{No}]/u.test(text.replace(/[0-9]/g, '')) || otherDollar(text)) return null;
   if (PERIOD_WORD_RE.test(text) && !RENT_WORD_RE.test(westernise(folded))) return null;
   const rent = RENT_WORD_RE.test(westernise(folded));
   if (rent && SALE_WORD_RE.test(westernise(folded))) return null;
@@ -150,10 +157,11 @@ export function parsePriceHint(caption) {
   // otherwise "3 bedrooms" would become a price.
   if (!currency && factor === 1 && value < 10000) return null;
   if (value < 1000) return null;
-  // Under 10,000 is a rent at most: on any other caption it is a rate per metre or a fee, not the price.
-  if (!rent && value < 10000) return null;
+  // Under 10,000 is a rent at most: on any other caption it is a rate per metre or a fee, not the price
+  // (the price command may set a rent's figure: the listing is named there).
+  if (!command && !rent && value < 10000) return null;
   const written = Boolean(currency) && currency !== 'RIYAL';
-  return { amount: value, currency: written ? currency : 'SAR', explicitCurrency: written, period };
+  return { amount: value, currency: written ? currency : 'SAR', explicitCurrency: written, riyal: currency === 'RIYAL', rent, period };
 }
 
 /**
@@ -179,10 +187,14 @@ export function parseCaption(caption) {
   for (const [re, value] of PERIOD_HINTS) {
     if (re.test(text)) { period = value; break; }
   }
-  const price = parsePriceHint(text);
-  // A caption price brings its own period, read from its closed word list.
+  let price = parsePriceHint(text);
+  // The price reader and the category reader must agree on a rent ("#rent_monthly AED 5,000", "Lease
+  // AED 2,000", "Rent45,000" are one to the first only): when they do not, no caption price.
+  if (price && price.rent !== (category === 'rent')) price = null;
+  // A caption price brings its own period, read from its closed word list; with none written the
+  // brochure's own period stands (listing.mjs), so "للإيجار 4,500 ريال" on a monthly brochure stays monthly.
   if (price) period = price.period;
-  if (category === 'rent' && !period) period = 'year';
+  else if (category === 'rent' && !period) period = 'year';
   if (category !== 'rent') period = null;
   return {
     text,
@@ -196,7 +208,8 @@ export function parseCaption(caption) {
     category,
     // A currency only when the owner wrote one: otherwise the brochure's own currency stands (an AED
     // listing priced "4.5m" stays in AED).
-    price: price ? { amount: price.amount, currency: price.explicitCurrency ? price.currency : null } : null,
+    // A riyal with no country is the listing's riyal: OMR on an Omani listing, else SAR (listing.mjs).
+    price: price ? { amount: price.amount, currency: price.explicitCurrency ? price.currency : null, ...(price.riyal ? { riyal: true } : {}) } : null,
     period,
   };
 }
@@ -302,12 +315,12 @@ export function parseCommand(text) {
       if (!id) return { cmd: 'error', message: 'usage: price BONA-W001 4500000  |  price BONA-W001 onrequest' };
       const rest = parts.slice(2).join(' ');
       if (/^\s*(on ?request|onrequest|عند الطلب)\s*$/i.test(rest)) return { cmd: 'price', id, onRequest: true };
-      const p = parsePriceHint(rest);
+      const p = parsePriceHint(rest, { command: true });
       // setPrice cannot change the rent period, so a figure with one is refused (it would be published as
       // the listing's own period).
       if (!p || p.period) return { cmd: 'error', message: 'usage: price BONA-W001 4500000  |  price BONA-W001 onrequest' };
       // A currency only when the owner wrote one: setPrice keeps the listing's own otherwise.
-      return { cmd: 'price', id, amount: p.amount, currency: p.explicitCurrency ? p.currency : null, onRequest: false };
+      return { cmd: 'price', id, amount: p.amount, currency: p.explicitCurrency ? p.currency : null, ...(p.riyal ? { riyal: true } : {}), onRequest: false };
     }
     case 'brochure':
     case 'pdf': {

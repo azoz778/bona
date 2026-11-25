@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ANY_LISTING_ID_RE, findListingId, HELP_TEXT, LISTING_ID_RE, parseCaption, parseCommand, parseExpiryDate, parsePriceHint } from '../lib/commands.mjs';
+import { ANY_LISTING_ID_RE, findListingId, HELP_TEXT, LISTING_ID_RE, parseCaption, parseCommand, parseExpiryDate, parsePriceHint, riyalCurrency } from '../lib/commands.mjs';
 import { INTAKE_ID_RE, LISTING_ID_RE as SITE_LISTING_ID_RE } from '../../../scripts/curate/rules.mjs';
 
 describe('parseCaption', () => {
@@ -235,17 +235,34 @@ describe('parsePriceHint', () => {
       assert.equal(parsePriceHint(caption), null, caption);
     }
     // a riyal with no country is read as SAR but not passed on: the brochure's currency (e.g. OMR) stands
-    assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال').price, { amount: 190000, currency: null });
+    assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال').price, { amount: 190000, currency: null, riyal: true });
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال سعودي').price, { amount: 190000, currency: 'SAR' });
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال عماني').price, { amount: 190000, currency: 'OMR' });
     assert.equal(hint('#sale 25m'), 'SAR 25000000');
   });
 
+  // r15 review (Codex)
+  it('round 15: other dollars, a rent only one reader sees, qualifiers, a riyal, the command floor', () => {
+    for (const caption of ['Price: AUS$ 450,000', 'CAD$ 450,000', 'is$450,000', '~SAR 4.5m~', 'SAR 4.5m+', '≈ SAR 4.5m', '#سِعر450000', '#سعر450000']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    assert.equal(hint('Price$450,000'), 'USD 450000');
+    assert.equal(hint('US$ 450,000'), 'USD 450000');
+    const c = parseCaption('#rent_monthly AED 5,000');
+    assert.deepEqual([c.price, c.period], [null, null]);
+    assert.equal(riyalCurrency('OMR'), 'OMR');
+    assert.equal(riyalCurrency('AED'), 'SAR');
+    assert.equal(riyalCurrency(undefined), 'SAR');
+    // the price command names its listing, so a rent's figure under 10,000 is accepted there
+    assert.deepEqual(parseCommand('price BONA-W001 5,000 AED'), { cmd: 'price', id: 'BONA-W001', amount: 5000, currency: 'AED', onRequest: false });
+    assert.deepEqual(parseCommand('price BONA-W001 190,000 ريال'), { cmd: 'price', id: 'BONA-W001', amount: 190000, currency: null, riyal: true, onRequest: false });
+  });
+
   // r14 review (Claude)
   it('round 14 (Claude): the period comes from the price caption itself', () => {
     for (const [caption, period] of [['Rent SAR 4,500 /month', 'month'], ['Rent 4,500 SAR / month', 'month'], ['rent 4,500 SAR month', 'month'],
-      ['إيجار 4,500 ريال شهر', 'month'], ['إيجار شهر 4,500 ريال', 'month'], ['إيجار الشهر 4,500 ريال', 'month'], ['Lease AED 2,000 per month', 'month'],
-      ['#rent SAR 60,000 yearly', 'year'], ['Rent SAR 60,000', 'year']]) {
+      ['إيجار 4,500 ريال شهر', 'month'], ['إيجار شهر 4,500 ريال', 'month'], ['إيجار الشهر 4,500 ريال', 'month'],
+      ['#rent SAR 60,000 yearly', 'year'], ['Rent SAR 60,000', null]]) {
       const c = parseCaption(caption);
       assert.ok(c.price, caption);
       assert.deepEqual([c.category, c.period], ['rent', period], caption);
@@ -263,11 +280,20 @@ describe('parsePriceHint', () => {
     assert.equal(parseCommand('price BONA-W001 SAR 4,500 rent').amount, 4500);
   });
 
-  it('reads "/ month" after a space, and lease as rent', () => {
+  it('reads "/ month" after a space; a lease is no caption price and no category', () => {
     assert.equal(parseCaption('Rent AED 5,000 / month').period, 'month');
-    const lease = parseCaption('Lease AED 5,000 monthly');
-    assert.equal(lease.category, 'rent');
-    assert.equal(lease.period, 'month');
+    // r15 (Claude): "lease" in a sale caption ("125-year lease") must not make it a rent, so it is no
+    // category word; the price reader sees a rent the category reader does not, so no caption price
+    for (const caption of ['Lease AED 5,000 monthly', 'Lease AED 2,000 per month', 'Rent45,000']) {
+      const c = parseCaption(caption);
+      assert.deepEqual([c.price, c.category], [null, null], caption);
+    }
+    for (const caption of ['London flat for sale, 125-year lease', 'Villa for sale, tenant lease until 2027']) {
+      assert.equal(parseCaption(caption).category, 'buy', caption);
+    }
+    assert.equal(parseCaption('#international apartment, 99 year lease').category, 'international');
+    // no caption price: a rent caption's period is still main's yearly default
+    assert.equal(parseCaption('#rent villa').period, 'year');
   });
 
   it('reads monthly and yearly as the rent period', () => {
