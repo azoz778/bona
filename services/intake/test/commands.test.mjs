@@ -184,6 +184,70 @@ describe('parsePriceHint', () => {
     assert.equal(parseCommand('price BONA-W001 450 m2').cmd, 'error');
   });
 
+  // r10 review (Codex) on the strict rule
+  it('reads currencies written as codes, symbols and words, and refuses others', () => {
+    for (const [caption, want] of [
+      ['Asking 4.5mUSD', 'USD 4500000'],
+      ['السعر ٤٥٠٬٠٠٠ ريال عماني', 'OMR 450000'],
+      ['السعر ٤٥٠٬٠٠٠ ريال سعودي', 'SAR 450000'],
+      ['Asking €450,000', 'EUR 450000'],
+      ['Asking $450,000', 'USD 450000'],
+      ['السعر 2,400,000 درهم', 'AED 2400000'],
+    ]) {
+      assert.equal(hint(caption), want, caption);
+    }
+    for (const caption of ['Asking QAR 450,000', 'السعر ٤٥٠٬٠٠٠ ريال قطري', 'Asking £450,000', 'السعر 450,000 دينار']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+  });
+
+  it('round 10: signs, hidden digits, line breaks, units, labels, negation, exact amounts', () => {
+    for (const caption of [
+      'Price: .5 million SAR', 'Offer AED −450,000', 'Offer AED -450,000',
+      'Price SAR 450,000 (old); now-AED500000', 'Price SAR 450,000 (old); now ５０００００',
+      'Land 12,000\nsqm', 'Land 12,000 hectares', '3,500 SAR SAR per sqm',
+      'Deposit #test SAR 50,000', 'Deposit: AED: 50,000', 'No parking, deposit SAR 50,000',
+      'Phone No. 555226302 AED', 'Offer rejected: SAR 450,000', 'SAR 1' + '0'.repeat(303) + 'm',
+    ]) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    assert.equal(hint('Asking 12,000\nk SAR'), 'SAR 12000000');
+    assert.equal(hint('Price: SAR 12,345.6789'), 'SAR 12345.6789');
+    assert.equal(hint('Asking ４．５m SAR'), 'SAR 4500000');
+  });
+
+  // r10 review (Claude) on the strict rule
+  it('round 10: a multiplier before a word, ids, spelled-out amounts, more currencies, labels, years, bare figures', () => {
+    for (const caption of [
+      'Villa on 30m street', 'Facing a 40m road', 'Villa 50 m from the beach', 'Land 25m frontage', 'Villa 20m wide',
+      'Land with 150 m frontage, price in SAR', 'Only 50k down',
+      'السعر مليون و200 ألف', 'مليون و٥٠٠ ألف ريال', 'السعر 3 مليون ونص',
+      'دفعة أولى ٥٠ ألف', 'الدخل السنوي 450,000', 'العائد 450 ألف', '#Deposit 50,000', '#area 12,000',
+      'Off-plan, delivery 2027, prices in SAR', 'Land 12,000 sq meters', 'Land 12,000 sq. metres',
+      'Al Rawdah, Jeddah 23434', 'Discount SAR 200,000', 'AED 2,100 psf', 'Villa with 12,000 visitors',
+      'Asking 850,000 GBP',
+    ]) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    for (const [caption, want] of [
+      ['Price-4,500,000', 'SAR 4500000'],
+      ['SAR-4.5m', 'SAR 4500000'],
+      ['Villa for sale-1,250,000', 'SAR 1250000'],
+      ['Dubai villa $1.2m', 'USD 1200000'],
+      ['€850,000 apartment', 'EUR 850000'],
+      ['1,200,000 درهم', 'AED 1200000'],
+      ['1,200,000 dirhams', 'AED 1200000'],
+      ['SR 4,500,000', 'SAR 4500000'],
+      ['SAR 1,500 thousand', 'SAR 1500000'],
+      ['4.5m negotiable', 'SAR 4500000'],
+      ['4500000', 'SAR 4500000'],
+      ['for sale 4,500,000', 'SAR 4500000'],
+    ]) {
+      assert.equal(hint(caption), want, caption);
+    }
+    assert.equal(parseCommand('price BONA-W001 $1.2m').currency, 'USD');
+  });
+
   it('runs in linear time on long captions', () => {
     const t0 = performance.now();
     for (const s of ['1 '.repeat(20000), ' '.repeat(100000) + '4.5m', 'Price AED 450,000' + '\r\n'.repeat(5000) + 'x', 'ً'.repeat(60000) + ' 4.5m', ('Area: ').repeat(5000) + '4.5m']) parsePriceHint(s);
