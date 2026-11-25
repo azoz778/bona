@@ -148,9 +148,9 @@ describe('parseCommand', () => {
     assert.deepEqual(parseCommand('show BONA-W003'), { cmd: 'hidden-set', id: 'BONA-W003', hidden: false });
   });
 
-  // `brochure <id>` re-runs rebrand_pdf.py against the original PDF still on disk. It is
-  // what the owner reaches for after `price` or a title fix: those facts are printed on the
-  // brochure's cover, so the PDF goes stale the moment they change.
+  // `brochure <id>` re-runs brochure_pdf.py on the listing and its files in the repo. It is
+  // what the owner reaches for after `price` or a title fix: those facts are printed in the
+  // brochure, so the PDF goes stale the moment they change.
   it('parses brochure <id>, and `pdf` as its alias', () => {
     assert.deepEqual(parseCommand('brochure BONA-W003'), { cmd: 'brochure', id: 'BONA-W003' });
     assert.deepEqual(parseCommand('brochure bona-w003'), { cmd: 'brochure', id: 'BONA-W003' });

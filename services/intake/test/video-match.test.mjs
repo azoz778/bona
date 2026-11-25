@@ -241,7 +241,12 @@ describe('the matcher prompt and its candidate list', () => {
     assert.equal(all[0].place, 'Obhur, Jeddah');
     assert.equal(all[0].thumbs.length, 2);
     assert.equal(candidateListings(repo, { limit: 1 }).length, 1);
-    assert.deepEqual(candidateListings(fs.mkdtempSync(path.join(os.tmpdir(), 'bona-empty-'))), []);
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-empty-'));
+    try {
+      assert.deepEqual(candidateListings(empty), []);
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
   });
 
   it('the prompt fences every candidate\'s own words and never lets a frame give orders', () => {

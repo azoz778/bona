@@ -2,12 +2,13 @@
 // Validates src/data/listings.json against src/data/LISTING-SCHEMA.md.
 // Usage: node scripts/curate/validate.mjs [--head]
 //   --head  also HEAD-request every remote image src/thumb (HTTP 200 required) and stat every
-//           site-local still under public/; network, ~1 min.
+//           site-local file under public/ (photos, videos and posters, floor plans and their
+//           thumbnails: rules.mjs localFilesOf); network, ~1 min.
 // Exits 1 on any failure.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FORBIDDEN, HYPE, imageFocusProblems, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, loadRegisterWithdrawals, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, subsidisedPriceProblems, unitsSheetProblems, videoEntryProblems, withdrawnAdvertising, withdrawnInboxListings, withdrawnNotice, WITHDRAWN_ADVERTISING } from './rules.mjs';
+import { forbiddenHits, HYPE, imageFocusProblems, isLandPublic, isLocalSrc, isPublishable, LAND_PRICE_CAP, faqProblems, licenceProblems, LISTING_ID_RE, loadRegisterWithdrawals, localFilesOf, LOCAL_LAND_STILL, LOCAL_LISTING_THUMB, modelsProblems, photoNoteProblems, projectFactsProblems, sarAmount, seoTitleProblems, subsidisedPriceProblems, unitsSheetProblems, videoEntryProblems, withdrawnAdvertising, withdrawnInboxListings, withdrawnNotice, WITHDRAWN_ADVERTISING } from './rules.mjs';
 
 function matterportIdOf(value) {
   if (typeof value !== 'string') return null;
@@ -35,7 +36,9 @@ const PERIOD = new Set([null, 'year', 'month']);
 const MEDIA = /^https:\/\/tk-storage\.azoz\.uk\/tk-estate-media\/media\/[^/]+\/[^/]+$/;
 const THUMB = /^https:\/\/tk-storage\.azoz\.uk\/tk-estate-media\/website-thumbs\/[^/]+\.webp$/;
 const ARABIC = /[؀-ۿ]/;
-// The id, site-local image path, FORBIDDEN (old brand + any telephone number) and HYPE
+// The id, site-local image path, FORBIDDEN (the old brand, another agency, or a contact
+// detail: phone, unified/toll-free/landline number, URL, domain, e-mail, social handle — tested
+// through forbiddenHits(), which turns Arabic-Indic and Persian digits into ASCII first) and HYPE
 // rules all come from ./rules.mjs, which services/intake also uses — one definition, so
 // the intake can never publish something this validator would then reject.
 
@@ -79,7 +82,7 @@ const isStr = (v) => typeof v === 'string' && v.trim().length > 0;
 const isNumOrNull = (v) => v === null || (typeof v === 'number' && Number.isFinite(v));
 const isLoc = (v) => v && isStr(v.en) && isStr(v.ar) && ARABIC.test(v.ar);
 const checkCopy = (id, label, s) => {
-  for (const re of FORBIDDEN) if (re.test(s)) err(id, `${label} mentions the old brand/phone: ${s.match(re)[0]}`);
+  for (const hit of forbiddenHits(s)) err(id, `${label} mentions a contact detail or another brand: ${hit}`);
   if (HYPE.test(s)) err(id, `${label} uses hype wording: "${s.match(HYPE)[0]}"`);
 };
 // Listings may share images only when they are units/pages of the same developer's project
@@ -227,6 +230,9 @@ for (const l of data) {
 
   // Project-page extras (rules.mjs): optional, but whole when present.
   for (const p of [...faqProblems(l.faq), ...seoTitleProblems(l.seoTitle), ...projectFactsProblems(l.projectFacts), ...photoNoteProblems(l.photoNote)]) err(id, p);
+  // Unit models + their floor plans, the amenities / nearby / warranties lists, the copy rules over
+  // every string in them, and the headline price that must be the cheapest model (rules.mjs).
+  for (const m of modelsProblems(l)) err(id, m);
   // A photo note is repeated in every image label, so no label can still present the photos as this listing.
   if (l.photoNote && isLoc(l.photoNote)) for (const [i, im] of (l.images ?? []).entries()) {
     if (!String(im.alt?.en ?? '').includes(l.photoNote.en) || !String(im.alt?.ar ?? '').includes(l.photoNote.ar)) err(id, `images[${i}].alt does not carry the listing's photoNote`);
@@ -253,9 +259,11 @@ if (featured < 6 || featured > 9) err('file', `expected 6–9 featured listings,
 
 async function headCheck() {
   const all = [...new Set(data.flatMap((l) => l.images.flatMap((im) => [im.src, im.thumb].filter(Boolean))))];
-  const local = all.filter((u) => u.startsWith('/'));
   const urls = all.filter((u) => !u.startsWith('/'));
-  for (const u of local) if (!fs.existsSync(path.join(ROOT, 'public', u))) err('head', `missing site-local still public${u}`);
+  // Every site-local file, not only the photos: a floor plan or a poster missing from public/ is the
+  // same broken page (rules.mjs localFilesOf — the list build.mjs checks too).
+  const local = [...new Set(data.flatMap((l) => localFilesOf(l).map((f) => f.path)))];
+  for (const u of local) if (!fs.existsSync(path.join(ROOT, 'public', u))) err('head', `missing site-local file public${u}`);
   let i = 0; const bad = [];
   async function worker() {
     while (i < urls.length) {
@@ -273,7 +281,7 @@ async function headCheck() {
   }
   await Promise.all(Array.from({ length: 12 }, worker));
   for (const u of bad) err('head', `not HTTP 200: ${u}`);
-  console.log(`HEAD-checked ${urls.length} URLs (${bad.length} failures), stat-checked ${local.length} local stills`);
+  console.log(`HEAD-checked ${urls.length} URLs (${bad.length} failures), stat-checked ${local.length} local files`);
 }
 
 if (HEAD) await headCheck();

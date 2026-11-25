@@ -4,12 +4,58 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOMS } from '../../../scripts/curate/rooms.mjs';
 import {
-  imageFocusProblems, INTAKE_ID_RE, isImageFocus as isFocus, isPublishable, licenceProblems, LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB,
-  subsidisedPriceProblems, videoEntryProblems, withdrawnAdvertising, withdrawnNotice,
+  FACT_LISTS, headlineFollowsModels, imageFocusProblems, INTAKE_ID_RE, isImageFocus as isFocus, isPublishable, licenceProblems, loadRegisterWithdrawals,
+  LOCAL_LISTING_SRC, LOCAL_LISTING_THUMB, modelsProblems, subsidisedPriceProblems, videoEntryProblems, withdrawnAdvertising, withdrawnNotice,
 } from '../../../scripts/curate/rules.mjs';
+import { isFigure } from './model-prices.mjs';
 
 export const INBOX_DIR = path.join('scripts', 'curate', 'inbox');
 export const INDEX_FILE = '_index.json';
+/**
+ * A listing slug, the site's rule (validate.mjs, checkListing): lowercase-hyphenated — so never a path that
+ * climbs out of public/listings/ ("../x", "a/b"). Checked before a slug read from a record is joined into
+ * a path (Codex r1 #6a).
+ */
+export const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+/** `slug` is one (SLUG_RE). */
+export const isSlug = (slug) => typeof slug === 'string' && SLUG_RE.test(slug);
+
+/**
+ * Why files may NOT be written or deleted under public/listings/<slug>/ of `repo`, or null when they may
+ * (r2 #6): the slug is not one (isSlug); or `public`, `public/listings` or the listing folder is a symbolic
+ * link, or resolves outside the repo — a write there would land outside the checkout, where git cannot
+ * roll it back. A folder that does not exist yet is fine (it is created as a real one).
+ */
+/**
+ * Why a listing's inbox record `file` may NOT be written, or null when it may (r3 #9): it is a symbolic link, or
+ * its folder resolves outside the repo — git could restore only the link, not what it points at.
+ */
+export function recordFileProblem(repo, file) {
+  let root;
+  try { root = fs.realpathSync(repo); } catch { return `the repo ${repo} cannot be read`; }
+  const rel = path.relative(repo, file);
+  let st = null;
+  try { st = fs.lstatSync(file); } catch { /* not written yet */ }
+  if (st?.isSymbolicLink()) return `${rel} is a symbolic link`;
+  let dir;
+  try { dir = fs.realpathSync(path.dirname(file)); } catch { return null; }   // created later, inside the repo
+  return dir === root || dir.startsWith(`${root}${path.sep}`) ? null : `${rel} resolves outside the repo`;
+}
+
+export function listingDirProblem(repo, slug) {
+  if (!isSlug(slug)) return `the slug ${JSON.stringify(slug)} is not a valid slug (lowercase-hyphenated)`;
+  let root;
+  try { root = fs.realpathSync(repo); } catch { return `the repo ${repo} cannot be read`; }
+  for (const rel of ['public', path.join('public', 'listings'), path.join('public', 'listings', slug)]) {
+    const abs = path.join(repo, rel);
+    let st;
+    try { st = fs.lstatSync(abs); } catch { continue; }
+    if (st.isSymbolicLink()) return `${rel} is a symbolic link`;
+    const real = fs.realpathSync(abs);
+    if (real !== root && !real.startsWith(`${root}${path.sep}`)) return `${rel} resolves outside the repo`;
+  }
+  return null;
+}
 export const RESERVED_SLUGS = new Set(['houses', 'apartments', 'land', 'buildings', 'for-sale', 'for-rent', 'off-plan', 'international', 'index']);
 
 const AR_DIACRITICS = /[ً-ٰٟ]/g;
@@ -138,12 +184,14 @@ export const WARNING_CODES = new Set([
   'not-enough-photos',      // fewer publishable photographs than BONA_MIN_IMAGES (dry run only)
   'price-not-printed',      // the model's price was not in the PDF or the caption -> on request
   'subsidised-price-not-printed', // the model's Sakani price could not be confirmed -> regular price only
-  'brochure-too-large',     // the branded brochure is still over BONA_MAX_BROCHURE_MB after downsampling
-  'brochure-failed',        // rebrand_pdf.py could not build the branded brochure at all
+  'model-price-not-printed', // a unit model's price was not confirmed on its page -> that model shows no price
+  'brochure-too-large',     // the brochure is still over BONA_MAX_BROCHURE_MB with its images scaled down
+  'brochure-failed',        // brochure_pdf.py could not build the brochure at all
   'images-skipped',         // sharp could not decode one or more candidates
   'model-flagged',          // the model returned warnings; read them in the work dir's ai.json
   'photos-cropped',         // one or more photographs were cut out of a page that was one flattened picture
   'map-unconfirmed',        // the brochure links a map but no two links agreed on one point -> district only
+  'plans-unchecked',        // the floor-plan contact check did not finish (quota, failed call) -> those plans left out; the backfill enriches it again
 ]);
 
 /**
@@ -179,11 +227,55 @@ function altFor(room, listing) {
   return base;
 }
 
+const copyPair = (v) => (v && typeof v === 'object' ? { en: v.en, ar: v.ar } : null);
+const copyList = (v) => ({ en: [...v.en], ar: [...v.ar] });
+const hasItems = (v) => Boolean(v) && Array.isArray(v.en) && Array.isArray(v.ar) && (v.en.length > 0 || v.ar.length > 0);
+
+/**
+ * The unit models as the site publishes them: only the fields validateAiResult() checked, copied
+ * (never the AI's objects themselves), the floor plan as the `{ src, thumb }` writeFloorPlans() wrote
+ * for that model position or null. Never the model's `evidence` (an internal citation) and never the
+ * candidate index in `floorPlan`. Prices are copied as the price step left them (under the owner's
+ * caption price it has already nulled them); a rental keeps no Sakani price, as on the headline.
+ */
+function publicModels(aiModels, floorPlans, { rent }) {
+  const plans = new Map((Array.isArray(floorPlans) ? floorPlans : [])
+    .filter((p) => Number.isInteger(p?.model)).map((p) => [p.model, { src: p.src, thumb: p.thumb }]));
+  return (Array.isArray(aiModels) ? aiModels : []).flatMap((m, i) => {
+    if (!m || typeof m !== 'object') return [];
+    const price = isFigure(m.price) ? m.price : null;
+    return [{
+      name: copyPair(m.name),
+      bedrooms: m.bedrooms ?? null,
+      bathrooms: m.bathrooms ?? null,
+      areaSqm: m.areaSqm ?? null,
+      rooms: hasItems(m.rooms) ? copyList(m.rooms) : null,
+      availability: copyPair(m.availability),
+      price,
+      subsidisedPrice: !rent && price !== null && isFigure(m.subsidisedPrice) && m.subsidisedPrice < price ? m.subsidisedPrice : null,
+      floorPlan: plans.get(i) ?? null,
+    }];
+  });
+}
+
+/**
+ * The unit models and the fact lists (amenities / nearby / warranties) a brochure reading publishes,
+ * each left out when empty — the part of buildListing() that `run-once --enrich` adds to a listing
+ * that is already live. `rent` = the listing is a rental (its models keep no Sakani price).
+ */
+export function modelsAndFacts(ai, floorPlans, { rent = false } = {}) {
+  const models = publicModels(ai?.models, floorPlans, { rent });
+  const facts = Object.fromEntries(Object.keys(FACT_LISTS).filter((k) => hasItems(ai?.[k])).map((k) => [k, copyList(ai[k])]));
+  return { ...(models.length ? { models } : {}), ...facts };
+}
+
 /**
  * Assemble the listing JSON written to scripts/curate/inbox/<slug>.json.
  * Intake-only fields live under `_intake` and in `hidden`; build.mjs strips both.
+ * `floorPlans` = writeFloorPlans()'s result (or, on a dry run, floorPlanTargets()'s paths):
+ * `[{ model, src, thumb }]`, `model` being the position in `ai.models`.
  */
-export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = {}, site, now = new Date() }) {
+export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = {}, site, now = new Date(), floorPlans = [] }) {
   const l = ai.listing;
   const kind = kindMap(repo)[l.type];
   if (!kind) throw new Error(`no kind mapping for type "${l.type}"`);
@@ -205,6 +297,8 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
       && typeof subsidised === 'number' && Number.isFinite(subsidised) && subsidised > 0 && subsidised < price.amount) {
     price.subsidisedAmount = subsidised;
   }
+  // Optional, and left out entirely when empty: a listing without unit models or facts keeps its shape.
+  const enrichment = modelsAndFacts(ai, floorPlans, { rent: l.category === 'rent' });
 
   const listing = {
     id,
@@ -233,6 +327,7 @@ export function buildListing({ ai, images, slug, id, repo, caption = {}, meta = 
     videos: [],
     description: { en: l.description.en.join('\n\n'), ar: l.description.ar.join('\n\n') },
     highlights: l.highlights,
+    ...enrichment,
     virtualTourUrl: null,
     brochureUrl: meta.brochureUrl ?? null,
     project: l.project ?? null,
@@ -276,7 +371,7 @@ export function checkListing(listing, { minImages = 4, maxImages = 10, withdrawa
   const isStr = (v) => typeof v === 'string' && v.trim().length > 0;
   const isPair = (v) => v && isStr(v.en) && isStr(v.ar) && ARABIC.test(v.ar);
   if (!INTAKE_ID_RE.test(listing.id || '')) e.push(`id must match BONA-W### (got ${listing.id})`);
-  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(listing.slug || '')) e.push(`slug must be lowercase-hyphenated (got ${listing.slug})`);
+  if (!isSlug(listing.slug)) e.push(`slug must be lowercase-hyphenated (got ${listing.slug})`);
   if (RESERVED_SLUGS.has(listing.slug)) e.push(`slug "${listing.slug}" collides with a section route`);
   if (!isPair(listing.title)) e.push('title.en/ar required');
   if (!Array.isArray(listing.images) || listing.images.length < minImages) {
@@ -293,6 +388,8 @@ export function checkListing(listing, { minImages = 4, maxImages = 10, withdrawa
     e.push('price.amount must be > 0 unless onRequest');
   }
   e.push(...subsidisedPriceProblems(listing.price, listing.category));
+  // Unit models, their floor plans and the fact lists — and the headline that must agree with them.
+  e.push(...modelsProblems(listing));
   // Optional, like project/unit/map — but when present every entry is `{ src, poster }` in
   // the same site-local shapes the site validator demands (scripts/curate/rules.mjs), so a
   // listing this accepts can never fail the build afterwards.
@@ -340,7 +437,7 @@ export function writeInboxListing(repo, listing) {
 const REBUILT_KEYS = new Set([
   'id', 'slug', 'sourceRef', 'status', 'category', 'type', 'kind', 'featured', 'title', 'location', 'price', 'specs',
   'images', 'videos', 'description', 'highlights', 'virtualTourUrl', 'brochureUrl', 'project', 'unit', 'map',
-  'mapPrecision', 'listedAt', 'hidden', 'licence', '_intake',
+  'mapPrecision', 'listedAt', 'hidden', 'licence', '_intake', 'models', 'amenities', 'nearby', 'warranties',
 ]);
 
 /**
@@ -354,6 +451,8 @@ export function replaceMetaFor(repo, id) {
   const found = findInbox(repo, id);
   if (!found) throw new Error(`--replace ${id}: no inbox listing with that id`);
   const l = found.listing;
+  // Before the slug becomes a path: a replacement deletes the listing's folder (r2 #6).
+  if (!isSlug(l.slug)) throw new Error(`--replace ${l.id}: its record's slug ${JSON.stringify(l.slug)} is not a valid slug (lowercase-hyphenated) — fix the record first`);
   const blockers = [];
   const extra = Object.keys(l).filter((k) => !REBUILT_KEYS.has(k));
   if (extra.length) blockers.push(`hand-added field(s) ${extra.join(', ')}`);
@@ -366,6 +465,120 @@ export function replaceMetaFor(repo, id) {
   if (Array.isArray(edits) && edits.length) blockers.push(`the owner's own ${edits.join(' and ')} edit(s)`);
   if (blockers.length) throw new Error(`--replace ${id}: it has ${blockers.join('; ')}, which a re-run would not keep — do it by hand`);
   return { replace: true, id: l.id, slug: l.slug, listedAt: l.listedAt, sourceRef: l.sourceRef ?? null, status: l.status };
+}
+
+// ---- run-once --enrich <id> -------------------------------------------------------------------
+// ~20 listings went live from WhatsApp PDFs before the intake read unit models; several were
+// corrected by hand since (titles, districts, photos), so --replace refuses them. --enrich adds ONLY
+// what the old intake could not read — the unit models with their floor plans, the fact lists, the
+// headline those models prove when the listing had none — and rebuilds the brochure. Everything
+// else in the listing stays exactly as it is.
+
+/** The keys `--enrich` adds, replaces or removes (besides `price` and `brochureUrl`), in publish order. */
+export const ENRICH_KEYS = Object.freeze(['models', ...Object.keys(FACT_LISTS)]);
+
+/**
+ * Which listing `run-once --enrich <id>` adds to — or why it must not. Refused: an unknown id, a
+ * withdrawn listing (its own record or rules.mjs / the review register: nothing is published for it
+ * again), one withheld by owner decision, a hidden one, and one that records no source PDF (the
+ * brochure could not be matched to it). Hand-added fields, videos, a licence, the owner's own edits
+ * do NOT block it: enrichment never rewrites them.
+ * @returns {{enrich:{id:string, slug:string, existing:object}}}
+ */
+export function enrichMetaFor(repo, id) {
+  const found = findInbox(repo, id);
+  if (!found) throw new Error(`--enrich ${id}: no inbox listing with that id`);
+  const l = found.listing;
+  const withdrawn = withdrawnAdvertising(l, loadRegisterWithdrawals(repo));
+  if (withdrawn) throw new Error(`--enrich ${l.id}: ${withdrawnNotice(withdrawn)}`);
+  if (l.status === 'withdrawn') throw new Error(`--enrich ${l.id}: it was withdrawn (status "withdrawn") — nothing is published for it again`);
+  if (!isPublishable(l)) throw new Error(`--enrich ${l.id}: it is withheld from the public site by owner decision`);
+  if (l.hidden) throw new Error(`--enrich ${l.id}: it is hidden — \`show ${l.id}\` first if it should go back on the site`);
+  if (typeof l._intake?.pdfSha256 !== 'string' || !l._intake.pdfSha256) {
+    throw new Error(`--enrich ${l.id}: it records no source PDF (_intake.pdfSha256), so no brochure can be matched to it`);
+  }
+  // Before the slug is joined into a path (Codex r1 #6a): a dry run deletes its staging folder too.
+  if (!isSlug(l.slug)) throw new Error(`--enrich ${l.id}: its record's slug ${JSON.stringify(l.slug)} is not a valid slug (lowercase-hyphenated) — fix the record first`);
+  return { enrich: { id: l.id, slug: l.slug, existing: l } };
+}
+
+const hasEnrichment = (k, v) => (k === 'models' ? Array.isArray(v) && v.length > 0 : hasItems(v));
+
+/**
+ * The listing `--enrich` writes: `existing` with ONLY the new run's enrichment taken from `built` (a
+ * buildListing() / modelsAndFacts() result for the same brochure) — `models` and each fact list,
+ * replaced by the new run's or REMOVED when it has none (an empty one counts as none) — and `price`
+ * only when one is passed. Every other key is the listing's own, unchanged and in its own place, so
+ * the file differs from the old one only by those keys. New keys go where the first enrichment key
+ * was, else after `highlights` (where buildListing() puts them), else at the end. `brochureUrl` is the
+ * caller's to set once the brochure is built. Pure: nothing passed in is changed or shared.
+ */
+export function mergeEnrichment(existing, built, { price } = {}) {
+  const fresh = Object.fromEntries(ENRICH_KEYS.filter((k) => hasEnrichment(k, built?.[k])).map((k) => [k, structuredClone(built[k])]));
+  const keys = Object.keys(existing ?? {});
+  const firstEnrich = keys.findIndex((k) => ENRICH_KEYS.includes(k));
+  const at = firstEnrich !== -1 ? firstEnrich : keys.includes('highlights') ? keys.indexOf('highlights') + 1 : keys.length;
+  const own = keys.filter((k) => !ENRICH_KEYS.includes(k));
+  const cut = keys.slice(0, at).filter((k) => !ENRICH_KEYS.includes(k)).length;
+  const out = {};
+  for (const k of own.slice(0, cut)) out[k] = structuredClone(existing[k]);
+  Object.assign(out, fresh);
+  for (const k of own.slice(cut)) out[k] = structuredClone(existing[k]);
+  if (price !== undefined) out.price = structuredClone(price);
+  return out;
+}
+
+const money = (p) => `${p?.currency ?? 'SAR'} ${Number(p?.amount).toLocaleString('en-US')}`;
+/** A price's Sakani line for a refusal; "(no Sakani price)" only where that line is the whole difference. */
+const sakani = (p, other) => (isFigure(p?.subsidisedAmount)
+  ? ` (Sakani ${p.currency ?? 'SAR'} ${p.subsidisedAmount.toLocaleString('en-US')})`
+  : p?.amount === other?.amount && isFigure(other?.subsidisedAmount) ? ' (no Sakani price)' : '');
+
+/**
+ * The headline `--enrich` publishes beside the unit models, decided from the EXISTING listing.
+ * `alignedPrice` = alignHeadline() over the models as they will be published (null when none of them
+ * kept a confirmed price). In order:
+ *   - the owner set the price by WhatsApp (`_intake.edits` has 'price'): his price stays and the
+ *     models lose theirs — the same rule as a caption price or a later `price <id>`;
+ *   - `currencyMismatch` (the caller's finding, pipeline.mjs: the reading's model prices are in another
+ *     currency than the listing's, or in one the reading did not establish — model-prices.mjs
+ *     modelPriceCurrency): the price stays and the models lose theirs — the site prints every model
+ *     price in the listing's `price.currency`;
+ *   - one specific `unit`: its own price stays, and its models keep theirs (the validator exempts units);
+ *   - no model kept a price: the price stays as it is, set or on request;
+ *   - not a whole development of several unit models (rules.mjs headlineFollowsModels: no `project`, or
+ *     fewer than two models — a single property, per-floor rows): its own price stays and its models
+ *     keep theirs, exactly as for a unit;
+ *   - on request: the models' confirmed headline is adopted — a printed figure the old intake could not read;
+ *   - set: kept when it IS the lowest model price with the same Sakani line (marked `from` if it was
+ *     not — what the validator requires of a headline taken from models); otherwise REFUSED with both
+ *     figures, and nothing changes.
+ * @returns {{price:object, dropModelPrices:boolean, refuse:string|null,
+ *            decision:'owner-price'|'currency-mismatch'|'unit'|'single-property'|'no-model-prices'|'adopted'|'kept'|'refused'}}
+ */
+export function enrichHeadline(existing, models, alignedPrice, { currencyMismatch = false } = {}) {
+  const current = existing?.price ?? null;
+  const keep = (decision, dropModelPrices = false) => ({ price: current, dropModelPrices, refuse: null, decision });
+  const edits = existing?._intake?.edits;
+  if (Array.isArray(edits) && edits.includes('price')) return keep('owner-price', true);
+  if (currencyMismatch) return keep('currency-mismatch', true);
+  if (existing?.unit !== null && existing?.unit !== undefined) return keep('unit');
+  const priced = (Array.isArray(models) ? models : []).some((m) => isFigure(m?.price));
+  if (!priced || !alignedPrice || !isFigure(alignedPrice.amount)) return keep('no-model-prices');
+  if (!headlineFollowsModels({ project: existing?.project, unit: null, models })) return keep('single-property');
+  if (!current || current.onRequest) return { price: alignedPrice, dropModelPrices: false, refuse: null, decision: 'adopted' };
+  const sameSakani = (current.subsidisedAmount ?? null) === (alignedPrice.subsidisedAmount ?? null);
+  if (current.amount === alignedPrice.amount && sameSakani) {
+    return { price: current.from === true ? current : { ...current, from: true }, dropModelPrices: false, refuse: null, decision: 'kept' };
+  }
+  const id = existing?.id ?? 'the listing';
+  return {
+    price: current,
+    dropModelPrices: false,
+    refuse: `${id} shows ${money(current)}${sakani(current, alignedPrice)} but the brochure's lowest model price is `
+      + `${money(alignedPrice)}${sakani(alignedPrice, current)} — send \`price ${id} …\` or re-run with --replace`,
+    decision: 'refused',
+  };
 }
 
 /** Pick the images to publish from the model's ranking. */

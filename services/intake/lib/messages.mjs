@@ -25,6 +25,19 @@ const priceText = (p) => {
   return `${p.currency} ${Number(p.amount).toLocaleString('en-US')}${p.period ? ` / ${p.period}` : ''}${p.from ? ' (from)' : ''}${sakani}`;
 };
 
+/**
+ * Every warning, in the order the reply shows them (r6 #8): it shows only the first 3, so the price warnings come
+ * first (the headline, Sakani and unit-model prices), then the one floor-plan line, then the rest (the model's
+ * flags, the money-text drops, the map, the photos …), each group in the order it was pushed. The pipeline names
+ * the first two groups in `report.warningPriority` (pipeline.mjs rankedWarning).
+ */
+export function orderedWarnings(report) {
+  const first = [report.warningPriority?.price ?? [], report.warningPriority?.plan ?? []];
+  const rank = (w) => { const r = first.findIndex((group) => group.includes(w)); return r < 0 ? first.length : r; };
+  // Array.prototype.sort is stable: the order within each group is kept.
+  return (report.warnings || []).filter(Boolean).sort((a, b) => rank(a) - rank(b));
+}
+
 const coverOf = (listing) => {
   const room = listing._intake?.images?.[0]?.room;
   return room && ROOMS[room] ? ROOMS[room].en : 'first photo';
@@ -44,10 +57,19 @@ export function published(report) {
   ];
   if (l.brochureUrl) {
     const mb = report.brochure?.bytes ? ` (${(report.brochure.bytes / 1048576).toFixed(1)} MB)` : '';
-    lines.push(`📄 Brochure re-published under Bona branding${mb}: ${l.brochureUrl}`);
+    const pages = report.brochure?.pages ? `, ${report.brochure.pages} pages` : '';
+    lines.push(`📄 Bona brochure (English + Arabic${pages})${mb}: ${l.brochureUrl}`);
   }
+  // The floor plans counted, never assumed: a brochure often prints the models without a plan for each.
+  const models = Array.isArray(l.models) ? l.models : [];
+  const plans = models.filter((m) => m?.floorPlan?.src).length;
+  if (models.length) {
+    lines.push(`🏢 ${models.length} unit model${models.length === 1 ? '' : 's'}${plans ? ` · ${plans} floor plan${plans === 1 ? '' : 's'}` : ''}`);
+  }
+  const checked = planCheckLine(report.planCheck);
+  if (checked) lines.push(`🔎 ${checked}`);
   if (l.hidden) lines.push('_Hidden: it is in the repo but not on the site (`show ' + l.id + '` publishes it)._');
-  const warn = (report.warnings || []).filter(Boolean).slice(0, 3);
+  const warn = orderedWarnings(report).slice(0, 3);
   if (warn.length) lines.push('', ...warn.map((w) => `⚠️ ${w}`));
   lines.push('', commandsFor(l.id));
   return lines.join('\n');
@@ -66,8 +88,10 @@ export function dryRunSummary(report) {
     '',
     `${report.picks.length} photos would be published, cover: ${report.picks[0] ? (ROOMS[report.picks[0].room]?.en ?? report.picks[0].room) : '—'}`,
   ];
+  const checked = planCheckLine(report.planCheck);
+  if (checked) lines.push(`🔎 ${checked}`);
   if (report.blocked) lines.push('', `❌ It would NOT publish: ${report.blocked}`);
-  const warn = (report.warnings || []).filter(Boolean).slice(0, 3);
+  const warn = orderedWarnings(report).slice(0, 3);
   if (warn.length) lines.push('', ...warn.map((w) => `⚠️ ${w}`));
   lines.push('', 'Send it again without `#test` to publish it.');
   return lines.join('\n');
@@ -112,7 +136,7 @@ export const notLive = (url, minutes) => `⚠️ The page is still not answering
 export const alreadyLive = (info) => `Already published: ${info.url}\n(${info.id})`;
 export const notFound = (id) => `No listing called ${id}. Send \`status\` to see what is live.`;
 
-/** `brochure <id>` — the branded PDF was rebuilt from the developer's original. */
+/** `brochure <id>` — the Bona brochure was rebuilt from the listing and its files in the repo. */
 export function brochureRebuilt(id, listing, brochure = {}) {
   const mb = brochure.bytes ? `${(brochure.bytes / 1048576).toFixed(1)} MB` : null;
   const shrunk = brochure.srcBytes && brochure.bytes && brochure.srcBytes > brochure.bytes * 1.05
@@ -161,6 +185,22 @@ export function wafiRecorded(id, licence, lang = 'en') {
 
 export const removed = (id, title) => `🗑️ Removed *${title}* (${id}). It comes off the site with the next deploy.`;
 export const updated = (id, what, listing) => `✏️ ${what} — *${listing.title.en}* (${id})\n${commandsFor(id)}`;
+/**
+ * What the `price` command did, for updated(): the new price, and — when the listing's unit models
+ * carried prices — that the owner's figure took them off (edits.mjs setPrice `modelPricesCleared`);
+ * and what happened to the brochure (edits.mjs setPriceWithBrochure `brochure`, Codex r1 #8).
+ */
+export function priceChange(price, { onRequest = false, modelPricesCleared = 0, brochure = null, id = '<id>' } = {}) {
+  const head = onRequest ? 'Price on request' : `Price set to ${price.currency} ${price.amount.toLocaleString('en-US')}`;
+  const models = modelPricesCleared > 0
+    ? ` — ${modelPricesCleared} unit-model price${modelPricesCleared === 1 ? '' : 's'} removed; the table now shows On request`
+    : '';
+  const pdf = !brochure ? ''
+    : brochure.rebuilt ? '\n📄 Brochure rebuilt with the new price'
+      : brochure.removed ? `\n⚠️ The brochure could not be rebuilt, so it was taken off the listing (it showed the old price) — send \`brochure ${id}\` to try again`
+        : '\n⚠️ The brochure could not be rebuilt (the reason is in the journal)';
+  return `${head}${models}${pdf}`;
+}
 
 /** A clip with no id in its caption and no brochure near it in time — recognized, not silently dropped. */
 export const videoNoId = () => '✋ Which listing is this video for? Send it right after its brochure, or caption it with the id, e.g. `video BONA-W001`.';
@@ -214,4 +254,29 @@ export function statusReport({ listings, groups, lastError, queueLength }) {
   }
   if (lastError) lines.push('', `Last error: ${lastError.message}`);
   return lines.join('\n');
+}
+
+/**
+ * The brochure line of the `run-once --enrich` report (r3 #11). A run whose build failed is committed only when
+ * the listing had no brochure (r2 #8: over an old one nothing is committed), so it has none now.
+ */
+export function enrichBrochureLine(report) {
+  const b = report?.brochure;
+  if (b?.ok) return 'rebuilt';
+  if (b?.skipped) return 'skipped (#nobrochure)';
+  return report?.enrich?.hadBrochure
+    ? 'NOT rebuilt — nothing was committed over the old one'
+    : 'NOT built — the listing has no brochure (the reason is in the warnings above)';
+}
+
+/**
+ * The floor-plan contact check in one line (r4): "8 floor plans · 0 left out by the contact check", and how many
+ * could not be checked. null when the run had no plan to check.
+ */
+export function planCheckLine(planCheck) {
+  if (!planCheck || !(planCheck.plans > 0)) return null;
+  const n = planCheck.plans;
+  const unchecked = planCheck.unchecked?.length ?? 0;
+  return `${n} floor plan${n === 1 ? '' : 's'} · ${planCheck.leftOut?.length ?? 0} left out by the contact check`
+    + `${unchecked ? ` · ${unchecked} not checked — try again later` : ''}`;
 }

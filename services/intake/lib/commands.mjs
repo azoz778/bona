@@ -262,7 +262,7 @@ export const HELP_TEXT = [
   'remove BONA-W001        take the listing off the site',
   'hero BONA-W001 4        make photo 4 the cover',
   'price BONA-W001 4500000 set the asking price (or: price BONA-W001 onrequest)',
-  'brochure BONA-W001      rebuild the Bona-branded PDF from the original',
+  'brochure BONA-W001      rebuild the Bona brochure (after a price, photo or title change)',
   'sold BONA-W001          mark it sold   (also: reserved / available)',
   'hide BONA-W001          keep it off the site  (show BONA-W001 puts it back)',
   'status                  what the intake is doing',

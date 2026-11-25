@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import {
-  ALLOWED_PATHS, assertCleanTree, gitCommitPush, gitPull, gitStatus, resetTree,
+  ALLOWED_PATHS, assertCleanTree, gitCommitPush, gitPull, gitStatus, resetTree, run,
 } from '../lib/publish.mjs';
 
 const git = (cwd, ...args) => execFileSync('git', args, {
@@ -156,6 +156,109 @@ describe('gitCommitPush — an explicit allowlist, never `git add -A`', () => {
   });
 });
 
+describe('gitCommitPush — a push that fails leaves no unpublished commit behind (Codex r1 #7)', () => {
+  /** The remote refuses every push (a pre-receive hook) until `open()`. */
+  const reject = () => {
+    const hooks = path.join(origin, 'hooks');
+    fs.mkdirSync(hooks, { recursive: true });
+    git(origin, 'config', 'core.hooksPath', hooks);
+    const hook = path.join(hooks, 'pre-receive');
+    fs.writeFileSync(hook, '#!/bin/sh\necho "refused by the test hook" >&2\nexit 1\n');
+    fs.chmodSync(hook, 0o755);
+    return { open: () => fs.rmSync(hook) };
+  };
+  const inProgress = () => ['rebase-merge', 'rebase-apply'].some((d) => fs.existsSync(path.join(clone, '.git', d)));
+
+  it('a push the remote still refuses after the retry undoes the job\'s own commit; the next job does not push it', async () => {
+    const base = git(clone, 'rev-parse', 'HEAD');
+    const remote = reject();
+    write(clone, 'public/listings/first/01.jpg', 'first');
+    await assert.rejects(
+      () => gitCommitPush(clone, 'intake: first (BONA-W001)', { remote: 'origin', branch: 'main', paths: ['public/listings/first'] }),
+      /git push failed/,
+    );
+    assert.equal(git(clone, 'rev-parse', 'HEAD'), base, 'the unpublished commit is gone from HEAD');
+    assert.equal(await resetTree(clone, { dirs: ['public/listings/first'] }), true, 'the caller\'s rollback leaves the clone clean');
+    assert.equal(fs.existsSync(path.join(clone, 'public/listings/first')), false);
+
+    // The next job, the remote open again: only ITS change reaches the remote.
+    remote.open();
+    write(clone, 'public/listings/second/01.jpg', 'second');
+    const res = await gitCommitPush(clone, 'intake: second (BONA-W002)', { remote: 'origin', branch: 'main', paths: ['public/listings/second'] });
+    assert.equal(res.pushed, true);
+    assert.doesNotMatch(git(origin, 'log', '--format=%s', 'main'), /first/);
+    const files = git(origin, 'ls-tree', '-r', '--name-only', 'main');
+    assert.match(files, /public\/listings\/second\/01\.jpg/);
+    assert.doesNotMatch(files, /public\/listings\/first/);
+  });
+
+  it('a retry whose rebase conflicts aborts the rebase and undoes the commit — the clone can pull again', async () => {
+    const base = git(clone, 'rev-parse', 'HEAD');
+    // Someone else pushed a different listings.json in the meantime.
+    const other = path.join(root, 'other');
+    git(root, 'clone', origin, other);
+    write(other, 'src/data/listings.json', '[{"theirs":true}]\n');
+    git(other, 'add', '-A');
+    git(other, 'commit', '-m', 'theirs');
+    git(other, 'push', 'origin', 'main');
+
+    write(clone, 'src/data/listings.json', '[{"ours":true}]\n');
+    write(clone, 'public/listings/villa/01.jpg', 'x');
+    await assert.rejects(
+      () => gitCommitPush(clone, 'intake: villa (BONA-W001)', { remote: 'origin', branch: 'main', paths: ['public/listings/villa', 'src/data/listings.json'] }),
+      /git rebase failed/,
+    );
+    assert.equal(inProgress(), false, 'no rebase left in progress');
+    assert.equal(git(clone, 'rev-parse', 'HEAD'), base, 'the job\'s own commit is undone');
+    assert.equal(await resetTree(clone, { dirs: ['public/listings/villa'] }), true);
+    await gitPull(clone, { remote: 'origin', branch: 'main' });
+    assert.equal(git(clone, 'rev-parse', 'HEAD'), git(origin, 'rev-parse', 'main'));
+  });
+});
+
+describe('gitCommitPush — a retry whose rebase drops the job\'s commit (r2 #7)', () => {
+  it('the remote already has the same patch and every push fails: the change is on the remote — nothing is reset', async () => {
+    // Someone else already pushed exactly this change.
+    const other = path.join(root, 'other');
+    git(root, 'clone', origin, other);
+    write(other, 'public/listings/first/01.jpg', 'first');
+    git(other, 'add', '-A');
+    git(other, 'commit', '-m', 'the same change, pushed first');
+    git(other, 'push', 'origin', 'main');
+    const upstream = git(origin, 'rev-parse', 'main');
+    // Fetching works, pushing does not (a transport error on every push).
+    git(clone, 'remote', 'set-url', '--push', 'origin', path.join(root, 'nowhere.git'));
+    write(clone, 'public/listings/first/01.jpg', 'first');
+    const res = await gitCommitPush(clone, 'intake: first (BONA-W001)', { remote: 'origin', branch: 'main', paths: ['public/listings/first'] });
+    assert.equal(res.pushed, true, 'the change is on the remote');
+    assert.equal(res.upstream, true);
+    assert.equal(git(clone, 'rev-parse', 'HEAD'), upstream, 'HEAD is the upstream commit — not reset off it');
+    assert.equal(git(clone, 'rev-parse', 'origin/main'), upstream);
+    assert.equal(await gitStatus(clone), '');
+  });
+});
+
+describe('gitCommitPush — the remote applied the same change and reverted it (r3 #8)', () => {
+  it('the retry rebase drops the job\'s commit, but the remote no longer has its content: not published, nothing reset', async () => {
+    const other = path.join(root, 'other');
+    git(root, 'clone', origin, other);
+    write(other, 'public/listings/first/01.jpg', 'first');
+    git(other, 'add', '-A');
+    git(other, 'commit', '-m', 'the same change');
+    git(other, 'revert', '--no-edit', 'HEAD');
+    git(other, 'push', 'origin', 'main');
+    const upstream = git(origin, 'rev-parse', 'main');
+    write(clone, 'public/listings/first/01.jpg', 'first');
+    await assert.rejects(
+      () => gitCommitPush(clone, 'intake: first (BONA-W001)', { remote: 'origin', branch: 'main', paths: ['public/listings/first'] }),
+      /not published/,
+    );
+    assert.equal(git(origin, 'rev-parse', 'main'), upstream, 'the remote is untouched');
+    assert.equal(git(clone, 'rev-parse', 'HEAD'), upstream, 'the local branch keeps the upstream commits — nothing reset off them');
+    assert.equal(await resetTree(clone, { dirs: ['public/listings/first'] }), true);
+  });
+});
+
 describe('resetTree — a failed job leaves the clone clean for the next one', () => {
   it('deletes the new listing and restores every tracked file', async () => {
     write(clone, 'public/listings/villa/01.jpg', 'x');
@@ -285,5 +388,18 @@ describe('the entry points pull before they write, and never after', () => {
     const waitAt = shutdown.indexOf('waitForIdle');
     assert.ok(waitAt > 0 && exitAt > waitAt, 'the exit must come after the wait');
     assert.ok(!/setTimeout\([^)]*process\.exit/.test(src), 'no timer-based exit');
+  });
+});
+
+describe('run reads a child\'s output as one UTF-8 stream (r9 #8)', () => {
+  // Two writes with a pause between: the pipe hands them over as two chunks, the first ending inside "إ".
+  it('an Arabic letter cut between two chunks arrives whole, on stdout and on stderr', async () => {
+    const script = `const b = Buffer.from('للإيجار'); const cut = b.indexOf(Buffer.from('إ')) + 1;
+      for (const s of [process.stdout, process.stderr]) s.write(b.subarray(0, cut));
+      setTimeout(() => { for (const s of [process.stdout, process.stderr]) s.write(b.subarray(cut)); }, 150);`;
+    const { code, out, err } = await run(process.execPath, ['-e', script]);
+    assert.equal(code, 0);
+    assert.equal(out, 'للإيجار');
+    assert.equal(err, 'للإيجار');
   });
 });

@@ -4,8 +4,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { licenceProblems, loadRegisterWithdrawals, withdrawnAdvertising, withdrawnNotice } from '../../../scripts/curate/rules.mjs';
-import { brochureFileIn, brochureUrlFor, buildBrandedBrochure, findSourcePdf } from './brochure.mjs';
-import { WARNING_CODES, findInbox } from './listing.mjs';
+import { brochureFileIn, brochureUrlFor, buildBrandedBrochure } from './brochure.mjs';
+import { log } from './log.mjs';
+import { WARNING_CODES, addWarningCode, findInbox, isSlug, listingDirProblem, recordFileProblem } from './listing.mjs';
 import { removeListingImages } from './images.mjs';
 import { MAX_VIDEOS, writeListingVideo } from './video.mjs';
 
@@ -20,6 +21,15 @@ function markEdited(listing, what) {
   const edits = new Set(Array.isArray(listing._intake.edits) ? listing._intake.edits : []);
   edits.add(what);
   listing._intake.edits = [...edits];
+}
+
+/**
+ * `{ error }` when this listing's inbox record — or, with `dir`, its public/listings/<slug>/ folder — may not
+ * be written (a symbolic link, or outside the repo: r2 #6, r3 #9), else null. Checked before anything is written.
+ */
+function editRefusal(repo, found, { dir = false } = {}) {
+  const problem = recordFileProblem(repo, found.file) ?? (dir ? listingDirProblem(repo, found.listing.slug) : null);
+  return problem ? { error: `${found.listing.id ?? 'the listing'}: ${problem} — nothing was changed` } : null;
 }
 
 function save(file, listing) {
@@ -45,6 +55,8 @@ function withdrawnRefusal(repo, listing) {
 export function removeListing(repo, id) {
   const found = findInbox(repo, id);
   if (!found) return null;
+  const blocked = editRefusal(repo, found, { dir: true });
+  if (blocked) return blocked;
   fs.rmSync(found.file, { force: true });
   removeListingImages(path.join(repo, 'public'), found.listing.slug);
   return found.listing;
@@ -57,7 +69,7 @@ export function removeListing(repo, id) {
 export function setHero(repo, id, n) {
   const found = findInbox(repo, id);
   if (!found) return null;
-  const refused = withdrawnRefusal(repo, found.listing);
+  const refused = withdrawnRefusal(repo, found.listing) ?? editRefusal(repo, found, { dir: true });
   if (refused) return refused;
   const images = found.listing.images;
   if (!Number.isInteger(n) || n < 1 || n > images.length) {
@@ -74,10 +86,14 @@ export function setHero(repo, id, n) {
   return { listing: save(found.file, found.listing) };
 }
 
+/**
+ * The `price` command. `{ listing, modelPricesCleared }`: how many unit models lost their price to
+ * the owner's figure (the reply says so; 0 when none carried one), or `{ error }` / null.
+ */
 export function setPrice(repo, id, { amount, currency, onRequest }) {
   const found = findInbox(repo, id);
   if (!found) return null;
-  const refused = withdrawnRefusal(repo, found.listing);
+  const refused = withdrawnRefusal(repo, found.listing) ?? editRefusal(repo, found);
   if (refused) return refused;
   const p = found.listing.price;
   if (onRequest) { p.onRequest = true; p.amount = null; p.from = false; }
@@ -85,8 +101,53 @@ export function setPrice(repo, id, { amount, currency, onRequest }) {
   // A Sakani price read from the brochure belonged to the brochure's headline price; once the
   // owner sets his own price it is stale (it could even be above the new one), so it goes.
   delete p.subsidisedAmount;
+  // The same goes for the unit-model prices, as under a caption price at publish time: the headline
+  // of a whole development must be its cheapest model whenever a model carries a price (rules.mjs modelsProblems), and the
+  // owner's own figure replaces the brochure's. The models themselves (rooms, areas, plans) stay.
+  let modelPricesCleared = 0;
+  for (const m of Array.isArray(found.listing.models) ? found.listing.models : []) {
+    if (!m || typeof m !== 'object') continue;
+    if ((m.price ?? null) !== null || (m.subsidisedPrice ?? null) !== null) modelPricesCleared += 1;
+    m.price = null; m.subsidisedPrice = null;
+  }
   markEdited(found.listing, 'price');
-  return { listing: save(found.file, found.listing) };
+  return { listing: save(found.file, found.listing), modelPricesCleared };
+}
+
+/**
+ * The `price` command as the bot runs it (Codex r1 #8): setPrice(), then the Bona brochure drawn again
+ * from the listing as it now is, in the same edit (and so the same commit) — the brochure prints the
+ * price and the unit-model table, so the old PDF would go on showing a price the listing no longer
+ * shows. Only a listing that has a brochure gets one. When the build fails and the price changed, the
+ * stale brochure is taken off the listing (its file deleted, `brochureUrl` null, `brochure-failed`) —
+ * never left up — and `brochure` says so for the reply.
+ * @returns {Promise<{listing:object, modelPricesCleared:number,
+ *   brochure: null | {rebuilt:true, bytes?:number, pages?:number} | {rebuilt:false, removed:boolean, error:string|null}}
+ *   | {error:string} | null>}
+ */
+export async function setPriceWithBrochure(repo, id, args, { cfg = {}, workDir, spawnImpl } = {}) {
+  const found = findInbox(repo, id);
+  const before = found?.listing ?? null;
+  // The brochure is rebuilt — or deleted — in the listing's folder, and the record rewritten: refused, price and
+  // all, when either is not a real one inside the repo (r2 #6, r3 #9).
+  const blocked = found ? editRefusal(repo, found, { dir: true }) : null;
+  if (blocked) return blocked;
+  const res = setPrice(repo, id, args);
+  if (!res || res.error) return res;
+  const { listing } = res;
+  const file = isSlug(listing.slug) ? brochureFileIn(path.join(repo, 'public', 'listings', listing.slug)) : null;
+  if (!listing.brochureUrl && !(file && fs.existsSync(file))) return { ...res, brochure: null };
+  const built = await rebuildBrochure(repo, id, { cfg, workDir, spawnImpl });
+  if (built && !built.error) {
+    return { listing: built.listing, modelPricesCleared: res.modelPricesCleared, brochure: { rebuilt: true, bytes: built.brochure?.bytes, pages: built.brochure?.pages } };
+  }
+  const changed = res.modelPricesCleared > 0 || JSON.stringify(before?.price ?? null) !== JSON.stringify(listing.price);
+  if (!changed) return { ...res, brochure: { rebuilt: false, removed: false, error: built?.error ?? null } };
+  if (file) fs.rmSync(file, { force: true });
+  listing.brochureUrl = null;
+  addWarningCode(listing, 'brochure-failed');
+  log.warn('edit.brochure_removed', { id, why: 'price changed and the brochure could not be rebuilt', error: built?.error ?? null });
+  return { listing: save(findInbox(repo, id).file, listing), modelPricesCleared: res.modelPricesCleared, brochure: { rebuilt: false, removed: true, error: built?.error ?? null } };
 }
 
 // ---- REGA advertising licences ------------------------------------------------------------
@@ -202,7 +263,7 @@ function applyLicence(repo, id, patch, clearKeys) {
   const want = String(id).toUpperCase();
   const found = findInbox(repo, want);
   if (found) {
-    const refused = withdrawnRefusal(repo, found.listing);
+    const refused = withdrawnRefusal(repo, found.listing) ?? editRefusal(repo, found);
     if (refused) return refused;
     const licence = nextLicence(found.listing.licence, patch, clearKeys);
     const problems = licenceProblems(licence);
@@ -235,7 +296,7 @@ export function setWafi(repo, id, { wafiNumber, clear = false } = {}) {
 export function setStatus(repo, id, status) {
   const found = findInbox(repo, id);
   if (!found) return null;
-  const refused = withdrawnRefusal(repo, found.listing);
+  const refused = withdrawnRefusal(repo, found.listing) ?? editRefusal(repo, found);
   if (refused) return refused;
   if (!['available', 'reserved', 'sold'].includes(status)) return { error: `unknown status "${status}"` };
   found.listing.status = status;
@@ -245,6 +306,8 @@ export function setStatus(repo, id, status) {
 export function setHidden(repo, id, hidden) {
   const found = findInbox(repo, id);
   if (!found) return null;
+  const blocked = editRefusal(repo, found);
+  if (blocked) return blocked;
   if (!hidden) {
     const refused = withdrawnRefusal(repo, found.listing);
     if (refused) return refused;
@@ -298,7 +361,7 @@ export const videoSrc = (v) => (typeof v === 'string' ? v : v?.src ?? '');
 export function addVideo(repo, id, media) {
   const found = findInbox(repo, id);
   if (!found) return null;
-  const refused = withdrawnRefusal(repo, found.listing);
+  const refused = withdrawnRefusal(repo, found.listing) ?? editRefusal(repo, found, { dir: true });
   if (refused) return refused;
   const { listing } = found;
   const source = typeof media === 'string' ? { file: media } : (media || {});
@@ -327,34 +390,44 @@ export function addVideo(repo, id, media) {
 }
 
 /**
- * `brochure <id>` — rebuild the Bona-branded PDF for a listing that is already live, from
- * the developer's original still sitting in `$BONA_DATA/intake/…`.
+ * `brochure <id>` — rebuild the Bona brochure for a listing that is already live, from what the
+ * repo itself holds: the inbox listing and the photos and floor plans in
+ * `public/listings/<slug>/`. The developer's original PDF is not needed, so this works long after
+ * the download was cleaned out of `$BONA_DATA`.
  *
- * The original is found by CONTENT HASH (`_intake.pdfSha256`), not by a path in the state
- * file: a listing published by `run-once.mjs` never wrote a state record, and a state file
- * can be lost, while the repo always remembers the sha of the PDF it came from.
- *
- * This is the command to reach for after `price` or a title fix — the brochure prints those
- * facts on its cover, so it goes stale when they change.
+ * This is the command to reach for after `price`, `hero` or a title fix — the brochure prints
+ * those, so it goes stale when they change. `workDir` is the build's own scratch folder: it is
+ * removed when the build is done, unless BONA_DEBUG is set.
  *
  * @returns {Promise<{listing:object,brochure:object}|{error:string}|null>}
  */
-export async function rebuildBrochure(repo, id, { cfg, workDir } = {}) {
+export async function rebuildBrochure(repo, id, { cfg = {}, workDir, spawnImpl } = {}) {
   const found = findInbox(repo, id);
   if (!found) return null;
   const refused = withdrawnRefusal(repo, found.listing);
   if (refused) return refused;
   const { listing } = found;
-  const sha = listing?._intake?.pdfSha256;
-  const source = findSourcePdf(cfg?.intakeDir, sha);
-  if (!source) {
-    return { error: `the original PDF for ${id} is not in ${cfg?.data ?? 'the data dir'} any more — send the brochure again to replace the listing` };
+  // Before the slug is joined into a path: the brochure is written into that folder (Codex r1 #6a), which
+  // must be a real folder inside the repo (r2 #6), and the record must be a real file in it (r3 #9).
+  if (!isSlug(listing.slug)) return { error: `${id}'s record has slug ${JSON.stringify(listing.slug)}, which is not a valid slug — nothing was built; fix the record first` };
+  const dirProblem = listingDirProblem(repo, listing.slug) ?? recordFileProblem(repo, found.file);
+  if (dirProblem) return { error: `${id}: ${dirProblem} — nothing was built` };
+  const filesDir = path.join(repo, 'public', 'listings', listing.slug);
+  let built;
+  try {
+    built = await buildBrandedBrochure({
+      listing, filesDir, outPath: brochureFileIn(filesDir), workDir,
+      // The site.json printed is the one in the repo being published, whatever cfg.repo says.
+      cfg: { ...cfg, repo },
+      spawnImpl,   // undefined -> the real spawn (buildBrandedBrochure's default)
+    });
+  } finally {
+    // The build's own scratch (its listing JSON and prepared images): gone once it is done, worked or not,
+    // unless BONA_DEBUG asks to look at it (r2 #11).
+    if (workDir && !process.env.BONA_DEBUG) fs.rmSync(workDir, { recursive: true, force: true });
   }
-  const outDir = path.join(repo, 'public', 'listings', listing.slug);
-  const built = await buildBrandedBrochure({
-    pdfPath: source, listing, outPath: brochureFileIn(outDir), workDir, cfg,
-  });
   if (!built.ok) {
+    log.warn('edit.brochure_failed', { id, reason: built.reason, error: built.error, detail: built.detail });
     return { error: built.reason === 'too-large' ? built.error : `the branded brochure could not be built for ${id} — the reason is in the journal` };
   }
   listing.brochureUrl = brochureUrlFor(cfg.site, listing.slug);
@@ -363,5 +436,5 @@ export async function rebuildBrochure(repo, id, { cfg, workDir } = {}) {
     listing._intake.warnings = listing._intake.warnings
       .filter((c) => WARNING_CODES.has(c) && c !== 'brochure-too-large' && c !== 'brochure-failed');
   }
-  return { listing: save(found.file, listing), brochure: built, source };
+  return { listing: save(found.file, listing), brochure: built };
 }

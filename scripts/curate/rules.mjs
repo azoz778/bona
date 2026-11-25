@@ -18,8 +18,98 @@ export const HYPE = new RegExp(`\\b(${HYPE_WORDS.map((w) => w.replace(/[.*+?^${}
  */
 export const PHONE_RE = /(?:\+?966[\s.-]?5\d(?:[\s.-]?\d){7}|(?<![\d+])0[\s.-]?5(?:[\s.-]?\d){8}(?!\d)|\+\d{1,3}[\s.-]?\d(?:[\s.-]?\d){6,13})/;
 
-/** The old brand, other agencies, and contact details. */
-export const FORBIDDEN = [/\bTK\b/i, /tk[- ]?estates?/i, /tk-estates\.com/i, PHONE_RE];
+/**
+ * Other contact details that leak from a developer's brochure: Saudi unified numbers (9200 +
+ * 5 digits), toll-free 800 numbers, Saudi landlines (01x + 6-7 digits), URLs, bare domains,
+ * e-mail addresses and social handles. The site renders its own contact block.
+ * A bare domain needs a TLD written all lower-case ("acme.com", "ACME.com") or all upper-case
+ * ("ACME.COM", "Acme.COM.SA"): "3 bedrooms.Net area" is a missing space, not an address. The label
+ * before the dot starts with a letter and has 2+ characters, so "Building 2.co-working" and "K.S.A"
+ * are not addresses. A word glued to a lower-case TLD ("more.info", "apt.io") IS treated as one —
+ * decided 2026-11-17 (curate.test.mjs): a listing never needs it, and the copy gets its space back.
+ */
+export const UNIFIED_NUMBER_RE = /(?<![\d+])9200(?:[\s-]?\d){5}(?!\d)/;
+export const TOLL_FREE_RE = /(?<![\d+])800(?:[\s-]?\d){7}(?!\d)/;
+export const LANDLINE_RE = /(?<![\d+])0[\s-]?1[1-9](?:[\s-]?\d){6,7}(?!\d)/;
+export const URL_RE = /https?:\/\/|\bwww\./i;
+const DOMAIN_TLDS = ['sa', 'com', 'net', 'org', 'ae', 'co', 'io', 'info', 'me'];
+export const DOMAIN_RE = new RegExp(`\\b[A-Za-z][A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${[...DOMAIN_TLDS, ...DOMAIN_TLDS.map((t) => t.toUpperCase())].join('|')})\\b`);
+export const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
+export const HANDLE_RE = /(?<![\w@])@\w{3,}/;
+export const CONTACT_RES = [UNIFIED_NUMBER_RE, TOLL_FREE_RE, LANDLINE_RE, URL_RE, DOMAIN_RE, EMAIL_RE, HANDLE_RE];
+
+/**
+ * The old brand, other agencies, and contact details. The number rules read ASCII digits only:
+ * test text through forbiddenHits(), which normalises it first (asciiDigits), never directly.
+ */
+export const FORBIDDEN = [/\bTK\b/i, /tk[- ]?estates?/i, /tk-estates\.com/i, PHONE_RE, ...CONTACT_RES];
+
+/**
+ * Arabic-Indic (U+0660–0669) and Persian (U+06F0–06F9) digits -> ASCII, and the Arabic decimal
+ * (٫ U+066B) and thousands (٬ U+066C) separators -> "." and ",". A brochure that prints its
+ * number as ٠٥٥١٢٣٤٥٦٧ is the same leak as 0551234567. The Arabic comma (، U+060C) separates
+ * words, not digits, and is left alone.
+ */
+export function asciiDigits(text) {
+  return String(text ?? '').replace(/[\u0660-\u0669\u06F0-\u06F9\u066B\u066C]/g, (c) => {
+    const n = c.charCodeAt(0);
+    if (n === 0x066B) return '.';
+    if (n === 0x066C) return ',';
+    return String(n - (n >= 0x06F0 ? 0x06F0 : 0x0660));
+  });
+}
+
+/**
+ * What a FORBIDDEN rule finds in `text` once its digits are ASCII: one match per rule that hits
+ * (empty = clean), reported as the ORIGINAL text — "٠٥٥١٢٣٤٥٦٧", not "0551234567" (asciiDigits maps
+ * one character to one, so the match's place in the ASCII text is its place in the original). The
+ * ONE way both the site validator and the WhatsApp intake test copy. Never throws: text that is not
+ * a string (or a number, read as its digits) is clean; `rules` that is not an array means FORBIDDEN
+ * (a broken call must not turn the check off), and an entry that is not a RegExp is skipped.
+ * @param {string} text
+ * @param {RegExp[]} [rules]  FORBIDDEN, or FORBIDDEN plus a caller's own extras
+ */
+export function forbiddenHits(text, rules = FORBIDDEN) {
+  if (typeof text !== 'string' && typeof text !== 'number') return [];
+  const original = String(text);
+  const t = asciiDigits(original);
+  const out = [];
+  for (const re of Array.isArray(rules) ? rules : FORBIDDEN) {
+    if (!(re instanceof RegExp)) continue;
+    // A global or sticky rule keeps state in lastIndex; a fresh copy without those flags never does.
+    const once = re.global || re.sticky ? new RegExp(re.source, re.flags.replace(/[gy]/g, '')) : re;
+    const m = once.exec(t);
+    if (m) out.push(original.slice(m.index, m.index + m[0].length));
+  }
+  return out;
+}
+
+// ---- bilingual fact lists --------------------------------------------------------------
+/** Any character of the Arabic block (U+0600–U+06FF): the "is this the Arabic side" test, here and for faq / seoTitle. */
+const ARABIC_SCRIPT = /[\u0600-\u06FF]/;
+const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
+/**
+ * `{en:[…], ar:[…]}` — equal length, non-empty strings, Arabic script in `ar`, optional caps.
+ * Returns EVERY problem (empty array = fine), each naming the item index. null/undefined is fine.
+ */
+export function bilingualListProblems(value, field, { max = 0, maxItemLength = 0 } = {}) {
+  if (value === null || value === undefined) return [];
+  if (!value || typeof value !== 'object' || !Array.isArray(value.en) || !Array.isArray(value.ar)) {
+    return [`${field} must be { en:[strings], ar:[strings] }`];
+  }
+  const out = [];
+  for (const lang of ['en', 'ar']) {
+    value[lang].forEach((x, i) => {
+      if (!nonEmpty(x)) { out.push(`${field}.${lang}[${i}] must be a non-empty string`); return; }
+      if (lang === 'ar' && !ARABIC_SCRIPT.test(x)) out.push(`${field}.ar[${i}] must be Arabic script`);
+      if (maxItemLength && x.length > maxItemLength) out.push(`${field}.${lang}[${i}] is ${x.length} characters — at most ${maxItemLength}`);
+    });
+  }
+  if (value.en.length !== value.ar.length) out.push(`${field}.en and .ar must have the same length (${value.en.length} vs ${value.ar.length})`);
+  const n = Math.max(value.en.length, value.ar.length);
+  if (max && n > max) out.push(`${field} has ${n} items — at most ${max}`);
+  return out;
+}
 
 // ---- identifiers ---------------------------------------------------------------------
 // BONA-### is a curated listing (positional, from listings.source.mjs); BONA-W### is one
@@ -43,6 +133,25 @@ export const LOCAL_LISTING_THUMB = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/\d{2,
 // never collide.
 export const LOCAL_LISTING_VIDEO = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/v-\d{2,3}\.mp4$/;
 export const LOCAL_LISTING_VIDEO_POSTER = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/v-\d{2,3}-poster\.jpg$/;
+
+/**
+ * Every site-local file a listing points at, with the field that names it: each image's src and
+ * thumb, each video's src and poster, each unit model's floor plan and its thumbnail. Only paths
+ * served out of public/ ("/…") are listed; a remote URL or an empty value is not. ONE list for
+ * build.mjs (both its loops) and validate.mjs --head, so a new kind of file cannot be stat-checked by
+ * one and forgotten by the other.
+ * @returns {Array<{field:string, path:string}>}
+ */
+export function localFilesOf(listing) {
+  const l = listing && typeof listing === 'object' ? listing : {};
+  const each = (v) => (Array.isArray(v) ? v : []);
+  const out = [];
+  const add = (field, p) => { if (typeof p === 'string' && p.startsWith('/')) out.push({ field, path: p }); };
+  each(l.images).forEach((im, i) => { add(`images[${i}].src`, im?.src); add(`images[${i}].thumb`, im?.thumb); });
+  each(l.videos).forEach((v, i) => { add(`videos[${i}].src`, v?.src); add(`videos[${i}].poster`, v?.poster); });
+  each(l.models).forEach((m, i) => { add(`models[${i}].floorPlan.src`, m?.floorPlan?.src); add(`models[${i}].floorPlan.thumb`, m?.floorPlan?.thumb); });
+  return out;
+}
 
 /**
  * One entry of `videos[]`: `{ src, poster }`. `src` is a site-local clip or a full https URL
@@ -96,6 +205,189 @@ export function subsidisedPriceProblems(price, category) {
   else if (s >= price.amount) e.push('price.subsidisedAmount must be lower than price.amount');
   if (category === 'rent') e.push('price.subsidisedAmount is for sales only');
   return e;
+}
+
+// ---- unit models and the project fact lists (2026-11-17) ------------------------------------
+// A development brochure prints several unit models, each with its own area, rooms, floor plan and
+// (often two) prices. The WhatsApp intake publishes them as `models[]`, beside three short bilingual
+// fact lists (`amenities`, `nearby`, `warranties`). All four are optional. ONE rule for the intake's
+// checkListing() and the site validator; it also applies the copy rules (FORBIDDEN through
+// forbiddenHits, and HYPE) to every model string and list item, because a hand edit or the backfill
+// never passes the intake's AI-step copy check (services/intake/lib/claude.mjs copyProblems).
+//   /listings/<slug>/plan-<nn>.jpg          a model's floor plan on white (services/intake images.mjs)
+//   /listings/<slug>/plan-<nn>-thumb.webp   …and its thumbnail
+// <nn> is the model's 1-based position when the intake wrote it. LOCAL_LISTING_SRC does not match
+// these names, so a floor plan can never stand in for a gallery photo.
+export const LOCAL_PLAN_SRC = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/plan-\d{2,3}\.jpg$/;
+export const LOCAL_PLAN_THUMB = /^\/listings\/[a-z0-9]+(?:-[a-z0-9]+)*\/plan-\d{2,3}-thumb\.webp$/;
+/**
+ * Every limit on a unit model and the fact lists, ONE set of numbers for the AI contract
+ * (services/intake/lib/claude.mjs validateAiResult), this rule (modelsProblems) and the prompt that
+ * states them (services/intake/lib/prompt.md, pinned by claude.test.mjs).
+ */
+export const MODEL_LIMITS = Object.freeze({
+  maxModels: 24,             // models per listing
+  nameMax: 60,               // characters, each language
+  roomsMax: 12,              // items in `rooms`
+  roomItemMax: 40,           // characters per room
+  availabilityMax: 160,      // characters, each language
+  factLists: Object.freeze({ amenities: 16, nearby: 8, warranties: 8 }), // items per list
+  factItemMax: 80,           // characters per fact item
+  roomCount: Object.freeze({ min: 0, max: 20 }),       // bedrooms, bathrooms (whole numbers)
+  areaSqm: Object.freeze({ min: 10, max: 100000 }),
+});
+export const MAX_MODELS = MODEL_LIMITS.maxModels;
+/** The three fact lists and how many items each may hold; every item is at most FACT_ITEM_MAX characters. */
+export const FACT_LISTS = MODEL_LIMITS.factLists;
+export const FACT_ITEM_MAX = MODEL_LIMITS.factItemMax;
+/** Every field a published model may carry. Anything else — the AI's internal `evidence` above all — is refused. */
+export const MODEL_FIELDS = Object.freeze(['name', 'bedrooms', 'bathrooms', 'areaSqm', 'rooms', 'availability', 'price', 'subsidisedPrice', 'floorPlan']);
+
+/** A price figure: a positive finite number. The ONE definition (services/intake/lib/model-prices.mjs imports it). */
+export const isFigure = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
+const absent = (v) => v === null || v === undefined;
+const fmt = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') : String(n));
+/** The <slug> of a site-local /listings/<slug>/… path. */
+const slugOfPath = (p) => /^\/listings\/([^/]+)\//.exec(p)?.[1] ?? null;
+
+/** The copy rules for one string, worded as validate.mjs words them for the rest of the listing. */
+function copyRuleHits(label, s) {
+  if (!nonEmpty(s)) return [];
+  const out = forbiddenHits(s).map((hit) => `${label} mentions a contact detail or another brand: ${hit}`);
+  const hype = s.match(HYPE);
+  if (hype) out.push(`${label} uses hype wording: "${hype[0]}"`);
+  return out;
+}
+
+/**
+ * Is a listing's headline its cheapest unit model, "from"? Only for a whole development sold as unit
+ * models: a `project`, no specific `unit`, and at least two unit models. A single property with one
+ * "model" — or per-floor rows — keeps its own headline, checked like any other price: it must never
+ * become "From SAR …". The ONE rule for the pipeline (which aligns the headline) and the validator.
+ */
+export function headlineFollowsModels(listing) {
+  const l = listing && typeof listing === 'object' ? listing : {};
+  return !absent(l.project) && absent(l.unit) && Array.isArray(l.models) && l.models.length >= 2;
+}
+
+/** `{ en, ar }`: both non-empty, Arabic script in `ar`, each at most `max` characters. */
+function bilingualTextProblems(v, field, max) {
+  if (!v || typeof v !== 'object' || Array.isArray(v) || !nonEmpty(v.en) || !nonEmpty(v.ar) || !ARABIC_SCRIPT.test(v.ar)) {
+    return [`${field} must be { en, ar } (ar in Arabic script)`];
+  }
+  return ['en', 'ar'].filter((k) => v[k].length > max).map((k) => `${field}.${k} is ${v[k].length} characters — at most ${max}`);
+}
+
+/**
+ * `models`, `amenities`, `nearby` and `warranties` of a listing (limits: MODEL_LIMITS). Each model: a
+ * bilingual name (≤ 60), bedrooms/bathrooms null or 0–20, areaSqm null or 10–100000, rooms a bilingual
+ * list (≤ 12 × 40), availability null or bilingual (≤ 160), price/subsidisedPrice null or > 0 with the
+ * Sakani price below the model's own price (sales only), floorPlan null or `{ src, thumb }` in this
+ * listing's own folder, the thumb the one of its own plan (plan-NN.jpg -> plan-NN-thumb.webp), each
+ * plan and thumb used once, and no other field. The headline of a whole development is its cheapest model,
+ * "from" (services/intake/lib/model-prices.mjs alignHeadline, applied by the pipeline), so the From
+ * figure and the table never disagree: whenever a model has a price, `price.amount` is the lowest one,
+ * `price.from` is true, and `price.subsidisedAmount` is the lowest model Sakani price when that is below
+ * the amount, else absent. Only a whole development (headlineFollowsModels): a single property — one
+ * "model", or a villa whose brochure prints a row per floor — and one specific unit keep their own price,
+ * and the pipeline never aligns them.
+ * @returns {string[]} problems (empty = good)
+ */
+export function modelsProblems(listing) {
+  const l = listing && typeof listing === 'object' ? listing : {};
+  const out = [];
+  const prices = [];
+  const subs = [];
+  if (!absent(l.models)) {
+    if (!Array.isArray(l.models)) out.push('models must be an array of unit models when present');
+    else {
+      const L = MODEL_LIMITS;
+      if (l.models.length > L.maxModels) out.push(`models has ${l.models.length} entries — at most ${L.maxModels}`);
+      const plans = new Set();
+      l.models.forEach((m, i) => {
+        const at = `models[${i}]`;
+        if (!m || typeof m !== 'object' || Array.isArray(m)) { out.push(`${at} must be an object`); return; }
+        for (const k of Object.keys(m)) if (!MODEL_FIELDS.includes(k)) out.push(`${at} has an unknown field "${k}"`);
+        out.push(...bilingualTextProblems(m.name, `${at}.name`, L.nameMax));
+        const { min: rMin, max: rMax } = L.roomCount;
+        for (const k of ['bedrooms', 'bathrooms']) {
+          if (!absent(m[k]) && !(Number.isInteger(m[k]) && m[k] >= rMin && m[k] <= rMax)) out.push(`${at}.${k} must be null or a whole number ${rMin}–${rMax}`);
+        }
+        const { min: aMin, max: aMax } = L.areaSqm;
+        if (!absent(m.areaSqm) && !(typeof m.areaSqm === 'number' && Number.isFinite(m.areaSqm) && m.areaSqm >= aMin && m.areaSqm <= aMax)) {
+          out.push(`${at}.areaSqm must be null or a number between ${aMin} and ${aMax}`);
+        }
+        out.push(...bilingualListProblems(m.rooms, `${at}.rooms`, { max: L.roomsMax, maxItemLength: L.roomItemMax }));
+        if (!absent(m.availability)) out.push(...bilingualTextProblems(m.availability, `${at}.availability`, L.availabilityMax));
+
+        if (!absent(m.price) && !isFigure(m.price)) out.push(`${at}.price must be null or a number above 0`);
+        if (!absent(m.subsidisedPrice)) {
+          if (!isFigure(m.subsidisedPrice)) out.push(`${at}.subsidisedPrice must be null or a number above 0`);
+          else if (!isFigure(m.price)) out.push(`${at}.subsidisedPrice needs the model's regular price`);
+          else if (m.subsidisedPrice >= m.price) out.push(`${at}.subsidisedPrice must be lower than its price`);
+          if (l.category === 'rent') out.push(`${at}.subsidisedPrice is for sales only`);
+        }
+        if (isFigure(m.price)) prices.push(m.price);
+        // Only a Sakani price valid against its own model's price counts for the headline (as in
+        // alignHeadline): an invalid one is reported above, once, not again as a headline mismatch.
+        if (isFigure(m.price) && isFigure(m.subsidisedPrice) && m.subsidisedPrice < m.price) subs.push(m.subsidisedPrice);
+
+        if (!absent(m.floorPlan)) {
+          const fp = m.floorPlan;
+          if (!fp || typeof fp !== 'object' || Array.isArray(fp)) out.push(`${at}.floorPlan must be null or { src, thumb }`);
+          else {
+            for (const k of Object.keys(fp)) if (!['src', 'thumb'].includes(k)) out.push(`${at}.floorPlan has an unknown field "${k}"`);
+            for (const [k, re, shape] of [['src', LOCAL_PLAN_SRC, 'plan-nn.jpg'], ['thumb', LOCAL_PLAN_THUMB, 'plan-nn-thumb.webp']]) {
+              if (!(typeof fp[k] === 'string' && re.test(fp[k]) && slugOfPath(fp[k]) === l.slug)) {
+                out.push(`${at}.floorPlan.${k} is not /listings/${l.slug}/${shape}: ${fp[k]}`);
+              }
+            }
+            if (LOCAL_PLAN_SRC.test(fp.src ?? '') && LOCAL_PLAN_THUMB.test(fp.thumb ?? '')) {
+              const own = fp.src.replace(/\.jpg$/, '-thumb.webp');
+              if (fp.thumb !== own) out.push(`${at}.floorPlan.thumb ${fp.thumb} is not the thumbnail of ${fp.src} (${own})`);
+            }
+            const files = [fp.src, fp.thumb].filter((f) => typeof f === 'string');
+            const taken = files.find((f) => plans.has(f));
+            if (taken) out.push(`${at}.floorPlan ${taken} is already used by another model`);
+            for (const f of files) plans.add(f);
+          }
+        }
+
+        for (const lang of ['en', 'ar']) {
+          out.push(...copyRuleHits(`${at}.name.${lang}`, m.name?.[lang]), ...copyRuleHits(`${at}.availability.${lang}`, m.availability?.[lang]));
+          (Array.isArray(m.rooms?.[lang]) ? m.rooms[lang] : []).forEach((x, j) => out.push(...copyRuleHits(`${at}.rooms.${lang}[${j}]`, x)));
+        }
+      });
+    }
+  }
+
+  if (prices.length && headlineFollowsModels(l)) {
+    const p = l.price && typeof l.price === 'object' ? l.price : {};
+    const low = Math.min(...prices);
+    if (p.onRequest || p.amount !== low) {
+      out.push(`price.amount must be the lowest unit-model price (${fmt(low)}) when the models carry prices, not ${p.onRequest ? 'on request' : absent(p.amount) ? 'absent' : fmt(p.amount)}`);
+    }
+    if (p.from !== true) out.push('price.from must be true when the headline is the lowest unit-model price');
+    // A rental's headline never has a Sakani price at all (subsidisedPriceProblems); nothing to align.
+    if (l.category !== 'rent') {
+      const lowSub = subs.length ? Math.min(...subs) : null;
+      if (lowSub !== null && lowSub < low) {
+        if (p.subsidisedAmount !== lowSub) {
+          out.push(`price.subsidisedAmount must be the lowest unit-model Sakani price (${fmt(lowSub)}), not ${absent(p.subsidisedAmount) ? 'absent' : fmt(p.subsidisedAmount)}`);
+        }
+      } else if (!absent(p.subsidisedAmount)) {
+        out.push(`price.subsidisedAmount must be absent: ${lowSub === null
+          ? 'no unit model has a Sakani price'
+          : `the lowest unit-model Sakani price (${fmt(lowSub)}) is not below the lowest price (${fmt(low)})`}`);
+      }
+    }
+  }
+
+  for (const [k, max] of Object.entries(MODEL_LIMITS.factLists)) {
+    out.push(...bilingualListProblems(l[k], k, { max, maxItemLength: MODEL_LIMITS.factItemMax }));
+    for (const lang of ['en', 'ar']) (Array.isArray(l[k]?.[lang]) ? l[k][lang] : []).forEach((x, j) => out.push(...copyRuleHits(`${k}.${lang}[${j}]`, x)));
+  }
+  return out;
 }
 
 // ---- withholding listings from the public site --------------------------------------
@@ -400,9 +692,7 @@ export function licenceProblems(lc) {
 // ---- Optional listing fields for project pages (2026-10-02, SEO audit rec. 1) --------------------
 // faq / seoTitle / projectFacts are optional on any listing; when present both languages are required,
 // because the page renders whichever locale it is building and a blank half would ship silently.
-
-const AR_RE = /[؀-ۿ]/;
-const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
+// "Arabic" = ARABIC_SCRIPT, the one Arabic-block test in this file (bilingual fact lists, above).
 
 export function faqProblems(faq) {
   if (faq === undefined || faq === null) return [];
@@ -416,11 +706,11 @@ export function faqProblems(faq) {
     else if (seen.has(it.id)) out.push(`${at}.id "${it.id}" is a duplicate`);
     seen.add(it?.id);
     if (!nonEmpty(it?.q?.en)) out.push(`${at}.q.en required`);
-    if (!nonEmpty(it?.q?.ar) || !AR_RE.test(it.q.ar)) out.push(`${at}.q.ar required (Arabic)`);
+    if (!nonEmpty(it?.q?.ar) || !ARABIC_SCRIPT.test(it.q.ar)) out.push(`${at}.q.ar required (Arabic)`);
     for (const lang of ['en', 'ar']) {
       const a = it?.a?.[lang];
       if (!Array.isArray(a) || !a.length || !a.every(nonEmpty)) out.push(`${at}.a.${lang} must be a non-empty array of paragraphs`);
-      else if (lang === 'ar' && !a.every((p) => AR_RE.test(p))) out.push(`${at}.a.ar must be Arabic`);
+      else if (lang === 'ar' && !a.every((p) => ARABIC_SCRIPT.test(p))) out.push(`${at}.a.ar must be Arabic`);
       for (const p of Array.isArray(a) ? a : []) {
         for (const [, k] of String(p).matchAll(/\{([^{}]*)\}/g)) if (!FAQ_PLACEHOLDERS.includes(k)) out.push(`${at}.a.${lang} uses unknown placeholder {${k}} (allowed: ${FAQ_PLACEHOLDERS.join(', ')})`);
         if (/[{}]/.test(String(p).replace(/\{[^{}]*\}/g, ''))) out.push(`${at}.a.${lang} has an unbalanced { or }`);
@@ -454,7 +744,7 @@ export function seoTitleProblems(t) {
   if (typeof t !== 'object' || Array.isArray(t)) return ['seoTitle must be { en, ar }'];
   const out = [];
   if (!nonEmpty(t.en)) out.push('seoTitle.en required');
-  if (!nonEmpty(t.ar) || !AR_RE.test(t.ar)) out.push('seoTitle.ar required (Arabic)');
+  if (!nonEmpty(t.ar) || !ARABIC_SCRIPT.test(t.ar)) out.push('seoTitle.ar required (Arabic)');
   for (const lang of ['en', 'ar']) if (nonEmpty(t[lang]) && t[lang].length > 70) out.push(`seoTitle.${lang} is ${t[lang].length} characters, keep it to 70 (the brand is appended)`);
   return out;
 }

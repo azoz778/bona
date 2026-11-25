@@ -21,6 +21,41 @@ owner's phone ──WhatsApp group "Bona …"──▶ Evolution API (wa-api.azo
 
 Nothing about this service is exposed to the internet: it makes outbound calls only.
 
+### The publish pipeline at a glance (unit models, brochure, enrich)
+
+1. **Models extraction**: the model reads the PDF and returns the listing plus its unit models
+   (type, beds, areas, prices as printed).
+2. **Per-page price confirmation** (`lib/model-prices.mjs`): every model price is confirmed on its
+   page image by a second model, one call per page (2 at a time, `BONA_MODEL_PRICE_CONCURRENCY`), at most `BONA_MAX_MODEL_PRICE_PAGES`
+   pages (12); a price that is not confirmed is dropped, never taken from the text layer.
+3. **Floor plans**: each model's plan is cut from the PDF and saved as `plan-NN.jpg` (flattened on white).
+   Before any plan file reaches the repo, a second model checks every plan image (at its published 1600 px
+   size, 12 per call, 2 calls at a time; a dry run too) for a phone number, email, website, social handle, QR
+   code, logo / brand name or price (`lib/plan-check.mjs`, r4). A flagged plan, or one without exactly one
+   well-formed "clean" answer, is left out (its model shows no plan; the listing is never blocked). A check that
+   cannot finish publishes without those plans ("try again later"); on `--enrich` it commits nothing
+   (retryable; `--force` takes the models without plans on a first enrichment, not after a quota).
+   `brochure <id>` and `price <id>` reuse the checked plan files and make no call.
+4. **Site section**: the listing page shows "Residences & prices" from `models`.
+5. **Brochure** (`brochure_pdf.py`): one bilingual (English + Arabic) A4 PDF drawn from scratch in the
+   TK design system, from the published listing, its photos and plans. WeasyPrint is pinned to 70.0 and
+   needs the system Pango libraries. A failed build never deletes an existing brochure.
+6. **`brochure <id>`** (WhatsApp command): rebuilds that brochure from the listing alone, no source PDF needed.
+7. **`run-once.mjs <pdf> --enrich <id>`**: adds models, plans, amenities / nearby / warranties and a new
+   brochure to an already published listing, leaving every other field untouched. Headline rules: the
+   owner's own price is kept and model prices are cleared; a price on request adopts the models' lowest
+   (`from`); an existing price must equal the models' lowest, else the run is refused (then it is marked
+   `from: true` when equal). It never writes over a listing with less than it carries: an incomplete
+   price check is refused ("try again later") when the listing already has model prices to lose (on a
+   first enrichment the models go up without the unchecked prices, with the same "try again later"),
+   and a reading with fewer models, fewer confirmed model prices, fewer floor plans or a fact list
+   fewer is refused unless `--force`. See "Enriching a published listing" below.
+8. **`backfill-enrich.mjs`**: runs `--enrich` over every older listing, one at a time; a listing that
+   already carries unit models or a fact list (amenities / nearby / warranties) is skipped as "already enriched" unless `--include-enriched` (no
+   `--force` is ever passed on). `--plan-only`
+   prints the plan and stops, `--dry-run` runs each job without writing, a live run commits and pushes.
+   It stops at the first FAILED job or a quota/usage limit and prints the `--only <ids>` that resumes it.
+
 ## How the owner uses it
 
 1. Make (or rename) any WhatsApp group whose **subject contains "Bona"** — e.g. "Bona
@@ -46,7 +81,7 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    remove BONA-W001          take the listing off the site (deletes the JSON and the photos)
    hero BONA-W001 4          make photo 4 the cover
    price BONA-W001 4500000   set the asking price   (price BONA-W001 onrequest clears it)
-   brochure BONA-W001        rebuild the Bona-branded PDF from the developer's original
+   brochure BONA-W001        rebuild the Bona brochure from the listing and its photos (no PDF needed)
    sold BONA-W001            mark it sold           (also: reserved / available)
    hide BONA-W001            keep it off the site   (show BONA-W001 puts it back)
    licence BONA-W001 7200012345 2027-03-01
@@ -185,6 +220,49 @@ Anything else in the group is ignored, silently.
   (`subsidised-price-not-printed`), when the headline price is not published, and by `price <id> …`.
   The "a price for one of its unit models counts" allowance in that check is only for a whole
   development quoted `from` its cheapest model, never for one unit.
+- **Unit-model prices** (`ai.models[].price` / `subsidisedPrice`, `lib/model-prices.mjs`): every
+  figure is confirmed on its page image by a second model, never by the text layer (a price table
+  puts every model's figures in the text; a match cannot tell whose figure it is). One call per page
+  covers every model on it (at most `BONA_MODEL_PRICE_CONCURRENCY` at once, 2 by default; none started after a quota error); a cited page
+  that was not rendered for the reading is rendered for this check (never one past the end of the
+  PDF), and when that render fails its models are refused — never moved to another page by their
+  text, so the page cap holds. A brochure that would need more than `BONA_MAX_MODEL_PRICE_PAGES`
+  pages checked gets no model price at all and no call. A figure not confirmed is dropped
+  (`model-price-not-printed`) and, like a refused headline, may not stay in the copy — nor in any
+  text the run publishes: a model's name, rooms or availability, or a fact list (a bare
+  "Buildings G–P, 419,994" counts), on a publish and on `--enrich` alike (which then changes nothing). The reply
+  words the two cases apart: "could not be confirmed on the brochure's own pages" for a figure the
+  check did not find, "could not be completed (pages …) — try again later" for one whose render or
+  call failed. After a quota error no further call is made for the brochure — not for the headline
+  or its Sakani price either, which then say "could not be checked … try again later". When any model keeps a price, the headline of a whole
+  development becomes the cheapest one, `from` (its period untouched), with the cheapest confirmed
+  subsidised price as its Sakani line. A whole development is a `project`, no `unit`, two models or
+  more (`rules.mjs headlineFollowsModels`, the same rule the validator applies). A listing for one
+  specific `unit`, and a single property (no `project`) with one "model" or per-floor rows, is never
+  published "From" its cheapest model: the prompt has its headline be the property's own printed price
+  (a villa priced per floor: its printed total) with `models` normally empty, and when a reading still
+  takes the headline from the models (the lowest model price as read, `from`), the pipeline clears
+  `from` and publishes the figure only once a second model has seen it printed on its page AS THE WHOLE
+  PROPERTY'S price (`whole`; the text layer cannot tell a floor's price from the villa's) — otherwise
+  "price on request". Its models keep their confirmed prices. "From …" can still appear on a listing
+  that is not a whole development in two cases only: a price the brochure itself prints as "starting
+  from" that is no model's, and a project with a single model (its own headline check decides). The owner's caption price drops every model price, and so does `price <id> …` later (its
+  reply says how many models lost their price: the table then shows "On request").
+  **Currency** (TAQEEM covers it: a figure printed in £ is not a price in SAR): model prices are written
+  and confirmed in the reading's `price.currency` (`modelPriceCurrency`). It never counts for a property
+  in a country whose own currency the site does not print (`homeCurrency`: only SA, AE, OM, US and the
+  euro area have one) — amount or not, because the prompt has the model set the headline amount FROM
+  the model prices, so that amount is no independent reading: W020's Hampstead brochure printed GBP and a
+  reading by the prompt says "from 1,250,000 SAR". Elsewhere it counts beside a headline amount, or — on
+  request — when it is that country's own currency (a Saudi brochure is priced in SAR). Otherwise no
+  model price is published or checked (`currency-unconfirmed` on a publish, `currency-mismatch` on
+  `--enrich`; `model-price-not-printed`), the headline is not aligned, and a figure the copy states
+  refuses the run. Every second-model check (unit-model prices and the headline) asks for the figure
+  printed IN that currency — its code, symbol or Arabic name (SAR / ر.س / ريال / ﷼ / ⃁ for SAR), beside it
+  or heading its table: the same figure in £, $ or any other currency does not count, and a figure with
+  no currency shown counts only in the property's own country's currency. The headline's text-layer
+  check applies the same rule (`printedInCurrency`): "£1,250,000" is never "1,250,000 SAR", and abroad a
+  bare figure in the text does not settle the price.
 - **Photo focus points**: the model gives every kept photo a `focus` `{x, y}` (the centre of its
   subject); the site uses it as the crop position, so a tall façade is not cut down to sky.
 - **Re-running a published brochure**: `node services/intake/run-once.mjs <pdf> --replace BONA-W023`
@@ -195,6 +273,37 @@ Anything else in the group is ignored, silently.
   has been committed to again since it was published (a hand correction, a WhatsApp edit), or that
   carries anything a re-run would not keep — a hand-added field (`photoNote`, `faq`, `seoTitle`, …),
   videos, a licence, a virtual tour, `hidden`, `featured`, or `_intake.edits` (`price`/`hero`).
+  Later `intake: enrich …`, `intake: rebuild brochure …` (backfill) and `intake: branded brochure (<id>)`
+  (the WhatsApp `brochure <id>` command) commits do not count as changes (a re-run rebuilds all three);
+  none is ever taken for the publish commit.
+- **Enriching a published listing** (listings published before the intake read unit models):
+  `node services/intake/run-once.mjs <pdf> --enrich BONA-W014 [--dry-run]` reads the brochure again
+  and adds ONLY the unit models (every model price confirmed on its page, as on a publish), their
+  floor plans (`plan-NN.jpg`, the old plan files are removed), `amenities` / `nearby` / `warranties`
+  (a list the new reading does not have is removed) and a new brochure drawn from the merged listing
+  and its own folder. Every other key of the inbox JSON — title, copy, photos, location, licence,
+  videos, `photoNote`, `faq`, `seoTitle`, `featured`, `_intake` — stays byte for byte, so it works on
+  a listing corrected by hand (no history rule). The headline is decided from the listing: the
+  owner's own price (`_intake.edits` has `price`) stays and the models publish without prices; model
+  prices in another currency than the listing's — or in none the reading established (see Currency
+  above) — are not published or checked and the headline stays (`currency-mismatch`); one
+  specific `unit` keeps its price, and so does a listing that is not a whole development
+  (`single-property`: no `project`, or fewer than two models), its models keeping theirs; a price on request adopts the models' lowest confirmed price
+  (`from`, with its Sakani line); a set price is kept only when it IS that price (marked `from`),
+  otherwise the run is refused with both figures and nothing changes — send `price <id> …` first, or
+  use `--replace`. It must be the very PDF the listing was published from (`_intake.pdfSha256`), the
+  clone clean and the listing committed (a failed run is rolled back from git); withdrawn, withheld
+  and hidden listings are refused. A brochure that cannot be built keeps the enrichment and the old
+  brochure (`brochure-failed`). The commit is `intake: enrich <title> (<id>) — unit models + brochure`.
+  Not with `--replace`, `--caption` or `--no-git` (except with `--dry-run`, which prints the models,
+  their prices, the headline decision, the comparison with what the listing carries and the plan
+  files, and writes nothing). A re-enrichment never degrades a listing: when the unit-model price
+  check could not be completed (a page that did not render, a failed call, a quota) on a listing that
+  already carries model prices, nothing is written ("try again later", `--force` or not) — a listing
+  with no model price to lose gets the models without the unchecked ones, and the reply's "could not be
+  completed … try again later"; when the reading has fewer unit models, fewer confirmed model
+  prices (regular + Sakani), fewer floor plans or drops a fact list the listing carries, it is refused
+  with the difference (`Compared   models 8 → 5 · …`) unless `--force` says the new reading is right.
 - **Nothing the model writes is trusted.** Only fields that pass `validateAiResult` +
   `copyProblems` + `checkListing` are written or sent on. The model's free-text `warnings`
   stay in the run's `ai.json`; `_intake.warnings` in the committed listing holds codes from a
@@ -210,13 +319,13 @@ Anything else in the group is ignored, silently.
   someone else; the generated copy is checked for `TK`, `tk-estates`, phone numbers and the
   hype words the site validator bans, and is rejected if any appear.
 - **The brochure comes back out under Bona's brand.** The owner is sent someone else's
-  brochure; what goes on the site is that document with a Bona cover in front of it, a
-  discreet footer strip on every one of the developer's pages and a closing *Enquire* page
-  with a QR of the listing URL. The developer's own pages are never re-rendered and their
-  branding is never removed — it is their document, and their brand on it is legitimate —
-  but nothing Bona *adds* may carry another agency: `rebrand_pdf.py` scrubs every listing
-  fact it is about to print and drops any that holds a rival broker, a phone number, an
-  email or a link. `#nobrochure` publishes the listing with no PDF at all.
+  brochure; what goes on the site is a NEW bilingual A4 brochure drawn from scratch by
+  `brochure_pdf.py` (TK design system, Bona branded) out of the published listing, its photos
+  and floor plans, and `src/data/site.json` — nothing of the developer's PDF is re-published.
+  It only ever prints fields the listing already passed the validators with; the developer is
+  named as text only. `#nobrochure` publishes the listing with no PDF at all. A rent keeps its
+  period wherever a price is printed — the units table, each model page, the "From" headline:
+  "SAR 50,000 / year", with the Arabic line "ابتداءً من 50,000 ر.س / سنوياً" (the site's own wording).
 - **Real Arabic**, checked for Arabic script in every `ar` field.
 - **4–10 photos.** A PDF that yields fewer than four publishable photographs is rejected
   rather than published thin.
@@ -336,6 +445,13 @@ Until then the old daemon keeps answering with the old rules. `build.mjs` and `v
 the exception: `rebuild()` runs them from `~/bona-bot` after its rebase, so the site-side gates
 apply from the merge on.
 
+**Rolling back the unit-models branch** (`feat/intake-brochure-models`): after a revert, the older
+`changedSincePublished` knows none of `intake: enrich …`, `intake: rebuild brochure …` and
+`intake: branded brochure (<id>)`, so
+`run-once --replace` treats a listing enriched or brochure-rebuilt since as hand-edited and refuses it
+("changed since it was published"). That is by design — the older code cannot rebuild what those
+commits added — so redo such a listing by hand, or roll the listing back too.
+
 ## Configuration
 
 `~/.secrets/bona-services.env` (mode 600, shared with `services/api`). Everything has a
@@ -366,11 +482,13 @@ default, so only the ones you want to change need to be present.
 | `BONA_VIDEO_MATCH_FRAMES` | `4` | frames pulled out of the clip for it to look at |
 | `BONA_VIDEO_MATCH_LISTINGS` | `15` | how many recent intake listings the clip is compared against |
 | `BONA_PAGE_READ_LONG_SIDE` | `1600` | long side of the page renders the AI reads (text-free PDFs) |
+| `BONA_MAX_MODEL_PRICE_PAGES` | `12` | most pages the unit-model price check may confirm on (one call each); more = no model prices |
+| `BONA_MODEL_PRICE_CONCURRENCY` | `2` | unit-model page checks running at once; each is a `claude -p` node process inside the daemon unit's `MemoryMax=2G`, so raise it with care |
 | `BONA_LOCK_WAIT_MS` | `900000` | how long a job waits for `$BONA_DATA/intake.lock` |
-| `BONA_PY_CMD` | `uv run --with pymupdf python` | argv for the extractor; split on spaces, never shelled |
-| `BONA_BROCHURE_PY_CMD` | `uv run --with pymupdf --with segno --with fonttools --with brotli python` | argv for the brochure step (segno draws the QR, fontTools+brotli turn `public/fonts/*.woff2` into TTF) |
-| `BONA_BROCHURE_TIMEOUT_MS` | `600000` | how long `rebrand_pdf.py` may take |
-| `BONA_MAX_BROCHURE_MB` | `25` | largest **branded** PDF committed into the repo; over it the images are downsampled, and if it still does not fit the listing publishes without one |
+| `BONA_PY_CMD` | `uv run --with pymupdf --with pillow python` | argv for the extractor; split on spaces, never shelled |
+| `BONA_BROCHURE_PY_CMD` | `uv run --with weasyprint==70.0 --with segno --with pillow --with pymupdf python` | argv for the brochure step (WeasyPrint is pinned — the layout checks were tuned on it; it needs the system Pango libraries) |
+| `BONA_BROCHURE_TIMEOUT_MS` | `600000` | how long `brochure_pdf.py` may take |
+| `BONA_MAX_BROCHURE_MB` | `25` | largest brochure committed into the repo; over it the images are scaled down, and if it still does not fit the listing publishes without one |
 | `BONA_SEND_REPLIES` | `true` | set `false` to run completely silent |
 | `BONA_DEBUG` | — | any value adds debug logs and stack traces |
 
@@ -388,9 +506,10 @@ node services/intake/run-once.mjs ~/brochures/villa.pdf --no-git --repo ~/bona -
 # the real thing (commits and pushes, exactly like the daemon)
 node services/intake/run-once.mjs ~/brochures/villa.pdf
 
-# the brochure step on its own: rebrand a local PDF and print what went on the Bona pages
-node services/intake/rebrand-once.mjs ~/brochures/villa.pdf ~/bona-bot/scripts/curate/inbox/villa.json /tmp/out.pdf
-node services/intake/rebrand-once.mjs ~/brochures/villa.pdf ~/facts.json /tmp/out.pdf --max-mb 12 --json
+# the brochure step on its own: a listing JSON + its folder of photos/plans + site.json
+uv run --with weasyprint==70.0 --with segno --with pillow --with pymupdf python -I \
+  services/intake/brochure_pdf.py ~/bona-bot/scripts/curate/inbox/villa.json \
+  ~/bona-bot/public/listings/villa ~/bona-bot/src/data/site.json ~/out/brochure.pdf --work ~/out/work
 
 # unit tests — note the glob: node v24.19.0 on this box does not accept a bare directory
 node --test 'services/intake/test/*.test.mjs'
@@ -408,12 +527,9 @@ node --input-type=module -e '
 ' ~/clips/walkthrough.mp4
 ```
 
-`rebrand-once.mjs` takes either a full listing (`scripts/curate/inbox/<slug>.json`) or a bare
-facts object `{ id, titleEn, titleAr, place, priceEn, project, developer, url }`. It writes no
-state, takes no lock and never touches git, so it is safe to run while the daemon is up — it is
-the loop to use when changing anything in `rebrand_pdf.py`. Rasterise a page or two afterwards
-and look at them; `docs/qa/brochure/` holds the reference renders (portrait, 16:9 deck, and the
-709x510 half-spread the owner's Nuzul Khayala brochure opens on).
+`brochure_pdf.py` reads only the files it is given and writes only `<out.pdf>` and `--work`, so
+it is safe to run while the daemon is up — it is the loop to use when changing the brochure.
+Rasterise the pages afterwards and look at every one of them.
 
 Every run leaves its scratch directory behind (`--work`, else `$BONA_DATA/intake/manual/…`)
 containing `prompt.txt` (exactly what the model was asked), `ai.json` (exactly what it
@@ -444,6 +560,8 @@ so pointing `--repo` at a working checkout with uncommitted changes in it is saf
 | `scripts/curate/inbox/_index.json` | the `BONA-W###` counter |
 | `public/listings/<slug>/NN.jpg` | photo, max 1920 px, q82, EXIF stripped |
 | `public/listings/<slug>/NN-thumb.webp` | 640 px thumbnail |
+| `public/listings/<slug>/plan-NN.jpg` | a unit model's floor plan (NN = the model's 1-based position in `models`), flattened on white, max 1600 px, q85, 4:4:4 colour |
+| `public/listings/<slug>/plan-NN-thumb.webp` | its 480 px thumbnail |
 | `public/listings/<slug>/v-NN.mp4` | a walkthrough clip, re-encoded (H.264/AAC, ≤1080p, faststart, ≤ `BONA_MAX_VIDEO_MB`) |
 | `public/listings/<slug>/v-NN-poster.jpg` | its poster frame, 1600 px |
 | `public/listings/<slug>/brochure.pdf` | the Bona-branded brochure — by default, unless `#nobrochure`, and only up to `BONA_MAX_BROCHURE_MB` |
@@ -457,6 +575,9 @@ so pointing `--repo` at a working checkout with uncommitted changes in it is saf
 
 `scripts/curate/build.mjs` appends the inbox files to `src/data/listings.json` after the TK
 live-list filter; intake listings are exempt from that filter because they are owner-authored.
+It refuses to build while any site-local file a listing names is missing from `public/` — photos
+and thumbnails, clips and posters, floor plans and their thumbnails (`rules.mjs` `localFilesOf`,
+which `validate.mjs --head` stat-checks too).
 
 ## Failure modes
 
@@ -472,8 +593,7 @@ live-list filter; intake listings are exempt from that filter because they are o
 | `the publishing clone has N uncommitted path(s)` | something other than the intake wrote to `~/bona-bot` | look at `git status` there yourself; the intake refuses to throw away work that is not its own |
 | `another intake job holds intake.lock` | a `run-once.mjs` is still running | wait, or remove the file if its pid is gone |
 | `⚠️ … spawn claude ENOENT` | the unit's PATH is missing `~/.local/bin` | fix `PATH=` in the unit, `daemon-reload`, restart |
-| listing live but no *Download brochure* button | the branded PDF was over `BONA_MAX_BROCHURE_MB` even after downsampling, or `rebrand_pdf.py` failed | the reply says which; `_intake.warnings` holds `brochure-too-large` / `brochure-failed`. Raise the cap and send `brochure <id>`, or leave it — the listing itself is fine |
-| `✋ the original PDF for BONA-W00x is not in …` | `brochure <id>` after the download was cleaned out of `$BONA_DATA` | send the brochure again |
+| listing live but no *Download brochure* button | the brochure was over `BONA_MAX_BROCHURE_MB` even with its images scaled down, or `brochure_pdf.py` failed (`intake.brochure_failed` / `edit.brochure_failed` in the journal) | the reply says which; `_intake.warnings` holds `brochure-too-large` / `brochure-failed`. Raise the cap and send `brochure <id>`, or leave it — the listing itself is fine |
 | `✋ Which listing is this video for? …` | a video with no `BONA-W###` in its caption and no brochure within `BONA_VIDEO_WINDOW_MIN` of it (or the nearest brochure was rejected / never finished within `BONA_VIDEO_WAIT_MIN`), and there was nothing published to compare it against | send it again right after the brochure, or captioned `video BONA-W001` |
 | `✋ I watched the clip and still cannot tell which property it is …` | the content matcher ran and came back under `BONA_VIDEO_MATCH_CONFIDENCE` | caption it with the id. `video.content_match` in the journal says what it saw and how sure it was; the frames, the contact sheets and `match.json` are in `<msgid>-match/` |
 | `✋ Two brochures were sent just as close to this video …` | two different listings were published from brochures within 60 s of each other around the clip | send it again captioned with the id you mean |
@@ -498,16 +618,15 @@ services/intake/
   index.mjs             the daemon: group discovery, polling, single-worker queue
   run-once.mjs          the same pipeline on one local PDF, no WhatsApp
   extract_pdf.py        PyMuPDF: page text + candidate photos, whole-page renders (--mode pages)
-                        and sliced page views (--mode views); run via `uv run --with pymupdf`
-  rebrand_pdf.py        PyMuPDF + segno: the Bona cover, the footer strip, the Enquire page, the shrink
-  rebrand-once.mjs      the brochure step alone, on one local PDF — the loop for changing rebrand_pdf.py
+                        and sliced page views (--mode views); run via `uv run --with pymupdf --with pillow`
+  brochure_pdf.py       WeasyPrint + segno: the Bona brochure, drawn from the listing, its photos and plans
   lib/
     env.mjs             config; reads ~/.secrets/*.env inside Node, never through a shell
     log.mjs             one JSON line per event, with secret redaction
     evolution.mjs       Evolution API client (+ the verified response shapes, in comments)
     classify.mjs        the default-deny gate
     pdf.mjs             wrapper around extract_pdf.py
-    brochure.mjs        wrapper around rebrand_pdf.py: the facts it prints, where the file lands
+    brochure.mjs        wrapper around brochure_pdf.py: the public listing it is handed, where the file lands
     contact-sheet.mjs   labelled sheets of the candidates, for the model to look at
     photo-regions.mjs   the photographs cut out of pages that are single flattened pictures
     prompt.md           the prompt template (the contract the model must answer with)

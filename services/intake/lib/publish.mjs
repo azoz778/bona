@@ -33,6 +33,9 @@ export function run(cmd, args, { cwd, timeoutMs = 600000, env } = {}) {
     let out = '';
     let err = '';
     const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+    // One UTF-8 decoder per stream: a pipe chunk can end inside an Arabic letter (r9 #8, as pdf.mjs r9 #6).
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { err += d; });
     child.on('error', (e) => { clearTimeout(timer); resolve({ code: -1, out, err: String(e.message) }); });
@@ -68,10 +71,19 @@ export async function committedUnchanged(repo, paths) {
 }
 
 /**
+ * Commits the intake makes over a published listing that a re-run rebuilds anyway (never its publish
+ * commit): `--replace`, `--enrich`, the backfill's brochure rebuild (backfill-enrich.mjs) and the
+ * WhatsApp `brochure <id>` command (index.mjs: "intake: branded brochure (<id>)").
+ */
+const INTAKE_REBUILDS = ['intake: replace ', 'intake: enrich ', 'intake: rebuild brochure ', 'intake: branded brochure ('];
+
+/**
  * Why a published listing may NOT be rebuilt from its brochure, or null when it may: every commit
- * touching `paths` must be the one that published it or a later `intake: replace …` run. Anything
- * else (a hand fix, a re-crop, an edit) is reported. A shallow clone cannot show the history, so
- * it is refused rather than trusted.
+ * touching `paths` must be the one that published it or a later `intake: replace …`, `intake: enrich …`,
+ * `intake: rebuild brochure …` (backfill-enrich.mjs) or `intake: branded brochure (<id>)` (the WhatsApp
+ * `brochure <id>` command) run — an enrichment or a brochure rebuild adds only what a re-run rebuilds
+ * anyway: unit models, floor plans, fact lists, the brochure. Anything else (a hand fix, a re-crop, an
+ * edit) is reported. A shallow clone cannot show the history, so it is refused rather than trusted.
  */
 export async function changedSincePublished(repo, paths) {
   const shallow = await run('git', ['rev-parse', '--is-shallow-repository'], { cwd: repo });
@@ -85,9 +97,11 @@ export async function changedSincePublished(repo, paths) {
   // If it is not — a hand rename moved the files, so their history starts at the rename — the real
   // history cannot be read from these paths, and the listing is refused.
   const origin = commits[commits.length - 1];
-  if (!/^intake: (?!replace )/.test(origin)) return `its history starts at "${origin.slice(0, 60)}", not at the intake's publish commit`;
+  if (!origin.startsWith('intake: ') || INTAKE_REBUILDS.some((p) => origin.startsWith(p))) {
+    return `its history starts at "${origin.slice(0, 60)}", not at the intake's publish commit`;
+  }
   const later = commits.slice(0, -1);
-  const others = later.filter((subject) => !subject.startsWith('intake: replace '));
+  const others = later.filter((subject) => !INTAKE_REBUILDS.some((p) => subject.startsWith(p)));
   return others.length ? `${others.length} later commit(s), e.g. "${others[0].slice(0, 60)}"` : null;
 }
 
@@ -177,17 +191,57 @@ export async function gitCommitPush(repo, message, { remote = 'origin', branch =
   const author = { GIT_AUTHOR_NAME: 'Bona intake', GIT_AUTHOR_EMAIL: 'intake@bona.azoz.uk', GIT_COMMITTER_NAME: 'Bona intake', GIT_COMMITTER_EMAIL: 'intake@bona.azoz.uk' };
   await must('git commit', await run('git', ['commit', '-m', message], { cwd: repo, env: author }));
   const sha = (await run('git', ['rev-parse', '--short', 'HEAD'], { cwd: repo })).out;
+  /** HEAD is in the remote-tracking branch: on the remote already, whoever committed it (r2 #7). */
+  const onRemote = async () => (await run('git', ['merge-base', '--is-ancestor', 'HEAD', `${remote}/${branch}`], { cwd: repo })).code === 0;
+  /**
+   * HEAD is the job's own commit — not on the remote, and carrying this job's author and message. A rebase
+   * rewrites it, or drops it when the remote already has the same change (r2 #7).
+   */
+  const headIsOurs = async () => {
+    if (await onRemote()) return false;
+    const [name, email, ...body] = (await run('git', ['log', '-1', '--format=%an%x1f%ae%x1f%B', 'HEAD'], { cwd: repo })).out.split('\x1f');
+    return name === author.GIT_AUTHOR_NAME && email === author.GIT_AUTHOR_EMAIL && body.join('\x1f').trim() === message.trim();
+  };
+  /** The job's own commit, as committed — its content is what a dropped rebase must find on the remote (r3 #8). */
+  const committedSha = (await run('git', ['rev-parse', 'HEAD'], { cwd: repo })).out;
   let push = await run('git', ['push', remote, `HEAD:${branch}`], { cwd: repo });
+  let failure = null;
   if (push.code !== 0) {
     // Someone else pushed while we were working — the tree is clean now that we have
     // committed, so a rebase is safe; then try once more.
-    await gitPull(repo, { remote, branch });
-    push = await run('git', ['push', remote, `HEAD:${branch}`], { cwd: repo });
+    try {
+      await gitPull(repo, { remote, branch });
+      // The rebase dropped the job's commit: the remote's history already has that patch. It is published only
+      // when the remote still holds its content (r3 #8: upstream may have applied the same change and reverted
+      // it) — else the job failed, and nothing is reset off the remote's commits.
+      if (await onRemote()) {
+        const same = (await run('git', ['diff', '--quiet', committedSha, 'HEAD', '--', ...stagedPaths], { cwd: repo })).code === 0;
+        if (same) {
+          const upstream = (await run('git', ['rev-parse', '--short', 'HEAD'], { cwd: repo })).out;
+          return { committed: true, pushed: true, upstream: true, sha: upstream, staged: stagedPaths };
+        }
+        throw Object.assign(new Error('git push failed — the remote had this change and reverted it, so it was not published — see the journal'), { upstreamReverted: true });
+      }
+      push = await run('git', ['push', remote, `HEAD:${branch}`], { cwd: repo });
+    } catch (err) {
+      // A conflict leaves the rebase half done: abort it, so HEAD is the job's commit again (Codex r1 #7).
+      await run('git', ['rebase', '--abort'], { cwd: repo });
+      failure = err;
+    }
   }
-  if (push.code !== 0) {
-    const err = new Error('git push failed — see the journal');
-    err.detail = (push.err || push.out).slice(-600);
-    throw err;
+  if (!failure && push.code !== 0) {
+    failure = new Error('git push failed — see the journal');
+    failure.detail = (push.err || push.out).slice(-600);
+  }
+  if (failure) {
+    // The commit never reached the remote: take it off HEAD — only when HEAD is still the job's own commit,
+    // never one the remote branch contains (r2 #7) — so the clone matches the remote again and no later job's
+    // push carries it (Codex r1 #7). Its files stay in the working tree, unstaged, for the caller's resetTree().
+    if (await headIsOurs()) {
+      const undo = await run('git', ['reset', '-q', 'HEAD~1'], { cwd: repo });
+      failure.uncommitted = undo.code === 0;
+    }
+    throw failure;
   }
   return { committed: true, pushed: true, sha, staged: stagedPaths };
 }

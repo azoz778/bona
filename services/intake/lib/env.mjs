@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DEFAULT_BROCHURE_PY_CMD } from './brochure.mjs';
 
 /** Parse a dotenv-style file body. Supports `export K=v`, quotes and `#` comments. */
 export function parseEnv(text) {
@@ -81,12 +82,12 @@ export function loadConfig(overrides = {}) {
     // argv ARRAY, never a shell string: nothing here is ever handed to a shell.
     pyCmd: String(raw.BONA_PY_CMD || '').trim()
       ? String(raw.BONA_PY_CMD).trim().split(/\s+/)
-      : ['uv', 'run', '--with', 'pymupdf', 'python'],
-    // The brochure step needs more than the extractor does: segno draws the QR and
-    // fontTools+brotli decompress public/fonts/*.woff2 into the TTFs PyMuPDF can embed.
+      : ['uv', 'run', '--with', 'pymupdf', '--with', 'pillow', 'python'],
+    // The brochure step needs more than the extractor does: WeasyPrint (pinned) lays the pages
+    // out, segno draws the QR — see DEFAULT_BROCHURE_PY_CMD in lib/brochure.mjs.
     brochurePyCmd: String(raw.BONA_BROCHURE_PY_CMD || '').trim()
       ? String(raw.BONA_BROCHURE_PY_CMD).trim().split(/\s+/)
-      : ['uv', 'run', '--with', 'pymupdf', '--with', 'segno', '--with', 'fonttools', '--with', 'brotli', 'python'],
+      : [...DEFAULT_BROCHURE_PY_CMD],
     brochureTimeoutMs: num(raw.BONA_BROCHURE_TIMEOUT_MS, 600000),
     site: (raw.BONA_SITE || 'https://bona-real-estate.com').replace(/\/+$/, ''),
     maxPdfMb: num(raw.BONA_MAX_PDF_MB, 150), // real developer brochures are 50–80 MB (owner's files 2026-09-06)
@@ -115,8 +116,8 @@ export function loadConfig(overrides = {}) {
     // brochure to finish publishing before it gives up and asks for an id.
     videoWindowMin: num(raw.BONA_VIDEO_WINDOW_MIN, 15),
     videoWaitMin: num(raw.BONA_VIDEO_WAIT_MIN, 30),
-    // The cap on the BRANDED output, not on the developer's original: rebrand_pdf.py
-    // downsamples until it fits and refuses to write anything larger.
+    // The cap on the brochure the intake writes, not on the developer's original: brochure_pdf.py
+    // scales its images down until it fits and refuses to write anything larger.
     maxBrochureMb: num(raw.BONA_MAX_BROCHURE_MB, 25),
     minImages: num(raw.BONA_MIN_IMAGES, 4),
     maxImages: num(raw.BONA_MAX_IMAGES, 10),
@@ -126,6 +127,12 @@ export function loadConfig(overrides = {}) {
     liveCheckMs: num(raw.BONA_LIVE_CHECK_MS, 600000),
     lockWaitMs: num(raw.BONA_LOCK_WAIT_MS, 900000),
     pageReadLongSide: num(raw.BONA_PAGE_READ_LONG_SIDE, 1600),
+    // The unit-model price check (lib/model-prices.mjs) pays one confirmation call per page: a
+    // brochure whose model prices would need more pages checked than this gets none of them.
+    maxModelPricePages: num(raw.BONA_MAX_MODEL_PRICE_PAGES, 12),
+    // ...and runs this many of those calls at once. Each is a `claude -p` — a node process of its own —
+    // inside the daemon unit's MemoryMax (2G), beside the extractor and the daemon itself.
+    modelPriceConcurrency: num(raw.BONA_MODEL_PRICE_CONCURRENCY, 2),
     sendReplies: bool(raw.BONA_SEND_REPLIES, true),
     ...overrides,
   };

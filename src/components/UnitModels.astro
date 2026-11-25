@@ -1,0 +1,200 @@
+---
+/* "Residences & prices": every unit model a development brochure prints (WhatsApp intake, `models` in
+   src/data/listings.json; shape in src/data/LISTING-SCHEMA.md → "Unit models and the project fact lists"),
+   with its size, rooms, both printed prices (regular and Sakani) and its floor plan, then the brochure's
+   amenities / nearby / warranties lists. A table when the column is 48rem or wider, stacked cards below; both
+   are in the HTML (each model's first table row and its card carry data-model-row="table" | "card";
+   test/unit-models.test.mjs counts them). Renders nothing when the listing has no models and no fact lists. */
+import { t, ui, fill, count, formatNumber, formatPrice, otherLocale, type Locale } from '../lib/i18n';
+import type { Listing, UnitModel } from '../lib/listings';
+
+interface Props { listing: Listing; locale: Locale; class?: string }
+const { listing: l, locale, class: cls = '' } = Astro.props;
+
+const ar = locale === 'ar';
+const other = otherLocale(locale);
+const models: UnitModel[] = Array.isArray(l.models) ? l.models : [];
+const currency = l.price?.currency || 'SAR';
+/* A rental development prices its models per year or per month, like the header price ("/ year", "/ سنوياً"). */
+const period = l.price?.period || null;
+const priceLabel = t(l.category === 'rent' ? ui.rentCol : ui.priceCol, locale);
+const isFigure = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
+const isCount = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0;
+
+const hasSakani = models.some((m) => isFigure(m.subsidisedPrice));
+const hasPrice = models.some((m) => isFigure(m.price));
+const sqm = ar ? 'م²' : 'm²';
+/* Brochures print areas to two decimals (175.40); whole areas stay whole. Western digits in both locales. */
+const areaFigure = (a: number) => (Number.isInteger(a)
+  ? formatNumber(a)
+  : new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(a));
+const cash = (n: number | null | undefined) => (isFigure(n) ? formatPrice({ amount: n, currency, period }, locale) : t(ui.onRequestShort, locale));
+const name = (m: UnitModel) => t(m.name, locale);
+const otherName = (m: UnitModel) => {
+  const o = m.name?.[other]?.trim();
+  return o && o !== name(m).trim() ? o : '';
+};
+const rooms = (m: UnitModel) => (m.rooms?.[locale] ?? m.rooms?.en ?? []).filter(Boolean).join(' · ');
+const availability = (m: UnitModel) => (m.availability ? t(m.availability, locale) : '');
+const details = (m: UnitModel) => [rooms(m), availability(m)].filter(Boolean);
+
+/* Zero bedrooms is a studio, in the table and on the card. Card line: "3 bedrooms · 2 bathrooms" /
+   "3 غرف نوم · دورتا مياه" (count(): Arabic dual, 3–10 plural, 11+ singular). */
+const bedsCell = (m: UnitModel) => (!isCount(m.bedrooms) ? '—' : m.bedrooms === 0 ? t(ui.studio, locale) : formatNumber(m.bedrooms));
+const specParts = (m: UnitModel) => [
+  isCount(m.bedrooms) ? (m.bedrooms === 0 ? t(ui.studio, locale) : count(m.bedrooms, 'bedroom', locale)) : '',
+  isCount(m.bathrooms) && m.bathrooms > 0 ? count(m.bathrooms, 'bathroom', locale) : '',
+].filter(Boolean);
+
+/* Defence in depth: the validator (scripts/curate/rules.mjs, LOCAL_PLAN_SRC / LOCAL_PLAN_THUMB) only lets a plan in
+   from this listing's own folder. The page checks the prefix again, so a bypassed validation can never put a
+   `javascript:` or foreign URL into an href or src: anything else renders as "—" (table) or no link (card). */
+const planPrefix = `/listings/${l.slug}/plan-`;
+const plan = (m: UnitModel): { href: string; img: string } | null => {
+  const fp = m.floorPlan;
+  if (!fp || typeof fp.src !== 'string' || !fp.src.startsWith(planPrefix)) return null;
+  const thumb: unknown = fp.thumb;
+  if (thumb != null && thumb !== '' && (typeof thumb !== 'string' || !thumb.startsWith(planPrefix))) return null;
+  return { href: fp.src, img: typeof thumb === 'string' && thumb ? thumb : fp.src };
+};
+const planAlt = (m: UnitModel) => fill(t(ui.planAlt, locale), { name: name(m) });
+
+const listOf = (v?: { en: string[]; ar: string[] } | null) => (v?.[locale] ?? v?.en ?? []).filter((x) => typeof x === 'string' && x.trim());
+const facts = [
+  { key: 'amenities', heading: t(ui.amenitiesHeading, locale), items: listOf(l.amenities) },
+  { key: 'nearby', heading: t(ui.nearbyHeading, locale), items: listOf(l.nearby) },
+  { key: 'warranties', heading: t(ui.warrantiesHeading, locale), items: listOf(l.warranties) },
+].filter((f) => f.items.length > 0);
+
+const show = models.length > 0 || facts.length > 0;
+const headingId = `residences-${l.id}`;
+/* With models the fact lists sit under the section heading (h3); on their own they are the section's headings. */
+const FactHeading = models.length > 0 ? 'h3' : 'h2';
+const cell = 'border-b border-ink/10 py-3 pe-4 text-end tabular-nums';
+---
+{show && (
+  <section id="residences" class={`@container scroll-mt-28 ${cls}`} aria-labelledby={models.length > 0 ? headingId : undefined} data-unit-models>
+    {models.length > 0 && (
+      <>
+        <h2 id={headingId} class="label text-stone-2">{t(ui.residencesPrices, locale)}</h2>
+
+        {/* a column 48rem or wider: one table. Measured on the column, not the viewport: from lg to xl the page puts
+            this column beside the enquiry panel at ~530 px, where seven columns do not fit. The wrapper scrolls
+            sideways when a long name or a rent period still overflows, so it is a focusable, named region. */}
+        <div class="mt-5 hidden overflow-x-auto @3xl:block" role="region" aria-label={t(ui.modelsTableLabel, locale)} tabindex="0">
+          <table class="w-full text-sm md:text-[15px]" aria-labelledby={headingId}>
+            <thead>
+              <tr class="border-b border-ink/15 text-xs text-stone-2">
+                <th scope="col" class="py-2 pe-4 text-start font-medium">{t(ui.layoutCol, locale)}</th>
+                <th scope="col" class="py-2 pe-4 text-end font-medium">{t(ui.bedroomsCol, locale)}</th>
+                <th scope="col" class="py-2 pe-4 text-end font-medium">{t(ui.bathroomsCol, locale)}</th>
+                <th scope="col" class="py-2 pe-4 text-end font-medium">{t(ui.areaCol, locale)}</th>
+                <th scope="col" class="py-2 pe-4 text-end font-medium">{priceLabel}</th>
+                {hasSakani && <th scope="col" class="py-2 pe-4 text-end font-medium">{t(ui.sakaniCol, locale)}</th>}
+                <th scope="col" class="py-2 text-end font-medium">{t(ui.planCol, locale)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* The row header holds only the model's name(s), so a screen reader repeats just the name on every cell.
+                  Rooms and availability sit in a second row under the name, in the Layout column (read once); the
+                  other cells span both rows. */}
+              {models.map((m) => {
+                const more = details(m);
+                const span = more.length > 0 ? 2 : undefined;
+                const p = plan(m);
+                return (
+                  <>
+                    <tr class="align-middle" data-model-row="table">
+                      <th scope="row" class:list={['pe-4 pt-3 text-start font-normal', more.length > 0 ? 'pb-0' : 'border-b border-ink/10 pb-3']}>
+                        <span class="font-semibold text-ink">{name(m)}</span>
+                        {otherName(m) && <span class="ms-2 text-xs text-stone-2"><bdi lang={other}>{otherName(m)}</bdi></span>}
+                      </th>
+                      <td rowspan={span} class={cell}>{bedsCell(m)}</td>
+                      <td rowspan={span} class={cell}>{isCount(m.bathrooms) ? formatNumber(m.bathrooms) : '—'}</td>
+                      <td rowspan={span} class={`whitespace-nowrap ${cell}`}>{isFigure(m.areaSqm) ? <><span dir="ltr">{areaFigure(m.areaSqm)}</span> {sqm}</> : '—'}</td>
+                      <td rowspan={span} class={`whitespace-nowrap ${cell}`}>{cash(m.price)}</td>
+                      {hasSakani && <td rowspan={span} class={`whitespace-nowrap ${cell}`}>{isFigure(m.subsidisedPrice) ? cash(m.subsidisedPrice) : '—'}</td>}
+                      <td rowspan={span} class="border-b border-ink/10 py-2 text-end">
+                        {p ? (
+                          <a href={p.href} target="_blank" rel="noopener" class="inline-block border border-ink/10 bg-white p-1 align-middle transition-colors hover:border-ink/40">
+                            <img src={p.img} alt={planAlt(m)} loading="lazy" decoding="async" width="108" height="72" class="block h-[72px] w-[108px] object-contain" />
+                          </a>
+                        ) : <span class="text-stone-2">—</span>}
+                      </td>
+                    </tr>
+                    {more.length > 0 && (
+                      <tr class="align-top">
+                        <td class="border-b border-ink/10 pb-3 pe-4 pt-1 text-start text-xs text-stone-2">
+                          {more.map((d, i) => <span class:list={['block', i > 0 && 'mt-0.5']}>{d}</span>)}
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* a narrower column (phones, and lg–xl beside the panel): stacked cards */}
+        <div class="mt-5 border-t border-ink/15 @3xl:hidden">
+          {models.map((m) => {
+            const p = plan(m);
+            const spec = specParts(m);
+            return (
+              <article class="border-b border-ink/10 py-4" data-model-row="card">
+                <h3 class="text-base font-semibold">{name(m)}</h3>
+                {(spec.length > 0 || isFigure(m.areaSqm)) && (
+                  <p class="mt-1 text-sm text-stone-2">
+                    {spec.join(' · ')}{spec.length > 0 && isFigure(m.areaSqm) && ' · '}{isFigure(m.areaSqm) && <><span dir="ltr">{areaFigure(m.areaSqm)}</span> {sqm}</>}
+                  </p>
+                )}
+                {rooms(m) && <p class="mt-1 text-xs text-stone-2">{rooms(m)}</p>}
+                {availability(m) && <p class="mt-0.5 text-xs text-stone-2">{availability(m)}</p>}
+                <dl class="mt-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                  <div>
+                    <dt class="text-xs text-stone-2">{priceLabel}</dt>
+                    <dd class="mt-0.5 text-[15px] font-semibold tabular-nums">{cash(m.price)}</dd>
+                  </div>
+                  {isFigure(m.subsidisedPrice) && (
+                    <div>
+                      <dt class="text-xs text-stone-2">{t(ui.sakaniCol, locale)}</dt>
+                      <dd class="mt-0.5 text-[15px] tabular-nums">{cash(m.subsidisedPrice)}</dd>
+                    </div>
+                  )}
+                </dl>
+                {/* the visible "View plan" names the link, so the thumbnail beside it is decorative */}
+                {p && (
+                  <a href={p.href} target="_blank" rel="noopener" class="mt-3 inline-flex items-center gap-4">
+                    <span class="border border-ink/10 bg-white p-1"><img src={p.img} alt="" loading="lazy" decoding="async" width="108" height="72" class="block h-[72px] w-[108px] object-contain" /></span>
+                    <span class="link-label text-ink">{t(ui.viewPlan, locale)}</span>
+                  </a>
+                )}
+              </article>
+            );
+          })}
+        </div>
+
+        {/* where the prices come from; who the Sakani price is for only when a model has one */}
+        {(hasPrice || hasSakani) && (
+          <p class="mt-4 max-w-[60ch] text-sm leading-relaxed text-stone-2" data-models-note>
+            {t(ui.modelsPricesNote, locale)}{hasSakani && <>{' '}<span data-models-sakani-note>{t(ui.modelsSakaniNote, locale)}</span></>}
+          </p>
+        )}
+      </>
+    )}
+
+    {facts.length > 0 && (
+      <div class:list={['grid gap-x-10 gap-y-8 sm:grid-cols-2 xl:grid-cols-3', models.length > 0 && 'mt-10']} data-unit-facts>
+        {facts.map((f) => (
+          <div data-fact-list={f.key}>
+            <FactHeading class="label text-stone-2">{f.heading}</FactHeading>
+            <ul class="mt-4 space-y-2.5 text-sm leading-relaxed">
+              {f.items.map((item) => <li class="flex items-start gap-3"><span class="rule mt-[0.7em] !w-3 shrink-0"></span><span>{item}</span></li>)}
+            </ul>
+          </div>
+        ))}
+      </div>
+    )}
+  </section>
+)}

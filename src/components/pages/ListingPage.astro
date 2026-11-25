@@ -10,6 +10,7 @@ import SectionHead from '../SectionHead.astro';
 import EnquiryForm from '../EnquiryForm.astro';
 import RegaBlock from '../RegaBlock.astro';
 import ProjectDetails from '../ProjectDetails.astro';
+import UnitModels from '../UnitModels.astro';
 import unitsData from '../../data/units.json';
 import { liveSummary, localFaq, recordFor, sheetVars } from '../../lib/units-summary.mjs';
 import Icon from '../Icon.astro';
@@ -152,6 +153,8 @@ const kindText = t(kindLabel[kind], locale);
               </ul>
             </section>
           )}
+
+          <UnitModels listing={l} locale={locale} class="mt-14" />
 
           <ProjectDetails listing={l} locale={locale} class="mt-14" />
 
