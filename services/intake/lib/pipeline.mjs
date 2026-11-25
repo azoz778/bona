@@ -277,23 +277,24 @@ const PERIOD_PHRASE = String.raw`(?:a\s+(?:night|week|day)|per\s+day)`;
 const RENT_WORDING_RE = new RegExp([
   String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|returns?|roi|revenues?|tenant(?:s|ed)?|tenancy|let\s+at|daily|weekend\s+rates?)\b`,
   String.raw`\b${PERIOD_PHRASE}\b`,
-  String.raw`\b(?:weekdays?|weekends?|night\s+rates?|(?:one|every)\s+night|(?:two|three|four|five|six|seven|\d+)\s+nights)\b`,
+  String.raw`\b(?:weekdays?|weekends?|night\s+rates?|(?:one|every|\d+)\s+night|(?:two|three|four|five|six|seven|\d+)\s+nights|per\s+(?:person|hour|stay))\b`,
   String.raw`\/\s*(?:day|night|week)\b`,
   arabicWords(String.raw`[إاأ]يجار(?:ات)?(?:ي|ية|يه|يا|ا|${RENT_SUFFIX})?|استئجار|تأجير|تاجير|أجرة|اجرة|أجره|اجره|[أا]جرت(?:ه|ها|هم)|مؤجر|مؤجرة|مؤجره|مؤجرا|`
     + String.raw`موجر|موجرة|مستأجر|مستأجرة|دخل(?:ا|${RENT_SUFFIX})?|عائد(?:ات)?(?:ا|${RENT_SUFFIX})?|عوائد(?:ا|${RENT_SUFFIX})?|[إا]يراد(?:ات)?(?:ا|${RENT_SUFFIX})?|`
     + String.raw`ريع(?:ا|${RENT_SUFFIX})?|مردود(?:ا|${RENT_SUFFIX})?`, { ka: true }),
   arabicWords(String.raw`بالليل[ةه]|في\s+الليل[ةه]|كل\s+ليل[ةه]|باليوم|في\s+(?:الأسبوع|الاسبوع)|بال[أا]سبوع|`
     + String.raw`سعر\s+الليل[ةه]|لليوم|لل[أا]سبوع|ليليا|ت[أا]جيري[ةه]|للعام|كل\s+عام|لكل\s+[أا]سبوع|سعر\s+اليومي|`
-    + String.raw`سعر\s+ال[أا]سبوعي|سعر\s+ال[أا]سبوع|ليل[ةه]\s+(?:ال)?واحد[ةه]|كل\s+يوم|(?:أيام|ايام|نهاية|نهايه|وسط)\s+ال[أا]سبوع|ليلتين|ليلتان|ليال(?:ي)?`),
+    + String.raw`سعر\s+ال[أا]سبوعي|سعر\s+ال[أا]سبوع|ليل[ةه]\s+(?:ال)?واحد[ةه]|كل\s+يوم|(?:أيام|ايام|نهاية|نهايه|وسط)\s+ال[أا]سبوع|ليلتين|ليلتان|ليال(?:ي)?|مبيت|ويكند|للشخص|لكل\s+شخص`),
   String.raw`\/\s*(?:ال)?(?:ليل[ةه]|يوم|[أا]سبوع|عام)(?!${AR_LETTER})`,
   RENT_PERIOD,
 ].join('|'), 'i');
 /**
  * Does `s` speak of rent or income (RENT_WORDING_RE)? Folded first as classify.mjs does: NFKC (a text layer's Arabic
  * presentation forms, "اﻹﻳﺠﺎر", become letters), no tatweel ("الإيـجار") and no harakat ("الدَّخل", "مَدخل": r7 #5), then
- * ى and ی read as ي ("إيجارى", "القيمة الإيجارى", "سنوی": r8 #5, Claude r7 B1a / B1b).
+ * ى and ی read as ي ("إيجارى", "القيمة الإيجارى", "سنوی": r8 #5, Claude r7 B1a / B1b), and a lam-alef the text layer swapped
+ * read back ("اإليجار" for "الإيجار", "األسبوع": r14e, Claude r14 NB6).
  */
-const foldRent = (s) => foldYeh(s.normalize('NFKC').replace(/[\u0640\u064b-\u0652\u0670]/g, ''));
+const foldRent = (s) => foldYeh(s.normalize('NFKC').replace(/[\u0640\u064b-\u0652\u0670]/g, '').replace(/ا([إأآ])ل/g, 'ال$1'));
 const rentWorded = (s) => typeof s === 'string' && RENT_WORDING_RE.test(foldRent(s));
 /** "starting / starts / from / يبدأ / ابتداء": money beside a figure of four digits or more (r3 #1). */
 const FROM_WORD_RE = new RegExp(String.raw`\b(?:starting|starts?|from)\b|` + arabicWords('يبدأ|تبدأ|ابتداء|ابتداءً|إبتداء|ابتداءا'), 'i');
@@ -845,6 +846,23 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // could not be checked is worded "try again later" — the brochure is not blamed for our quota.
   let quotaHit = false;
   /**
+   * Doubt (r14): the text blocks a figure's doubt is read in — every text page that is no subsidy page, and the owner's
+   * caption, whose text the text layer's evidence reads too (Codex r14 #1: "plot size 4,500 sq ft" in a caption).
+   */
+  const doubtBlocks = [...textPages, caption.text || ''];
+  const nearLine = (lines, i, step) => {
+    for (let j = i + step; j >= 0 && j < lines.length; j += step) if (lines[j].trim()) return lines[j];
+    return '';
+  };
+  const rentLabel = (line) => rentWorded(line) && !ownAmount(line);
+  /** A unit or measure word on or beside a line printing `amount` (price.mjs measureNear), in any doubt block. */
+  const measureDoubtOf = (amount) => doubtBlocks.some((t) => measureNear(t, amount));
+  /** Rent or income wording on a line printing `amount`, or a rent label beside it, on the same page or in the caption. */
+  const rentNear = (amount) => doubtBlocks.some((block) => {
+    const lines = String(block ?? '').split('\n');
+    return lines.some((line, i) => priceAppearsIn(line, amount) && (rentWorded(line) || rentLabel(nearLine(lines, i, -1)) || rentLabel(nearLine(lines, i, 1))));
+  });
+  /**
    * Is `amount` printed as THIS price? In the plain text layer (headline only), or — confirmed by a
    * second model — on a rendered page. Evidence the model forgot is looked for in the rendered
    * pages' text, so a price it read from the text layer is still checked on its page. After a quota
@@ -860,7 +878,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // whose period the text layer cannot tell (r3 #4), a sale's headline that may be a rent (r6 #3), or any figure printed
     // with a unit word beside it, which may be an area or a price per m² (r14) — on every caller, the copy-guard checks of a
     // figure the copy states too (the r14 verifier: "Plot area sqm" / "450,000" and "Priced at 450,000" in the copy).
-    if (!pageCheck && !subsidised && textPages.some((t) => measureNear(t, amount))) pageCheck = true;
+    // …and rent doubt on a sale, on every caller too (Codex r14 NB1: a short-stay figure the copy states under the
+    // owner's caption price).
+    if (!pageCheck && !subsidised && (measureDoubtOf(amount) || (!listingPeriod && rentNear(amount)))) pageCheck = true;
     const out = { inText: subsidised || whole || pageCheck ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency, home: local }), confirmed: null };
     if (out.inText) return out;
     if (whole || pageCheck) return printedWhole(amount, evidence, { subsidised, out, whole });
@@ -973,11 +993,16 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
    */
   const wholeCheckPages = (amount, evidence) => {
     const carries = (n) => priceAppearsIn(pageText[n - 1] ?? '', amount);
+    // A page that prints the figure with a unit word beside it may print it as an area: a page that prints it with none
+    // is looked at first, so a doubted area on one page does not cost the price another page prints (Codex r14 #3).
+    const doubted = (n) => measureNear(pageText[n - 1] ?? '', amount);
+    const carrying = pageText.map((_, k) => k + 1).filter(carries);
+    const clean = carrying.find((n) => !doubted(n) && isRendered(n)) ?? carrying.find((n) => !doubted(n)) ?? null;
     const cited = inPdf(evidence?.page) ? evidence.page : null;
-    if (cited !== null && carries(cited)) return [cited];
+    if (cited !== null && carries(cited)) return [cited, doubted(cited) ? clean : null].filter((n, k, all) => n !== null && all.indexOf(n) === k);
     const rendered = pageImages.find((p) => carries(p.page));
     const i = pageText.findIndex((t) => priceAppearsIn(t ?? '', amount));
-    const inText = rendered ? rendered.page : i === -1 ? null : i + 1;
+    const inText = clean ?? (rendered ? rendered.page : i === -1 ? null : i + 1);
     return [inText, cited].filter((n, k, all) => n !== null && all.indexOf(n) === k);
   };
   /**
@@ -1008,6 +1033,12 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     }
   };
   const rejectedPrices = [];
+  /** The refused figures that were only NOT CHECKED (a spent quota, a failed render or call), with why (Codex r14 #4). */
+  const uncheckedPrices = new Map();
+  const refuse = (n, check) => {
+    rejectedPrices.push(n);
+    if (check?.unchecked) uncheckedPrices.set(n, uncheckedWhy(check));
+  };
   // Every text the run publishes, sentence by sentence, each with where it comes from: the listing's
   // copy (a publish only — an enrichment keeps the listing's own), and the unit models' names, rooms
   // and availability and the fact lists, which both publish. A refused figure is looked for in all of it.
@@ -1167,7 +1198,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
       for (const [n, evidence, subsidised] of [[before.amount, ai.priceEvidence, false], [before.subsidised, ai.subsidisedPriceEvidence, true]]) {
         if (!isFigure(n) || kept.has(n) || mp.refused.includes(n) || !inCopy(n)) continue;
         const check = await printed(n, evidence, { subsidised });
-        if (!check.inText && !check.confirmed) rejectedPrices.push(n);
+        if (!check.inText && !check.confirmed) refuse(n, check);
       }
     }
   }
@@ -1309,7 +1340,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   if (caption.price && price && typeof price.amount === 'number' && price.amount > 0
       && price.amount !== caption.price.amount && inCopy(price.amount)) {
     const check = await printed(price.amount, ai.priceEvidence);
-    if (!check.inText && !check.confirmed) rejectedPrices.push(price.amount);
+    if (!check.inText && !check.confirmed) refuse(price.amount, check);
   }
   if (!headlineFromModels && !caption.price && price && !price.onRequest && typeof price.amount === 'number' && price.amount > 0) {
     // Codex r1 #1: the text layer cannot tie a figure to one unit model or one unit. A headline that IS a
@@ -1338,28 +1369,19 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // ending "Rental income" labels nothing on the next. The text layer cannot tell a rent from an asking price: only
     // its page settles it (asked as a sale's, as every check of a sale is). A sale with no period, printed with no
     // such words on or beside its line, keeps the text layer.
-    const near = (lines, i, step) => {
-      for (let j = i + step; j >= 0 && j < lines.length; j += step) if (lines[j].trim()) return lines[j];
-      return '';
-    };
-    const rentLabel = (line) => rentWorded(line) && !ownAmount(line);
-    const saleMayBeRent = !listingPeriod && (Boolean(price.period) || rentWorded(ai.priceEvidence?.quote)
-      || [...textPages, caption.text || ''].some((block) => {
-        const lines = String(block ?? '').split('\n');
-        return lines.some((line, i) => priceAppearsIn(line, price.amount) && (rentWorded(line) || rentLabel(near(lines, i, -1)) || rentLabel(near(lines, i, 1))));
-      }));
+    const saleMayBeRent = !listingPeriod && (Boolean(price.period) || rentWorded(ai.priceEvidence?.quote) || rentNear(price.amount));
     // Measure doubt (r14, Codex r13 #1 – #6): a measure or unit word on the line printing the figure, or on its non-empty
     // neighbour above or below, on the same page (price.mjs measureNear). The figure may be an area or a price per m² —
     // or a real total beside a unit or a model code: the text layer cannot tell, and rounds 9–13 guessing which words
     // excuse a figure leaked rates and lost totals. Doubt only sends the headline to its page, asked as a sale's, which
     // decides both ways: a false hit costs one check, and under a spent quota the listing is on request, "try again
     // later" — never a leak, never a silent loss. On every listing (a rental's headline goes to its page anyway).
-    const measureDoubt = textPages.some((t) => measureNear(t, price.amount));
+    const measureDoubt = measureDoubtOf(price.amount);
     report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: pageOnly, pageCheck: rentHeadline || saleMayBeRent || measureDoubt });
     const fromWords = ownPriceOnly ? startingFromWords() : null;
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
       log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency, unchecked: report.priceEvidence.unchecked === true, why: report.priceEvidence.uncheckedWhy ?? null, whole: pageOnly });
-      rejectedPrices.push(price.amount);
+      refuse(price.amount, report.priceEvidence);
       price.amount = null;
       price.onRequest = true;
       price.from = false;
@@ -1413,6 +1435,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     : [price && !price.onRequest ? price.amount : null, price?.subsidisedAmount, ...(Array.isArray(ai.models) ? ai.models : []).flatMap(figuresOf)]);
   if (stated) {
     const n = stated.n.toLocaleString('en-US');
+    // A figure only left unchecked is no brochure's fault: "try again later", never "not printed" (Codex r14 #4).
+    if (uncheckedPrices.has(stated.n)) {
+      throw new RejectError(`${stated.where} states the price ${n}, which could not be checked on the brochure (${uncheckedPrices.get(stated.n)}) — try again later`, 'price');
+    }
     throw new RejectError(caption.price
       ? `${stated.where} states the price ${n}, which could not be confirmed on the brochure — send it again; the next reading may leave it out`
       : `${stated.where} states the price ${n}, which could not be confirmed on the brochure — resend with the price in the caption, or without it`, 'price');

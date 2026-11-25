@@ -476,7 +476,7 @@ const periodRule = (what, period) => [
  * worded the same, the unit models' (confirmModelPrices, r7 #6): a figure printed as a rent, an income, a fee, a
  * deposit or an instalment is not the price asked about. Each prompt adds how to answer "no" in its own format.
  */
-const SALE_LINE = 'The listing is for sale: a rent, a rental income, a service fee, a deposit or an instalment printed on the page is NOT its asking price —';
+const SALE_LINE = 'The listing is for sale: a rent, a rental income, a service fee, a deposit, an instalment, an area or a price per m² printed on the page is NOT its asking price —';
 
 /**
  * Second opinion on ONE page render: is the price the model claimed actually printed there, AS this
@@ -501,7 +501,8 @@ const SALE_LINE = 'The listing is for sale: a rent, a rental income, a service f
  *   - `unit`: one specific unit — a price printed for another unit or model does not count.
  *   - `period`: a rental's ('month' | 'year') — the figure must be the rent for that period (r2 #3).
  *   - `sale`: a listing for sale — every check of one that is not a rental (r6 #3, r7 #6) — a rent, rental income,
- *     service fee, deposit or instalment is not its asking price (SALE_LINE).
+ *     service fee, deposit, instalment, area or price per m² is not its asking price (SALE_LINE; the area and per-m² words: r14e,
+ *     Claude r14 NB1 — the page check a measure doubt sends the headline to says so).
  * @returns {Promise<{confirmed:boolean, error?:string, fatal?:boolean}>} on a failed call: not
  *   confirmed, the error message, and `fatal` when it was a quota or session limit (runClaudeOnce) —
  *   the pipeline then makes no more calls for this brochure

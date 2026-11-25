@@ -655,6 +655,7 @@ describe('r14 (Codex r13 #3): a period word after a dotted pair after a figure r
       'نموذج 7.5ر.سشـهـريا', 'نموذج 7.5ر.سشَهريا', 'نموذج 3 ر.سشهريا',
       // r14 verifier: the glued nouns too — a night, a day, a year, "per month".
       'نموذج 7.5ر.سليلة', 'نموذج 7.5ر.سيوم', 'نموذج 7.5ر.سعام', 'نموذج 7.5ر.سبالشهر', 'نموذج 7.5ر.سفي الشهر',
+      'نموذج 7.5ر.سليله', 'نموذج 7.5ر.سبالسنة', 'نموذج 7.5ر.سبالليلة',
     ]) {
       for (const figures of [[], [850000]]) assert.equal(nameOf('Studio', ar, figures), 'models[0].name', `${ar} ${figures}`);
     }
@@ -1650,6 +1651,61 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     }
   });
 
+  it('r14d (Codex r14 #1-#4, NB1): caption doubt, tanween units, the clean page first, a quota-unchecked copy figure, rent doubt on the copy path', async () => {
+    const PAD = ' — شقة سكنية واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات';
+    const sale = (amount, quote = null) => {
+      const a = withModels([], { price: { amount, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence: quote ? { page: 3, quote } : null });
+      a.listing.category = 'buy';
+      return a;
+    };
+    const run = (r, caption = {}) => processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption, workDir: path.join(r.repo, '..', 'work'), dryRun: true });
+    // #2: the tanween forms of the Arabic units are units.
+    for (const t of ['تمتد على 12,500 هكتارًا', 'تمتد على 12,500 هكتارا', 'على 12,500 أمتارًا', 'بمساحة 12,500 مترًا',
+      // r14e (Claude r14 B2): the tanween on the alif, the dual, a pronoun suffix; "areas"; the last line; a raw "²".
+      'تمتد على 12,500 هكتاراً', 'تمتد على 12,500 هكتارين', 'تمتد على 12,500 هكتاران', 'على 12,500 مترين', 'على 12,500 متران',
+      'على 12,500 أمتارها', 'على 12,500 امتارا', 'Play areas\n12,500', 'Price\n12,500\nsqm', '12,500m²']) assert.equal(measureNear(t, 12500), true, t);
+    for (const t of ['Price 12,500', 'السعر 12,500 ريال', 'المترو 12,500'.replace('المترو', 'الدور')]) assert.equal(measureNear(t, 12500), false, t);
+    // #1: the caption's plot area is doubt too — never settled from the caption text with 0 checks.
+    {
+      const r = await rig({ listing: sale(4500), pageText: [`Overview${PAD}`, 'Location', `Specification${PAD}`], confirm: [] });
+      try {
+        const report = await run(r, { text: 'For sale — plot size 4,500 sq ft' });
+        assert.equal(report.priceEvidence.inText, false, 'the caption area is not printed-price evidence');
+        assert.equal(report.listingPreview.price.onRequest, true);
+      } finally { r.cleanup(); }
+    }
+    // #3: the same figure as an area on page 2 and as the asking price on page 3: the page that prints it with no unit
+    // word is checked first, and the price is published.
+    {
+      const r = await rig({ listing: sale(450000), pageText: [`Overview${PAD}`, `Land 450,000 sq ft${PAD}`, `Asking price SAR 450,000${PAD}`, 'Contact'],
+        facts: { 3: [{ fig: 450000, mark: 'SAR', kind: 'whole' }] } });
+      try {
+        const report = await run(r);
+        assert.equal(report.listingPreview.price.amount, 450000);
+        assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm')[0]?.page, 3, 'the clean page first');
+      } finally { r.cleanup(); }
+    }
+    // #4: a doubted headline the quota stopped, which the copy repeats: refused with "try again later", not "not printed".
+    {
+      const a = sale(1250000);
+      a.listing.highlights.en = ['Priced at 1,250,000', ...a.listing.highlights.en.slice(1)];
+      const r = await rig({ listing: a, pageText: [`Overview${PAD}`, 'Location', `Villa 250 m²\nSAR 1,250,000${PAD}`, 'Contact'], confirm: [], confirmFail: 'quota' });
+      try {
+        await assert.rejects(run(r), (err) => err.stage === 'price' && /could not be checked/.test(err.reason) && /try again later/.test(err.reason) && !/could not be confirmed/.test(err.reason));
+      } finally { r.cleanup(); }
+    }
+    // NB1: a short-stay figure the copy states under the owner's caption price goes to its page too, and is refused.
+    {
+      const a = sale(1200);
+      a.listing.highlights.en = ['Priced at 1,200', ...a.listing.highlights.en.slice(1)];
+      const r = await rig({ listing: a, pageText: [`Overview${PAD}`, 'Location', `SAR 1,200 for 2 hours per day${PAD}`, 'Contact'], confirm: [] });
+      try {
+        await assert.rejects(run(r, { price: { amount: 2000000, currency: 'SAR' }, text: '2000000' }), (err) => err.stage === 'price' && /copy states the price 1,200|states the price 1,200/.test(err.reason));
+        assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 1, 'one page check');
+      } finally { r.cleanup(); }
+    }
+  });
+
   it('the model\'s own headline figure, replaced by the models, must still be printed if the copy states it', async () => {
     const a = withModels([model('Lulu', 319015, null, 3)], { price: { amount: 300000, currency: 'SAR', from: true, period: null, onRequest: false } });
     a.listing.description.en = ['Two-bedroom apartments from 300,000 in phase one.', 'Two.'];
@@ -2444,7 +2500,12 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       // r14c (Claude r13 NB3): weekends, the days of the week, the definite "one night", nights in the plural or dual.
       ['Weekends\nSAR 700', 700], ['Weekend\nSAR 700', 700], ['أيام الأسبوع\n700 ريال', 700], ['نهاية الأسبوع\n700 ريال', 700],
       ['وسط الأسبوع\n700 ريال', 700], ['الليلة الواحدة\n700 ريال', 700], ['SAR 1,800 for 2 nights', 1800], ['1,800 ريال لليلتين', 1800],
-      ['1,800 ريال لثلاث ليال', 1800], ['SAR 1,800 for three nights', 1800]]) {
+      ['1,800 ريال لثلاث ليال', 1800], ['SAR 1,800 for three nights', 1800],
+      // r14e (Claude r14 NB6 / NB7 / NB9): lam-alef swapped by the text layer; overnight, weekend, per person / hour / stay,
+      // "1 night"; the spelling twins of r14c.
+      ['اإليجار\n60,000 ريال', 60000], ['في األسبوع\n700 ريال', 700], ['المبيت\n700 ريال', 700], ['الويكند\n700 ريال', 700],
+      ['700 ريال للشخص', 700], ['SAR 700 per person', 700], ['SAR 700 per hour', 700], ['SAR 700 per stay', 700], ['SAR 700 / 1 night', 700],
+      ['ايام الأسبوع\n700 ريال', 700], ['نهايه الأسبوع\n700 ريال', 700], ['ليلتان\n1,800 ريال', 1800], ['ليالي\n1,800 ريال', 1800]]) {
       const o = await outcome({ listing: sale(amount), pageText: pages(p3), confirm: [] });
       assert.deepEqual(o.checks.map((c) => [c.amount, c.page, c.sale]), [[amount, 3, true]], p3);
       assert.equal(o.price.onRequest, true, p3);

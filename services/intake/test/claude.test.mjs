@@ -806,7 +806,7 @@ describe('confirmModelPrices', () => {
     const f = fakeSpawn([{ envelope: envelope([]) }, { envelope: envelope([]) }]);
     await confirmModelPrices({ ...opts, sale: true, spawnImpl: f.spawnImpl });
     assert.equal(f.calls.length, 1, 'one call, as without it');
-    assert.match(f.calls[0].prompt, /The listing is for sale: a rent, a rental income, a service fee, a deposit or an instalment printed on the page is NOT its asking price —\nanswer false for such a figure\./);
+    assert.match(f.calls[0].prompt, /The listing is for sale: a rent, a rental income, a service fee, a deposit, an instalment, an area or a price per m² printed on the page is NOT its asking price —\nanswer false for such a figure\./);
     assert.doesNotMatch(f.calls[0].prompt, /rent per/, 'a sale has no period');
     await confirmModelPrices({ ...opts, spawnImpl: f.spawnImpl });
     assert.doesNotMatch(f.calls[1].prompt, /for sale/, 'no sale line unless asked');
@@ -971,7 +971,7 @@ describe('confirmPriceEvidence', () => {
   it('r6 #3: `sale` — the listing is for sale: a rent, rental income, service fee, deposit or instalment is not its asking price', async () => {
     const f = fakeSpawn([{ envelope: envelope({ confirmed: false }) }, { envelope: envelope({ confirmed: false }) }]);
     await confirmPriceEvidence({ ...opts, sale: true, spawnImpl: f.spawnImpl });
-    assert.match(f.calls[0].prompt, /The listing is for sale: a rent, a rental income, a service fee, a deposit or an instalment printed on the page is NOT its asking price/);
+    assert.match(f.calls[0].prompt, /The listing is for sale: a rent, a rental income, a service fee, a deposit, an instalment, an area or a price per m² printed on the page is NOT its asking price/);
     assert.match(f.calls[0].prompt, /answer \{"confirmed": false\} for such a figure/);
     assert.doesNotMatch(f.calls[0].prompt, /rent per/, 'a sale has no period');
     await confirmPriceEvidence({ ...opts, spawnImpl: f.spawnImpl });
