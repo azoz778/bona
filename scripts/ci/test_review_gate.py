@@ -1,10 +1,13 @@
 """Tests for review_gate.py. Run: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v"""
+import io
 import json
 import os
 import sys
 import tempfile
 import time
 import unittest
+import urllib.error
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import review_gate as g  # noqa: E402
@@ -175,6 +178,17 @@ class Main(unittest.TestCase):
             self.run_main({"pull_request": {"number": 5}})
         self.assertEqual([b["state"] for _, b in self.posts], ["pending", "error"])
 
+    def test_first_read_fails_job_fails(self):
+        def broken(path, token, method="GET", body=None):
+            if method == "POST":
+                self.posts.append((path, body))
+                return {}
+            raise OSError("HTTP 502")
+        g.api = broken
+        with self.assertRaises(OSError):
+            self.run_main({"issue": {"number": 5, "pull_request": {"url": "u"}}})
+        self.assertEqual(self.posts, [])
+
     def test_plain_issue_comment_writes_nothing(self):
         self.run_main({"issue": {"number": 5}})
         self.assertEqual(self.posts, [])
@@ -182,6 +196,45 @@ class Main(unittest.TestCase):
     def test_missing_verdicts_pending(self):
         self.run_main({"pull_request": {"number": 5}})
         self.assertEqual([b["state"] for _, b in self.posts], ["pending", "pending"])
+
+
+class Retry(unittest.TestCase):
+    """api() retries 5xx/429 and network errors a few times, nothing else."""
+
+    def call(self, errors):
+        calls = []
+
+        class Response:
+            def __enter__(self):
+                return io.BytesIO(b'{"ok": 1}')
+
+            def __exit__(self, *a):
+                return False
+
+        def urlopen(req, timeout):
+            calls.append(req.full_url)
+            if len(calls) <= len(errors):
+                e = errors[len(calls) - 1]
+                raise urllib.error.HTTPError(req.full_url, e, "x", {}, None) if isinstance(e, int) else e
+            return Response()
+        with mock.patch.object(g.urllib.request, "urlopen", urlopen), mock.patch.object(g.time, "sleep"):
+            try:
+                return g.api("/x", "t"), len(calls)
+            except Exception as e:  # noqa: BLE001
+                return e, len(calls)
+
+    def test_retries_then_succeeds(self):
+        self.assertEqual(self.call([502, 429, urllib.error.URLError("down")]), ({"ok": 1}, 4))
+
+    def test_client_errors_not_retried(self):
+        result, n = self.call([404])
+        self.assertIsInstance(result, urllib.error.HTTPError)
+        self.assertEqual(n, 1)
+
+    def test_gives_up(self):
+        result, n = self.call([502] * 9)
+        self.assertIsInstance(result, urllib.error.HTTPError)
+        self.assertEqual(n, len(g.RETRY_WAITS) + 1)
 
 
 class Events(unittest.TestCase):

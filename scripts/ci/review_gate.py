@@ -12,8 +12,8 @@ The parsing (VERDICT_START, CANONICAL, verdicts) is a verbatim copy of the owner
 (~/.claude/hooks/guard-main.py), so the server and the guard read the same comments the same way.
 Change both together.
 
-Runs from the default branch (.github/workflows/review-gate.yml). It reads comments over the API and
-never checks out or runs code from the pull request. Python standard library only.
+Runs from the default branch on owner PR comments (.github/workflows/review-gate.yml). It reads comments
+over the API and never checks out or runs code from the pull request. Python standard library only.
 
 Known limits (docs/auto-merge.md): a commit status belongs to a commit, not to a PR (two PRs with the same
 head share it; a branch reset to an approved commit is green again until this re-runs); verdicts in review
@@ -24,6 +24,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -114,6 +115,9 @@ def pr_number(event):
     return None
 
 
+RETRY_WAITS = (3, 10, 30)  # seconds between attempts when GitHub answers 5xx/429 or the network fails
+
+
 def api(path, token, method="GET", body=None):
     req = urllib.request.Request(API + path, method=method,
                                  data=None if body is None else json.dumps(body).encode(),
@@ -122,8 +126,17 @@ def api(path, token, method="GET", body=None):
                                           "Content-Type": "application/json",
                                           "X-GitHub-Api-Version": "2022-11-28",
                                           "User-Agent": "bona-review-gate"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.load(r)
+    for wait in RETRY_WAITS + (None,):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if wait is None or not (e.code >= 500 or e.code == 429):
+                raise
+        except (urllib.error.URLError, TimeoutError):
+            if wait is None:
+                raise
+        time.sleep(wait)
 
 
 def pages(path, token):
@@ -159,7 +172,7 @@ def main():
         api(f"/repos/{repo}/statuses/{sha}", token, "POST",
             {"state": state, "context": CONTEXT, "description": description[:140], "target_url": run_url})
 
-    head = None
+    head = None  # an issue_comment event carries no head sha; api() retries before giving up
     try:
         # Pending first: if this run dies (API error, timeout), the head is left blocked, never green.
         head = api(f"/repos/{repo}/pulls/{number}", token)["head"]["sha"]

@@ -3,17 +3,18 @@ name: Two-model review gate
 # Sets the commit status `two-model-review` on the PR head: success only when the newest Claude and
 # Codex verdicts by the owner's account are both exactly `<Model> review: SHIP <sha>` for the CURRENT
 # head (scripts/ci/review_gate.py). The `main` ruleset requires it, so an auto-merge waits for it.
+# It runs when the owner comments on a PR (posts, edits or deletes a comment). A new commit has no
+# status at all, so it is blocked until fresh verdicts are posted; there is no push trigger, because
+# pull_request_target is blocked by default in public repos from 2026-12-02 and is not needed here.
 #
-# Safety: pull_request_target and issue_comment run with a write token, so this job checks out ONLY
-# the default branch's copy of the gate script (never the PR's code) and runs nothing else. Both events
-# run this file and the script from the default branch, so editing them in a PR does not change how that
-# PR is judged. It is a process check, not a security boundary: any workflow in a same-repo PR could
-# post this status itself, which the Claude and Codex reviews of the diff are there to catch.
-# Verdicts go in PR comments. Verdict lines in review bodies count, but a review does not re-run the gate.
+# Safety: issue_comment runs with a write token from the default branch, so this job checks out ONLY the
+# default branch's copy of the gate script (never the PR's code) and runs nothing else; editing them in
+# a PR does not change how that PR is judged. It is a process check, not a security boundary: any
+# workflow in a same-repo PR could post this status itself, which the Claude and Codex reviews of the
+# diff are there to catch. Verdict lines in review bodies count, but a review does not re-run the gate.
+# Limits and operating rules: docs/auto-merge.md.
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened]
   issue_comment:
     types: [created, edited, deleted]
 
@@ -26,13 +27,11 @@ permissions:
 jobs:
   gate:
     # Comments: only PR comments by the owner's account can change the result.
-    if: >-
-      github.event_name != 'issue_comment' ||
-      (github.event.issue.pull_request && github.event.comment.user.login == 'azoz778')
+    if: github.event.issue.pull_request && github.event.comment.user.login == 'azoz778'
     # On the job, after the `if`, so a skipped run (someone else's comment) can never replace a queued one.
     # One run at a time per PR; a newer run replaces a queued one, and every run reads fresh state.
     concurrency:
-      group: review-gate-${{ github.event.pull_request.number || github.event.issue.number }}
+      group: review-gate-${{ github.event.issue.number }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
