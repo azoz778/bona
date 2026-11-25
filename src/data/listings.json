@@ -5701,6 +5701,66 @@
         "ضمان إنشائي لعشر سنوات"
       ]
     },
+    "amenities": {
+      "en": [
+        "Private swimming pool with outdoor showers",
+        "Outdoor bathroom by the pool",
+        "Car garage",
+        "Guard room",
+        "Maid's room",
+        "Laundry room",
+        "Large roof terrace"
+      ],
+      "ar": [
+        "مسبح خاص مع مروش خارجية",
+        "حمام خارجي بجوار المسبح",
+        "كراج سيارات",
+        "غرفة حارس",
+        "غرفة عاملات",
+        "غرفة غسيل",
+        "سطح كبير"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Jawharat Jeddah Mall – 0.7 km",
+        "Sulaiman Al Habib Hospital – 0.9 km",
+        "Yacht Club – 2.5 km",
+        "Red Sea Mall – 4.2 km",
+        "King Abdulaziz Airport – 5 km",
+        "Jeddah Economic City – 7 km"
+      ],
+      "ar": [
+        "جوهرة جدة مول – 0.7 كم",
+        "مستشفى سليمان الحبيب – 0.9 كم",
+        "نادي اليخوت – 2.5 كم",
+        "ردسي مول – 4.2 كم",
+        "مطار الملك عبدالعزيز – 5 كم",
+        "مدينة جدة الاقتصادية – 7 كم"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Structural frame – 10 years",
+        "Insulation works – 10 years",
+        "Aluminium works – 25 years",
+        "Water network – 2 years",
+        "Sanitary fixtures – 2 years",
+        "Plumbing works – 2 years",
+        "Electrical and air-conditioning – 2 years",
+        "Elevator – 2 years"
+      ],
+      "ar": [
+        "الهيكل الإنشائي – 10 سنوات",
+        "أعمال العزل – 10 سنوات",
+        "أعمال الألمنيوم – 25 سنة",
+        "شبكة المياه – سنتان",
+        "الأدوات الصحية – سنتان",
+        "أعمال السباكة – سنتان",
+        "الكهرباء والتكييف – سنتان",
+        "المصعد – سنتان"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/danyah-villas-al-basateen/brochure.pdf",
     "project": {
