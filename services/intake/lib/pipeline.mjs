@@ -205,7 +205,8 @@ const NAME_WORD_ENDS = String.raw`(?![\u0640\u064b-\u065f\u0670]*[\u0620-\u063f\
  */
 const NAME_IN_WORD = String.raw`[\u0640\u064b-\u065f\u0670]*`;
 const NAME_PERIOD_AFTER = String.raw`[\s\u0640\u064b-\u065f\u0670]*(?:`
-  + ['شهري', 'سنوي', 'يومي', 'أسبوعي', 'اسبوعي', 'ليلي', 'شهر', 'سنة', 'سنه'].map((w) => [...w].join(NAME_IN_WORD)).join('|') + ')';
+  + ['شهري', 'سنوي', 'يومي', 'أسبوعي', 'اسبوعي', 'ليلي', 'شهر', 'سنة', 'سنه', 'ليلة', 'ليله', 'يوم', 'عام', 'بالشهر', 'في الشهر', 'بالسنة', 'بالليلة']
+    .map((w) => [...w].join(NAME_IN_WORD)).join('|') + ')';
 const NAME_CURRENCY_RE = new RegExp(String.raw`${NAME_SITE_CODE}\.?\s*${nameAmountAfter(String.raw`\d{3}`)}|${nameAmountBefore(String.raw`\d{3}`)}\s*${NAME_SITE_CODE}`
   + String.raw`|${NAME_OTHER_CODE}\.?\s*${nameAmountAfter(String.raw`\d{4}`)}|${nameAmountBefore(String.raw`\d{4}`)}\s*${NAME_OTHER_CODE}`
   + String.raw`|(?<![A-Za-z])${MONEY_MARKS.words}(?![A-Za-z])|${MONEY_MARKS.arabic}|${MONEY_MARKS.abbreviations}${NAME_WORD_ENDS}`
@@ -856,8 +857,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // "£1,250,000" is a price in pounds, never "1,250,000 SAR". `whole`: the figure must be the whole
     // property's price — which the text layer cannot tell from a floor's or a model's, so only a page can.
     // `pageCheck`: only a page settles it, the same way, without the whole-property wording — a rental's headline,
-    // whose period the text layer cannot tell (r3 #4), a sale's headline that may be a rent (r6 #3), or one printed with
-    // a unit word beside it, which may be an area or a price per m² (r14).
+    // whose period the text layer cannot tell (r3 #4), a sale's headline that may be a rent (r6 #3), or any figure printed
+    // with a unit word beside it, which may be an area or a price per m² (r14) — on every caller, the copy-guard checks of a
+    // figure the copy states too (the r14 verifier: "Plot area sqm" / "450,000" and "Priced at 450,000" in the copy).
+    if (!pageCheck && !subsidised && textPages.some((t) => measureNear(t, amount))) pageCheck = true;
     const out = { inText: subsidised || whole || pageCheck ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency, home: local }), confirmed: null };
     if (out.inText) return out;
     if (whole || pageCheck) return printedWhole(amount, evidence, { subsidised, out, whole });

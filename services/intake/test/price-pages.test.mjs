@@ -653,6 +653,8 @@ describe('r14 (Codex r13 #3): a period word after a dotted pair after a figure r
       'نموذج 7.5ر.سشهريا', 'نموذج ٧٥٠ر.سشهريًا', 'نموذج ٧٫٥ر.سشهريًا', 'نموذج 7.5 ر.س شهريا', 'نموذج 7.5ر.سـشهريا', 'نموذج 7.5ر.سسنويا',
       'نموذج 7.5د.إيومي', 'نموذج 7.5ر.سأسبوعيا', 'نموذج 7.5ر.ساسبوعي', 'نموذج 7.5ر.سليلي', 'نموذج 7.5ر.سشهر', 'نموذج 7.5ر.سسنة', 'نموذج 7.5ر.سسنه',
       'نموذج 7.5ر.سشـهـريا', 'نموذج 7.5ر.سشَهريا', 'نموذج 3 ر.سشهريا',
+      // r14 verifier: the glued nouns too — a night, a day, a year, "per month".
+      'نموذج 7.5ر.سليلة', 'نموذج 7.5ر.سيوم', 'نموذج 7.5ر.سعام', 'نموذج 7.5ر.سبالشهر', 'نموذج 7.5ر.سفي الشهر',
     ]) {
       for (const figures of [[], [850000]]) assert.equal(nameOf('Studio', ar, figures), 'models[0].name', `${ar} ${figures}`);
     }
@@ -1546,7 +1548,7 @@ describe('processPdf: round-6 review cases', { timeout: 120000 }, () => {
   });
 });
 
-describe('processPdf: unit-model prices (every figure confirmed on its page, one call per page)', { timeout: 120000 }, () => {
+describe('processPdf: unit-model prices (every figure confirmed on its page, one call per page)', { timeout: 240000 }, () => {
   const ON_REQUEST = { amount: null, currency: 'SAR', from: false, period: null, onRequest: true };
   const model = (en, price, subsidisedPrice, page) => ({
     name: { en, ar: `نموذج ${en}` }, bedrooms: 2, bathrooms: 2, areaSqm: 105, rooms: null, availability: null,
@@ -1630,6 +1632,22 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       assert.equal(report.listingPreview.price.amount, 319015);
       assert.ok(report.warningCodes.includes('model-price-not-printed'));
     } finally { r.cleanup(); }
+  });
+
+  it('r14 verifier: an area stated in the copy is checked on its page on every copy-guard path, not settled by the text layer', async () => {
+    // Caption path: the owner's caption price stands; the reading's own figure is an area the copy states as a price.
+    const PAD = ' — شقة سكنية واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات';
+    for (const area of ['Plot area sqm\n450,000', 'Land of 450,000 m2', '² م450,000', 'Total 450,000 sq ft']) {
+      const a = answer({ price: { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false } });
+      a.listing.highlights.en = ['Priced at 450,000', ...a.listing.highlights.en.slice(1)];
+      const pageText = [`مشروع سكني${PAD}`, `${area}${PAD}`];
+      const r = await rig({ pageText, listing: a, confirm: [] });
+      try {
+        await assert.rejects(processPdf({ pdfPath: r.pdfPath, cfg: r.cfg, caption: { price: { amount: 2000000, currency: 'SAR' }, text: '2000000' }, workDir: path.join(r.repo, '..', 'work'), dryRun: true }),
+          (err) => err.stage === 'price' && /copy states the price 450,000/.test(err.reason), area);
+        assert.equal(r.calls().filter((c) => c.tool === 'claude-confirm').length, 1, `${area}: one page check`);
+      } finally { r.cleanup(); }
+    }
   });
 
   it('the model\'s own headline figure, replaced by the models, must still be printed if the copy states it', async () => {
@@ -2280,7 +2298,7 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     }
   });
 
-  it('r10 #1 (Claude r9 B1 / B2 / NB4 / NB5, Codex r9 #1 / #3 / NB2): every frequency word makes a rent label, ات takes a pronoun after it, "a night" / "a week" / "per day" / "كل يوم" count only after a figure, and the short-stay siblings count on the figure\'s own line', async () => {
+  it('r10 #1 (Claude r9 B1 / B2 / NB4 / NB5, Codex r9 #1 / #3 / NB2): every frequency word makes a rent label, ات takes a pronoun after it, "a night" / "a week" / "per day" / "كل يوم" count anywhere (r14), and the short-stay siblings count on the figure\'s own line', async () => {
     const sale = (amount, quote = null) => {
       const a = withModels([], { price: { amount, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence: quote ? { page: 3, quote } : null });
       a.listing.category = 'buy';
@@ -2337,7 +2355,7 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       'الأرض عائدة للمطور — سعر البيع 450,000 ريال', 'الأرض عائدة للمطور\nسعر البيع 450,000 ريال',
       'فيلا مدخلها مستقل — سعر البيع 450,000 ريال', 'فيلا مدخلها مستقل\nسعر البيع 450,000 ريال',
     ]) await settled(p3);
-    // C#3 / NB5: "a night" / "a week" are rates only after a figure on the same line…
+    // C#3 / NB5: "a night" / "a week" after the figure are rates (r14: anywhere — see below)…
     await sentToPage('SAR 700 a night', 700, 'SAR 700');
     await sentToPage('700 SAR a week', 700, '700 SAR');
     // r14: a timeline or a frequency in prose beside a correct sale price is a rent label too — "a week", "per day",
@@ -2355,9 +2373,8 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
         .flatMap((form) => [[`${form} 60,000 ريال`, '60,000 ريال'], [`60,000 ريال ${form}`, '60,000 ريال']]),
     ]) await sentToPage(p3, 60000, quote);
     // r11 #1 (Claude r10 B1 = Codex r10 #1, Claude r10 NB2 / NB3 = Codex r10 NB2): "a night" / "a week" / "a day" are
-    // rates on a label line or before the figure too — only a prose lead-in ("within", "in", "twice", "days", "hours")
-    // makes them a timeline or a frequency; "per day" / "كل يوم" count with a figure before or after them on the line,
-    // or alone on their line; and the other per-period forms.
+    // rates on a label line or before the figure too, and "per day" / "كل يوم" with a figure on the line or alone on
+    // it; and the other per-period forms. (r11–r13 excused a prose lead-in; r14 dropped that: every placement counts.)
     for (const [p3, amount, quote] of [
       ['SAR 1,200\na night', 1200], ['SAR 4,500\na week', 4500], ['a night\nSAR 1,200', 1200], ['A week in the chalet from SAR 4,500', 4500, 'SAR 4,500'],
       ['A week from SAR 4,500', 4500, 'SAR 4,500'], ["A night's stay from SAR 60,000", 60000, 'SAR 60,000'], ['SAR 1,200 (incl. breakfast) a night', 1200, 'SAR 1,200'],
