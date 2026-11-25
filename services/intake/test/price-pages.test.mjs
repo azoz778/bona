@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { checkListing, replaceMetaFor, writeInboxListing } from '../lib/listing.mjs';
 import { compareEnrichment, dropMoneyText, processPdf, statesMoney } from '../lib/pipeline.mjs';
 import { copyProblems } from '../lib/claude.mjs';
-import { priceAppearsIn, printedInCurrency } from '../lib/price.mjs';
+import { measureNear, priceAppearsIn, printedInCurrency } from '../lib/price.mjs';
 import { classifyRun, planBackfill } from '../lib/backfill.mjs';
 import * as msg from '../lib/messages.mjs';
 
@@ -441,37 +441,46 @@ describe('r8 #3: the copy guard — "،" / space grouping, "/-", "SAR:", plural 
 
 // r9 #1 (Codex r8 #1): the text layer settles a sale's headline (pipeline.mjs printed()) when printedInCurrency finds the
 // figure, a bare one too on a Saudi listing in SAR. A figure with a measure straight after it is an area, never that
-// evidence: "4.5 million square feet", "4,500,000 sq ft", "٤٫٥ ملايين م²". Only its page can settle it.
-describe('r9 #1: printedInCurrency — a figure followed by a measure is no printed price', () => {
+// evidence: "4.5 million square feet", "4,500,000 sq ft", "٤٫٥ ملايين م²". Only its page can settle it. r14: the text layer no
+// longer decides which neighbouring words make a figure "no price" — any unit word on or beside the figure's line is doubt
+// (measureNear), and doubt sends the headline to its page (pipeline.mjs measureDoubt). printedInCurrency reads only the
+// figure and its currency mark.
+describe('r9 #1, r14: a figure followed by a measure is doubted (measureNear) — its page settles it', () => {
   const inText = (t) => printedInCurrency(t, 4500000, 'SAR', { bareCounts: true, home: 'SAR' });
-  it('an area is not the price: square feet, sq ft, m², m2, متر, م²', () => {
+  const near = (t) => measureNear(t, 4500000);
+  it('an area is doubt: square feet, sq ft, m², m2, متر, م²', () => {
     for (const t of [
       'The development spans 4.5 millions of square feet', 'The development spans 4.5 million square feet', '4.5 million square feet',
       'Total built-up area 4,500,000 sq ft', 'مساحة المشروع 4.5 مليون متر مربع', 'Total area 4.5m sq ft', 'Total area 4.5 millions sq ft',
       'مساحة المشروع ٤٫٥ ملايين م²', 'Land of 4,500,000 m2',
-    ]) assert.equal(inText(t), false, t);
+    ]) assert.equal(near(t), true, t);
   });
-  it('…and a price is still a price, with an area elsewhere on its line or none', () => {
-    for (const t of [
-      'Prices from SAR 4.5 millions', 'Price 4,500,000', 'السعر 4.5 مليون ريال', 'Price SAR 4,500,000 for a 450 m² villa',
-      '4,500,000 SAR / 450 m²', 'SAR 4,500,000.00',
-    ]) assert.equal(inText(t), true, t);
+  it('…and a price is still a price; with an area on its line it is doubt too (one page check), with no unit word it is not', () => {
+    for (const t of ['Price SAR 4,500,000 for a 450 m² villa', '4,500,000 SAR / 450 m²']) {
+      assert.equal(inText(t), true, t);
+      assert.equal(near(t), true, t);
+    }
+    for (const t of ['Prices from SAR 4.5 millions', 'Price 4,500,000', 'السعر 4.5 مليون ريال', 'SAR 4,500,000.00']) {
+      assert.equal(inText(t), true, t);
+      assert.equal(near(t), false, t);
+    }
   });
 });
 
 // r10 #2: three more ways an area passed for a printed price, or a price for an area. A model code after a price is no
-// m² (Codex r9 #2 = Claude r9 NB6): "M2A" is a code, "m2" with no letter or digit after it a measure. The solid million
-// "m" and thousand "k" do not take the "m" of m² / m2 / m³ (Codex r9 NB1 = Claude r9 NB2): "4.5m²" is no 4.5 million.
-// A measure right BEFORE the figure (Claude r9 NB1): the Arabic text layer comes in visual order, "² م1,000,000" for
-// "1,000,000 م²" (AC53D4FF p5), so the unit stands before the area.
-describe('r10 #2: printedInCurrency — a model code is no m², m² is no million, a unit before the figure is an area', () => {
+// m² (Codex r9 #2 = Claude r9 NB6) — r14: every "m2" is a unit word, a code too: a false hit costs one page check. The solid
+// million "m" and thousand "k" do not take the "m" of m² / m2 / m³ (Codex r9 NB1 = Claude r9 NB2): "4.5m²" is no 4.5
+// million — figure parsing, which r14 keeps. A measure right BEFORE the figure (Claude r9 NB1): the Arabic text layer comes
+// in visual order, "² م1,000,000" for "1,000,000 م²" (AC53D4FF p5), so the unit stands before the area.
+describe('r10 #2 … r13 #1, r14: unit words near a figure are doubt; m² is no million', () => {
   const sar = (t, n) => printedInCurrency(t, n, 'SAR', { bareCounts: true, home: 'SAR' });
-  it('C#2 / NB6: "M2A" after a price is a model code, not m²', () => {
-    assert.equal(sar('Sale price SAR 450,000 M2A Villa', 450000), true);
-    assert.equal(sar('Sale price SAR 450,000 m2a Villa', 450000), true);
-    assert.equal(sar('Sale price SAR 450,000 M22 Villa', 450000), true);
+  it('C#2 / NB6: a model code "M2A" after a price keeps the price, and is doubt like m²', () => {
+    for (const t of ['Sale price SAR 450,000 M2A Villa', 'Sale price SAR 450,000 m2a Villa', 'Sale price SAR 450,000 M22 Villa']) {
+      assert.equal(sar(t, 450000), true, t);
+      assert.equal(measureNear(t, 450000), true, t);
+    }
     for (const t of ['Land of 450,000 m2', 'Land of 450,000 M2', 'Land of 450,000 m2.', 'Land of 450,000 m2 in all', 'Land of 450,000 M²']) {
-      assert.equal(sar(t, 450000), false, t);
+      assert.equal(measureNear(t, 450000), true, t);
     }
   });
   it('C-NB1 / NB2: the solid "m" of m² / m2 / m³ is no million', () => {
@@ -482,63 +491,105 @@ describe('r10 #2: printedInCurrency — a model code is no m², m² is no millio
     for (const t of ['SAR 4.5m', 'SAR 4.5m.', '4.5m SAR', 'Price 4.5m', 'SAR 4.5M, all in']) assert.equal(sar(t, 4.5e6), true, t);
     for (const t of ['SAR 990k', 'SAR 990k.', '990k SAR']) assert.equal(sar(t, 990000), true, t);
   });
-  it('NB1: a measure right before the figure — unit first in the visual-order text layer — is an area', () => {
+  it('NB1: a measure right before the figure — unit first in the visual-order text layer — is doubt', () => {
     for (const t of ['² م1,000,000', 'م² 1,000,000', 'متر مربع 1,000,000', 'على مساحة ² م1,000,000', 'م2 1,000,000', '2م 1,000,000',
       'المساحة متر 1,000,000', 'Area m² 1,000,000', 'Area sqm: 1,000,000', 'Area sq. m 1,000,000', 'هكتار 1,000,000']) {
-      assert.equal(sar(t, 1e6), false, t);
+      assert.equal(measureNear(t, 1e6), true, t);
     }
-    for (const t of ['السعر 1,000,000 ريال', 'Price SAR 1,000,000', 'ريال 1,000,000', 'Price 1,000,000', 'Villa 450 m², SAR 1,000,000']) {
+    for (const t of ['السعر 1,000,000 ريال', 'Price SAR 1,000,000', 'ريال 1,000,000', 'Price 1,000,000']) {
       assert.equal(sar(t, 1e6), true, t);
+      assert.equal(measureNear(t, 1e6), false, t);
     }
+    assert.equal(sar('Villa 450 m², SAR 1,000,000', 1e6), true);
+    assert.equal(measureNear('Villa 450 m², SAR 1,000,000', 1e6), true);
   });
-  it('r10 #4 (r10 verifier): a unit with its own figure before it, a model code or a year is no measure of the next figure', () => {
-    // A table row Model | Area | Price: the unit belongs to the area before it, not to the price after it. "M2" typed as
-    // a model code (the mirror of C#2), "Item2" and the year suffix in "2022م" are no unit either.
+  it('r10 #4 (r10 verifier): a table row Model | Area | Price keeps its price and is doubt; "رقم 2", "حمام 2" and the year in "2022م" are no unit', () => {
+    // A false hit ("M2" typed as a model code, "Item2") costs one page check, which confirms a real price.
     for (const [t, n] of [
       ['Villa A 250 m² 1,250,000 SAR', 1.25e6], ['Villa A 250 m2 1,250,000 SAR', 1.25e6], ['Villa A 250 sqm 1,250,000', 1.25e6],
       ['Type B 180 m² - 450,000 SAR', 450000], ['فيلا أ 250 م² 1,250,000 ريال', 1.25e6], ['فيلا أ 250 متر مربع 1,250,000 ريال', 1.25e6],
       ['فيلا أ ٢٥٠ م² 1,250,000 ريال', 1.25e6], ['Villa M2 450,000 SAR', 450000], ['Type M2 450,000', 450000], ['Item2 450,000 ريال', 450000],
-      ['تسليم 2022م 1,500,000 ريال', 1.5e6],
-    ]) assert.equal(sar(t, n), true, t);
+    ]) {
+      assert.equal(sar(t, n), true, t);
+      assert.equal(measureNear(t, n), true, t);
+    }
+    for (const [t, n] of [['تسليم 2022م 1,500,000 ريال', 1.5e6], ['فيلا رقم 2 1,250,000 ريال', 1.25e6], ['حمام 2\n1,250,000 ريال', 1.25e6]]) {
+      assert.equal(sar(t, n), true, t);
+      assert.equal(measureNear(t, n), false, t);
+    }
   });
-  it('r11 #2 (Claude r10 B2 / NB1 / NB5 / NB6, Codex r10 #2 / #3 / #4 / NB1): m² glued to a word, a visual unit after a lot number, a per-m² price; a word ending in م, a unit on its own line', () => {
-    // An area: m² glued to the next word (a one-letter tail is a model code, a word the next cell); the visual-order
-    // "² م" glued to its figure whatever stands before it; a price per m² is no total; "SQM" in capitals is a unit.
+  it('r11 #2 (Claude r10 B2 / NB1 / NB5 / NB6, Codex r10 #2 / #3 / #4 / NB1): m² glued to a word, a visual unit after a lot number, a per-m² price, "SQM"; a unit on the line above', () => {
     for (const [t, n] of [
       ['Land 30,000 m²Built-up 12,000 m²', 30000], ['Plot area: 450,000 m²of land', 450000], ['GFA 4.5 million m²Total', 4.5e6],
       ['Land 30,000 m2Built-up', 30000], ['قطعة 12 ² م1,000,000', 1e6], ['ريال 15,000,000 ² م30,000', 30000],
       ['SAR 4,500 / m²', 4500], ['Price SAR 4,500 per sqm', 4500], ['سعر المتر 4,500 / م²', 4500], ['Area SQM 1,000,000', 1e6],
-    ]) assert.equal(sar(t, n), false, t);
-    // A price: a model code with one letter (and a digit) after m2; "رقم 2" before the figure is no m2; a unit on a
-    // line of its own, or at the end of the line above, measures nothing on the next line; a price per villa.
+    ]) assert.equal(measureNear(t, n), true, t);
+    // A real price beside a code or under a unit on its own line keeps its evidence, and is doubt; a price per villa is not.
     for (const [t, n] of [
-      ['Sale price SAR 450,000 M2A Villa', 450000], ['Sale price SAR 450,000 M2B2 villa', 450000], ['فيلا رقم 2 1,250,000 ريال', 1.25e6],
-      ['Villa A\n250\nm²\n1,250,000 SAR', 1.25e6], ['Built-up area sqm\n1,250,000 SAR', 1.25e6], ['SAR 4,500,000 / villa', 4.5e6],
-    ]) assert.equal(sar(t, n), true, t);
+      ['Sale price SAR 450,000 M2A Villa', 450000], ['Sale price SAR 450,000 M2B2 villa', 450000],
+      ['Villa A\n250\nm²\n1,250,000 SAR', 1.25e6], ['Built-up area sqm\n1,250,000 SAR', 1.25e6],
+    ]) {
+      assert.equal(sar(t, n), true, t);
+      assert.equal(measureNear(t, n), true, t);
+    }
+    assert.equal(sar('SAR 4,500,000 / villa', 4.5e6), true);
+    assert.equal(measureNear('SAR 4,500,000 / villa', 4.5e6), false);
   });
-  it('r12 #2 (Codex r11 #1 / #3 / NB1): a bare figure under a unit label is an area; a column after "/ sqm:" or a code "M2AB" keeps the total; a per-area price with its currency between', () => {
+  it('r12 #2 (Codex r11 #1 / #3 / NB1), r13 #4 / #6: a bare figure under a unit label, a per-area price; a column after "/ sqm:", a code "M2AB", "/ M2 SAR" keep the total and are doubt', () => {
     for (const [t, n] of [
       ['Plot area sqm\n450,000', 450000], ['المساحة م²\n450,000', 450000], ['Built-up area (sqm)\n450,000', 450000],
       ['4,500 SAR / m²', 4500], ['4,500 ريال لكل متر مربع', 4500], ['4,500 ريال / م²', 4500], ['AED 4,500 per sqm', 4500],
-    ]) assert.equal(sar(t, n), false, t);
+      ['Land 30,000 m²Built-up 12,000 m²', 30000], ['GFA 4.5 million m²Total', 4.5e6],
+    ]) assert.equal(measureNear(t, n), true, t);
     for (const [t, n] of [
       ['Sale price SAR 1,250,000 / sqm: 250', 1.25e6], ['Sale price SAR 1,250,000 M2AB Villa', 1.25e6], ['Plot area sqm\n450,000 SAR', 450000],
-      ['Villa A 250 m² 1,250,000 SAR', 1.25e6], ['Land 30,000 m²Built-up 12,000 m²', 0],
-    ].filter(([, n]) => n)) assert.equal(sar(t, n), true, t);
-    assert.equal(sar('Land 30,000 m²Built-up 12,000 m²', 30000), false);
-    assert.equal(sar('GFA 4.5 million m²Total', 4.5e6), false);
+      ['Villa A 250 m² 1,250,000 SAR', 1.25e6], ['سعر البيع 1,250,000 ريال / متر مربع: 250', 1.25e6], ['Model M2\n1,250,000', 1.25e6],
+      ['Building A / M2 SAR 1,250,000', 1.25e6],
+    ]) {
+      assert.equal(sar(t, n), true, t);
+      assert.equal(measureNear(t, n), true, t);
+    }
   });
-  it('r13 #1 (Claude r11 B1 / B2 / NB1 / NB4 / NB7): المتر with its article or clitic, a stacked unit label in visual order, a per-area label before the figure, m² glued to digits', () => {
+  it('r13 #1 (Claude r11 B1 / B2 / NB1 / NB4 / NB7), r14: المتر with its article or clitic, a stacked unit label in visual order, a per-area label, m² glued to digits, m³ — all doubt', () => {
     for (const [t, n] of [
       ['أرض للبيع\nسعر المتر: 2,500 ريال', 2500], ['السعر بالمتر 4,500 ريال', 4500], ['للمتر 4,500 ريال', 4500], ['قيمة المتر 3,500 ريال', 3500],
       ['المساحة بالمتر: 1,000,000\nالسعر عند الطلب', 1e6], ['مساحة الأرض بالم2 1,000,000', 1e6], ['سعر المتر 4,500 ريال', 4500],
       ['Land for sale, Al Shati\nPlot area m²\n450,000\nPrice on request', 450000], ['مساحة الأرض متر مربع\n1,000,000', 1e6], ['² م\n1,000,000', 1e6],
       ['6,000 ريال للمتر المربع', 6000], ['Price per m²: SAR 4,500', 4500], ['4,500 لكل م²', 4500], ['Land 30,000 m²12,000 m²', 30000],
-    ]) assert.equal(sar(t, n), false, t);
+      ['SAR 4,500 per sqm — 250 sqm minimum', 4500], ['Pool volume m³\n12,000', 12000], ['سعر المتر: 2,500 ريال', 2500],
+      ['Plot 1,000,000 hectares', 1e6], ['1,000,000 acres', 1e6], ['BUA 450,000', 450000], ['GFA: 450,000', 450000], ['450,000 ft', 450000],
+      ['450,000 feet', 450000], ['450,000 km', 450000], ['450,000 كم', 450000], ['450,000 sq yd', 450000], ['450,000 sqft', 450000],
+      ['450,000 square metres', 450000], ['450,000 metres', 450000], ['450,000 أمتار', 450000], ['بمساحة 450,000', 450000],
+      ['المساحة: 450,000', 450000], ['450,000 م³', 450000], ['ﻣﺴﺎﺣﺔ 450,000', 450000], ['450,000 مـتر', 450000],
+      // A false hit, accepted: "بمساحة واسعة" is "spacious". It costs one page check, which confirms a real price.
+      ['السعر 319,015 ريال\nشقة سكنية بمساحة واسعة', 319015],
+    ]) assert.equal(measureNear(t, n), true, t);
     for (const [t, n] of [
-      ['فيلا رقم 2 1,250,000 ريال', 1.25e6], ['حمام 2\n1,250,000 ريال', 1.25e6], ['Villa A\n250\nm²\n1,250,000 SAR', 1.25e6],
-      ['المساحة م²\n1,250,000 ريال', 1.25e6], ['Price\n450,000', 450000],
+      ['فيلا رقم 2 1,250,000 ريال', 1.25e6], ['حمام 2\n1,250,000 ريال', 1.25e6], ['Price\n450,000', 450000], ['Price SAR 1,000,000', 1e6],
+      ['السعر 1,000,000 ريال', 1e6], ['Sale price SAR 450,000 — قرب محطة المترو\nNear the metro', 450000], ['نقدم لكم 450,000 ريال', 450000],
+    ]) {
+      assert.equal(sar(t, n), true, t);
+      assert.equal(measureNear(t, n), false, t);
+    }
+    // A real total under a unit label on its own line keeps its evidence, and is doubt (one check).
+    for (const t of ['Villa A\n250\nm²\n1,250,000 SAR', 'المساحة م²\n1,250,000 ريال']) {
+      assert.equal(sar(t, 1.25e6), true, t);
+      assert.equal(measureNear(t, 1.25e6), true, t);
+    }
+    // Only the figure's own line and the non-empty line just above and below it: a unit two lines away, or on the other
+    // page (pipeline.mjs reads each page on its own), is no doubt.
+    assert.equal(measureNear('Plot area sqm\nAl Shati\n\nPrice\n1,250,000', 1.25e6), false);
+    assert.equal(measureNear('1,250,000\nAsking price', 1.25e6), false);
+    assert.equal(measureNear('Plot area sqm\n\n\n1,250,000', 1.25e6), true);
+  });
+  it('r14: printedInCurrency reads only the figure and its mark — an area\'s or a rate\'s figure is printed; the doubt is measureNear\'s', () => {
+    for (const [t, n] of [
+      ['Total built-up area 4,500,000 sq ft', 4.5e6], ['² م1,000,000', 1e6], ['Plot area sqm\n450,000', 450000], ['SAR 4,500 per sqm', 4500],
+      ['Price per m²: SAR 4,500', 4500], ['Pool volume m³\n12,000', 12000], ['سعر المتر: 2,500 ريال', 2500], ['Model M2\n1,250,000', 1.25e6],
+      ['Building A / M2 SAR 1,250,000', 1.25e6], ['سعر البيع 1,250,000 ريال / متر مربع: 250', 1.25e6],
     ]) assert.equal(sar(t, n), true, t);
+    // Another currency's mark still decides the figure: "AED 4,500 per sqm" is no SAR figure, whatever unit is beside it.
+    assert.equal(sar('AED 4,500 per sqm', 4500), false);
   });
 });
 
@@ -588,6 +639,27 @@ describe('r10 #3: a glued dotted pair after a one-digit model number is initials
   it('names: a one-digit model number, then a person\'s initials', () => {
     for (const ar of ['فيلا ٣ د.إبراهيم', 'نموذج 2 ر.قاسم', 'فيلا 3 د.إبراهيم', 'فيلا ٣د.إبراهيم', 'نموذج ٢ ر.قاسم']) {
       for (const figures of [[], [850000]]) assert.equal(nameOf('Studio', ar, figures), null, `${ar} ${figures}`);
+    }
+  });
+});
+
+// r14 (Codex r13 #3): a dotted pair right after a figure that is no amount ("7.5", a model number like "١٫٢") refuses a
+// model name when a period word follows the pair, glued or not: "نموذج 7.5ر.سشهريا" is 7.5 riyals a month. Initials after a
+// model number stay a name.
+describe('r14 (Codex r13 #3): a period word after a dotted pair after a figure refuses a model name', () => {
+  const nameOf = (en, ar, figures = []) => dropMoneyText({ models: [{ name: { en, ar } }] }, { figures }).name;
+  it('refused: the pair, then a period word, glued or not, with tatweel or harakat', () => {
+    for (const ar of [
+      'نموذج 7.5ر.سشهريا', 'نموذج ٧٥٠ر.سشهريًا', 'نموذج ٧٫٥ر.سشهريًا', 'نموذج 7.5 ر.س شهريا', 'نموذج 7.5ر.سـشهريا', 'نموذج 7.5ر.سسنويا',
+      'نموذج 7.5د.إيومي', 'نموذج 7.5ر.سأسبوعيا', 'نموذج 7.5ر.ساسبوعي', 'نموذج 7.5ر.سليلي', 'نموذج 7.5ر.سشهر', 'نموذج 7.5ر.سسنة', 'نموذج 7.5ر.سسنه',
+      'نموذج 7.5ر.سشـهـريا', 'نموذج 7.5ر.سشَهريا', 'نموذج 3 ر.سشهريا',
+    ]) {
+      for (const figures of [[], [850000]]) assert.equal(nameOf('Studio', ar, figures), 'models[0].name', `${ar} ${figures}`);
+    }
+  });
+  it('still names: a model number before initials', () => {
+    for (const ar of ['فيلا ١٫٢ د.إبراهيم', 'فيلا ٣ د.إبراهيم', 'Villa 3,4 د.كمال', 'فيلا 1.2 د.إبراهيم', 'نموذج 2 ر.قاسم', 'فيلا ٣ د.إسماعيل']) {
+      for (const figures of [[], [850000]]) assert.equal(nameOf('Villa', ar, figures), null, `${ar} ${figures}`);
     }
   });
 });
@@ -968,7 +1040,8 @@ describe('processPdf: prices on pages whose digits are scrambled', { timeout: 12
   });
 
   it('a brochure whose single price is readable renders nothing extra and needs no second model', async () => {
-    const pageText = ['مشروع سكني — شقق بغرفتي نوم — شقة سكنية بمساحة واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات', 'السعر 319,015 ريال\nشقة سكنية بمساحة واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات'];
+    // (r14: no unit word beside the price — "بمساحة واسعة" there is measure doubt, one page check: see measureNear.)
+    const pageText = ['مشروع سكني — شقق بغرفتي نوم — شقة سكنية واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات', 'السعر 319,015 ريال\nشقة سكنية واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات'];
     const price = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false };
     const r = await rig({ pageText, listing: answer({ price }), confirm: [] });
     try {
@@ -1158,7 +1231,8 @@ describe('processPdf: round-2 review cases', { timeout: 120000 }, () => {
 
   it('a Sakani footer on every page does not push the real price page out of the render budget', async () => {
     const pageText = Array.from({ length: 13 }, () => `مشروع سكني${PAD}\nبالشراكة مع منصة سكني`);
-    pageText.push(`السعر 319,015 ريال\n${PAD}`);
+    // (r14: no unit word beside the price — "بمساحة" in PAD there is measure doubt, one page check: see measureNear.)
+    pageText.push(`السعر 319,015 ريال\n${PAD.replace('بمساحة واسعة', 'واسعة')}`);
     const price = { amount: 319015, currency: 'SAR', from: true, period: null, onRequest: false };
     const r = await rig({ pageText, listing: answer({ price }), confirm: [] });
     try {
@@ -2129,11 +2203,12 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       assert.equal(o.price.amount, null, area);
       assert.ok(o.codes.includes('price-not-printed'), area);
     }
-    // Control: a price printed with an area further along its line is still settled by the text layer, no check.
+    // A price printed with an area further along its line is doubt too (r14): one sale check, which confirms it, and it
+    // is published. (At r9 the text layer settled it with no check.)
     const priced = 'Price SAR 4,500,000 for a 450 m² villa';
-    const o = await outcome({ listing: sale(4500000, { page: 2, quote: priced }), pageText: [overview, priced, 'Specification', 'Contact'], confirm: [] });
-    assert.deepEqual(o.evidence, { inText: true, confirmed: null });
-    assert.deepEqual(o.checks, []);
+    const o = await outcome({ listing: sale(4500000, { page: 2, quote: priced }), pageText: [overview, priced, 'Specification', 'Contact'], confirm: [4500000] });
+    assert.deepEqual(o.evidence, { inText: false, confirmed: true });
+    assert.deepEqual(o.checks.map((c) => [c.amount, c.page, c.sale]), [[4500000, 2, true]]);
     assert.deepEqual(o.price, { amount: 4500000, currency: 'SAR', from: false, period: null, onRequest: false });
   });
 
@@ -2234,6 +2309,13 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       assert.deepEqual(o.checks, [], p3);
       assert.deepEqual(o.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
     };
+    // One sale check, which confirms the correct sale price: it is published (r14).
+    const confirmedOnPage = async (p3) => {
+      const o = await outcome({ listing: sale(450000), pageText: pages(p3), confirm: [450000] });
+      assert.deepEqual(o.evidence, { inText: false, confirmed: true }, p3);
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.period, c.sale]), [[450000, null, true]], p3);
+      assert.deepEqual(o.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
+    };
     // B1 = Codex r9 #1: card labels and table headers with a frequency word and a qualifier — a currency, "from", a
     // bracket, a second column word — are rent labels, in either order (r9 #2's weak-word cut made them none).
     const labels = [
@@ -2258,11 +2340,12 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     // C#3 / NB5: "a night" / "a week" are rates only after a figure on the same line…
     await sentToPage('SAR 700 a night', 700, 'SAR 700');
     await sentToPage('700 SAR a week', 700, '700 SAR');
-    // …so a timeline or a frequency in prose beside a correct sale price is no rent label — nor "per day" / "كل يوم"
-    // with no figure before them.
+    // r14: a timeline or a frequency in prose beside a correct sale price is a rent label too — "a week", "per day",
+    // "كل يوم" count anywhere. It costs one sale check, which confirms the price, and it is published (r10 #1 – r13 kept
+    // these at 0 checks by guessing the lead-in; every guess moved the edge a little).
     for (const prose of ['Move in within a week', 'Housekeeping twice a week', 'Housekeeping once per day', 'تنظيف كل يوم']) {
-      await settled(`${prose}\nSale price SAR 450,000`);
-      await settled(`Sale price SAR 450,000\n${prose}`);
+      await confirmedOnPage(`${prose}\nSale price SAR 450,000`);
+      await confirmedOnPage(`Sale price SAR 450,000\n${prose}`);
     }
     // NB4 = Codex r9 NB2: the short-stay siblings on the figure's own line — "daily", "per day" and "كل يوم" after the
     // figure, the others before it or after.
@@ -2285,8 +2368,8 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       ['Per day\nSAR 60,000', 60000], ['ريال كل يوم1,500', 1500, '1,500'], ['كل يوم 1,500 ريال', 1500, '1,500 ريال'],
     ]) await sentToPage(p3, amount, quote ?? null);
     for (const prose of ['Open 7 days a week', 'Gym open 24 hours a day, 7 days a week', 'Handover in a week', '2BR ready in a week']) {
-      await settled(`${prose}\nSale price SAR 450,000`);
-      await settled(`Sale price SAR 450,000\n${prose}`);
+      await confirmedOnPage(`${prose}\nSale price SAR 450,000`);
+      await confirmedOnPage(`Sale price SAR 450,000\n${prose}`);
     }
     // r12 #1 (Codex r11 #2): on a line with a money-sized figure the prose lead-in excuses nothing — a short-stay package.
     for (const [p3, amount] of [['SAR 1,200 for 2 nights a week', 1200], ['1,200 ريال — SAR 1,200 in a week', 1200], ['SAR 4,500 for 3 days a week', 4500]]) {
@@ -2302,7 +2385,100 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       ['٦٠٬٠٠٠ ريال كل يوم', 60000, '٦٠٬٠٠٠ ريال'], ['Per day SAR 60,000', 60000, 'SAR 60,000'], ['كل يوم\n60,000 ريال', 60000],
     ]) await sentToPage(p3, amount, quote ?? null);
     for (const prose of ['Housekeeping once per day', 'Cleaning thrice a week', 'Two times a week', 'Every day a day of joy', 'Two nights a week of live music']) {
-      await settled(`${prose}\nSale price SAR 450,000`);
+      await confirmedOnPage(`${prose}\nSale price SAR 450,000`);
+    }
+  });
+
+  it('r14 (Codex r13 #1 – #6, NB1 / NB2): a unit or period word near the headline figure is doubt — one sale check on its page decides it, both ways', async () => {
+    const sale = (amount, category = 'buy', period = null) => {
+      const a = withModels([], { price: { amount, currency: 'SAR', from: false, period, onRequest: false }, priceEvidence: null });
+      a.listing.category = category;
+      return a;
+    };
+    const pages = (p3) => ['Overview\nA residential compound for sale. A residential compound for sale.', 'Location', p3, 'Specification', 'Contact'];
+    const outcome = async (opts) => {
+      const r = await rig(opts);
+      try {
+        const report = await r.run();
+        return { evidence: report.priceEvidence, price: report.listingPreview.price, texts: report.warnings, checks: r.calls().filter((c) => c.tool === 'claude-confirm') };
+      } finally { r.cleanup(); }
+    };
+    const AREA = /\(the figure read may be an area or a price per m², not the sale price\)/;
+    const RENT = /\(the figure read may be a rent or income, not the sale price\)/;
+    const priceLine = (o) => o.texts.find((w) => /price on request/.test(w)) ?? '';
+    // (a) An area, a rate per area, a stacked unit label, a cubic unit: one sale check, which refuses — on request, and why.
+    // At ab70307 these settled from the text layer with 0 checks (a leak), or lost their evidence and went on request
+    // with no check at all.
+    for (const [p3, amount] of [
+      ['The development spans 4.5 millions of square feet', 4.5e6], ['Plot area sqm\n450,000', 450000], ['SAR 4,500 per sqm — 250 sqm minimum', 4500],
+      ['² م1,000,000', 1e6], ['سعر المتر: 2,500 ريال', 2500], ['Pool volume m³\n12,000', 12000],
+    ]) {
+      const o = await outcome({ listing: sale(amount), pageText: pages(p3), confirm: [] });
+      assert.equal(o.evidence.inText, false, p3);
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.page, c.sale]), [[amount, 3, true]], p3);
+      assert.equal(o.price.onRequest, true, p3);
+      assert.equal(o.price.amount, null, p3);
+      assert.match(priceLine(o), AREA, p3);
+      assert.doesNotMatch(priceLine(o), RENT, p3);
+    }
+    // …a short-stay rate (Codex r13 #2: "per day" after "hours", the scaled 1.2k) and a weekday label (Codex r13 NB1) go
+    // the rent way: one sale check, on request, the rent wording.
+    for (const [p3, amount] of [['SAR 1.2k for 2 hours per day', 1200], ['Weekdays\nSAR 700', 700]]) {
+      const o = await outcome({ listing: sale(amount), pageText: pages(p3), confirm: [] });
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.page, c.sale]), [[amount, 3, true]], p3);
+      assert.equal(o.price.onRequest, true, p3);
+      assert.match(priceLine(o), RENT, p3);
+      assert.doesNotMatch(priceLine(o), AREA, p3);
+    }
+    // Under a spent quota the doubted figure is not settled either: on request, "try again later".
+    {
+      const o = await outcome({ listing: sale(4500), pageText: pages('SAR 4,500 per sqm — 250 sqm minimum'), confirm: [], confirmFail: 'quota' });
+      assert.equal(o.evidence.unchecked, true);
+      assert.equal(o.price.onRequest, true);
+      assert.match(o.texts.find((w) => /could not be checked/.test(w)) ?? '', /try again later/);
+    }
+    // (b) A real total beside a unit or a model code: one sale check, which confirms it — published. (At ab70307 the
+    // text layer either settled these with no check or lost them: Codex r13 #4 – #6.)
+    for (const [p3, amount] of [
+      ['Villa A 250 m² 1,250,000 SAR', 1.25e6], ['Sale price SAR 1,250,000 / sqm: 250', 1.25e6], ['سعر البيع 1,250,000 ريال / متر مربع: 250', 1.25e6],
+      ['Model M2\n1,250,000', 1.25e6], ['Building A / M2 SAR 1,250,000', 1.25e6], ['Sale price SAR 450,000 M2A Villa', 450000],
+    ]) {
+      const o = await outcome({ listing: sale(amount), pageText: pages(p3), confirm: [amount] });
+      assert.deepEqual(o.evidence, { inText: false, confirmed: true }, p3);
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.page, c.sale]), [[amount, 3, true]], p3);
+      assert.deepEqual(o.price, { amount, currency: 'SAR', from: false, period: null, onRequest: false }, p3);
+    }
+    // …and on a text brochure whose price page is never rendered for the reading (its figure is readable): at ab70307 the
+    // measure exclusions took the text evidence away and the price went on request with NO check — a silent loss (Codex
+    // r13 #4 – #6). Now the doubt renders that page and asks it: one check, published.
+    const FILL = 'شقة سكنية واسعة وتشطيبات حديثة في موقع مميز قريب من الخدمات';
+    for (const row of ['سعر البيع 1,250,000 ريال / متر مربع: 250', 'Model M2\n1,250,000', 'Building A / M2 SAR 1,250,000']) {
+      const r = await rig({ listing: sale(1.25e6), pageText: [`مشروع سكني — شقق بغرفتي نوم — ${FILL}`, `${row}\n${FILL}`], confirm: [1.25e6] });
+      try {
+        const report = await r.run();
+        assert.deepEqual(r.calls().filter((c) => c.tool === 'py-pages').map((c) => c.pages), [[2]], row);
+        assert.deepEqual(r.calls().filter((c) => c.tool === 'claude-confirm').map((c) => [c.amount, c.page, c.sale]), [[1.25e6, 2, true]], row);
+        assert.deepEqual(report.listingPreview.price, { amount: 1.25e6, currency: 'SAR', from: false, period: null, onRequest: false }, row);
+      } finally { r.cleanup(); }
+    }
+    // (c) An ordinary priced line with no unit or period word near it keeps the text layer: 0 checks under a spent quota.
+    // A unit label at the end of the page before is no doubt of a figure at the top of the next (Codex r13 #5).
+    for (const pageText of [
+      pages('Sale price SAR 450,000'), pages('Price\n450,000\nVilla A, 5 bedrooms'),
+      ['Overview\nA residential compound for sale.', 'Location\nBuilt-up area sqm', '450,000\nAsking price', 'Specification', 'Contact'],
+    ]) {
+      const o = await outcome({ listing: sale(450000), pageText, confirm: [], confirmFail: 'quota' });
+      assert.deepEqual(o.evidence, { inText: true, confirmed: null }, pageText.join(' | '));
+      assert.deepEqual(o.checks, [], pageText.join(' | '));
+      assert.deepEqual(o.price, { amount: 450000, currency: 'SAR', from: false, period: null, onRequest: false }, pageText.join(' | '));
+    }
+    // A rental is checked on its page anyway (rentHeadline); the area wording is for a sale only.
+    {
+      const o = await outcome({ listing: sale(60000, 'rent', 'year'), pageText: pages('Annual rent SAR 60,000 — 250 m²'), confirm: [] });
+      assert.deepEqual(o.checks.map((c) => [c.amount, c.page]), [[60000, 3]]);
+      assert.equal(o.price.onRequest, true);
+      assert.doesNotMatch(priceLine(o), AREA);
+      assert.doesNotMatch(priceLine(o), RENT);
     }
   });
 

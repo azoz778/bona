@@ -184,56 +184,68 @@ const marksIn = (slice, table) => {
 };
 
 /**
- * A measure straight after a figure — after its decimal tail and spaces, an "of" / "من" and an "ال" at most: "4.5 million
- * square feet", "4,500,000 sq ft", "4.5 millions of square feet", "٤٫٥ ملايين م²", "4.5 مليون متر مربع". Such a figure is
- * an area or a length, never a printed price (r9 #1, Codex r8 #1): printedInCurrency skips it. Read on NFKC-folded text
- * ("²" folds to "2", presentation forms to letters). "m2" with a digit, ONE letter, or up to three capitals after it is
- * a model code ("SAR 450,000 M2A Villa", "M2B2", "M2AB": r10 #2, Codex r9 #2 = Claude r9 NB6; r12 #2, Codex r11 #3), not
- * m²; with a word after it, it is the unit glued to the next cell ("30,000 m²Built-up", "450,000 m²of land": r11 #2,
- * Claude r10 B2 = Codex r10 #2).
+ * Doubt, not a verdict (r14). Rounds 9–13 tried to tell from the text layer which words beside a figure make it no price —
+ * an area, a price per m², a model code — and every guess moved the edge: an area or a rate settled as the sale price
+ * with no check, or a real total lost its evidence. Now ANY measure or unit word on the line that prints the figure, or on
+ * the non-empty line just above or below it, is doubt (measureNear), and doubt only sends the headline to its page, which
+ * decides both ways (pipeline.mjs measureDoubt): a false hit costs one page check. ONE blunt list, case-insensitive, with no
+ * exception for a model code or a column label:
+ *   - Latin: m², m³, m2, m3 anywhere ("136m2", "M2A", "m²Built-up"); sqm, sq m, sq. m, sq ft, sq yd, sqft; square metre /
+ *     meter / feet / foot / yard; metre(s), meter(s), ft, feet, hectare(s), acre(s), km, BUA, GFA, area(s) — as words, a
+ *     digit may stand right before them ("250sqm");
+ *   - Arabic, whole words with the clitics و / ف, ب / ل / ك / لل and ال in front: م² / م2 / م³ ("بالم2"), متر ("متر مربع",
+ *     "مترا"), أمتار, امتار, هكتار, مساحة (مساحه, مساحات, مساحته, مساحتها); كم on its own (with a clitic it is "لكم", "بكم");
+ *     and the visual-order "² م" — a lone 2 or 3 before م too ("2 م30000"), never a year ("تسليم 2022م": م alone is no unit).
  */
-const UNITS = String.raw`(?:m²|m2(?!\d|(?-i:[A-Z]{1,3})(?![a-z])|[a-z](?![a-z]))|sq\.?\s?(?:m|ft|yds?)\b|sqm\b|sqft\b|square\s+(?:met|feet|foot|yards?)|met(?:re|er)s?\b|ft\b|feet\b|hectares?\b|acres?\b|km\b|`
-  + String.raw`م²|م2|متر|أمتار|امتار|هكتار|كم(?![\u0600-\u06ff]))`;
-const MEASURE_NEXT = new RegExp(String.raw`^(?:[.,٫]\d{1,2})?[ \t\u00a0\u202f\u2009]*(?:(?:of|من)\s+)?(?:ال)?${UNITS}`, 'i');
+const AR_LETTER = String.raw`[\u0621-\u064a\u066e-\u06d3\u06d5\u06fa-\u06ff]`;
+const AR_CLITICS = String.raw`[وف]?(?:لل|[بلك])?(?:ال)?`;
+const MEASURE_WORD_RE = new RegExp([
+  String.raw`m[²³23]`,
+  String.raw`(?<![a-z])(?:sq\.?\s?(?:m|ft|yds?)|square\s+(?:met(?:re|er)s?|feet|foot|yards?))`,
+  String.raw`(?<![a-z])(?:met(?:re|er)s?|ft|feet|hectares?|acres?|km|bua|gfa|areas?)(?![a-z])`,
+  String.raw`(?<!${AR_LETTER})${AR_CLITICS}م\s?(?:[²³]|[23٢٣](?![\d٠-٩۰-۹]))`,
+  String.raw`(?:[²³]|(?<![\d٠-٩۰-۹][.,٫٬]?)[23٢٣])\s?م(?!${AR_LETTER})`,
+  String.raw`(?<!${AR_LETTER})${AR_CLITICS}(?:متر(?:ا|\s*مربع)?|[أا]متار|هكتار(?:ات)?|مساح(?:ة|ه|ات|ته|تها))(?!${AR_LETTER})`,
+  String.raw`(?<!${AR_LETTER})كم(?!${AR_LETTER})`,
+].join('|'), 'i');
+/** A line as printed and NFKC-folded with no tatweel or harakat: "²" is a unit as printed, presentation forms are letters folded. */
+const measureWordIn = (line) => MEASURE_WORD_RE.test(line) || MEASURE_WORD_RE.test(line.normalize('NFKC').replace(/[\u0640\u064b-\u0652\u0670]/g, ''));
+
 /**
- * A price per unit area, its currency before the "/" or not: "SAR 4,500 / m²", "4,500 SAR / m²", "4,500 ريال لكل متر
- * مربع", "4,500 per sqm" — no total (r11 #2, Codex r10 NB1; r12 #2, Codex r11 NB1). A unit with a figure of its own
- * after it is the next column's label, not a denominator: "Sale price SAR 1,250,000 / sqm: 250" keeps its total
- * (r12 #2, Codex r11 #3).
+ * Is `amount` printed in `text` (priceAppearsIn's figure rules: figureMatches) on a line with a measure or unit word on
+ * it, or on the non-empty line just above or below it (MEASURE_WORD_RE)? Then the figure may be an area or a price per
+ * m², or a real total beside a unit or a model code: the text layer cannot tell, only its page can (r14). `text` is ONE
+ * page's text layer (pipeline.mjs reads each page on its own): a line of another page is no neighbour.
+ * @returns {boolean}
  */
-const PER_AREA_NEXT = new RegExp(String.raw`^(?:[.,٫]\d{1,2})?[ \t\u00a0\u202f\u2009]*(?:${MONEY_MARKS.any}[ \t\u00a0\u202f\u2009]*)?(?:\/|per\b|لكل|لل)[ \t\u00a0\u202f\u2009]*(?:ال)?${UNITS}(?![ \t\u00a0\u202f\u2009:：\-–—]*[\d٠-٩۰-۹])`, 'i');
-/**
- * A unit label alone on the line above a BARE figure ("Plot area sqm" / "450,000", "المساحة م²" / "450,000"): the
- * figure is that area (r12 #2, Codex r11 #1). A figure with its own currency mark is a price whatever label stands
- * above it ("Built-up area sqm" / "1,250,000 SAR", a page join).
- */
-const UNIT_LINE_ABOVE = new RegExp(String.raw`(?:^|\n)[^\d٠-٩۰-۹\n]*(?:\b(?:sqm|sq\.?\s?m|m2|sq\.?\s?ft|sqft|square\s+(?:met(?:re|er)s?|feet))\b|m\uE002|\uE002\s?م|م\uE002|م2|متر\s+مربع)[^\d٠-٩۰-۹\n]*\n[ \t\u00a0\u202f\u2009]*$`, 'i');
-/**
- * …and a measure that ends right BEFORE the figure, spaces, a colon or a dash between at most: the Arabic text layer
- * comes in visual order, so "1,000,000 م²" reads "² م1,000,000" (AC53D4FF p5); "م² 1,000,000", "متر مربع 1,000,000",
- * "Area sqm: 1,000,000" too. Such a figure is an area as well (r10 #2, Claude r9 NB1). A unit with its own figure right
- * before it measures THAT figure — a table row Model | Area | Price, "Villa A 250 m² 1,250,000 SAR", "تسليم 2022م
- * 1,500,000" — so it is no measure of the next one (r10 #4, r10 verifier). The Arabic units are read on the NFKC-folded
- * head ("²" folds to "2"); the Latin ones on the head as printed, where only "m²", "sqm" or "sq. m" is a unit: a typed
- * "M2" before a figure is a model code ("Villa M2 450,000 SAR", the mirror of Codex r9 #2), "Item2" a word. The visual
- * "² م" glued before its figure is that figure's unit whatever stands before it ("قطعة 12 ² م1,000,000": r11 #2, Codex
- * r10 #3 = Claude r10 NB1); "م 2" at the end of a word is no unit ("فيلا رقم 2 1,250,000"); and the unit must end on
- * the figure's own line, never on the line or page above (r11 #2, Claude r10 NB5 = Codex r10 #4).
- */
-const NO_FIGURE_BEFORE = String.raw`(?<![\d٠-٩۰-۹][ \t\u00a0\u202f\u2009]*)`;
-const ON_THE_LINE = String.raw`[ \t\u00a0\u202f\u2009:：\-–—]*$`;
-const MEASURE_BEFORE = new RegExp(String.raw`(?:(?<![\d٠-٩۰-۹])2\s?م|${NO_FIGURE_BEFORE}(?<![\u0621-\u064a])(?:[وف]?(?:[بلك]?ال|لل|[بلك]))?(?:م\s?2|متر(?:\s+مربع)?|أمتار|امتار|هكتار))${ON_THE_LINE}`);
-/**
- * A per-area label right before the figure, its currency between or not: "Price per m²: SAR 4,500", "سعر المتر: 2,500"
- * — a rate per unit area, no total (r13 #1, Claude r11 NB1). Read on the NFKC-folded head.
- */
-const PER_AREA_BEFORE = new RegExp(String.raw`(?:\bper|\/|لكل|لل|سعر\s+ال)[ \t\u00a0\u202f\u2009]*(?:ال)?(?:m2|sqm|sq\.?\s?m|م\s?2|متر(?:\s+مربع)?)`
-  + String.raw`[ \t\u00a0\u202f\u2009:：\-–—]*(?:${MONEY_MARKS.any}[ \t\u00a0\u202f\u2009:：\-–—]*)?$`, 'i');
-/** A raw "²" / "³" after the figure is a unit whatever follows it, digits too: "30,000 m²12,000 m²" (r13 #1, Claude r11 NB4). */
-const RAW_UNIT_NEXT = /^(?:[.,٫]\d{1,2})?[ \t\u00a0\u202f\u2009]*(?:(?:of|من)\s+)?(?:ال)?(?:m[²³]|م[²³])/i;
-/** ² and ³ kept apart from the digits NFKC would fold them to, so a unit label's line still has no figure of its own. */
-const keepSuperscripts = (s) => s.replace(/²/g, '\uE002').replace(/³/g, '\uE003').normalize('NFKC');
-const MEASURE_BEFORE_LATIN = new RegExp(String.raw`${NO_FIGURE_BEFORE}(?<![A-Za-z])(?:m²|sqm|sq\.?\s?m)${ON_THE_LINE}`, 'i');
+export function measureNear(text, amount) {
+  const t = String(text ?? '');
+  const hits = figureMatches(t, amount);
+  if (!hits.length) return false;
+  const lines = t.split('\n');
+  const starts = [];
+  let at = 0;
+  for (const line of lines) {
+    starts.push(at);
+    at += line.length + 1;
+  }
+  const lineOf = (offset) => {
+    let i = 0;
+    while (i + 1 < starts.length && starts[i + 1] <= offset) i += 1;
+    return i;
+  };
+  const nonEmpty = (i, step) => {
+    for (let j = i + step; j >= 0 && j < lines.length; j += step) if (lines[j].trim()) return j;
+    return -1;
+  };
+  return hits.some(({ index, end }) => {
+    const first = lineOf(index);
+    const last = lineOf(Math.max(index, end - 1));
+    const around = [nonEmpty(first, -1), nonEmpty(last, 1)];
+    for (let i = first; i <= last; i += 1) around.push(i);
+    return around.some((i) => i >= 0 && measureWordIn(lines[i]));
+  });
+}
 
 /** The countries where a bare riyal is not the Saudi one: their own currency is a riyal or rial too. */
 const OWN_RIYALS = Object.freeze(['OMR', 'QAR', 'YER', 'IRR']);
@@ -257,9 +269,8 @@ export function riyalOf(home) {
  * country whose currency it is (pipeline.mjs printed()). `home` is the currency of the country the
  * property is in, printed by the site or not (model-prices.mjs countryCurrency): a bare "ريال" / ﷼ is
  * that country's riyal (riyalOf) — an Omani "190,000 ريال" is 190,000 OMR, never 190,000 SAR — and a
- * marked figure, so never a bare one. An occurrence with a measure straight after it ("4,500,000 sq ft",
- * "4.5 مليون متر مربع": MEASURE_NEXT) is an area, no price in any currency (r9 #1); so is one with a measure
- * right before it ("² م1,000,000", "م² 1,000,000": MEASURE_BEFORE, r10 #2).
+ * marked figure, so never a bare one. It reads only the figure and the marks beside it: whether the figure is an
+ * area, a price per m² or a total beside a unit is doubt that only its page settles (measureNear, r14).
  * @returns {boolean}
  */
 export function printedInCurrency(text, amount, currency, { bareCounts = true, home = null } = {}) {
@@ -271,10 +282,6 @@ export function printedInCurrency(text, amount, currency, { bareCounts = true, h
     for (const m of t.matchAll(re)) {
       const head = t.slice(Math.max(0, m.index - 24), m.index);
       const tail = t.slice(m.index + m[0].length, m.index + m[0].length + 32);
-      // An area or a length is no price, whatever mark is near it: only its page can settle the figure (r9 #1). The
-      // unit may come before it too, in the visual-order Arabic text layer (r10 #2).
-      if (MEASURE_NEXT.test(tail.normalize('NFKC')) || RAW_UNIT_NEXT.test(tail) || PER_AREA_NEXT.test(tail.normalize('NFKC'))
-        || MEASURE_BEFORE.test(head.normalize('NFKC')) || MEASURE_BEFORE_LATIN.test(head) || PER_AREA_BEFORE.test(head.normalize('NFKC'))) continue;
       const marksBy = ({ before, after }) => [...marksIn(head, before), ...marksIn(tail, after)].map((c) => (c === RIYAL ? riyal : c));
       // A mark directly beside the figure decides it — the one before first ("$ 1,250,000 SAR 4,687,500": the SAR
       // is 4,687,500's), else the one after; other marks on the line do not count for it (r3 #5).
@@ -286,7 +293,7 @@ export function printedInCurrency(text, amount, currency, { bareCounts = true, h
       // THIS currency's mark counts only on the figure's own line; ANY other currency's mark, even one a line
       // away ("AED" / "1,250,000" split by the text layer), means the figure is not a bare one (r2 #1).
       if (marksBy(ON_LINE).includes(currency)) return true;
-      if (bareCounts && !UNIT_LINE_ABOVE.test(keepSuperscripts(head)) && marksBy(ACROSS_LINES).every((c) => c === currency)) return true;
+      if (bareCounts && marksBy(ACROSS_LINES).every((c) => c === currency)) return true;
     }
   }
   return false;

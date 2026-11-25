@@ -44,7 +44,7 @@ import { checkPlanImages } from './plan-check.mjs';
 import { ABROAD_CURRENCIES, alignHeadline, checkModelPrices, countryCurrency, homeCurrency, isFigure, modelPriceCurrency } from './model-prices.mjs';
 import { extractPdf, renderPdfPages } from './pdf.mjs';
 import { compositePages, cropPhotoRegions, modelFlagsComposites } from './photo-regions.mjs';
-import { MONEY_MARKS, figureMatches, priceAppearsIn, printedInCurrency, westernise } from './price.mjs';
+import { MONEY_MARKS, figureMatches, measureNear, priceAppearsIn, printedInCurrency, westernise } from './price.mjs';
 import { isSubsidyPricePage, pricePagesToRender } from './price-pages.mjs';
 import { pinFromLinks } from './geo.mjs';
 import { changedSincePublished, committedUnchanged, rebuild, resetTree } from './publish.mjs';
@@ -181,7 +181,7 @@ const SPACED_PA_G = /(?<![A-Za-z])p\.\s+a(?![A-Za-z])/gi;
  * amount-sized: three digits, two on their own, or a decimal with two digits on one side ("٧٥", "٧٥٠٫٥", "1.25"). A
  * model number before a person's initials is a name — one digit, or a dotted one like "١٫٢": "فيلا ٣ د.إبراهيم",
  * "نموذج 2 ر.قاسم", "فيلا ١٫٢ د.إبراهيم" (r10 #3, Codex r9 #4 = Claude r9 NB7; r11 #3, Codex r10 #5; r12 #3, Codex r11
- * #4).
+ * #4) — unless a period word follows the pair (NAME_PERIOD_AFTER): "نموذج 7.5ر.سشهريا" is refused (r14, Codex r13 #3).
  */
 const NAME_SITE_CODE = `(?<![A-Za-z])${MONEY_MARKS.siteCodes}(?![A-Za-z])`;
 const NAME_OTHER_CODE = `(?<![A-Za-z])(?-i:${MONEY_MARKS.otherCodes})(?![A-Za-z])`;
@@ -198,10 +198,19 @@ const nameAmountBefore = (whole) => String.raw`(?:${whole}|\d[.,٫٬]\d+|\d{1,3}
  * these alone do not carry the word on): "ر.سـ 2000" is the mark drawn out, "د.إبراهيم" a name; a figure is no letter.
  */
 const NAME_WORD_ENDS = String.raw`(?![\u0640\u064b-\u065f\u0670]*[\u0620-\u063f\u0641-\u064a\u066e\u066f\u0671-\u06d3\u06d5-\u06ff])`;
+/**
+ * A period word after a dotted pair, glued or not, tatweel and harakat between its letters allowed: "7.5ر.سشهريا",
+ * "7.5 ر.س شهريًا", "7.5ر.سـسنويا" — after ANY figure the pair is then money, a price per month or year, never initials
+ * (r14, Codex r13 #3). "فيلا ١٫٢ د.إبراهيم" stays a name.
+ */
+const NAME_IN_WORD = String.raw`[\u0640\u064b-\u065f\u0670]*`;
+const NAME_PERIOD_AFTER = String.raw`[\s\u0640\u064b-\u065f\u0670]*(?:`
+  + ['شهري', 'سنوي', 'يومي', 'أسبوعي', 'اسبوعي', 'ليلي', 'شهر', 'سنة', 'سنه'].map((w) => [...w].join(NAME_IN_WORD)).join('|') + ')';
 const NAME_CURRENCY_RE = new RegExp(String.raw`${NAME_SITE_CODE}\.?\s*${nameAmountAfter(String.raw`\d{3}`)}|${nameAmountBefore(String.raw`\d{3}`)}\s*${NAME_SITE_CODE}`
   + String.raw`|${NAME_OTHER_CODE}\.?\s*${nameAmountAfter(String.raw`\d{4}`)}|${nameAmountBefore(String.raw`\d{4}`)}\s*${NAME_OTHER_CODE}`
   + String.raw`|(?<![A-Za-z])${MONEY_MARKS.words}(?![A-Za-z])|${MONEY_MARKS.arabic}|${MONEY_MARKS.abbreviations}${NAME_WORD_ENDS}`
-  + String.raw`|(?<=(?:\d{3}|(?<![\d.,٫٬])\d{2}|\d[.,٫٬]\d{2}|\d{2}[.,٫٬]\d)[ \t\u00a0\u202f\u2009]*)${MONEY_MARKS.abbreviations}|${MONEY_MARKS.symbols}`, 'i');
+  + String.raw`|(?<=(?:\d{3}|(?<![\d.,٫٬])\d{2}|\d[.,٫٬]\d{2}|\d{2}[.,٫٬]\d)[ \t\u00a0\u202f\u2009]*)${MONEY_MARKS.abbreviations}`
+  + String.raw`|(?<=\d[ \t\u00a0\u202f\u2009]*)${MONEY_MARKS.abbreviations}(?=${NAME_PERIOD_AFTER})|${MONEY_MARKS.symbols}`, 'i');
 /**
  * Arabic words as whole words, with the clitics و / ف, ب / ل / لل and ال in front (a tatweel may follow one:
  * "فـحجز"): "السعر", "بسعر", "للإيجار" — never inside another word ("رسوم" is not in "رسومات"). Only a LETTER
@@ -252,41 +261,29 @@ const PRICE_WORD_RE = new RegExp([
  * this check only (statesMoney keeps its list): بالليلة, في الليلة, كل ليلة, "/ ليلة", باليوم, في الأسبوع, بالأسبوع (r9 #2,
  * Claude r8 B1c), "daily", "سعر الليلة", لليوم, للأسبوع, ليلياً, التأجيرية (r10 #1, Claude r9 NB4 = Codex r9 NB2),
  * للعام, كل عام, لكل أسبوع, "/ أسبوع", "/ عام", "/ اليوم", "/ الليلة", "/day", "السعر اليومي", "Weekend rate" (r11 #1,
- * Claude r10 NB2 = Codex r10 NB2). "a night" / "a week" / "a day" anywhere — a label line ("SAR 1,200" / "a night"), before
- * the figure ("A week from SAR 4,500") — but after a prose lead-in: "Move in within a week", "Housekeeping twice a
- * week", "Open 7 days a week", "24 hours a day" are a timeline or a frequency (r11 #1, Claude r10 B1 = Codex r10 #1;
- * r10 #1's after-figure gate let a rate split from its figure through); on a line with a money-sized figure no lead-in
- * excuses them, "SAR 1,200 for 2 nights a week" (r12 #1, Codex r11 #2 = Claude r11 B3). "per day" the same way: "Price
- * per day", "Per day (SAR)", never "Housekeeping once per day" (r13 #2, Claude r11 NB2). "كل يوم" with a figure before
- * or after it on the line, or alone on its line: "ريال كل يوم1,500" — never "تنظيف كل يوم" (r10 #1, Codex r9 #3 =
- * Claude r9 NB5; r11 #1, Claude r10 NB3). And "Weekday rate", "Night rate", "one / every night", "السعر الأسبوعي",
- * "سعر الأسبوع", "ليلة واحدة" (r13 #2, Claude r11 NB3). A word that only contains one is none: مدخل / مدخلها / تدخل (an entrance, enters), عائدة (belongs to), سريع
+ * Claude r10 NB2 = Codex r10 NB2). "a night" / "a week" / "a day", "per day" and "كل يوم" anywhere (r14): a label line
+ * ("SAR 1,200" / "a night"), before the figure ("A week from SAR 4,500"), after "hours" ("SAR 1.2k for 2 hours per day":
+ * Codex r13 #2) — and in prose too: "Move in within a week", "Open 7 days a week", "Housekeeping once per day", "تنظيف كل
+ * يوم" beside a correct sale price cost one sale check, which confirms it. Rounds 10–13 excused prose lead-ins and every
+ * guess moved the edge a little. And "Weekday(s)" (Codex r13 NB1), "Weekday rate", "Night rate", "one / every night",
+ * "السعر الأسبوعي", "سعر الأسبوع", "ليلة واحدة" (r13 #2, Claude r11 NB3). A word that only contains one is none: مدخل / مدخلها / تدخل (an entrance, enters), عائدة (belongs to), سريع
  * (Codex r6 #7, Claude r6 B1c). "عائده للمطور" (ه for ة), "الدراسة التي أجرتها الشركة" (conducted) cost a page check: the
  * safe side.
  */
 const RENT_SUFFIX = 'ه|ها|هم|هما|نا|ات|اتها|اته|اتهم|ك|كم|ي';
-/** A figure on the same line, within 15 characters before or after: "SAR 700 per day", "ريال كل يوم1,500" (r10 #1, r11 #1). */
-const NEAR_FIGURE = (re) => String.raw`(?:(?<=[\d٠-٩۰-۹][^\n]{0,15}?)(?:${re})|(?:${re})(?=[^\n]{0,15}?[\d٠-٩۰-۹])|(?<=^|\n)[ \t]*(?:${re})[ \t]*(?=$|\n))`;
-/**
- * The prose lead-ins of "a night" / "a week" / "a day": a timeline or a frequency, no rate (r11 #1) — but never on a line
- * that prints a money-sized figure: "SAR 1,200 for 2 nights a week" is a short-stay package (r12 #1, Codex r11 #2).
- */
-const MONEY_FIGURE = String.raw`(?:[\d٠-٩۰-۹]{1,3}[,٬.][\d٠-٩۰-۹]{3}|[\d٠-٩۰-۹]{3,})`;
-/** "a night" / "a week" / "a day" and "per day" — a rate, but for a prose lead-in on a line with no money figure (r13 #2, Claude r11 NB2). */
+/** "a night" / "a week" / "a day" and "per day" — a rate wherever they stand (r14). */
 const PERIOD_PHRASE = String.raw`(?:a\s+(?:night|week|day)|per\s+day)`;
-const PROSE_LEAD_IN = String.raw`(?<!\b(?:within|in|twice|once|thrice|times|days|hours|day|nights|weeks)\s+)`;
 const RENT_WORDING_RE = new RegExp([
   String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|returns?|roi|revenues?|tenant(?:s|ed)?|tenancy|let\s+at|daily|weekend\s+rates?)\b`,
-  String.raw`${PROSE_LEAD_IN}\b${PERIOD_PHRASE}\b|(?<=${MONEY_FIGURE}[^\n]*?)\b${PERIOD_PHRASE}\b|\b${PERIOD_PHRASE}\b(?=[^\n]*?${MONEY_FIGURE})`,
-  String.raw`\b(?:weekday\s+rates?|night\s+rates?|(?:one|every)\s+night)\b`,
+  String.raw`\b${PERIOD_PHRASE}\b`,
+  String.raw`\b(?:weekdays?|night\s+rates?|(?:one|every)\s+night)\b`,
   String.raw`\/\s*(?:day|night|week)\b`,
   arabicWords(String.raw`[إاأ]يجار(?:ات)?(?:ي|ية|يه|يا|ا|${RENT_SUFFIX})?|استئجار|تأجير|تاجير|أجرة|اجرة|أجره|اجره|[أا]جرت(?:ه|ها|هم)|مؤجر|مؤجرة|مؤجره|مؤجرا|`
     + String.raw`موجر|موجرة|مستأجر|مستأجرة|دخل(?:ا|${RENT_SUFFIX})?|عائد(?:ات)?(?:ا|${RENT_SUFFIX})?|عوائد(?:ا|${RENT_SUFFIX})?|[إا]يراد(?:ات)?(?:ا|${RENT_SUFFIX})?|`
     + String.raw`ريع(?:ا|${RENT_SUFFIX})?|مردود(?:ا|${RENT_SUFFIX})?`, { ka: true }),
   arabicWords(String.raw`بالليل[ةه]|في\s+الليل[ةه]|كل\s+ليل[ةه]|باليوم|في\s+(?:الأسبوع|الاسبوع)|بال[أا]سبوع|`
     + String.raw`سعر\s+الليل[ةه]|لليوم|لل[أا]سبوع|ليليا|ت[أا]جيري[ةه]|للعام|كل\s+عام|لكل\s+[أا]سبوع|سعر\s+اليومي|`
-    + String.raw`سعر\s+ال[أا]سبوعي|سعر\s+ال[أا]سبوع|ليل[ةه]\s+واحد[ةه]`),
-  NEAR_FIGURE(arabicWords(String.raw`كل\s+يوم`)),
+    + String.raw`سعر\s+ال[أا]سبوعي|سعر\s+ال[أا]سبوع|ليل[ةه]\s+واحد[ةه]|كل\s+يوم`),
   String.raw`\/\s*(?:ال)?(?:ليل[ةه]|يوم|[أا]سبوع|عام)(?!${AR_LETTER})`,
   RENT_PERIOD,
 ].join('|'), 'i');
@@ -859,7 +856,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     // "£1,250,000" is a price in pounds, never "1,250,000 SAR". `whole`: the figure must be the whole
     // property's price — which the text layer cannot tell from a floor's or a model's, so only a page can.
     // `pageCheck`: only a page settles it, the same way, without the whole-property wording — a rental's headline,
-    // whose period the text layer cannot tell (r3 #4), or a sale's headline that may be a rent (r6 #3).
+    // whose period the text layer cannot tell (r3 #4), a sale's headline that may be a rent (r6 #3), or one printed with
+    // a unit word beside it, which may be an area or a price per m² (r14).
     const out = { inText: subsidised || whole || pageCheck ? false : printedInCurrency(haystack, amount, price.currency, { bareCounts: home === price.currency, home: local }), confirmed: null };
     if (out.inText) return out;
     if (whole || pageCheck) return printedWhole(amount, evidence, { subsidised, out, whole });
@@ -1347,7 +1345,14 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         const lines = String(block ?? '').split('\n');
         return lines.some((line, i) => priceAppearsIn(line, price.amount) && (rentWorded(line) || rentLabel(near(lines, i, -1)) || rentLabel(near(lines, i, 1))));
       }));
-    report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: pageOnly, pageCheck: rentHeadline || saleMayBeRent });
+    // Measure doubt (r14, Codex r13 #1 – #6): a measure or unit word on the line printing the figure, or on its non-empty
+    // neighbour above or below, on the same page (price.mjs measureNear). The figure may be an area or a price per m² —
+    // or a real total beside a unit or a model code: the text layer cannot tell, and rounds 9–13 guessing which words
+    // excuse a figure leaked rates and lost totals. Doubt only sends the headline to its page, asked as a sale's, which
+    // decides both ways: a false hit costs one check, and under a spent quota the listing is on request, "try again
+    // later" — never a leak, never a silent loss. On every listing (a rental's headline goes to its page anyway).
+    const measureDoubt = textPages.some((t) => measureNear(t, price.amount));
+    report.priceEvidence = await printed(price.amount, ai.priceEvidence, { whole: pageOnly, pageCheck: rentHeadline || saleMayBeRent || measureDoubt });
     const fromWords = ownPriceOnly ? startingFromWords() : null;
     if (!report.priceEvidence.inText && !report.priceEvidence.confirmed) {
       log.warn('intake.price_unevidenced', { amount: price.amount, currency: price.currency, unchecked: report.priceEvidence.unchecked === true, why: report.priceEvidence.uncheckedWhy ?? null, whole: pageOnly });
@@ -1361,7 +1366,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
         : ownPriceOnly
           ? 'the price read was the lowest unit-model price, which the brochure does not print as this single property\'s own price (a property is not "From" its cheapest model), so the listing says "price on request" — send `price <id> <amount>` to set one'
           // Its page refused a figure that may be a rent (Claude r6 NB1): the reply says so, not only "not printed".
-          : `the price was not printed in the brochure${saleMayBeRent ? ' (the figure read may be a rent or income, not the sale price)' : ''}, so the listing says "price on request" — send \`price <id> <amount>\` to set one`);
+          // …and one that may be an area or a rate per area (r14), on a sale: a rental's reply stays as it was.
+          : `the price was not printed in the brochure${saleMayBeRent ? ' (the figure read may be a rent or income, not the sale price)'
+            : measureDoubt && !listingPeriod ? ' (the figure read may be an area or a price per m², not the sale price)' : ''}, so the listing says "price on request" — send \`price <id> <amount>\` to set one`);
     } else if (fromWords) {
       price.from = true;
       rankedWarning(report, 'price', `the price read was its one unit model's; confirmed on its page as the property's own price, and shown "From" as the brochure words it (its evidence: "${fromWords}")`);
