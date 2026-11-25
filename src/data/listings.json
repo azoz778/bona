@@ -9648,6 +9648,518 @@
         "دخول ذكي وتطبيق للسكان"
       ]
     },
+    "models": [
+      {
+        "name": {
+          "en": "A-M01",
+          "ar": "نموذج A-M01"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 90,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-M01, first floor (mezzanine)",
+          "ar": "الوحدة A-M01، الدور الأول (الميزانين)"
+        },
+        "price": 780000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-M02",
+          "ar": "نموذج A-M02"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 86,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-M02, first floor (mezzanine)",
+          "ar": "الوحدة A-M02، الدور الأول (الميزانين)"
+        },
+        "price": 750000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-M06",
+          "ar": "نموذج A-M06"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 117,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-M06, first floor (mezzanine)",
+          "ar": "الوحدة A-M06، الدور الأول (الميزانين)"
+        },
+        "price": 850000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-201",
+          "ar": "نموذج A-201"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 110,
+        "rooms": {
+          "en": [
+            "Terrace"
+          ],
+          "ar": [
+            "تراس"
+          ]
+        },
+        "availability": {
+          "en": "Unit A-01, second floor",
+          "ar": "الوحدة A-01، الدور الثاني"
+        },
+        "price": 830000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-202",
+          "ar": "نموذج A-202"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 100,
+        "rooms": {
+          "en": [
+            "Terrace"
+          ],
+          "ar": [
+            "تراس"
+          ]
+        },
+        "availability": {
+          "en": "Unit A-02, second floor",
+          "ar": "الوحدة A-02، الدور الثاني"
+        },
+        "price": 800000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-203",
+          "ar": "نموذج A-203"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 145,
+        "rooms": {
+          "en": [
+            "Terrace"
+          ],
+          "ar": [
+            "تراس"
+          ]
+        },
+        "availability": {
+          "en": "Units A-03 and A-06, second floor",
+          "ar": "الوحدتان A-03 وA-06، الدور الثاني"
+        },
+        "price": 820000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-204",
+          "ar": "نموذج A-204"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 171,
+        "rooms": {
+          "en": [
+            "Terrace"
+          ],
+          "ar": [
+            "تراس"
+          ]
+        },
+        "availability": {
+          "en": "Units A-04 and A-05, second floor",
+          "ar": "الوحدتان A-04 وA-05، الدور الثاني"
+        },
+        "price": 850000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-207",
+          "ar": "نموذج A-207"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 105,
+        "rooms": {
+          "en": [
+            "Terrace"
+          ],
+          "ar": [
+            "تراس"
+          ]
+        },
+        "availability": {
+          "en": "Unit A-07, second floor",
+          "ar": "الوحدة A-07، الدور الثاني"
+        },
+        "price": 820000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-208",
+          "ar": "نموذج A-208"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 110,
+        "rooms": {
+          "en": [
+            "Terrace"
+          ],
+          "ar": [
+            "تراس"
+          ]
+        },
+        "availability": {
+          "en": "Unit A-08, second floor",
+          "ar": "الوحدة A-08، الدور الثاني"
+        },
+        "price": 830000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-01",
+          "ar": "نموذج A-01"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 86,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-01, floors 3 to 6",
+          "ar": "الوحدة A-01، الأدوار من الثالث إلى السادس"
+        },
+        "price": 810000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-02",
+          "ar": "نموذج A-02"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 76,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-02, floors 3 to 6",
+          "ar": "الوحدة A-02، الأدوار من الثالث إلى السادس"
+        },
+        "price": 780000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-03",
+          "ar": "نموذج A-03"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 73,
+        "rooms": null,
+        "availability": {
+          "en": "Units A-03 and A-06, floors 3 to 6",
+          "ar": "الوحدتان A-03 وA-06، الأدوار من الثالث إلى السادس"
+        },
+        "price": 760000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-04",
+          "ar": "نموذج A-04"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 77,
+        "rooms": null,
+        "availability": {
+          "en": "Units A-04 and A-05, floors 3 to 6",
+          "ar": "الوحدتان A-04 وA-05، الأدوار من الثالث إلى السادس"
+        },
+        "price": 780000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-07",
+          "ar": "نموذج A-07"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 81,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-07, floors 3 to 6",
+          "ar": "الوحدة A-07، الأدوار من الثالث إلى السادس"
+        },
+        "price": 800000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-08",
+          "ar": "نموذج A-08"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 85,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-08, floors 3 to 6",
+          "ar": "الوحدة A-08، الأدوار من الثالث إلى السادس"
+        },
+        "price": 830000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-09",
+          "ar": "نموذج A-09"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 73,
+        "rooms": null,
+        "availability": {
+          "en": "Units A-09 and A-10, floors 3 to 6",
+          "ar": "الوحدتان A-09 وA-10، الأدوار من الثالث إلى السادس"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "B-01",
+          "ar": "نموذج B-01"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 72,
+        "rooms": null,
+        "availability": {
+          "en": "Units B-01 and B-12, floors 2 to 7",
+          "ar": "الوحدتان B-01 وB-12، الأدوار من الثاني إلى السابع"
+        },
+        "price": 730000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "B-02",
+          "ar": "نموذج B-02"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 75,
+        "rooms": null,
+        "availability": {
+          "en": "Units B-02, B-05, B-08 and B-11, floors 2 to 7",
+          "ar": "الوحدات B-02 وB-05 وB-08 وB-11، الأدوار من الثاني إلى السابع"
+        },
+        "price": 700000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "B-03",
+          "ar": "نموذج B-03"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 74,
+        "rooms": null,
+        "availability": {
+          "en": "Units B-03 and B-04, floors 2 to 7",
+          "ar": "الوحدتان B-03 وB-04، الأدوار من الثاني إلى السابع"
+        },
+        "price": 680000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "B-L01",
+          "ar": "نموذج B-L01"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 83,
+        "rooms": null,
+        "availability": {
+          "en": "Lofts B-L01 to B-L04, floors 2+3, 4+5 and 6+7",
+          "ar": "وحدات اللوفت من B-L01 إلى B-L04، الأدوار 2+3 و4+5 و6+7"
+        },
+        "price": 650000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-L01",
+          "ar": "نموذج A-L01"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 93,
+        "rooms": null,
+        "availability": {
+          "en": "Lofts A-L01, A-L03, A-L04 and A-L06, floors 2+3, 4+5 and 6+7",
+          "ar": "وحدات اللوفت A-L01 وA-L03 وA-L04 وA-L06، الأدوار 2+3 و4+5 و6+7"
+        },
+        "price": 710000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-L02",
+          "ar": "نموذج A-L02"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 85,
+        "rooms": null,
+        "availability": {
+          "en": "Lofts A-L02 and A-L05, floors 2+3, 4+5 and 6+7",
+          "ar": "وحدتا اللوفت A-L02 وA-L05، الأدوار 2+3 و4+5 و6+7"
+        },
+        "price": 700000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "R-B06",
+          "ar": "نموذج R-B06"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 84,
+        "rooms": null,
+        "availability": {
+          "en": "Annex R-B06, seventh floor",
+          "ar": "الملحق R-B06، الدور السابع"
+        },
+        "price": 770000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "R-B03",
+          "ar": "نموذج R-B03"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 115,
+        "rooms": null,
+        "availability": {
+          "en": "Annexes R-B03 and R-B04, seventh floor",
+          "ar": "الملحقان R-B03 وR-B04، الدور السابع"
+        },
+        "price": 900000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      }
+    ],
+    "amenities": {
+      "en": [
+        "Men's health club",
+        "Women's health club",
+        "Residents' lounge",
+        "Kids' zone",
+        "Housekeeping service",
+        "High-speed Wi-Fi",
+        "Security cameras",
+        "Resident app",
+        "Smart entry",
+        "Smart home system",
+        "Hotel-style entrance",
+        "Hotel-grade finishes",
+        "High ceilings",
+        "Wide windows"
+      ],
+      "ar": [
+        "نادٍ صحي للرجال",
+        "نادٍ صحي للنساء",
+        "لاونج للسكان",
+        "منطقة أطفال",
+        "خدمة التدبير المنزلي",
+        "إنترنت عالي السرعة",
+        "كاميرات أمنية",
+        "تطبيق خاص بالسكان",
+        "دخول ذكي",
+        "نظام المنزل الذكي",
+        "مدخل بطابع فندقي",
+        "تشطيبات فندقية",
+        "أسقف عالية",
+        "نوافذ واسعة"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Close to main roads",
+        "Close to the airport",
+        "Close to everyday services"
+      ],
+      "ar": [
+        "بالقرب من الطرق الرئيسية",
+        "بالقرب من المطار",
+        "بالقرب من الخدمات"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Structure: 10 years, natural disasters excluded",
+        "Sanitary fittings: 5 years",
+        "Electrical sockets: 10 years, supplier's warranty",
+        "Plumbing: 24 months"
+      ],
+      "ar": [
+        "الهيكل الإنشائي: 10 سنوات ولا يشمل الكوارث الطبيعية",
+        "الأدوات الصحية: 5 سنوات",
+        "الأفياش: 10 سنوات حسب ضمان الوكيل",
+        "السباكة: 24 شهراً"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/the-river-residences-al-salamah-jeddah/brochure.pdf",
     "project": {
