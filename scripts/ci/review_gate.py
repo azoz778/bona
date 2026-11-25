@@ -6,7 +6,7 @@ a PR comment for the head commit, one line each:  Claude review: SHIP <sha7>  / 
 The status is `success` only when, for EACH model, the newest verdict-like line written by a trusted
 author (comments and submitted, non-dismissed reviews; quotes and code blocks ignored) is exactly a
 SHIP for a prefix of the CURRENT head. Anything else is `pending` with a short reason, so a new commit
-resets the gate. The `main` ruleset (docs/auto-merge.md, once live) requires this status (and `ci`) before a
+resets the gate. The `main` ruleset (docs/auto-merge.md) requires this status (and `ci`) before a
 PR can merge.
 
 The parsing (VERDICT_START, CANONICAL, verdicts) is a verbatim copy of the owner's local merge guard

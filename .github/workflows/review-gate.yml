@@ -2,7 +2,7 @@ name: Two-model review gate
 
 # Sets the commit status `two-model-review` on the PR head: success only when the newest Claude and
 # Codex verdicts by the owner's account are both exactly `<Model> review: SHIP <sha>` for the CURRENT
-# head (scripts/ci/review_gate.py). The `main` ruleset (docs/auto-merge.md, once live) requires it, so an
+# head (scripts/ci/review_gate.py). The `main` ruleset (docs/auto-merge.md) requires it, so an
 # auto-merge waits for it.
 # It runs when the owner comments on a PR (posts, edits or deletes a comment). A new commit has no
 # status at all, so it is blocked until fresh verdicts are posted; there is no push trigger, because
