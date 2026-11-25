@@ -178,19 +178,21 @@ describe('buildListing', () => {
     assert.deepEqual([kept.price.amount, kept.price.currency], [4500000, 'AED']);
     const written = buildListing({ ai: structuredClone(aed), images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { price: { amount: 4500000, currency: 'USD' } }, meta: {} });
     assert.deepEqual([written.price.amount, written.price.currency], [4500000, 'USD']);
-    // a riyal with no country: SAR on an AED brochure, OMR on an Omani one
-    const riyalAed = buildListing({ ai: structuredClone(aed), images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { price: { amount: 190000, currency: null, riyal: true } }, meta: {} });
-    assert.deepEqual([riyalAed.price.amount, riyalAed.price.currency], [190000, 'SAR']);
-    const omr = structuredClone(aed);
-    omr.listing.price.currency = 'OMR';
-    const riyalOmr = buildListing({ ai: omr, images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { price: { amount: 190000, currency: null, riyal: true } }, meta: {} });
-    assert.deepEqual([riyalOmr.price.amount, riyalOmr.price.currency], [190000, 'OMR']);
-    // a rent caption price with no period written keeps the brochure's period (r15, Claude)
+    // a rent caption price must say its period (r16): with none it is no caption price and the brochure
+    // stands; with one it is read
     const monthly = structuredClone(aed);
     monthly.listing.category = 'rent';
     monthly.listing.price = { amount: 4000, currency: 'SAR', from: false, period: 'month', onRequest: false };
-    const rent = buildListing({ ai: monthly, images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { ...parseCaption('للإيجار 4,500 ريال'), text: 'للإيجار 4,500 ريال' }, meta: {} });
-    assert.deepEqual([rent.price.amount, rent.price.currency, rent.price.period], [4500, 'SAR', 'month']);
+    const rent = buildListing({ ai: monthly, images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { ...parseCaption('للإيجار 4,500 ريال سعودي'), text: 'للإيجار 4,500 ريال سعودي' }, meta: {} });
+    assert.deepEqual([rent.price.amount, rent.price.currency, rent.price.period], [4000, 'SAR', 'month']);
+    const said = buildListing({ ai: structuredClone(monthly), images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { ...parseCaption('للإيجار 45,000 ريال سعودي سنوياً'), text: 'للإيجار 45,000 ريال سعودي سنوياً' }, meta: {} });
+    assert.deepEqual([said.price.amount, said.price.currency, said.price.period], [45000, 'SAR', 'year']);
+    // a rent caption with no price and no period: the brochure's period stands, a year only when it has none
+    const tag = buildListing({ ai: structuredClone(monthly), images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { ...parseCaption('#rent villa'), text: '#rent villa' }, meta: {} });
+    assert.deepEqual([tag.category, tag.price.amount, tag.price.period], ['rent', 4000, 'month']);
+    const sale = structuredClone(aed);
+    const tagged = buildListing({ ai: sale, images: imagesFor(slug, picks), slug, id: 'BONA-W023', repo: REPO, caption: { ...parseCaption('#rent villa'), text: '#rent villa' }, meta: {} });
+    assert.deepEqual([tagged.category, tagged.price.period], ['rent', 'year']);
   });
 
   it('the local checks refuse a subsidised price that is not below the headline price', () => {
@@ -740,13 +742,12 @@ describe('inbox + edits', () => {
     assert.equal(onReq.amount, null);
   });
 
-  it('price keeps the listing\'s currency when none is written, and a bare riyal is the listing\'s riyal', () => {
+  it('price keeps the listing\'s currency when none is written', () => {
     const set = (args) => edits.setPrice(tmp, 'BONA-W001', args).listing.price;
     set({ amount: 2500000, currency: 'OMR' });
-    assert.deepEqual([set({ amount: 190000, currency: null }).currency, set({ amount: 190000, currency: null, riyal: true }).currency], ['OMR', 'OMR']);
+    assert.equal(set({ amount: 190000, currency: null }).currency, 'OMR');
     set({ amount: 2500000, currency: 'AED' });
     assert.equal(set({ amount: 190000, currency: null }).currency, 'AED');
-    assert.equal(set({ amount: 190000, currency: null, riyal: true }).currency, 'SAR');
     set({ amount: 2500000, currency: 'SAR' });
   });
 

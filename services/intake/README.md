@@ -66,8 +66,8 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    |---|---|
    | `rent`, `للإيجار` | category = rent (period defaults to `year`; `per month` sets month) |
    | `off-plan`, `international` | sets the category |
-   | `SAR 4,500,000`, `4.5m`, `990,000 ر.س`, `٤٥٠٠٠٠٠ ريال` | the asking price, overriding the PDF |
-   | `Villa 450 m2`, `Deposit 50,000`, `Villa for sale in Obhur 4.5m`, `SAR 4,500,000 4 bedrooms`, `4.5m (USD 1.2m)` | no caption price: the caption sets a price only when it is nothing but a price — one figure with its multiplier and currency, and only words like price / asking / for sale / rent / per year / negotiable (السعر، للبيع، إيجار، سنوياً). Anything else and the PDF's price stands; send `price <id> …` to set one |
+   | `SAR 4,500,000`, `4.5m`, `990,000 ر.س`, `٤٥٠٠٠٠٠ ريال سعودي` | the asking price, overriding the PDF |
+   | `Villa 450 m2`, `Deposit 50,000`, `Villa for sale in Obhur 4.5m`, `SAR 4,500,000 4 bedrooms`, `4.5m (USD 1.2m)`, `٤٥٠٠٠٠٠ ريال` / `Dhs 1.2m` (a riyal or dirham with no country) | no caption price: the caption sets a price only when it is nothing but a price — one figure with its multiplier and currency, and only words like price / asking / for sale / rent / per year / negotiable (السعر، للبيع، إيجار، سنوياً). Anything else and the PDF's price stands; send `price <id> …` to set one |
    | `#test` | dry run — the bot replies with the listing it *would* publish and writes nothing |
    | `#nobrochure` | publish the listing with **no** downloadable brochure |
    | `#brochure` | nothing (a no-op alias — every brochure is re-published by default) |
