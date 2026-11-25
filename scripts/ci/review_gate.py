@@ -6,7 +6,7 @@ a PR comment for the head commit, one line each:  Claude review: SHIP <sha7>  / 
 The status is `success` only when, for EACH model, the newest verdict-like line written by a trusted
 author (comments and submitted, non-dismissed reviews; quotes and code blocks ignored) is exactly a
 SHIP for a prefix of the CURRENT head. Anything else is `pending` with a short reason, so a new commit
-resets the gate. The `main` ruleset (docs/auto-merge.md, once live) requires this status (and `ci`) before a
+resets the gate. The `main` ruleset (docs/auto-merge.md) requires this status (and `ci`) before a
 PR can merge.
 
 The parsing (VERDICT_START, CANONICAL, verdicts) is a verbatim copy of the owner's local merge guard
@@ -18,8 +18,9 @@ over the API and never checks out or runs code from the pull request. Python sta
 
 Known limits (docs/auto-merge.md): a commit status belongs to a commit, not to a PR (two PRs with the same
 head share it; a branch reset to an approved commit is green again until this re-runs); verdicts in review
-bodies count but only comments trigger a re-check; and any workflow in a same-repo PR could post this
-status, so this is a process check that the two reviews of the diff back up, not a security boundary.
+bodies count but only comments trigger a re-check; and a push- or PR-triggered workflow could satisfy the
+required check with a job of this name (a fork PR's too) or, in a same-repo run, by posting this status, so this
+is a process check, not a security boundary.
 """
 import http.client
 import json

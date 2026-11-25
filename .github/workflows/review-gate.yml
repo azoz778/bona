@@ -2,7 +2,7 @@ name: Two-model review gate
 
 # Sets the commit status `two-model-review` on the PR head: success only when the newest Claude and
 # Codex verdicts by the owner's account are both exactly `<Model> review: SHIP <sha>` for the CURRENT
-# head (scripts/ci/review_gate.py). The `main` ruleset (docs/auto-merge.md, once live) requires it, so an
+# head (scripts/ci/review_gate.py). The `main` ruleset (docs/auto-merge.md) requires it, so an
 # auto-merge waits for it.
 # It runs when the owner comments on a PR (posts, edits or deletes a comment). A new commit has no
 # status at all, so it is blocked until fresh verdicts are posted; there is no push trigger, because
@@ -10,9 +10,9 @@ name: Two-model review gate
 #
 # Safety: issue_comment runs with a write token from the default branch, so this job checks out ONLY the
 # default branch's copy of the gate script (never the PR's code) and runs nothing else; editing them in
-# a PR does not change how that PR is judged. It is a process check, not a security boundary: any
-# workflow in a same-repo PR could post this status itself, which the Claude and Codex reviews of the
-# diff are there to catch. Verdict lines in review bodies count, but a review does not re-run the gate.
+# a PR does not change how that PR is judged. It is a process check, not a security boundary: a push- or
+# PR-triggered workflow in this repo could satisfy the required check with a job named `two-model-review`
+# (a fork PR's too), and a same-repo one could also post this status (docs/auto-merge.md, known limits). Verdict lines in review bodies count, but a review does not re-run the gate.
 # Limits and operating rules: docs/auto-merge.md.
 
 on:
