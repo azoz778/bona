@@ -5446,6 +5446,202 @@
         "أفنية أمامية وجانبية وخلفية خاصة"
       ]
     },
+    "models": [
+      {
+        "name": {
+          "en": "Villa 01",
+          "ar": "فيلا 01"
+        },
+        "bedrooms": 5,
+        "bathrooms": 6,
+        "areaSqm": 293.55,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Dining room",
+            "Living room",
+            "Kitchen",
+            "Guest WC",
+            "Secondary family entrance",
+            "Master bedroom with dressing room",
+            "First-floor living area",
+            "Annex laundry room",
+            "Roof terrace",
+            "Front, rear and side courtyards"
+          ],
+          "ar": [
+            "مجلس",
+            "غرفة طعام",
+            "غرفة معيشة",
+            "مطبخ",
+            "دورة مياه للضيوف",
+            "مدخل ثانوي للعائلة",
+            "غرفة نوم رئيسية بغرفة ملابس",
+            "فراغ معيشة في الطابق الأول",
+            "غرفة غسيل في الملحق",
+            "سطح",
+            "أفنية أمامية وخلفية وجانبية"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/aseel-al-ghoroub-2-al-madinah/plan-01.jpg",
+          "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/plan-01-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Villa 02",
+          "ar": "فيلا 02"
+        },
+        "bedrooms": 3,
+        "bathrooms": 4,
+        "areaSqm": null,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Dining room",
+            "Living room",
+            "Kitchen",
+            "Guest WC",
+            "Secondary family entrance",
+            "Master bedroom with dressing room",
+            "First-floor living area",
+            "Front terrace",
+            "Rear terrace",
+            "Roof terrace",
+            "Front, rear and side courtyards"
+          ],
+          "ar": [
+            "مجلس",
+            "غرفة طعام",
+            "غرفة معيشة",
+            "مطبخ",
+            "دورة مياه للضيوف",
+            "مدخل ثانوي للعائلة",
+            "غرفة نوم رئيسية بغرفة ملابس",
+            "فراغ معيشة في الطابق الأول",
+            "تراس أمامي",
+            "تراس خلفي",
+            "سطح",
+            "أفنية أمامية وخلفية وجانبية"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/aseel-al-ghoroub-2-al-madinah/plan-02.jpg",
+          "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/plan-02-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Townhouse Villa",
+          "ar": "فيلا تاون هاوس"
+        },
+        "bedrooms": 3,
+        "bathrooms": 3,
+        "areaSqm": 244.86,
+        "rooms": {
+          "en": [
+            "Entrance with staircase",
+            "Majlis",
+            "Dining room",
+            "Living room",
+            "Kitchen",
+            "Interior courtyards",
+            "Master bedroom with sitting corner",
+            "Dressing room",
+            "Roof terrace",
+            "Front and rear courtyards"
+          ],
+          "ar": [
+            "مدخل مع درج",
+            "مجلس",
+            "غرفة طعام",
+            "غرفة معيشة",
+            "مطبخ",
+            "أفنية داخلية",
+            "غرفة نوم رئيسية بركن جلوس",
+            "غرفة ملابس",
+            "سطح",
+            "فناءان أمامي وخلفي"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/aseel-al-ghoroub-2-al-madinah/plan-03.jpg",
+          "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/plan-03-thumb.webp"
+        }
+      }
+    ],
+    "amenities": {
+      "en": [
+        "Mosques and a Friday mosque",
+        "Park within the project",
+        "Educational facility",
+        "Health facility",
+        "Commercial centre",
+        "Schools in the destination",
+        "Outdoor seating areas",
+        "Al Ghoroub Park, over one million m²"
+      ],
+      "ar": [
+        "مساجد وجامع",
+        "حديقة داخل المشروع",
+        "مرفق تعليمي",
+        "مرفق صحي",
+        "مركز تجاري",
+        "مدارس ضمن الوجهة",
+        "جلسات خارجية",
+        "حديقة الغروب بمساحة تتجاوز مليون م²"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Prophet's Mosque — 13 km",
+        "Quba Mosque — 14 km",
+        "King Fahd Hospital — 9 km",
+        "Prince Sultan Armed Forces Hospital — 6 km",
+        "Islamic University — 9 km",
+        "Taibah University — 6 km"
+      ],
+      "ar": [
+        "المسجد النبوي الشريف — 13 كم",
+        "مسجد قباء — 14 كم",
+        "مستشفى الملك فهد — 9 كم",
+        "مستشفى الأمير سلطان للقوات المسلحة — 6 كم",
+        "الجامعة الإسلامية — 9 كم",
+        "جامعة طيبة — 6 كم"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Structural works",
+        "Waterproofing works",
+        "Termite control",
+        "Plumbing works",
+        "Electrical works",
+        "Electrical distribution boards",
+        "Sanitary fixtures",
+        "Interior and exterior doors"
+      ],
+      "ar": [
+        "أعمال الهيكل الإنشائي",
+        "أعمال العزل المائي",
+        "مكافحة النمل الأبيض",
+        "أعمال السباكة",
+        "الأعمال الكهربائية",
+        "لوحات توزيع الكهرباء",
+        "الأطقم الصحية",
+        "الأبواب الداخلية والخارجية"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/aseel-al-ghoroub-2-al-madinah/brochure.pdf",
     "project": {
