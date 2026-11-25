@@ -7260,6 +7260,322 @@
         "ضمان إنشائي يصل إلى 10 سنوات"
       ]
     },
+    "models": [
+      {
+        "name": {
+          "en": "Type 01",
+          "ar": "نموذج 01"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 138.4,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC",
+            "Dressing room",
+            "Laundry and storage room"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة",
+            "غرفة ملابس",
+            "غرفة غسيل ومستودع"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-01.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-01-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type 02",
+          "ar": "نموذج 02"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 126.15,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-02.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-02-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type 03",
+          "ar": "نموذج 03"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 116.5,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-03.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-03-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type 04",
+          "ar": "نموذج 04"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 112.45,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-04.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-04-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type 05",
+          "ar": "نموذج 05"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 110.25,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-05.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-05-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type 06",
+          "ar": "نموذج 06"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 109.8,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC",
+            "Terrace"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة",
+            "شرفة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-06.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-06-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type 07",
+          "ar": "نموذج 07"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 108.35,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-07.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-07-thumb.webp"
+        }
+      }
+    ],
+    "amenities": {
+      "en": [
+        "Men's gym",
+        "Women's gym",
+        "Residents' lounge",
+        "Underground and outdoor parking",
+        "Electronic gates at parking entrances",
+        "Elevators for residents",
+        "Safety systems",
+        "Modern landscaping",
+        "Owners' association",
+        "High privacy"
+      ],
+      "ar": [
+        "صالة رياضية للرجال",
+        "صالة رياضية للنساء",
+        "صالة استرخاء للسكان",
+        "مواقف سيارات سفلية وخارجية",
+        "بوابات إلكترونية لمداخل المواقف",
+        "مصاعد للسكان",
+        "أنظمة سلامة",
+        "تنسيق خارجي حديث",
+        "اتحاد ملّاك",
+        "خصوصية عالية"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Western Ring Road",
+        "Jeddah Road",
+        "Sultanah Street",
+        "Najran Street",
+        "Schools and healthcare facilities",
+        "Neighbourhood mosques",
+        "Banks and supermarkets",
+        "Fuel stations"
+      ],
+      "ar": [
+        "الطريق الدائري الغربي",
+        "طريق جدة",
+        "شارع سلطانة",
+        "شارع نجران",
+        "مدارس ومرافق صحية",
+        "مساجد الحي",
+        "بنوك وأسواق تموينية",
+        "محطات وقود"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Hidden defects insurance",
+        "Structure and waterproofing: 10 years",
+        "Wires, cables, panels and breakers: up to 25 years",
+        "Thermal pipes: up to 15 years",
+        "Sockets and switches: up to 10 years",
+        "Plumbing, electrical and sanitary fixtures: 2 years",
+        "Elevators: 2 years",
+        "Finishing, aluminium and civil defence: 1 year"
+      ],
+      "ar": [
+        "تأمين ضد العيوب الخفية",
+        "الهيكل الإنشائي والعزل المائي: 10 سنوات",
+        "الأسلاك والكيابل والطبالين والقواطع: حتى 25 سنة",
+        "المواسير الحرارية: حتى 15 سنة",
+        "الأفياش والمفاتيح: حتى 10 سنوات",
+        "تأسيس السباكة والكهرباء والأدوات الصحية: سنتان",
+        "المصاعد: سنتان",
+        "التشطيبات والألمنيوم وأنظمة الدفاع المدني: سنة واحدة"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/katheeb-residences-laban-district/brochure.pdf",
     "project": {
