@@ -2440,7 +2440,11 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     }
     // …a short-stay rate (Codex r13 #2: "per day" after "hours", the scaled 1.2k) and a weekday label (Codex r13 NB1) go
     // the rent way: one sale check, on request, the rent wording.
-    for (const [p3, amount] of [['SAR 1.2k for 2 hours per day', 1200], ['Weekdays\nSAR 700', 700]]) {
+    for (const [p3, amount] of [['SAR 1.2k for 2 hours per day', 1200], ['Weekdays\nSAR 700', 700],
+      // r14c (Claude r13 NB3): weekends, the days of the week, the definite "one night", nights in the plural or dual.
+      ['Weekends\nSAR 700', 700], ['Weekend\nSAR 700', 700], ['أيام الأسبوع\n700 ريال', 700], ['نهاية الأسبوع\n700 ريال', 700],
+      ['وسط الأسبوع\n700 ريال', 700], ['الليلة الواحدة\n700 ريال', 700], ['SAR 1,800 for 2 nights', 1800], ['1,800 ريال لليلتين', 1800],
+      ['1,800 ريال لثلاث ليال', 1800], ['SAR 1,800 for three nights', 1800]]) {
       const o = await outcome({ listing: sale(amount), pageText: pages(p3), confirm: [] });
       assert.deepEqual(o.checks.map((c) => [c.amount, c.page, c.sale]), [[amount, 3, true]], p3);
       assert.equal(o.price.onRequest, true, p3);

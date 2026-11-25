@@ -277,14 +277,14 @@ const PERIOD_PHRASE = String.raw`(?:a\s+(?:night|week|day)|per\s+day)`;
 const RENT_WORDING_RE = new RegExp([
   String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|returns?|roi|revenues?|tenant(?:s|ed)?|tenancy|let\s+at|daily|weekend\s+rates?)\b`,
   String.raw`\b${PERIOD_PHRASE}\b`,
-  String.raw`\b(?:weekdays?|night\s+rates?|(?:one|every)\s+night)\b`,
+  String.raw`\b(?:weekdays?|weekends?|night\s+rates?|(?:one|every)\s+night|(?:two|three|four|five|six|seven|\d+)\s+nights)\b`,
   String.raw`\/\s*(?:day|night|week)\b`,
   arabicWords(String.raw`[إاأ]يجار(?:ات)?(?:ي|ية|يه|يا|ا|${RENT_SUFFIX})?|استئجار|تأجير|تاجير|أجرة|اجرة|أجره|اجره|[أا]جرت(?:ه|ها|هم)|مؤجر|مؤجرة|مؤجره|مؤجرا|`
     + String.raw`موجر|موجرة|مستأجر|مستأجرة|دخل(?:ا|${RENT_SUFFIX})?|عائد(?:ات)?(?:ا|${RENT_SUFFIX})?|عوائد(?:ا|${RENT_SUFFIX})?|[إا]يراد(?:ات)?(?:ا|${RENT_SUFFIX})?|`
     + String.raw`ريع(?:ا|${RENT_SUFFIX})?|مردود(?:ا|${RENT_SUFFIX})?`, { ka: true }),
   arabicWords(String.raw`بالليل[ةه]|في\s+الليل[ةه]|كل\s+ليل[ةه]|باليوم|في\s+(?:الأسبوع|الاسبوع)|بال[أا]سبوع|`
     + String.raw`سعر\s+الليل[ةه]|لليوم|لل[أا]سبوع|ليليا|ت[أا]جيري[ةه]|للعام|كل\s+عام|لكل\s+[أا]سبوع|سعر\s+اليومي|`
-    + String.raw`سعر\s+ال[أا]سبوعي|سعر\s+ال[أا]سبوع|ليل[ةه]\s+واحد[ةه]|كل\s+يوم`),
+    + String.raw`سعر\s+ال[أا]سبوعي|سعر\s+ال[أا]سبوع|ليل[ةه]\s+(?:ال)?واحد[ةه]|كل\s+يوم|(?:أيام|ايام|نهاية|نهايه|وسط)\s+ال[أا]سبوع|ليلتين|ليلتان|ليال(?:ي)?`),
   String.raw`\/\s*(?:ال)?(?:ليل[ةه]|يوم|[أا]سبوع|عام)(?!${AR_LETTER})`,
   RENT_PERIOD,
 ].join('|'), 'i');
