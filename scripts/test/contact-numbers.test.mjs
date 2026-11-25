@@ -1,6 +1,7 @@
 // Every hand copy of Bona's contact numbers agrees with src/data/site.json (2026-11-19 WhatsApp move).
-// site.whatsapp moved to Bona's own number; site.phone stays until Phase 3. A wa.me link is always
-// the WhatsApp number, and any Saudi mobile number written out is one of the two.
+// site.whatsapp moved to Bona's own number, and on 2026-11-26 the owner moved site.phone there too
+// (calls reach the AI phone line). A wa.me link is always the WhatsApp number, any Saudi mobile
+// number written out is one of the two, and the owner's personal number is gone from every hand copy.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
@@ -17,8 +18,18 @@ const EXAMPLE = /^9665000000\d\d$/;
 const FILES = [
   'src/data/faq.json', 'src/data/privacy.json', 'src/data/content-calendar.json', 'src/data/integrations.json',
   'marketing/page-meta.json', 'marketing/growth-targets.json', 'public/site.webmanifest', 'services/api/retell/prompt.md',
-  'services/api/lib/tools.mjs', 'services/api/index.mjs', 'services/intake/rebrand_pdf.py',
+  'services/api/lib/tools.mjs', 'services/api/index.mjs',
 ];
+// The owner's personal number, which both lines used before the move. Only the dated lines of the
+// privacy notice's "Changes" section may still name it (they say what it was replaced by).
+const OLD = '966593296933';
+// A hand copy's text, with the privacy notice's "Changes" section left out (its dated lines name the old number).
+const textOf = (f) => {
+  if (f !== 'src/data/privacy.json') return read(f);
+  const policy = JSON.parse(read(f));
+  policy.sections = policy.sections.filter((x) => x.id !== 'changes');
+  return JSON.stringify(policy);
+};
 // Hand copies that name only the WhatsApp number (no phone line of their own).
 const WHATSAPP_ONLY = [
   'src/data/content-calendar.json', 'marketing/page-meta.json', 'marketing/growth-targets.json', 'public/site.webmanifest', 'src/data/integrations.json',
@@ -32,7 +43,7 @@ test('site.json: the three WhatsApp fields name one number', () => {
 
 test('every wa.me link in the hand copies is site.whatsapp, every Saudi mobile written out is site.whatsapp or site.phone', () => {
   for (const f of FILES) {
-    const text = read(f);
+    const text = textOf(f);
     for (const m of text.matchAll(/wa\.me\/(\d+)/g)) assert.equal(m[1], WA, `${f}: wa.me/${m[1]}`);
     for (const m of text.matchAll(/(?:\+|00)?966[\s -]?5\d(?:[\s -]?\d){7}/g)) {
       const n = digits(m[0]);
@@ -41,12 +52,20 @@ test('every wa.me link in the hand copies is site.whatsapp, every Saudi mobile w
   }
 });
 
-test('the WhatsApp-only hand copies no longer name the phone number', () => {
-  assert.notEqual(WA, PHONE, 'this branch moves WhatsApp only');
+test('the WhatsApp-only hand copies name the WhatsApp number', () => {
   for (const f of WHATSAPP_ONLY) {
     const text = read(f);
     assert.ok(text.includes(site.whatsapp.display) || text.includes(site.whatsapp.e164) || text.includes(WA), `${f} does not name the WhatsApp number`);
-    assert.ok(!text.includes(PHONE) && !text.includes(site.phone.display), `${f} still names the phone number as WhatsApp`);
+  }
+});
+
+test("site.phone is Bona's own number too, and no hand copy names the owner's personal number (owner 2026-11-26)", () => {
+  assert.equal(PHONE, WA, 'calls and WhatsApp share Bona\'s own number');
+  assert.equal(site.phone.display, site.whatsapp.display);
+  for (const f of FILES) {
+    const text = textOf(f);
+    const found = [...text.matchAll(/(?:\+|00)?966[\s -]?5\d(?:[\s -]?\d){7}|\b05\d(?:[\s -]?\d){7}\b/g)].map((m) => digits(m[0]).replace(/^0/, '966'));
+    assert.ok(!found.includes(OLD), `${f} still names +966 59 329 6933`);
   }
 });
 

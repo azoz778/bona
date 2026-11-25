@@ -137,7 +137,9 @@ test('the persona states the rules the owner cannot have broken', () => {
   // Dana hands over on the site's WhatsApp number (src/data/site.json) and quotes no other.
   assert.match(prompt, new RegExp(`hand over: WhatsApp \\*\\*${esc(site.whatsapp.display)}\\*\\*`));
   assert.match(prompt, new RegExp(`offer WhatsApp \\*\\*${esc(site.whatsapp.display)}\\*\\*`));
-  assert.match(prompt, new RegExp(`- WhatsApp: \\*\\*${esc(site.whatsapp.display)}\\*\\*\\. Phone: \\*\\*${esc(site.phone.display)}\\*\\*\\.`));
+  // Calls moved to Bona's own number too (owner 2026-11-26): one line names it for both, and says who answers calls.
+  assert.equal(site.phone.display, site.whatsapp.display);
+  assert.match(prompt, new RegExp(`- WhatsApp and phone: \\*\\*${esc(site.whatsapp.display)}\\*\\* \\(phone calls to it are answered by Bona’s AI phone assistant\\)\\.`));
   for (const [n] of prompt.matchAll(/\+966 \d{2} \d{3} \d{4}/g)) assert.ok([site.whatsapp.display, site.phone.display].includes(n), `unknown number in prompt.md: ${n}`);
   assert.match(prompt, /Sunday–Thursday, 10:00–19:00/);
   assert.match(prompt, /AI concierge/i);

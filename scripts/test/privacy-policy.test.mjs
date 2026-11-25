@@ -300,6 +300,18 @@ test('the AI phone assistant section: who answers, the recording, where the voic
   assert.deepEqual([...new Set(arTo)].sort(), [...new Set(enTo)].sort());
 });
 
+test('the business-partner sentence (owner OK 2026-11-26) sits with the WhatsApp conversations and the call records', () => {
+  const en = 'A business partner of the owner of Bona who also uses his AI tools can access them as well.';
+  const ar = 'ويمكن كذلك لشريك أعمال لمالك بونا يستخدم أدوات الذكاء الاصطناعي نفسها الوصول إليها.';
+  for (const id of ['whatsapp-conversations', 'ai-phone-line']) {
+    assert.ok(body(section(id), 'en').includes(en), `${id} en`);
+    assert.ok(body(section(id), 'ar').includes(ar), `${id} ar`);
+  }
+  const changes = section('changes');
+  assert.ok(changes.body.en.some((p) => /^26 November 2026:.*business partner of the owner of Bona/.test(p)));
+  assert.ok(changes.body.ar.some((p) => /^26 نوفمبر 2026:.*شريك أعمال لمالك بونا/.test(p)));
+});
+
 test("dashboard replies are said to come from the site's WhatsApp number", () => {
   const s = section('whatsapp-conversations');
   assert.ok(body(s, 'en').includes(`come from Bona’s WhatsApp number, ${site.whatsapp.display}`));
@@ -307,23 +319,25 @@ test("dashboard replies are said to come from the site's WhatsApp number", () =>
 });
 
 test('every number the policy writes out is site.whatsapp or site.phone, and the version date moved with the new number', () => {
-  const all = JSON.stringify(policy);
+  // The dated "Changes" lines may name the number that was replaced; nothing else may.
+  const all = JSON.stringify({ ...policy, sections: policy.sections.filter((x) => x.id !== 'changes') });
   const digits = (x) => String(x).replace(/\D/g, '');
   for (const m of all.matchAll(/\+966 5\d \d{3} \d{4}/g)) assert.ok([site.whatsapp.display, site.phone.display].includes(m[0]), m[0]);
-  assert.ok(policy.updated >= '2026-11-19', 'the version date moves with the new number');
-  assert.notEqual(digits(site.whatsapp.e164), digits(site.phone.e164));
+  for (const m of JSON.stringify(section('changes')).matchAll(/\+966 5\d \d{3} \d{4}/g)) assert.ok([site.whatsapp.display, '+966 59 329 6933'].includes(m[0]), m[0]);
+  assert.ok(policy.updated >= '2026-11-26', 'the version date moves with the new number');
+  assert.equal(digits(site.whatsapp.e164), digits(site.phone.e164), 'calls moved to Bona\'s own number too (owner 2026-11-26)');
 });
 
-// The dated line comes out once its 30 days are up (on or after 2026-12-19), and this test with it.
+// The dated line comes out once its 30 days are up (on or after 2026-12-26), and this test with it.
 test('the Changes section flags the new WhatsApp number and the AI phone assistant, in both languages (30 days)', () => {
-  if (new Date().toISOString().slice(0, 10) >= '2026-12-19') return;
+  if (new Date().toISOString().slice(0, 10) >= '2026-12-26') return;
   const changes = section('changes');
-  const en = changes.body.en.find((p) => /^19 November 2026:/.test(p));
-  const ar = changes.body.ar.find((p) => /^19 نوفمبر 2026:/.test(p));
+  const en = changes.body.en.find((p) => /^26 November 2026:/.test(p));
+  const ar = changes.body.ar.find((p) => /^26 نوفمبر 2026:/.test(p));
   assert.ok(en && ar, 'a dated line in each language');
   for (const text of [en, ar]) {
     assert.ok(text.includes(site.whatsapp.display), 'the new number');
-    assert.ok(text.includes(site.phone.display), 'the number it replaces');
+    assert.ok(text.includes('+966 59 329 6933'), 'the number it replaces');
   }
   assert.match(en, /“The AI phone assistant”/);
   assert.match(ar, /«المساعدة الهاتفية بالذكاء الاصطناعي»/);

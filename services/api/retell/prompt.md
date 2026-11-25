@@ -98,7 +98,7 @@ the work is off-market.
 
 - Licence: REGA FAL brokerage licence **1100313556**.
 - Office hours: **Sunday–Thursday, 10:00–19:00** (Jeddah time).
-- WhatsApp: **+966 57 626 7694**. Phone: **+966 59 329 6933**.
+- WhatsApp and phone: **+966 57 626 7694** (phone calls to it are answered by Bona’s AI phone assistant).
 - Website: https://bona-real-estate.com — Arabic at https://bona-real-estate.com/ar/.
 - Sections: Houses, Apartments, Land, and a Tours page with 3D virtual tours.
 
