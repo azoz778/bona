@@ -3,9 +3,16 @@
 Every pull request into `main` gets two checks. The `main` ruleset requires both, so a PR can merge itself
 (GitHub auto-merge) as soon as they are green, and nobody has to watch it.
 
-Rollout order (2026-11-25): this file and the two checks landed first; the repo settings below were applied
-right after, then the owner's local helper was installed and the flow was tested live on throwaway PRs. The
-helper refuses to arm anything unless GitHub's rules for `main` require both checks, so it cannot run early.
+**Status: rolling out (2026-11-25), not live yet.** Until this line says "live since <date>", auto-merge is
+not used on this repo and the owner merges. Rollout steps, in order:
+1. The two checks (this file's PR).
+2. Owner-approved settings (below): `allow_auto_merge` and the ruleset.
+3. The owner's local helper is installed (`~/.claude/scripts/automerge-on.py`).
+4. Live tests on throwaway PRs: a status written by the workflow token satisfies the check pinned to GitHub
+   Actions; the owner (repo admin, who can bypass the ruleset) sees a PR with pending checks as blocked, and
+   auto-merge he armed waits for both checks; what a new push does to an auto-merge pinned to a head.
+5. This status line is updated with the date and the results.
+The helper refuses to arm anything unless GitHub's rules for `main` require both checks, so it cannot run early.
 
 | Check | Where | Green when |
 |---|---|---|
@@ -44,13 +51,17 @@ helper refuses to arm anything unless GitHub's rules for `main` require both che
 ## When the gate looks stuck
 
 - `two-model-review` says pending with the reason (e.g. "Codex missing"). Post the missing verdict.
-- It says `error`, or pending because "GitHub's comment list is behind": re-run that workflow run (Actions
-  tab, or `gh run rerun <id> -R azoz778/bona`); every run reads the current state.
+- It says `error`: re-run that workflow run (Actions tab, or `gh run rerun <id> -R azoz778/bona`); every run
+  reads the current state.
+- It says pending because "GitHub's comment list is behind": post a new owner comment (or edit one). Do not
+  re-run that old run: it waits for its own comment as it was then, which a later edit has replaced.
 - No `two-model-review` status at all on the head ("Expected"): nothing has run for this head yet, e.g. the
   verdicts were posted while GitHub still showed an older head. Any new owner comment (or editing one)
   re-runs the gate.
-- Once a run has written `pending` (its first write), a run that dies later leaves the PR blocked, never
-  wrongly green. A run that fails before that (checkout, no runner, GitHub down) changes nothing.
+- Once a run has written `pending` (its first write), a run that dies later leaves the PR blocked, with one
+  exception: if GitHub accepts the final `success` but the answer is lost, the run's `error` write is best
+  effort (and auto-merge may already have seen the green). A run that fails before its first write
+  (checkout, no runner, GitHub down) changes nothing.
 
 ## Known limits (a process check, not a security boundary)
 
