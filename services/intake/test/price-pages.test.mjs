@@ -1729,6 +1729,40 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
         await assert.rejects(run(r), (err) => err.stage === 'price' && /states the price 319,015/.test(err.reason) && /try again later/.test(err.reason) && !/could not be confirmed/.test(err.reason));
       } finally { r.cleanup(); }
     }
+    // r14f (Codex r14e #1): the cited page that alone shows the price (as an image) is never dropped for two text pages
+    // that carry the same figure: a third look, at most.
+    {
+      const a = sale(450000);
+      a.priceEvidence = { page: 4, quote: 'SAR 450,000' };
+      const r = await rig({ listing: a,
+        pageText: [`Overview${PAD}`, `Villa B asking price SAR 450,000 — 250 m²${PAD}`, `Villa C asking price SAR 450,000${PAD}`, '', 'Contact'],
+        facts: { 4: [{ fig: 450000, mark: 'SAR', kind: 'whole' }] } });
+      try {
+        const report = await run(r);
+        assert.equal(report.listingPreview.price.amount, 450000);
+        assert.deepEqual(r.calls().filter((c) => c.tool === 'claude-confirm').map((c) => c.page), [3, 2, 4]);
+      } finally { r.cleanup(); }
+    }
+    // r14f (Codex r14e #2): a quota hit by ANOTHER check (a unit-model price) does not make a Sakani figure "unchecked":
+    // the headline was refused (printed nowhere), so the Sakani figure the copy states is refused as not confirmed.
+    {
+      const a = withModels([model('Lulu', 319015, null, 3)], { price: { amount: 1250000, subsidisedAmount: 1100000, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence: null });
+      a.listing.category = 'buy';
+      a.listing.highlights.en = ['Sakani price 1,100,000', ...a.listing.highlights.en.slice(1)];
+      const r = await rig({ listing: a, modelConfirmFail: 'quota' });
+      try {
+        await assert.rejects(run(r), (err) => err.stage === 'price' && /states the price 1,100,000/.test(err.reason) && !/try again later/.test(err.reason), 'refused, not "try again later"');
+      } finally { r.cleanup(); }
+    }
+    // r14f (Codex r14e NB3): a check whose call failed (not a quota) is unchecked too: "try again later", not "not printed".
+    {
+      const r = await rig({ listing: sale(450000, 'SAR 450,000'), pageText: [`Overview${PAD}`, 'Location', '', 'Contact'], confirmFail: true });
+      try {
+        const report = await run(r);
+        assert.equal(report.listingPreview.price.onRequest, true);
+        assert.ok(report.warnings.some((w) => /could not be checked/.test(w) && /try again later/.test(w)), report.warnings.join(' | '));
+      } finally { r.cleanup(); }
+    }
     // NB1: a short-stay figure the copy states under the owner's caption price goes to its page too, and is refused.
     {
       const a = sale(1200);
@@ -2543,7 +2577,7 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       ['ايام الأسبوع\n700 ريال', 700], ['نهايه الأسبوع\n700 ريال', 700], ['ليلتان\n1,800 ريال', 1800], ['ليالي\n1,800 ريال', 1800],
       // r14e (Claude r14d NB7): the Arabic short-stay twins and the English hyphen and overnight forms.
       ['700 ريال بالساعة', 700], ['700 ريال للإقامة', 700], ['700 ريال للفرد', 700], ['الويك اند\n700 ريال', 700],
-      ['SAR 700 overnight', 700], ['SAR 1,800 2-night stay', 1800]]) {
+      ['SAR 700 overnight', 700], ['SAR 1,800 2-night stay', 1800], ['SAR 1,800 2\u2011night stay', 1800]]) {
       const o = await outcome({ listing: sale(amount), pageText: pages(p3), confirm: [] });
       assert.deepEqual(o.checks.map((c) => [c.amount, c.page, c.sale]), [[amount, 3, true]], p3);
       assert.equal(o.price.onRequest, true, p3);

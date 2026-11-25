@@ -277,7 +277,7 @@ const PERIOD_PHRASE = String.raw`(?:a\s+(?:night|week|day)|per\s+day)`;
 const RENT_WORDING_RE = new RegExp([
   String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|returns?|roi|revenues?|tenant(?:s|ed)?|tenancy|let\s+at|daily|weekend\s+rates?)\b`,
   String.raw`\b${PERIOD_PHRASE}\b`,
-  String.raw`\b(?:weekdays?|weekends?|night\s+rates?|(?:one|every|\d+)\s+night|(?:two|three|four|five|six|seven|\d+)\s+nights|per\s+(?:person|hour|stay)|overnight|\d+-nights?)\b`,
+  String.raw`\b(?:weekdays?|weekends?|night\s+rates?|(?:one|every|\d+)\s+night|(?:two|three|four|five|six|seven|\d+)\s+nights|per\s+(?:person|hour|stay)|overnight|\d+[-\u2010\u2011\u2013]nights?)\b`,
   String.raw`\/\s*(?:day|night|week)\b`,
   arabicWords(String.raw`[إاأ]يجار(?:ات)?(?:ي|ية|يه|يا|ا|${RENT_SUFFIX})?|استئجار|تأجير|تاجير|أجرة|اجرة|أجره|اجره|[أا]جرت(?:ه|ها|هم)|مؤجر|مؤجرة|مؤجره|مؤجرا|`
     + String.raw`موجر|موجرة|مستأجر|مستأجرة|دخل(?:ا|${RENT_SUFFIX})?|عائد(?:ات)?(?:ا|${RENT_SUFFIX})?|عوائد(?:ا|${RENT_SUFFIX})?|[إا]يراد(?:ات)?(?:ا|${RENT_SUFFIX})?|`
@@ -901,6 +901,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     const check = await askPage(page, amount, cited.quote, { subsidised, whole, inferred: cited !== evidence });
     out.confirmed = check.confirmed;
     if (check.fatal) return { ...out, unchecked: true, uncheckedWhy: 'quota' };
+    // A call that failed (a timeout, a crash) did not look at the page: not "not printed" (r2 #2; Codex r14e NB3).
+    if (check.error && !check.confirmed) return { ...out, unchecked: true, uncheckedWhy: 'call' };
     return out;
   };
   /**
@@ -1003,9 +1005,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     const rendered = pageImages.find((p) => carries(p.page));
     const i = pageText.findIndex((t) => priceAppearsIn(t ?? '', amount));
     const inText = rendered ? rendered.page : i === -1 ? null : i + 1;
-    // The clean page first, and the page it outranked as the second look, so a price printed beside its own area on one
-    // page is still checked when another page's clean figure is someone else's (Codex r14d #1); two looks at most.
-    return [clean, inText, cited].filter((n, k, all) => n !== null && all.indexOf(n) === k).slice(0, 2);
+    // The clean page first, the page it outranked as the second look, so a price printed beside its own area on one
+    // page is still checked when another page's clean figure is someone else's (Codex r14d #1), and the cited page
+    // last, which may print the price only as an image (Codex r14e #1): three looks at most, each a different page.
+    return [clean, inText, cited].filter((n, k, all) => n !== null && all.indexOf(n) === k);
   };
   /**
    * Makes sure page `want` is among the rendered pages: renders it (into `headline-pages`) when it is not
@@ -1164,7 +1167,7 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     rejectedPrices.push(...mp.refused);
     // A figure whose check could not be done (a render, a failed call, a spent quota) is unchecked, not refused: a copy
     // that states it refuses the run with "try again later" (Claude r14d NB3).
-    for (const n of mp.incomplete) uncheckedPrices.set(n, mp.fatal ? 'the AI quota ran out' : 'the check of its page failed');
+    for (const n of mp.incomplete) uncheckedPrices.set(n, 'its check could not be completed');
     if (mp.fatal) quotaHit = true;
     // Two kinds of refusal, two warnings. `mp.incomplete`: figures whose check could not be done for
     // a reason that is ours, not the brochure's — their page did not render, the second model's call
@@ -1424,8 +1427,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
           ? `the subsidised (Sakani) price could not be checked on the brochure (${uncheckedWhy(evidence)}), so only the regular price is shown for now — try again later`
           : 'the subsidised (Sakani) price could not be confirmed on the brochure, so only the regular price is shown');
       }
-      // Never checked because a spent quota cleared the headline first: unchecked, not refused (Codex r14d #2).
-      if (price.subsidisedAmount > 0) refuse(price.subsidisedAmount, evidence ?? (quotaHit ? { unchecked: true, uncheckedWhy: 'quota' } : null));
+      // Never checked because the headline was cleared first: unchecked when the HEADLINE was only unchecked (a spent
+      // quota, a failed render or call — Codex r14d #2), refused when the headline was refused (Codex r14e #2).
+      if (price.subsidisedAmount > 0) refuse(price.subsidisedAmount, evidence ?? (report.priceEvidence?.unchecked ? report.priceEvidence : null));
       price.subsidisedAmount = null;
     }
   }
