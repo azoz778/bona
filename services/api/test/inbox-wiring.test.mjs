@@ -998,13 +998,24 @@ test('BONA_WA_INSTANCE_JID unset: a sent record whose alt is the owner\'s number
   }
 });
 
-test('a BONA_WA_INSTANCE_JID that is not a phone jid is said out loud at start-up (no value logged), and the app still builds', async () => {
-  for (const value of ['bona@s.whatsapp.net', '101010101010102@lid', '966576267694@g.us']) {
+test('a BONA_WA_INSTANCE_JID that is not a phone jid is said out loud at start-up (no value logged), the app still builds, and the owner\'s number stands in', async () => {
+  for (const value of ['bona@s.whatsapp.net', '101010101010102@lid', '966576267694@g.us', 'bona']) {
     const h = build({ env: { ...ENV, BONA_WA_INSTANCE_JID: value } });
     try {
       const line = h.logs.find((l) => l.evt === 'wa.instance_jid_invalid');
       assert.ok(line && line.level === 'error', value);
-      assert.doesNotMatch(JSON.stringify(line), /bona@|101010101010102|576267694/);
+      assert.doesNotMatch(JSON.stringify(line), /bona@|101010101010102|576267694|"bona"/);
+      // As with the line unset: a sent record whose alt is the owner's number names our sender.
+      const { app, db } = h;
+      db.insertLead({
+        lead_id: 'LEAD-client', created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000077', wa_jid: '966500000077@s.whatsapp.net',
+        channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: NOW - DAY, inbox_state: 'in', inbox_since: NOW - DAY,
+      });
+      const rec = {
+        id: 'OWN-1', jid: '966500000077@s.whatsapp.net', jidAlt: '966593296933@s.whatsapp.net', fromMe: true, ts: NOW - 1000, text: 'on my way',
+        pushName: null, contextInfo: null, messageType: 'conversation', media: null, fileName: null, noise: false,
+      };
+      assert.deepEqual(await app.ingest.ingest(db.getLead('LEAD-client'), rec), { stored: true, inserted: true, senderKind: 'owner_number' }, value);
     } finally {
       await h.close();
     }

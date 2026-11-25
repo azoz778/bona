@@ -72,10 +72,11 @@ die()  { printf '\033[1;31mfail\033[0m %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 
 # The remote command that prints the VPS's own VPS_KEEP_KEYS lines of VPS_KEEP_FILE: nothing
-# when the file is missing or has none, a non-zero status when grep itself fails.
+# when the file is missing or has none, a non-zero status when grep itself fails. Spaces before
+# the `=` count, as the API's env parser (services/api/lib/env.mjs) accepts them.
 vps_keep_grep() {
   local alt; alt=$(printf '%s' "$VPS_KEEP_KEYS" | tr ' ' '|')
-  printf '%s' "f=~/.secrets/$VPS_KEEP_FILE; [ -e \"\$f\" ] || exit 0; grep -E '^[[:space:]]*(export[[:space:]]+)?($alt)=' \"\$f\"; [ \$? -le 1 ]"
+  printf '%s' "f=~/.secrets/$VPS_KEEP_FILE; [ -e \"\$f\" ] || exit 0; grep -E '^[[:space:]]*(export[[:space:]]+)?($alt)[[:space:]]*=' \"\$f\"; [ \$? -le 1 ]"
 }
 
 # keep_vps_keys PC_FILE VPS_LINES OUT: OUT is PC_FILE, except that a VPS_KEEP_KEYS line the VPS

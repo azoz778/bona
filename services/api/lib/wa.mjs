@@ -16,9 +16,16 @@
 
 export const DEFAULT_OWNER_JID = '966593296933@s.whatsapp.net';
 
+/** A phone jid (`966…@s.whatsapp.net`, a device suffix allowed) or bare digits: the only usable own number. */
+export const PHONE_JID_RE = /^\d{8,15}(?::\d+)?(?:@s\.whatsapp\.net)?$/;
+
 export function waConfig(env = {}) {
   const ownerJid = env.BONA_OWNER_JID ?? DEFAULT_OWNER_JID;
-  const ownJid = String(env.BONA_WA_INSTANCE_JID ?? '').trim();
+  const raw = String(env.BONA_WA_INSTANCE_JID ?? '').trim();
+  // A value that is not a phone jid (a lid, a group, a name) would make the poller read the
+  // instance's own chat as a client's, or skip a client's: it counts as unset (the owner's
+  // number, as before the split) and says so as "invalid" on /health and at start-up.
+  const ownJid = PHONE_JID_RE.test(raw) ? raw : '';
   return {
     baseUrl: String(env.EVOLUTION_API_URL ?? '').replace(/\/+$/, ''),
     apiKey: env.EVOLUTION_API_KEY ?? '',
@@ -27,7 +34,7 @@ export function waConfig(env = {}) {
     /** The instance's own number: the chat the poller never reads, the sender a sent record's alt names. */
     instanceJid: ownJid || ownerJid,
     /** Where that number came from, for /health and the start-up line (never the digits). */
-    ownNumberFrom: ownJid ? 'instance' : 'owner',
+    ownNumberFrom: ownJid ? 'instance' : raw ? 'invalid' : 'owner',
     groupJid: env.BONA_WA_GROUP_JID ?? null,
     enabled: String(env.BONA_WA_NOTIFY ?? '1') !== '0',
   };

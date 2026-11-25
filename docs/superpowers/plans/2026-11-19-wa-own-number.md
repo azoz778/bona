@@ -1552,6 +1552,19 @@ Conventions kept from the files: curly quotes ’ “ ” in English, «» in Ar
 ```markdown
 # Bona WhatsApp cutover: personal number → Bona's own number (+966 57 626 7694)
 
+> **Update 2026-11-26 (owner decisions before the cutover; they override the lines below where they differ):**
+> - `site.phone` moves too: every call button and `tel:` link is +966 57 626 7694, answered by the AI phone line.
+>   A call alert (~/bona-line `call_alert.py`, `bona-line-call-alert.timer`) sends the owner a WhatsApp note from
+>   the Bona number after every call, because the AI line has no Phase 2 upload yet.
+> - The REGA advertiser line on property posts keeps the number on the REGA ad licences (`site.advertiser.phone`
+>   = +966 59 329 6933), so the 31 approved property reviews stay valid and match REGA. When the owner updates the
+>   REGA records, that one field changes and every property review is drafted and approved again
+>   (test/social-catalogue-advertiser.test.mjs fails until then, on purpose).
+> - Data and deletion requests go by WhatsApp only (the privacy page has no call button); partner sentence added.
+> - Dana stays ON (B1 skipped): chats added in B9a/B10 can get a Dana reply.
+> - Brochures are printed by `services/intake/brochure_pdf.py` (rebrand_pdf.py was removed in #72); it reads
+>   `site.json` phone and WhatsApp, so a re-render prints the new number on both.
+
 Branch: `feat/wa-own-number` in `/home/azoz778/bona-wt/wa-own-number`, on top of `origin/main`
 `ed94e60` (NOT pushed; `git log --oneline origin/main..feat/wa-own-number` lists the commits). Plan:
 `docs/superpowers/plans/2026-11-19-wa-own-number.md` (Appendix A = the privacy/FAQ candidate text;
@@ -1569,7 +1582,7 @@ What the branch does (so the steps below make sense):
   same field is in the `wa.poll.init` start-up log line.
 - `sync-secrets.sh` keeps the VPS's own `BONA_WA_INSTANCE` / `BONA_WA_INSTANCE_JID` lines and copies
   nothing when it cannot read them.
-- Site: `site.json` `whatsapp` → +966 57 626 7694 (`site.phone` stays +966 59 329 6933), all hand
+- Site: `site.json` `whatsapp` and (since 26 Nov) `phone` → +966 57 626 7694, all hand
   copies, Dana's prompt and tool notes, privacy notice + FAQ (CANDIDATE text, owner OK first).
 
 ## A. Before the cutover day (nothing public changes)
@@ -1765,7 +1778,7 @@ B9a. RECONCILE what the first poll could not see. A new instance has no poll cur
      every chat with a client message older than FROM (the Riyadh time printed above) that the
      dashboard Inbox, its Unsure tab included, does not show, and adds it with *Add chat by phone
      number* (owner only: it creates or reuses the lead, `owner_added`, puts it in the Bona inbox
-     and pulls its last 30 days), then answers it there by hand (Dana is off since B1). Not the
+     and pulls its last 30 days), then answers it there by hand (Dana stays on since 26 Nov: she may answer first). Not the
      owner's or a team member's own chat. A Ref line in such a chat stays in the thread; the lead
      does not get its campaign. If the B7 link gate failed and the env was switched later, the
      owner also goes through the Fold's chats from the site update (SINCE, or the verified Pages publication time if earlier) to FROM whatever the count says: what reached
@@ -1783,7 +1796,7 @@ B11. Owner by hand, same day: the FB Page / IG WhatsApp button and any click-to-
      lives on the personal account), the Zoho signature. Repo checklists that still name the old
      WhatsApp number for these profiles: `marketing/instagram-profile.md`,
      `marketing/instagram-connect-checklist.md`, `marketing/instagram-access.md`,
-     `marketing/google-business-profile.md` (phone stays; WhatsApp button moves).
+     `marketing/google-business-profile.md` (phone and WhatsApp button both move since 26 Nov).
 
 ## C. After
 

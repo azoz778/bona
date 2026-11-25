@@ -715,6 +715,16 @@ test('keep_vps_keys: nothing on the VPS means the PC file as it is; a key the VP
   assert.equal(keepRun(pc, 'export BONA_WA_INSTANCE=bona\n'), 'A=1\nexport BONA_WA_INSTANCE=bona\n');
 });
 
+test('vps_keep_grep: the VPS lines are found with or without spaces before the =, and nothing else is', () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-keepgrep-'));
+  mkdirSync(path.join(home, '.secrets'));
+  writeFileSync(path.join(home, '.secrets', 'bona-services.env'),
+    'A=1\nBONA_WA_INSTANCE = bona\nexport BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\nBONA_WA_INSTANCE_X=no\n# BONA_WA_INSTANCE=commented\n');
+  const r = bash(['-c', '. ./lib.sh; VPS_KEEP_FILE=bona-services.env; eval "$(vps_keep_grep)"'], { env: { HOME: home } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'BONA_WA_INSTANCE = bona\nexport BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n');
+});
+
 test('keep_vps_keys: a key the PC writes twice comes out once, as the VPS line; other keys are never touched', () => {
   const pc = 'BONA_WA_INSTANCE=abdulaziz-personal\nBONA_WA_INSTANCE_X=keep\nBONA_WA_INSTANCE=again\n';
   assert.equal(keepRun(pc, 'BONA_WA_INSTANCE=bona\nOTHER=vps-only\n'), 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_X=keep\n');

@@ -302,14 +302,27 @@ test('the AI phone assistant section: who answers, the recording, where the voic
 
 test('the business-partner sentence (owner OK 2026-11-26) sits with the WhatsApp conversations and the call records', () => {
   const en = 'A business partner of the owner of Bona who also uses his AI tools can access them as well.';
-  const ar = 'ويمكن كذلك لشريك أعمال لمالك بونا يستخدم أدوات الذكاء الاصطناعي نفسها الوصول إليها.';
-  for (const id of ['whatsapp-conversations', 'ai-phone-line']) {
-    assert.ok(body(section(id), 'en').includes(en), `${id} en`);
-    assert.ok(body(section(id), 'ar').includes(ar), `${id} ar`);
-  }
+  const ar = 'ويمكن كذلك لشريك أعمال لمالك بونا يستخدم أدوات الذكاء الاصطناعي نفسها الوصول';
+  for (const id of ['whatsapp-conversations', 'ai-phone-line']) assert.ok(body(section(id), 'en').includes(en), `${id} en`);
+  // Arabic: "them" is the conversations (plural, إليها) in one section, the recording and the transcript (dual, إليهما) in the other.
+  assert.ok(body(section('whatsapp-conversations'), 'ar').includes(`تسجيل الدخول. ${ar} إليها.`));
+  assert.ok(body(section('ai-phone-line'), 'ar').includes(`وقراءة النص. ${ar} إليهما.`));
+  // The dated change line says so too, until its 30 days are up (on or after 2026-12-26).
+  if (new Date().toISOString().slice(0, 10) >= '2026-12-26') return;
   const changes = section('changes');
   assert.ok(changes.body.en.some((p) => /^26 November 2026:.*business partner of the owner of Bona/.test(p)));
   assert.ok(changes.body.ar.some((p) => /^26 نوفمبر 2026:.*شريك أعمال لمالك بونا/.test(p)));
+});
+
+test('a deletion or data request is sent on WhatsApp, never by phone (a call reaches the AI line, 2026-11-26)', () => {
+  const en = policy.sections.flatMap((x) => x.body.en).join(' ') + ' ' + policy.contact.en;
+  const ar = policy.sections.flatMap((x) => x.body.ar).join(' ') + ' ' + policy.contact.ar;
+  assert.doesNotMatch(en, /call us/i);
+  assert.doesNotMatch(ar, /اتصل بنا/);
+  assert.ok(body(section('whatsapp-conversations'), 'en').includes(`from our phones, message us on WhatsApp at ${site.whatsapp.display}`));
+  assert.ok(body(section('whatsapp-conversations'), 'ar').includes(`من هواتفنا، راسلنا على واتساب على الرقم ${site.whatsapp.display}`));
+  const page = fs.readFileSync(new URL('../../src/components/pages/PrivacyPage.astro', import.meta.url), 'utf8');
+  assert.doesNotMatch(page, /tel:/, 'the privacy page offers WhatsApp for questions about your data, not a call');
 });
 
 test("dashboard replies are said to come from the site's WhatsApp number", () => {

@@ -23,6 +23,19 @@ test('set: the instance has its own number and the owner keeps his', () => {
   assert.equal(cfg.ownNumberFrom, 'instance');
 });
 
+test('a BONA_WA_INSTANCE_JID that is not a phone jid counts as unset: the owner\'s number, reported as "invalid"', () => {
+  for (const value of ['bona', 'bona@s.whatsapp.net', '101010101010102@lid', '966576267694@g.us', '+966576267694']) {
+    const cfg = waConfig({ BONA_WA_INSTANCE: 'bona', BONA_OWNER_JID: OWNER, BONA_WA_INSTANCE_JID: value });
+    assert.equal(cfg.instanceJid, OWNER, value);
+    assert.equal(cfg.ownNumberFrom, 'invalid', value);
+  }
+  for (const value of ['966576267694', '966576267694:12@s.whatsapp.net', BONA]) {
+    const cfg = waConfig({ BONA_OWNER_JID: OWNER, BONA_WA_INSTANCE_JID: value });
+    assert.equal(cfg.instanceJid, value, value);
+    assert.equal(cfg.ownNumberFrom, 'instance', value);
+  }
+});
+
 test('a lead note still goes to the owner\'s personal number, now sent from the Bona instance', async () => {
   const calls = [];
   const fetchImpl = async (url, init) => { calls.push({ url, body: JSON.parse(init.body) }); return { ok: true, status: 201 }; };
