@@ -136,7 +136,6 @@ describe('parsePriceHint', () => {
   it('never lets a figure set aside on a guess hand its slot to a smaller one', () => {
     for (const caption of [
       'Villa for sale 4.5m from the owner directly, service charge 15,000 SAR yearly',
-      'Price 4.5M high floor, maintenance 20,000 SAR',
       'Residential plot 2,500,000, commission 2.5% = 62,500',
       'Apartment in Al Olaya area 1,200,000, service charge SAR 12,000/year',
     ]) {
@@ -144,6 +143,8 @@ describe('parsePriceHint', () => {
     }
     for (const [caption, amount] of [
       ['SAR 4.5m by owner, service charge 12,000', 4500000],
+      // r8: a price word before the figure keeps a metre word away
+      ['Price 4.5M high floor, maintenance 20,000 SAR', 4500000],
       ['شقة مدعومة من الإسكان 850,000 ريال والعربون 20,000 ريال', 850000],
       ['أرض 625 متر مربع 2.5 مليون، العربون 100 ألف', 2500000],
       ['Villa 450 sqm price SAR 4,500,000, deposit SAR 50,000', 4500000],
@@ -298,6 +299,39 @@ describe('parsePriceHint', () => {
     assert.equal(parsePriceHint('Villa for rent, SAR 120,000. Video: https://m.youtube.com/watch?v=abc') && parseCaption('Villa for rent, SAR 120,000. Video: https://m.youtube.com/watch?v=abc').period, 'year');
   });
 
+  // r8 review (Codex)
+  it('round 8: m sq ft, a currency line with words, a price word before metres', () => {
+    assert.equal(hint('Asking 4.5m sq ft 12,000 SAR 3,000 annual service charge'), 'SAR 4500000');
+    assert.equal(hint('Dubai apartment: Asking 450,000\nAED negotiable'), 'AED 450000');
+    assert.equal(hint('Asking 150m from the owner directly\nAnnual rent SAR 9,500,000'), 'SAR 150000000');
+    assert.equal(hint('Asking:\n4,500,000 (sqm: 450)\nBank valuation 4,200,000'), 'SAR 4500000');
+    assert.equal(parsePriceHint('Land 12,000 m.sq'), null);
+    const t0 = performance.now();
+    assert.equal(hint('Price AED 450,000\n' + 'ً'.repeat(60000)), 'AED 450000');
+    assert.ok(performance.now() - t0 < 500);
+  });
+
+  // r8 review (Claude)
+  it('round 8: "/m" with a word after on a rent caption, whose currency across a comma or a line', () => {
+    assert.equal(hint('1BR for rent AED 6,500/m sqft 850, parking AED 1,000'), 'AED 6500');
+    assert.equal(hint('Rent AED 12,000 /m. Square layout, chiller AED 1,200'), 'AED 12000');
+    assert.equal(parsePriceHint('Rent AED 12,000 / m sq, parking AED 1,000'), null);
+    assert.equal(parsePriceHint('Price 980,000, OMR 196,000 to book'), null);
+    assert.equal(parsePriceHint('Price 2,000,000\nAED 450,000 down payment'), null);
+    assert.equal(parsePriceHint('Villa for sale 4.5M\nUSD 900,000 to book'), null);
+    assert.equal(hint('السعر 3,500,000 ريال 50,000 عربون'), 'SAR 3500000');
+    assert.equal(parsePriceHint('Apartment in Dubai Marina 980,000 ,USD 245,000 down payment'), null);
+    assert.equal(parsePriceHint('4,500,000,USD 900,000 down payment'), null);
+    assert.equal(hint('Price,4,500,000 SAR'), 'SAR 4500000');
+    // a comma inside a figure never starts one: an emoji before the figure must not leave 500,000
+    assert.equal(parsePriceHint('فيلا للبيع - 🔥12,500,000 SAR🔥'), null);
+    assert.equal(parsePriceHint('Villa for sale | 💵4,500,000 ر.س💵 | 625 م2'), null);
+    // a currency line that carries its own figure never joins the line above (a phone there must not become a price)
+    assert.equal(hint('Ref No. 4582\nللتواصل: 0555226302\nريال سعودي 1.85M'), 'SAR 1850000');
+    assert.equal(hint('Call 0555226302 SAR, villa 1.85M'), 'SAR 1850000');
+    assert.equal(hint('Price 2,000,000\nAED 2,500,000 for the bigger unit'), 'AED 2500000');
+  });
+
   it('parses a caption full of spaces in linear time', () => {
     const t0 = performance.now();
     assert.equal(hint('450,000' + ' '.repeat(112000) + 'AED'), 'AED 450000');
@@ -315,8 +349,10 @@ describe('parsePriceHint', () => {
 
   it('sets money with an area unit aside as a guess', () => {
     assert.equal(hint('SAR 4,500,000 sqm 450'), null);
-    // without a currency, the unit makes the figure an area (the price is lost, never a wrong one taken)
-    assert.equal(hint('Price 4.5M sqm 450'), null);
+    // a price word before a multiplier figure: the unit after it labels the next figure
+    assert.equal(hint('Price 4.5M sqm 450'), 'SAR 4500000');
+    // without a price word, the unit after the multiplier makes it a guess
+    assert.equal(hint('Villa 4.5M sqm 450'), null);
     assert.equal(hint('Land 12,000 sqm 4.5M متر'), null);
   });
 
