@@ -528,6 +528,18 @@ describe('r10 #2: printedInCurrency — a model code is no m², m² is no millio
     assert.equal(sar('Land 30,000 m²Built-up 12,000 m²', 30000), false);
     assert.equal(sar('GFA 4.5 million m²Total', 4.5e6), false);
   });
+  it('r13 #1 (Claude r11 B1 / B2 / NB1 / NB4 / NB7): المتر with its article or clitic, a stacked unit label in visual order, a per-area label before the figure, m² glued to digits', () => {
+    for (const [t, n] of [
+      ['أرض للبيع\nسعر المتر: 2,500 ريال', 2500], ['السعر بالمتر 4,500 ريال', 4500], ['للمتر 4,500 ريال', 4500], ['قيمة المتر 3,500 ريال', 3500],
+      ['المساحة بالمتر: 1,000,000\nالسعر عند الطلب', 1e6], ['مساحة الأرض بالم2 1,000,000', 1e6], ['سعر المتر 4,500 ريال', 4500],
+      ['Land for sale, Al Shati\nPlot area m²\n450,000\nPrice on request', 450000], ['مساحة الأرض متر مربع\n1,000,000', 1e6], ['² م\n1,000,000', 1e6],
+      ['6,000 ريال للمتر المربع', 6000], ['Price per m²: SAR 4,500', 4500], ['4,500 لكل م²', 4500], ['Land 30,000 m²12,000 m²', 30000],
+    ]) assert.equal(sar(t, n), false, t);
+    for (const [t, n] of [
+      ['فيلا رقم 2 1,250,000 ريال', 1.25e6], ['حمام 2\n1,250,000 ريال', 1.25e6], ['Villa A\n250\nm²\n1,250,000 SAR', 1.25e6],
+      ['المساحة م²\n1,250,000 ريال', 1.25e6], ['Price\n450,000', 450000],
+    ]) assert.equal(sar(t, n), true, t);
+  });
 });
 
 // r9 #3 (Codex r8 #2): in a model NAME a tight dotted pair with letters glued after it is initials ("د.إبراهيم": r8 #2),
@@ -561,7 +573,7 @@ describe('r11 #3 (Codex r10 #5 = Claude r10 NB4): a decimal figure right before 
     for (const ar of ['فيلا ٣ د.إبراهيم', 'نموذج 2 ر.قاسم']) assert.equal(nameOf('Villa', ar, [850000]), null, ar);
   });
   it('r12 #3 (Codex r11 #4): a dotted model number before initials stays a name; an amount-sized figure before the pair refuses it', () => {
-    for (const ar of ['فيلا ١٫٢ د.إبراهيم', 'فيلا 1.2 د.إبراهيم', 'نموذج ٢٫٣ ر.قاسم']) assert.equal(nameOf('Villa', ar, [850000]), null, ar);
+    for (const ar of ['فيلا ١٫٢ د.إبراهيم', 'فيلا 1.2 د.إبراهيم', 'نموذج ٢٫٣ ر.قاسم', 'Villa 3,4 د.كمال']) assert.equal(nameOf('Villa', ar, [850000]), null, ar);
     for (const ar of ['نموذج ٧٥ر.سسنويًا', 'نموذج ٧٥٠٫٥ر.سشهريًا', 'نموذج 1.25ر.سشهريا', 'نموذج ١٬٢٥٠ر.سشهريًا']) assert.equal(nameOf('Studio', ar, [850000]), 'models[0].name', ar);
   });
 });
@@ -2279,6 +2291,18 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     // r12 #1 (Codex r11 #2): on a line with a money-sized figure the prose lead-in excuses nothing — a short-stay package.
     for (const [p3, amount] of [['SAR 1,200 for 2 nights a week', 1200], ['1,200 ريال — SAR 1,200 in a week', 1200], ['SAR 4,500 for 3 days a week', 4500]]) {
       await sentToPage(p3, amount, `SAR ${amount.toLocaleString('en-US')}`);
+    }
+    // r13 #2 (Claude r11 B3 / NB2 / NB3 / NB7): the same before the figure; "per day" as a label; the other short-stay
+    // labels; Arabic-Indic digits near كل يوم; كل يوم and "Per day" with a figure on the line.
+    for (const [p3, amount, quote] of [
+      ['Stay 2 nights a week from SAR 1,200', 1200, 'SAR 1,200'], ['Earn up to SAR 450,000 in a week', 450000, 'SAR 450,000'],
+      ['Price per day\nSAR 700', 700], ['Per day:\nSAR 700', 700], ['Per day (SAR)\n700', 700], ['(incl. VAT & breakfast) per day\nSAR 700', 700],
+      ['Weekday rate\nSAR 700', 700], ['Night rate\nSAR 700', 700], ['SAR 700 every night', 700, 'SAR 700'], ['SAR 700 for one night', 700, 'SAR 700'],
+      ['السعر الأسبوعي\n4,500 ريال', 4500], ['سعر الأسبوع\n4,500 ريال', 4500], ['ليلة واحدة\n700 ريال', 700],
+      ['٦٠٬٠٠٠ ريال كل يوم', 60000, '٦٠٬٠٠٠ ريال'], ['Per day SAR 60,000', 60000, 'SAR 60,000'], ['كل يوم\n60,000 ريال', 60000],
+    ]) await sentToPage(p3, amount, quote ?? null);
+    for (const prose of ['Housekeeping once per day', 'Cleaning thrice a week', 'Two times a week', 'Every day a day of joy', 'Two nights a week of live music']) {
+      await settled(`${prose}\nSale price SAR 450,000`);
     }
   });
 

@@ -255,9 +255,12 @@ const PRICE_WORD_RE = new RegExp([
  * Claude r10 NB2 = Codex r10 NB2). "a night" / "a week" / "a day" anywhere — a label line ("SAR 1,200" / "a night"), before
  * the figure ("A week from SAR 4,500") — but after a prose lead-in: "Move in within a week", "Housekeeping twice a
  * week", "Open 7 days a week", "24 hours a day" are a timeline or a frequency (r11 #1, Claude r10 B1 = Codex r10 #1;
- * r10 #1's after-figure gate let a rate split from its figure through). "per day" / "كل يوم" with a figure before or
- * after them on the line, or alone on their line: "SAR 60,000 per day", "ريال كل يوم1,500", "Per day" — never
- * "Housekeeping once per day" or "تنظيف كل يوم" (r10 #1, Codex r9 #3 = Claude r9 NB5; r11 #1, Claude r10 NB3). A word that only contains one is none: مدخل / مدخلها / تدخل (an entrance, enters), عائدة (belongs to), سريع
+ * r10 #1's after-figure gate let a rate split from its figure through); on a line with a money-sized figure no lead-in
+ * excuses them, "SAR 1,200 for 2 nights a week" (r12 #1, Codex r11 #2 = Claude r11 B3). "per day" the same way: "Price
+ * per day", "Per day (SAR)", never "Housekeeping once per day" (r13 #2, Claude r11 NB2). "كل يوم" with a figure before
+ * or after it on the line, or alone on its line: "ريال كل يوم1,500" — never "تنظيف كل يوم" (r10 #1, Codex r9 #3 =
+ * Claude r9 NB5; r11 #1, Claude r10 NB3). And "Weekday rate", "Night rate", "one / every night", "السعر الأسبوعي",
+ * "سعر الأسبوع", "ليلة واحدة" (r13 #2, Claude r11 NB3). A word that only contains one is none: مدخل / مدخلها / تدخل (an entrance, enters), عائدة (belongs to), سريع
  * (Codex r6 #7, Claude r6 B1c). "عائده للمطور" (ه for ة), "الدراسة التي أجرتها الشركة" (conducted) cost a page check: the
  * safe side.
  */
@@ -269,17 +272,20 @@ const NEAR_FIGURE = (re) => String.raw`(?:(?<=[\d٠-٩۰-۹][^\n]{0,15}?)(?:${re
  * that prints a money-sized figure: "SAR 1,200 for 2 nights a week" is a short-stay package (r12 #1, Codex r11 #2).
  */
 const MONEY_FIGURE = String.raw`(?:[\d٠-٩۰-۹]{1,3}[,٬.][\d٠-٩۰-۹]{3}|[\d٠-٩۰-۹]{3,})`;
+/** "a night" / "a week" / "a day" and "per day" — a rate, but for a prose lead-in on a line with no money figure (r13 #2, Claude r11 NB2). */
+const PERIOD_PHRASE = String.raw`(?:a\s+(?:night|week|day)|per\s+day)`;
 const PROSE_LEAD_IN = String.raw`(?<!\b(?:within|in|twice|once|thrice|times|days|hours|day|nights|weeks)\s+)`;
 const RENT_WORDING_RE = new RegExp([
   String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|returns?|roi|revenues?|tenant(?:s|ed)?|tenancy|let\s+at|daily|weekend\s+rates?)\b`,
-  String.raw`${PROSE_LEAD_IN}\ba\s+(?:night|week|day)\b|(?<=${MONEY_FIGURE}[^\n]*?)\ba\s+(?:night|week|day)\b|\ba\s+(?:night|week|day)\b(?=[^\n]*?${MONEY_FIGURE})`,
-  NEAR_FIGURE(String.raw`\bper\s+day\b`),
+  String.raw`${PROSE_LEAD_IN}\b${PERIOD_PHRASE}\b|(?<=${MONEY_FIGURE}[^\n]*?)\b${PERIOD_PHRASE}\b|\b${PERIOD_PHRASE}\b(?=[^\n]*?${MONEY_FIGURE})`,
+  String.raw`\b(?:weekday\s+rates?|night\s+rates?|(?:one|every)\s+night)\b`,
   String.raw`\/\s*(?:day|night|week)\b`,
   arabicWords(String.raw`[إاأ]يجار(?:ات)?(?:ي|ية|يه|يا|ا|${RENT_SUFFIX})?|استئجار|تأجير|تاجير|أجرة|اجرة|أجره|اجره|[أا]جرت(?:ه|ها|هم)|مؤجر|مؤجرة|مؤجره|مؤجرا|`
     + String.raw`موجر|موجرة|مستأجر|مستأجرة|دخل(?:ا|${RENT_SUFFIX})?|عائد(?:ات)?(?:ا|${RENT_SUFFIX})?|عوائد(?:ا|${RENT_SUFFIX})?|[إا]يراد(?:ات)?(?:ا|${RENT_SUFFIX})?|`
     + String.raw`ريع(?:ا|${RENT_SUFFIX})?|مردود(?:ا|${RENT_SUFFIX})?`, { ka: true }),
   arabicWords(String.raw`بالليل[ةه]|في\s+الليل[ةه]|كل\s+ليل[ةه]|باليوم|في\s+(?:الأسبوع|الاسبوع)|بال[أا]سبوع|`
-    + String.raw`سعر\s+الليل[ةه]|لليوم|لل[أا]سبوع|ليليا|ت[أا]جيري[ةه]|للعام|كل\s+عام|لكل\s+[أا]سبوع|سعر\s+اليومي`),
+    + String.raw`سعر\s+الليل[ةه]|لليوم|لل[أا]سبوع|ليليا|ت[أا]جيري[ةه]|للعام|كل\s+عام|لكل\s+[أا]سبوع|سعر\s+اليومي|`
+    + String.raw`سعر\s+ال[أا]سبوعي|سعر\s+ال[أا]سبوع|ليل[ةه]\s+واحد[ةه]`),
   NEAR_FIGURE(arabicWords(String.raw`كل\s+يوم`)),
   String.raw`\/\s*(?:ال)?(?:ليل[ةه]|يوم|[أا]سبوع|عام)(?!${AR_LETTER})`,
   RENT_PERIOD,
