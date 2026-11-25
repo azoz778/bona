@@ -1,10 +1,12 @@
-# PR checks and auto-merge (since 2026-11-25)
+# PR checks and auto-merge
 
-Every pull request into `main` gets two checks. The `main` ruleset requires both, so a PR can merge itself
-(GitHub auto-merge) as soon as they are green, and nobody has to watch it.
+Every pull request into `main` gets two checks. Once the rollout below is complete, the `main` ruleset
+requires both, so a PR can merge itself (GitHub auto-merge) as soon as they are green, and nobody has to
+watch it.
 
 **Status: rolling out (2026-11-25), not live yet.** Until this line says "live since <date>", auto-merge is
-not used on this repo and the owner merges. Rollout steps, in order:
+not used on this repo: the owner merges, after checking that `ci` is green and both verdicts name the PR's
+current head; only the owner's throwaway tests (step 4) arm auto-merge. Rollout steps, in order:
 1. The two checks (this file's PR).
 2. Owner-approved settings (below): `allow_auto_merge` and the ruleset.
 3. The owner's local helper is installed (`~/.claude/scripts/automerge-on.py`).
@@ -19,14 +21,15 @@ The helper refuses to arm anything unless GitHub's rules for `main` require both
 | `ci` | `.github/workflows/ci.yml` | the deploy build job's checks pass on the PR's code: `npm test`, intake tests, review-gate tests, `validate.mjs`, `gen-llms`, `build`, `test:dist` (no TK sync, no Pages). About 6 minutes. |
 | `two-model-review` | `.github/workflows/review-gate.yml`, `scripts/ci/review_gate.py` | the newest Claude and Codex verdicts by `azoz778` are exactly `Claude review: SHIP <sha>` and `Codex review: SHIP <sha>` for the **current** head (AGENTS.md rule 2). |
 
-## The flow
+## The flow (once live)
 
 1. Open the PR. Turn auto-merge on right away (Claude, on the owner's PC):
    `~/.claude/scripts/automerge-on.py azoz778/bona <N> <full head sha>`.
    It arms GitHub auto-merge (squash, pinned to that head) only for a same-repo PR into `main` that GitHub
    reports as blocked, when the rules require both checks; it never merges anything itself. The owner's local
    merge guard keeps refusing `gh pr merge` (with or without `--auto`) until CI and both verdicts are in.
-   A person can use the "Enable auto-merge" button instead.
+   The owner can use GitHub's "Enable auto-merge" button instead; it skips the helper's checks, so it is
+   safe only while the ruleset above is in place.
 2. Claude and Codex review that head. Post both verdicts as PR **comments**, one line each.
 3. `two-model-review` turns green; once `ci` is green too, GitHub merges, and `deploy.yml` deploys `main`.
 4. A new commit resets the gate: the new head has no `two-model-review` status at all ("Expected"), so the PR

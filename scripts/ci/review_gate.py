@@ -176,7 +176,7 @@ def evaluate(repo, number, token, event):
         time.sleep(CATCH_UP_WAIT)
         comments = pages(f"/repos/{repo}/issues/{number}/comments", token)
         if not caught_up(event, comments):
-            return head, "pending", "GitHub's comment list is behind the comment that started this run; re-run it"
+            return head, "pending", "GitHub's comment list is behind the comment that started this run; post a new comment"
     items = [from_comment(c) for c in comments]
     items += [from_review(r) for r in pages(f"/repos/{repo}/pulls/{number}/reviews", token)]
     return (head,) + decide(items, head)
