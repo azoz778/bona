@@ -4414,6 +4414,111 @@
         "قرب سير من المدارس والمساجد والمراكز الصحية"
       ]
     },
+    "models": [
+      {
+        "name": {
+          "en": "Maren townhouse",
+          "ar": "تاون هاوس مرن"
+        },
+        "bedrooms": 3,
+        "bathrooms": 4,
+        "areaSqm": 192,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Family majlis",
+            "Living room",
+            "Dining area",
+            "Kitchen",
+            "Master bedroom",
+            "Dressing room",
+            "Two terraces",
+            "Roof (82.40 sqm)",
+            "Open parking space"
+          ],
+          "ar": [
+            "مجلس",
+            "مجلس عائلي",
+            "صالة معيشة",
+            "منطقة طعام",
+            "مطبخ",
+            "غرفة نوم رئيسية",
+            "غرفة ملابس",
+            "تراسان",
+            "سطح بمساحة 82.40 م²",
+            "موقف سيارة مفتوح"
+          ]
+        },
+        "availability": {
+          "en": "134 townhouses",
+          "ar": "134 تاون هاوس"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/al-wareef-townhouse-jeddah/plan-01.jpg",
+          "thumb": "/listings/al-wareef-townhouse-jeddah/plan-01-thumb.webp"
+        }
+      }
+    ],
+    "amenities": {
+      "en": [
+        "21 commercial centres",
+        "10 schools",
+        "7 mosques",
+        "5 Friday mosques",
+        "2 health centres",
+        "Community centre",
+        "Security centre",
+        "1.3 million sqm of green spaces and parks",
+        "Planned safe pedestrian network"
+      ],
+      "ar": [
+        "21 مركزًا تجاريًا",
+        "10 مدارس",
+        "7 مساجد",
+        "5 جوامع",
+        "مركزان صحيان",
+        "مركز اجتماعي",
+        "مركز أمني",
+        "1.3 مليون م² من المساحات الخضراء والحدائق",
+        "شبكة مشي آمنة ومخططة"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Historic Jeddah",
+        "Jeddah city centre",
+        "Main city entrances",
+        "Business centres"
+      ],
+      "ar": [
+        "جدة التاريخية",
+        "قلب مدينة جدة",
+        "مداخل المدينة الرئيسية",
+        "مراكز الأعمال"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "10-year concrete structure warranty",
+        "10-year building warranty",
+        "10-year insulation warranty",
+        "10-year anti-termite soil treatment warranty",
+        "1-year final finishes warranty",
+        "1-year plumbing warranty",
+        "1-year electrical works warranty"
+      ],
+      "ar": [
+        "ضمان الهيكل الخرساني 10 سنوات",
+        "ضمان المباني 10 سنوات",
+        "ضمان العزل 10 سنوات",
+        "ضمان معالجة التربة ضد الحشرات 10 سنوات",
+        "ضمان التشطيبات النهائية سنة كاملة",
+        "ضمان السباكة سنة كاملة",
+        "ضمان أعمال الكهرباء سنة كاملة"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/al-wareef-townhouse-jeddah/brochure.pdf",
     "project": {
@@ -4570,6 +4675,404 @@
         "موقع في جنوب شرق جدة"
       ]
     },
+    "models": [
+      {
+        "name": {
+          "en": "Model A",
+          "ar": "نموذج A"
+        },
+        "bedrooms": 3,
+        "bathrooms": 4,
+        "areaSqm": 183.68,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Majlis",
+            "Family majlis",
+            "Dining room",
+            "Dressing room",
+            "Roof 92.03 m²"
+          ],
+          "ar": [
+            "صالة معيشة",
+            "مطبخ",
+            "مجلس",
+            "مجلس عائلي",
+            "غرفة طعام",
+            "غرفة ملابس",
+            "سطح 92.03 م²"
+          ]
+        },
+        "availability": {
+          "en": "84 villas; 2 floors; plot 249.64–314.6 m²",
+          "ar": "84 فيلا، طابقان، مساحة الأرض 249.64–314.6 م²"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/al-warf-district-jeddah/plan-01.jpg",
+          "thumb": "/listings/al-warf-district-jeddah/plan-01-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Model B",
+          "ar": "نموذج B"
+        },
+        "bedrooms": 4,
+        "bathrooms": 5,
+        "areaSqm": 240.56,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Majlis",
+            "Family majlis",
+            "Dining room",
+            "Two master bedrooms",
+            "Rooftop stair room",
+            "Roof 95.64 m²"
+          ],
+          "ar": [
+            "صالة معيشة",
+            "مطبخ",
+            "مجلس",
+            "مجلس عائلي",
+            "غرفة طعام",
+            "غرفتا نوم رئيسيتان",
+            "غرفة درج السطح",
+            "سطح 95.64 م²"
+          ]
+        },
+        "availability": {
+          "en": "54 villas; 3 floors; plot 249.90–317.86 m²",
+          "ar": "54 فيلا، ثلاثة طوابق، مساحة الأرض 249.90–317.86 م²"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/al-warf-district-jeddah/plan-02.jpg",
+          "thumb": "/listings/al-warf-district-jeddah/plan-02-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Model C",
+          "ar": "نموذج C"
+        },
+        "bedrooms": 4,
+        "bathrooms": 6,
+        "areaSqm": 243.33,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Majlis",
+            "Family majlis",
+            "Dining room",
+            "Terrace 14.49 m²",
+            "Rooftop stair room",
+            "Roof 97.20 m²"
+          ],
+          "ar": [
+            "صالة معيشة",
+            "مطبخ",
+            "مجلس",
+            "مجلس عائلي",
+            "غرفة طعام",
+            "تراس 14.49 م²",
+            "غرفة درج السطح",
+            "سطح 97.20 م²"
+          ]
+        },
+        "availability": {
+          "en": "19 villas; 3 floors; plot 249.95–474.95 m²",
+          "ar": "19 فيلا، ثلاثة طوابق، مساحة الأرض 249.95–474.95 م²"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/al-warf-district-jeddah/plan-03.jpg",
+          "thumb": "/listings/al-warf-district-jeddah/plan-03-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Model D",
+          "ar": "نموذج D"
+        },
+        "bedrooms": 4,
+        "bathrooms": 5,
+        "areaSqm": 268.71,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Majlis",
+            "First-floor family majlis",
+            "Dining room",
+            "Dressing room",
+            "Rooftop stair room",
+            "Front and back roofs"
+          ],
+          "ar": [
+            "صالة معيشة",
+            "مطبخ",
+            "مجلس",
+            "مجلس عائلي في الطابق الأول",
+            "غرفة طعام",
+            "غرفة ملابس",
+            "غرفة درج السطح",
+            "سطح أمامي وسطح خلفي"
+          ]
+        },
+        "availability": {
+          "en": "24 villas; 3 floors; plot 350.2–544.05 m²",
+          "ar": "24 فيلا، ثلاثة طوابق، مساحة الأرض 350.2–544.05 م²"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/al-warf-district-jeddah/plan-04.jpg",
+          "thumb": "/listings/al-warf-district-jeddah/plan-04-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Ufuq",
+          "ar": "نموذج أفق"
+        },
+        "bedrooms": 3,
+        "bathrooms": 4,
+        "areaSqm": 161.02,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Majlis",
+            "Family majlis",
+            "Dining room",
+            "Terrace 20.16 m²",
+            "Rooftop stair room",
+            "Roof 54.80 m²"
+          ],
+          "ar": [
+            "صالة معيشة",
+            "مطبخ",
+            "مجلس",
+            "مجلس عائلي",
+            "غرفة طعام",
+            "تراس 20.16 م²",
+            "غرفة درج السطح",
+            "سطح 54.80 م²"
+          ]
+        },
+        "availability": {
+          "en": "70 townhouses; 3 floors; plot 200 m²",
+          "ar": "70 تاون هاوس، ثلاثة طوابق، مساحة الأرض 200 م²"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/al-warf-district-jeddah/plan-05.jpg",
+          "thumb": "/listings/al-warf-district-jeddah/plan-05-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Marin",
+          "ar": "نموذج مرن"
+        },
+        "bedrooms": 3,
+        "bathrooms": 4,
+        "areaSqm": 192,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Majlis",
+            "Family majlis",
+            "Dining room",
+            "Entrance hall",
+            "Two terraces",
+            "Dressing room",
+            "Rooftop stair room",
+            "Roof 82.40 m²"
+          ],
+          "ar": [
+            "صالة معيشة",
+            "مطبخ",
+            "مجلس",
+            "مجلس عائلي",
+            "غرفة طعام",
+            "مدخل",
+            "تراسان",
+            "غرفة ملابس",
+            "غرفة درج السطح",
+            "سطح 82.40 م²"
+          ]
+        },
+        "availability": {
+          "en": "134 townhouses; 3 floors; plot 200 m²",
+          "ar": "134 تاون هاوس، ثلاثة طوابق، مساحة الأرض 200 م²"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/al-warf-district-jeddah/plan-06.jpg",
+          "thumb": "/listings/al-warf-district-jeddah/plan-06-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Sa'ah",
+          "ar": "نموذج سعة"
+        },
+        "bedrooms": 4,
+        "bathrooms": 5,
+        "areaSqm": 224.3,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Open kitchen",
+            "Majlis",
+            "Family majlis",
+            "Dining room",
+            "Entrance hall",
+            "Dressing room",
+            "Terrace 19.43 m²",
+            "Rooftop stair room",
+            "Roof 84.85 m²"
+          ],
+          "ar": [
+            "صالة معيشة",
+            "مطبخ",
+            "مطبخ مفتوح",
+            "مجلس",
+            "مجلس عائلي",
+            "غرفة طعام",
+            "مدخل",
+            "غرفة ملابس",
+            "تراس 19.43 م²",
+            "غرفة درج السطح",
+            "سطح 84.85 م²"
+          ]
+        },
+        "availability": {
+          "en": "269 villas; 3 floors; plot 250 m²",
+          "ar": "269 فيلا، ثلاثة طوابق، مساحة الأرض 250 م²"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "Rehab",
+          "ar": "نموذج رحاب"
+        },
+        "bedrooms": 4,
+        "bathrooms": 6,
+        "areaSqm": 271.47,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Majlis",
+            "First-floor family majlis",
+            "Dining room",
+            "Entrance hall",
+            "Dressing room",
+            "Terrace 11.02 m²",
+            "Roof-level maid's room",
+            "Front and back roofs"
+          ],
+          "ar": [
+            "صالة معيشة",
+            "مطبخ",
+            "مجلس",
+            "مجلس عائلي في الطابق الأول",
+            "غرفة طعام",
+            "مدخل",
+            "غرفة ملابس",
+            "تراس 11.02 م²",
+            "غرفة خادمة في دور السطح",
+            "سطح أمامي وسطح خلفي"
+          ]
+        },
+        "availability": {
+          "en": "39 villas; 3 floors; plot 275 m²",
+          "ar": "39 فيلا، ثلاثة طوابق، مساحة الأرض 275 م²"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      }
+    ],
+    "amenities": {
+      "en": [
+        "21 commercial centres",
+        "10 schools",
+        "7 mosques and 5 Friday mosques",
+        "Two health centres",
+        "Community centre",
+        "Security centre",
+        "Over 1.3 million m² of parks and green space",
+        "Planned safe walking network",
+        "Garden irrigation water points",
+        "One open parking space per home"
+      ],
+      "ar": [
+        "21 مركزاً تجارياً",
+        "10 مدارس",
+        "7 مساجد و5 جوامع",
+        "مركزان صحيان",
+        "مركز اجتماعي",
+        "مركز أمني",
+        "أكثر من 1.3 مليون م² من الحدائق والمساحات الخضراء",
+        "شبكة مشي آمنة ومخططة",
+        "مصادر مياه لري الحدائق",
+        "موقف سيارة مكشوف لكل منزل"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Jeddah city centre",
+        "Main city entrances",
+        "Historic Jeddah",
+        "Business centres",
+        "Daily services within a 5–10 minute walk"
+      ],
+      "ar": [
+        "قلب مدينة جدة",
+        "مداخل المدينة الرئيسية",
+        "جدة التاريخية",
+        "مراكز الأعمال",
+        "خدمات يومية على بعد 5–10 دقائق مشياً"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "10-year concrete structure warranty",
+        "10-year building warranty",
+        "10-year insulation warranty",
+        "10-year anti-termite soil treatment warranty",
+        "1-year electrical works warranty",
+        "1-year plumbing warranty",
+        "1-year final finishes warranty"
+      ],
+      "ar": [
+        "ضمان الهيكل الخرساني 10 سنوات",
+        "ضمان المباني 10 سنوات",
+        "ضمان العزل 10 سنوات",
+        "ضمان معالجة التربة ضد الحشرات 10 سنوات",
+        "ضمان الأعمال الكهربائية سنة كاملة",
+        "ضمان السباكة سنة كاملة",
+        "ضمان التشطيبات النهائية سنة كاملة"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/al-warf-district-jeddah/brochure.pdf",
     "project": {
@@ -4720,6 +5223,66 @@
         "موقف خاص مغطى",
         "5 دقائق من الكورنيش",
         "ضمان إنشائي 25 سنة"
+      ]
+    },
+    "amenities": {
+      "en": [
+        "Bohemian-style architecture",
+        "High ceilings",
+        "Wide windows",
+        "Hotel-style entrances",
+        "Smart entry system",
+        "Security cameras",
+        "Upper-level landscaping",
+        "Building elevator"
+      ],
+      "ar": [
+        "تصميم بطابع بوهيمي",
+        "أسقف عالية",
+        "نوافذ واسعة",
+        "مداخل بطابع فندقي",
+        "نظام دخول ذكي",
+        "كاميرات مراقبة",
+        "تنسيق نباتي في الطوابق العلوية",
+        "مصعد في العمارة"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Near Prince Sultan Street",
+        "Near Al-Yamamah Walkway",
+        "Near the Arab Open University",
+        "Near the University of Jeddah",
+        "Near CBA University",
+        "5 minutes from the Corniche",
+        "10 minutes from the airport"
+      ],
+      "ar": [
+        "بالقرب من شارع الأمير سلطان",
+        "بالقرب من ممشى اليمامة",
+        "بالقرب من الجامعة العربية المفتوحة",
+        "بالقرب من جامعة جدة",
+        "بالقرب من جامعة CBA",
+        "5 دقائق من الكورنيش",
+        "10 دقائق من المطار"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Structural frame: 25 years, natural disasters excluded",
+        "Sockets and switches: 25 years (dealer's warranty)",
+        "Grohe sanitary ware: 5 years (dealer's warranty)",
+        "Alfanar electrical wiring: 20 years (dealer's warranty)",
+        "Concealed internal plumbing: 2 years",
+        "Elevator: 2 years (supplier's warranty)"
+      ],
+      "ar": [
+        "الهيكل الإنشائي: 25 سنة، لا يشمل الكوارث الطبيعية",
+        "الأفياش: 25 سنة حسب ضمان الوكيل",
+        "الأدوات الصحية (غروهي): 5 سنوات حسب ضمان الوكيل",
+        "الأسلاك الكهربائية (الفنار): 20 سنة حسب ضمان الوكيل",
+        "السباكة والتمديدات الداخلية المدفونة: سنتان",
+        "المصعد: سنتان حسب ضمان الشركة الموردة"
       ]
     },
     "virtualTourUrl": null,
@@ -4883,6 +5446,202 @@
         "أفنية أمامية وجانبية وخلفية خاصة"
       ]
     },
+    "models": [
+      {
+        "name": {
+          "en": "Villa 01",
+          "ar": "فيلا 01"
+        },
+        "bedrooms": 5,
+        "bathrooms": 6,
+        "areaSqm": 293.55,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Dining room",
+            "Living room",
+            "Kitchen",
+            "Guest WC",
+            "Secondary family entrance",
+            "Master bedroom with dressing room",
+            "First-floor living area",
+            "Annex laundry room",
+            "Roof terrace",
+            "Front, rear and side courtyards"
+          ],
+          "ar": [
+            "مجلس",
+            "غرفة طعام",
+            "غرفة معيشة",
+            "مطبخ",
+            "دورة مياه للضيوف",
+            "مدخل ثانوي للعائلة",
+            "غرفة نوم رئيسية بغرفة ملابس",
+            "فراغ معيشة في الطابق الأول",
+            "غرفة غسيل في الملحق",
+            "سطح",
+            "أفنية أمامية وخلفية وجانبية"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/aseel-al-ghoroub-2-al-madinah/plan-01.jpg",
+          "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/plan-01-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Villa 02",
+          "ar": "فيلا 02"
+        },
+        "bedrooms": 3,
+        "bathrooms": 4,
+        "areaSqm": null,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Dining room",
+            "Living room",
+            "Kitchen",
+            "Guest WC",
+            "Secondary family entrance",
+            "Master bedroom with dressing room",
+            "First-floor living area",
+            "Front terrace",
+            "Rear terrace",
+            "Roof terrace",
+            "Front, rear and side courtyards"
+          ],
+          "ar": [
+            "مجلس",
+            "غرفة طعام",
+            "غرفة معيشة",
+            "مطبخ",
+            "دورة مياه للضيوف",
+            "مدخل ثانوي للعائلة",
+            "غرفة نوم رئيسية بغرفة ملابس",
+            "فراغ معيشة في الطابق الأول",
+            "تراس أمامي",
+            "تراس خلفي",
+            "سطح",
+            "أفنية أمامية وخلفية وجانبية"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/aseel-al-ghoroub-2-al-madinah/plan-02.jpg",
+          "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/plan-02-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Townhouse Villa",
+          "ar": "فيلا تاون هاوس"
+        },
+        "bedrooms": 3,
+        "bathrooms": 3,
+        "areaSqm": 244.86,
+        "rooms": {
+          "en": [
+            "Entrance with staircase",
+            "Majlis",
+            "Dining room",
+            "Living room",
+            "Kitchen",
+            "Interior courtyards",
+            "Master bedroom with sitting corner",
+            "Dressing room",
+            "Roof terrace",
+            "Front and rear courtyards"
+          ],
+          "ar": [
+            "مدخل مع درج",
+            "مجلس",
+            "غرفة طعام",
+            "غرفة معيشة",
+            "مطبخ",
+            "أفنية داخلية",
+            "غرفة نوم رئيسية بركن جلوس",
+            "غرفة ملابس",
+            "سطح",
+            "فناءان أمامي وخلفي"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/aseel-al-ghoroub-2-al-madinah/plan-03.jpg",
+          "thumb": "/listings/aseel-al-ghoroub-2-al-madinah/plan-03-thumb.webp"
+        }
+      }
+    ],
+    "amenities": {
+      "en": [
+        "Mosques and a Friday mosque",
+        "Park within the project",
+        "Educational facility",
+        "Health facility",
+        "Commercial centre",
+        "Schools in the destination",
+        "Outdoor seating areas",
+        "Al Ghoroub Park, over one million m²"
+      ],
+      "ar": [
+        "مساجد وجامع",
+        "حديقة داخل المشروع",
+        "مرفق تعليمي",
+        "مرفق صحي",
+        "مركز تجاري",
+        "مدارس ضمن الوجهة",
+        "جلسات خارجية",
+        "حديقة الغروب بمساحة تتجاوز مليون م²"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Prophet's Mosque — 13 km",
+        "Quba Mosque — 14 km",
+        "King Fahd Hospital — 9 km",
+        "Prince Sultan Armed Forces Hospital — 6 km",
+        "Islamic University — 9 km",
+        "Taibah University — 6 km"
+      ],
+      "ar": [
+        "المسجد النبوي الشريف — 13 كم",
+        "مسجد قباء — 14 كم",
+        "مستشفى الملك فهد — 9 كم",
+        "مستشفى الأمير سلطان للقوات المسلحة — 6 كم",
+        "الجامعة الإسلامية — 9 كم",
+        "جامعة طيبة — 6 كم"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Structural works",
+        "Waterproofing works",
+        "Termite control",
+        "Plumbing works",
+        "Electrical works",
+        "Electrical distribution boards",
+        "Sanitary fixtures",
+        "Interior and exterior doors"
+      ],
+      "ar": [
+        "أعمال الهيكل الإنشائي",
+        "أعمال العزل المائي",
+        "مكافحة النمل الأبيض",
+        "أعمال السباكة",
+        "الأعمال الكهربائية",
+        "لوحات توزيع الكهرباء",
+        "الأطقم الصحية",
+        "الأبواب الداخلية والخارجية"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/aseel-al-ghoroub-2-al-madinah/brochure.pdf",
     "project": {
@@ -4997,6 +5756,46 @@
         "حمام بخاري وساونا",
         "مصعد يخدم المستويات الأربعة",
         "نظام منزل ذكي كريسترون"
+      ]
+    },
+    "amenities": {
+      "en": [
+        "Indoor pool with jacuzzi",
+        "Hammam and sauna",
+        "Lift serving all four levels",
+        "Crestron smart-home automation",
+        "Lutron lighting system",
+        "VRF climate control",
+        "Underfloor heating",
+        "Four fireplaces",
+        "Four offices",
+        "Parking for eight cars"
+      ],
+      "ar": [
+        "مسبح داخلي مع جاكوزي",
+        "حمام بخاري وساونا",
+        "مصعد يخدم المستويات الأربعة",
+        "منزل ذكي بنظام كريسترون",
+        "نظام إضاءة لوترون",
+        "تحكم مناخي بنظام VRF",
+        "تدفئة أرضية",
+        "أربع مدافئ",
+        "أربعة مكاتب",
+        "مواقف لثماني سيارات"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Hampstead Heath",
+        "The Bishops Avenue",
+        "Leading schools",
+        "Central London"
+      ],
+      "ar": [
+        "هامبستيد هيث",
+        "شارع ذا بيشوبس أفنيو",
+        "مدارس مرموقة",
+        "وسط لندن"
       ]
     },
     "virtualTourUrl": null,
@@ -5136,6 +5935,66 @@
         "أربع غرف نوم بحمامات خاصة",
         "غرفة عاملات وغرفة غسيل",
         "ضمان إنشائي لعشر سنوات"
+      ]
+    },
+    "amenities": {
+      "en": [
+        "Private swimming pool with outdoor showers",
+        "Outdoor bathroom by the pool",
+        "Car garage",
+        "Guard room",
+        "Maid's room",
+        "Laundry room",
+        "Large roof terrace"
+      ],
+      "ar": [
+        "مسبح خاص مع مروش خارجية",
+        "حمام خارجي بجوار المسبح",
+        "كراج سيارات",
+        "غرفة حارس",
+        "غرفة عاملات",
+        "غرفة غسيل",
+        "سطح كبير"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Jawharat Jeddah Mall – 0.7 km",
+        "Sulaiman Al Habib Hospital – 0.9 km",
+        "Yacht Club – 2.5 km",
+        "Red Sea Mall – 4.2 km",
+        "King Abdulaziz Airport – 5 km",
+        "Jeddah Economic City – 7 km"
+      ],
+      "ar": [
+        "جوهرة جدة مول – 0.7 كم",
+        "مستشفى سليمان الحبيب – 0.9 كم",
+        "نادي اليخوت – 2.5 كم",
+        "ردسي مول – 4.2 كم",
+        "مطار الملك عبدالعزيز – 5 كم",
+        "مدينة جدة الاقتصادية – 7 كم"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Structural frame – 10 years",
+        "Insulation works – 10 years",
+        "Aluminium works – 25 years",
+        "Water network – 2 years",
+        "Sanitary fixtures – 2 years",
+        "Plumbing works – 2 years",
+        "Electrical and air-conditioning – 2 years",
+        "Elevator – 2 years"
+      ],
+      "ar": [
+        "الهيكل الإنشائي – 10 سنوات",
+        "أعمال العزل – 10 سنوات",
+        "أعمال الألمنيوم – 25 سنة",
+        "شبكة المياه – سنتان",
+        "الأدوات الصحية – سنتان",
+        "أعمال السباكة – سنتان",
+        "الكهرباء والتكييف – سنتان",
+        "المصعد – سنتان"
       ]
     },
     "virtualTourUrl": null,
@@ -5292,6 +6151,176 @@
         "وحدات من غرفة إلى دوبلكس",
         "مسبح لا متناهٍ ونادٍ رياضي",
         "سينما خاصة وصالة استراحة"
+      ]
+    },
+    "models": [
+      {
+        "name": {
+          "en": "Standard | 1 Bedroom",
+          "ar": "نموذج Standard | 1 Bedroom"
+        },
+        "bedrooms": 1,
+        "bathrooms": null,
+        "areaSqm": 55.45,
+        "rooms": null,
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "Premium | Option 1: 1 Bedroom / Option 2: 2 Bedroom",
+          "ar": "نموذج Premium | Option 1: 1 Bedroom / Option 2: 2 Bedroom"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 73.62,
+        "rooms": null,
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "Standard | 2 Bedroom",
+          "ar": "نموذج Standard | 2 Bedroom"
+        },
+        "bedrooms": 2,
+        "bathrooms": null,
+        "areaSqm": 88.87,
+        "rooms": null,
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "Premium | Option 1: 2 Bedroom / Option 2: 3 Bedroom",
+          "ar": "نموذج Premium | Option 1: 2 Bedroom / Option 2: 3 Bedroom"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 96.8,
+        "rooms": null,
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "Standard | 3 Bedroom",
+          "ar": "نموذج Standard | 3 Bedroom"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 123.98,
+        "rooms": null,
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "Premium | Option 1: 3 Bedroom / Option 2: 4 Bedroom",
+          "ar": "نموذج Premium | Option 1: 3 Bedroom / Option 2: 4 Bedroom"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 135.41,
+        "rooms": null,
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "The Jewel (Duplex) | 3 Bedroom",
+          "ar": "نموذج The Jewel (Duplex) | 3 Bedroom"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 174,
+        "rooms": null,
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      }
+    ],
+    "amenities": {
+      "en": [
+        "On-site mosque",
+        "Kids play area",
+        "Dedicated residents' lounge",
+        "Fully equipped gym",
+        "Residents' sauna",
+        "Infinity swimming pool",
+        "Jacuzzi area",
+        "Designated running area",
+        "Private cinema",
+        "Electric vehicle charging",
+        "On-site car wash"
+      ],
+      "ar": [
+        "مسجد داخل المشروع",
+        "منطقة ألعاب للأطفال",
+        "صالة مخصصة للسكان",
+        "نادٍ رياضي مجهز",
+        "ساونا للسكان",
+        "مسبح لا متناهي الحواف",
+        "منطقة جاكوزي",
+        "منطقة مخصصة للجري",
+        "سينما خاصة",
+        "شحن السيارات الكهربائية",
+        "مغسلة سيارات داخل المشروع"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Formula 1 circuit – 1 minute",
+        "Jeddah Waterfront – 2 minutes",
+        "King Abdulaziz Road – 4 minutes",
+        "Jeddah Promenade – 4 minutes",
+        "City Walk – 5 minutes",
+        "Jeddah Yacht Club – 5 minutes",
+        "Red Sea Mall – 6 minutes"
+      ],
+      "ar": [
+        "حلبة الفورمولا 1 – دقيقة واحدة",
+        "الواجهة البحرية بجدة – دقيقتان",
+        "طريق الملك عبدالعزيز – 4 دقائق",
+        "جدة بروميناد – 4 دقائق",
+        "سيتي ووك – 5 دقائق",
+        "نادي جدة لليخوت – 5 دقائق",
+        "ردسي مول – 6 دقائق"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "25 years on plugs and distribution panels",
+        "10 years on the construction structure",
+        "10 years on water tanks",
+        "10 years on doors",
+        "10 years on flooring",
+        "10 years on elevators",
+        "3 years on lighting",
+        "2 years on intercom"
+      ],
+      "ar": [
+        "25 سنة على الأفياش والطبلونات",
+        "10 سنوات على الهيكل الإنشائي",
+        "10 سنوات على خزانات المياه",
+        "10 سنوات على الأبواب",
+        "10 سنوات على الأرضيات",
+        "10 سنوات على المصاعد",
+        "3 سنوات على الإنارة",
+        "سنتان على الإنتركوم"
       ]
     },
     "virtualTourUrl": null,
@@ -5773,6 +6802,356 @@
         "ضمان الهيكل الإنشائي عشر سنوات"
       ]
     },
+    "models": [
+      {
+        "name": {
+          "en": "Lulu 2",
+          "ar": "لؤلؤ 2"
+        },
+        "bedrooms": 2,
+        "bathrooms": 2,
+        "areaSqm": 79.77,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Laundry room"
+          ],
+          "ar": [
+            "صالة معيشة",
+            "مطبخ",
+            "غرفة غسيل"
+          ]
+        },
+        "availability": {
+          "en": "Buildings H–R, ground to sixth floor",
+          "ar": "المباني H–R، من الدور الأرضي إلى الدور السادس"
+        },
+        "price": 319015,
+        "subsidisedPrice": 270425,
+        "floorPlan": {
+          "src": "/listings/jeddah-heights-residential-community-jeddah/plan-01.jpg",
+          "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-01-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Nawras 2",
+          "ar": "نورس 2"
+        },
+        "bedrooms": 3,
+        "bathrooms": 2,
+        "areaSqm": 105.02,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Laundry room"
+          ],
+          "ar": [
+            "صالة معيشة",
+            "مطبخ",
+            "غرفة غسيل"
+          ]
+        },
+        "availability": {
+          "en": "Buildings G–P, first to seventh floor",
+          "ar": "المباني G–P، من الدور الأول إلى الدور السابع"
+        },
+        "price": 419994,
+        "subsidisedPrice": 356024,
+        "floorPlan": {
+          "src": "/listings/jeddah-heights-residential-community-jeddah/plan-02.jpg",
+          "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-02-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Seif 2",
+          "ar": "سيف 2"
+        },
+        "bedrooms": 3,
+        "bathrooms": 2,
+        "areaSqm": 122.98,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Dining room",
+            "Kitchen",
+            "Laundry room",
+            "Balcony"
+          ],
+          "ar": [
+            "صالة معيشة",
+            "غرفة طعام",
+            "مطبخ",
+            "غرفة غسيل",
+            "شرفة"
+          ]
+        },
+        "availability": {
+          "en": "Buildings H–R, first to sixth floor",
+          "ar": "المباني H–R، من الدور الأول إلى الدور السادس"
+        },
+        "price": 491819,
+        "subsidisedPrice": 416910,
+        "floorPlan": {
+          "src": "/listings/jeddah-heights-residential-community-jeddah/plan-03.jpg",
+          "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-03-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Seif 3",
+          "ar": "سيف 3"
+        },
+        "bedrooms": 2,
+        "bathrooms": 3,
+        "areaSqm": 127.93,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Dressing room",
+            "Kitchen",
+            "Laundry"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "غرفة ملابس",
+            "مطبخ",
+            "مغسلة"
+          ]
+        },
+        "availability": {
+          "en": "Building E, ground, second, fifth, sixth and seventh floors",
+          "ar": "المبنى E، الأدوار الأرضي والثاني والخامس والسادس والسابع"
+        },
+        "price": 511615,
+        "subsidisedPrice": 433690,
+        "floorPlan": {
+          "src": "/listings/jeddah-heights-residential-community-jeddah/plan-04.jpg",
+          "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-04-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Marafi 3",
+          "ar": "مرافئ 3"
+        },
+        "bedrooms": 3,
+        "bathrooms": 3,
+        "areaSqm": 148.46,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Dining room",
+            "Kitchen",
+            "Laundry room",
+            "Two entrances"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "غرفة طعام",
+            "مطبخ",
+            "غرفة غسيل",
+            "مدخلان"
+          ]
+        },
+        "availability": {
+          "en": "Buildings H–R, first to seventh floor",
+          "ar": "المباني H–R، من الدور الأول إلى الدور السابع"
+        },
+        "price": 593719,
+        "subsidisedPrice": 503288,
+        "floorPlan": {
+          "src": "/listings/jeddah-heights-residential-community-jeddah/plan-05.jpg",
+          "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-05-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Al Zumurrud 2",
+          "ar": "الزمرد 2"
+        },
+        "bedrooms": 3,
+        "bathrooms": 4,
+        "areaSqm": 156.84,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Maid's room",
+            "Maid's bathroom",
+            "Dressing room",
+            "Kitchen"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "غرفة خادمة",
+            "دورة مياه الخادمة",
+            "غرفة ملابس",
+            "مطبخ"
+          ]
+        },
+        "availability": {
+          "en": "Building D, ground to second floor",
+          "ar": "المبنى D، من الدور الأرضي إلى الدور الثاني"
+        },
+        "price": 673245,
+        "subsidisedPrice": 559261,
+        "floorPlan": {
+          "src": "/listings/jeddah-heights-residential-community-jeddah/plan-06.jpg",
+          "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-06-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Al Fairouz 1",
+          "ar": "الفيروز 1"
+        },
+        "bedrooms": 3,
+        "bathrooms": 4,
+        "areaSqm": 160.05,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Maid's room",
+            "Maid's bathroom",
+            "Dressing room",
+            "Kitchen"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "غرفة خادمة",
+            "دورة مياه الخادمة",
+            "غرفة ملابس",
+            "مطبخ"
+          ]
+        },
+        "availability": {
+          "en": "Building D, ground, second and fourth floors",
+          "ar": "المبنى D، الأدوار الأرضي والثاني والرابع"
+        },
+        "price": 636245,
+        "subsidisedPrice": 519928,
+        "floorPlan": {
+          "src": "/listings/jeddah-heights-residential-community-jeddah/plan-07.jpg",
+          "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-07-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Kahraman 2",
+          "ar": "كهرمان 2"
+        },
+        "bedrooms": 3,
+        "bathrooms": 4,
+        "areaSqm": 175.4,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Dining room",
+            "Maid's room",
+            "Maid's bathroom",
+            "Kitchen",
+            "Balcony",
+            "Two entrances"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "غرفة طعام",
+            "غرفة خادمة",
+            "دورة مياه الخادمة",
+            "مطبخ",
+            "شرفة",
+            "مدخلان"
+          ]
+        },
+        "availability": {
+          "en": "Building F, ground, second and third floors",
+          "ar": "المبنى F، الأدوار الأرضي والثاني والثالث"
+        },
+        "price": 752914,
+        "subsidisedPrice": 625442,
+        "floorPlan": {
+          "src": "/listings/jeddah-heights-residential-community-jeddah/plan-08.jpg",
+          "thumb": "/listings/jeddah-heights-residential-community-jeddah/plan-08-thumb.webp"
+        }
+      }
+    ],
+    "amenities": {
+      "en": [
+        "Friday mosques",
+        "Neighbourhood mosques",
+        "Parks and green spaces",
+        "Educational facilities",
+        "Health centre",
+        "Commercial facilities",
+        "Health club",
+        "Children's nursery",
+        "Diwaniya social lounges",
+        "Retail shops",
+        "Outdoor seating areas"
+      ],
+      "ar": [
+        "جوامع لصلاة الجمعة",
+        "مساجد الأحياء",
+        "حدائق ومساحات خضراء",
+        "مرافق تعليمية",
+        "مركز صحي",
+        "مرافق تجارية",
+        "نادٍ صحي",
+        "حضانة أطفال",
+        "ديوانيات للجلسات الاجتماعية",
+        "محلات تجارية",
+        "جلسات خارجية"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "King Abdulaziz International Airport",
+        "King Abdullah Sports City",
+        "Al Hamdaniyah Boulevard",
+        "Marina Avenue Mall",
+        "The Village Mall",
+        "Obhur Beach",
+        "Alexandria Beach"
+      ],
+      "ar": [
+        "مطار الملك عبدالعزيز الدولي",
+        "مدينة الملك عبدالله الرياضية",
+        "بوليفارد الحمدانية",
+        "مارينا أفينيو مول",
+        "ذا فيلج مول",
+        "شاطئ أبحر",
+        "شاطئ الإسكندرية"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Structural frame: 10 years",
+        "Waterproofing and insulation: 10 years",
+        "Plumbing installation: 1 year",
+        "Electrical installation: 1 year",
+        "Paintwork: 1 year"
+      ],
+      "ar": [
+        "الهيكل الإنشائي: عشر سنوات",
+        "العزل المائي والحراري: عشر سنوات",
+        "تأسيس السباكة: سنة واحدة",
+        "تأسيس الكهرباء: سنة واحدة",
+        "الدهانات: سنة واحدة"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/jeddah-heights-residential-community-jeddah/brochure.pdf",
     "project": {
@@ -5919,6 +7298,322 @@
         "صالتان رياضيتان للرجال والنساء",
         "مواقف سيارات سفلية وخارجية",
         "ضمان إنشائي يصل إلى 10 سنوات"
+      ]
+    },
+    "models": [
+      {
+        "name": {
+          "en": "Type 01",
+          "ar": "نموذج 01"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 138.4,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC",
+            "Dressing room",
+            "Laundry and storage room"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة",
+            "غرفة ملابس",
+            "غرفة غسيل ومستودع"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-01.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-01-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type 02",
+          "ar": "نموذج 02"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 126.15,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-02.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-02-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type 03",
+          "ar": "نموذج 03"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 116.5,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-03.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-03-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type 04",
+          "ar": "نموذج 04"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 112.45,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-04.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-04-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type 05",
+          "ar": "نموذج 05"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 110.25,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-05.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-05-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type 06",
+          "ar": "نموذج 06"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 109.8,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC",
+            "Terrace"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة",
+            "شرفة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-06.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-06-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type 07",
+          "ar": "نموذج 07"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 108.35,
+        "rooms": {
+          "en": [
+            "Living room",
+            "Kitchen",
+            "Two bathrooms",
+            "Master bedroom WC",
+            "Maid's room",
+            "Maid's room WC"
+          ],
+          "ar": [
+            "غرفة معيشة",
+            "مطبخ",
+            "حمّامان",
+            "دورة مياه لغرفة النوم الرئيسية",
+            "غرفة خادمة",
+            "دورة مياه لغرفة الخادمة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/katheeb-residences-laban-district/plan-07.jpg",
+          "thumb": "/listings/katheeb-residences-laban-district/plan-07-thumb.webp"
+        }
+      }
+    ],
+    "amenities": {
+      "en": [
+        "Men's gym",
+        "Women's gym",
+        "Residents' lounge",
+        "Underground and outdoor parking",
+        "Electronic gates at parking entrances",
+        "Elevators for residents",
+        "Safety systems",
+        "Modern landscaping",
+        "Owners' association",
+        "High privacy"
+      ],
+      "ar": [
+        "صالة رياضية للرجال",
+        "صالة رياضية للنساء",
+        "صالة استرخاء للسكان",
+        "مواقف سيارات سفلية وخارجية",
+        "بوابات إلكترونية لمداخل المواقف",
+        "مصاعد للسكان",
+        "أنظمة سلامة",
+        "تنسيق خارجي حديث",
+        "اتحاد ملّاك",
+        "خصوصية عالية"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Western Ring Road",
+        "Jeddah Road",
+        "Sultanah Street",
+        "Najran Street",
+        "Schools and healthcare facilities",
+        "Neighbourhood mosques",
+        "Banks and supermarkets",
+        "Fuel stations"
+      ],
+      "ar": [
+        "الطريق الدائري الغربي",
+        "طريق جدة",
+        "شارع سلطانة",
+        "شارع نجران",
+        "مدارس ومرافق صحية",
+        "مساجد الحي",
+        "بنوك وأسواق تموينية",
+        "محطات وقود"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Hidden defects insurance",
+        "Structure and waterproofing: 10 years",
+        "Wires, cables, panels and breakers: up to 25 years",
+        "Thermal pipes: up to 15 years",
+        "Sockets and switches: up to 10 years",
+        "Plumbing, electrical and sanitary fixtures: 2 years",
+        "Elevators: 2 years",
+        "Finishing, aluminium and civil defence: 1 year"
+      ],
+      "ar": [
+        "تأمين ضد العيوب الخفية",
+        "الهيكل الإنشائي والعزل المائي: 10 سنوات",
+        "الأسلاك والكيابل والطبالين والقواطع: حتى 25 سنة",
+        "المواسير الحرارية: حتى 15 سنة",
+        "الأفياش والمفاتيح: حتى 10 سنوات",
+        "تأسيس السباكة والكهرباء والأدوات الصحية: سنتان",
+        "المصاعد: سنتان",
+        "التشطيبات والألمنيوم وأنظمة الدفاع المدني: سنة واحدة"
       ]
     },
     "virtualTourUrl": null,
@@ -6082,6 +7777,164 @@
         "تصاميم بخمس أو ست غرف نوم",
         "مصعد خاص ومدخل مزدوج الارتفاع",
         "تصميم متكيف مناخيًا وذاتي التظليل"
+      ]
+    },
+    "models": [
+      {
+        "name": {
+          "en": "The Chatsworth",
+          "ar": "نموذج تشاتسوورث"
+        },
+        "bedrooms": 5,
+        "bathrooms": null,
+        "areaSqm": 557.88,
+        "rooms": {
+          "en": [
+            "Double-height entrance foyer",
+            "Private lift",
+            "Semi-open kitchen",
+            "Lounge",
+            "Gym",
+            "Master dressing room",
+            "Master jacuzzi",
+            "Maid's room with bathroom",
+            "Driver's room with bathroom",
+            "Laundry",
+            "Climate-controlled shaded terrace",
+            "Private temperature-controlled pool"
+          ],
+          "ar": [
+            "ردهة مدخل بارتفاع طابقين",
+            "مصعد خاص",
+            "مطبخ شبه مفتوح",
+            "صالة جلوس",
+            "صالة رياضية",
+            "غرفة ملابس للجناح الرئيسي",
+            "جاكوزي في الجناح الرئيسي",
+            "غرفة خادمة مع حمام",
+            "غرفة سائق مع حمام",
+            "غرفة غسيل",
+            "تراس مظلل بتحكم في الحرارة",
+            "مسبح خاص بتحكم في الحرارة"
+          ]
+        },
+        "availability": {
+          "en": "31 units",
+          "ar": "31 وحدة"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "The Blenheim",
+          "ar": "نموذج بلينهايم"
+        },
+        "bedrooms": 6,
+        "bathrooms": null,
+        "areaSqm": 836.78,
+        "rooms": {
+          "en": [
+            "Triple-height grand entrance",
+            "Private lift",
+            "Chef's kitchen",
+            "Show kitchen",
+            "Wellness lounge with indoor jacuzzi",
+            "Gym, convertible to cinema",
+            "Guest bedroom",
+            "Master suite lounge",
+            "Maid's room with bathroom",
+            "Driver's room with bathroom",
+            "Shaded terrace with kitchenette",
+            "Private temperature-controlled pool"
+          ],
+          "ar": [
+            "مدخل رئيسي بارتفاع ثلاثة طوابق",
+            "مصعد خاص",
+            "مطبخ للطهاة",
+            "مطبخ عرض",
+            "صالة عافية مع جاكوزي داخلي",
+            "صالة رياضية قابلة للتحويل إلى سينما",
+            "غرفة نوم للضيوف",
+            "صالة جلوس في الجناح الرئيسي",
+            "غرفة خادمة مع حمام",
+            "غرفة سائق مع حمام",
+            "تراس مظلل مع مطبخ صغير",
+            "مسبح خاص بتحكم في الحرارة"
+          ]
+        },
+        "availability": {
+          "en": "15 units: 13 units plus 2 corner units",
+          "ar": "15 وحدة: 13 وحدة إضافة إلى وحدتين على الزاوية"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      }
+    ],
+    "amenities": {
+      "en": [
+        "Swimmable Sunrise Lagoon",
+        "The Ripple Water Café",
+        "Outdoor cinema",
+        "Kids' aqua park",
+        "Outdoor jacuzzi area",
+        "BBQ and smokehouse pavilion",
+        "Jogging track",
+        "Aqua sunbeds",
+        "Sikka walkway linking to Phase 1",
+        "EV charging facilities",
+        "Shaded parking spaces",
+        "Solar water heaters",
+        "UV-proof double glazing",
+        "Lagoon water treatment and filtration"
+      ],
+      "ar": [
+        "بحيرة الشروق المخصصة للسباحة",
+        "مقهى ذا ريبل المائي",
+        "سينما في الهواء الطلق",
+        "حديقة مائية للأطفال",
+        "منطقة جاكوزي خارجية",
+        "جناح للشواء وتدخين الأطعمة",
+        "مضمار للجري",
+        "أسرّة تشمّس داخل الماء",
+        "سكة مشاة تصل إلى المرحلة الأولى",
+        "نقاط شحن للسيارات الكهربائية",
+        "مواقف سيارات مظللة",
+        "سخانات مياه بالطاقة الشمسية",
+        "زجاج مزدوج يحجب الأشعة فوق البنفسجية",
+        "معالجة مياه البحيرة وترشيحها"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Crystal swimmable lagoon, 3-minute walk",
+        "Meydan Racecourse",
+        "Downtown Dubai",
+        "Business Bay",
+        "DIFC",
+        "Museum of the Future",
+        "Dubai International Airport",
+        "North London Collegiate School Dubai"
+      ],
+      "ar": [
+        "البحيرة الكريستالية للسباحة على بعد 3 دقائق سيرًا",
+        "مضمار ميدان لسباق الخيل",
+        "وسط مدينة دبي",
+        "الخليج التجاري",
+        "مركز دبي المالي العالمي",
+        "متحف المستقبل",
+        "مطار دبي الدولي",
+        "مدرسة نورث لندن كوليجيت في دبي"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "10-year waterproofing warranty (The Blenheim)"
+      ],
+      "ar": [
+        "ضمان 10 سنوات على العزل المائي (نموذج بلينهايم)"
       ]
     },
     "virtualTourUrl": null,
@@ -6263,6 +8116,78 @@
         "ضمان إنشائي لعشر سنوات"
       ]
     },
+    "amenities": {
+      "en": [
+        "Private pool with outdoor seating",
+        "Private elevator",
+        "Guest majlis",
+        "Roof majlis",
+        "Two roof terraces",
+        "Side family entrance",
+        "Guard's room",
+        "Maid's room",
+        "Laundry and storage room",
+        "Parking for two cars",
+        "Basement service area"
+      ],
+      "ar": [
+        "مسبح خاص مع جلسة خارجية",
+        "مصعد خاص",
+        "مجلس ضيوف",
+        "مجلس في طابق الروف",
+        "تراسان في طابق الروف",
+        "مدخل عائلي جانبي",
+        "غرفة حارس",
+        "غرفة خادمة",
+        "غرفة غسيل وتخزين",
+        "موقفان للسيارات",
+        "منطقة خدمات في القبو"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Al Nakheel Park — 2 minutes",
+        "Four Seasons Hotel — 2 minutes",
+        "Sari Street — 2 minutes",
+        "Corniche Road — 3 minutes",
+        "King Abdulaziz Road — 4 minutes",
+        "King Road Tower — 5 minutes",
+        "Al Nawras Square — 7 minutes",
+        "Jeddah Promenade — 8 minutes"
+      ],
+      "ar": [
+        "منتزه النخيل – دقيقتان",
+        "فندق فور سيزونز – دقيقتان",
+        "شارع صاري – دقيقتان",
+        "طريق الكورنيش – 3 دقائق",
+        "طريق الملك عبدالعزيز – 4 دقائق",
+        "برج طريق الملك (برج الشاشة) – 5 دقائق",
+        "ساحة النورس – 7 دقائق",
+        "جدة بروميناد – 8 دقائق"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Concrete structure — 10 years",
+        "Electrical works — 2 years",
+        "Plumbing works — 2 years",
+        "Roof rain insulation — 10 years",
+        "Waterproofing works — 10 years",
+        "Building maintenance — 3 months",
+        "Elevator spare parts — 2 years",
+        "Elevator motor — 5 years"
+      ],
+      "ar": [
+        "الهيكل الخرساني – 10 سنوات",
+        "أعمال الكهرباء – سنتان",
+        "أعمال السباكة – سنتان",
+        "عزل الأسطح ضد الأمطار – 10 سنوات",
+        "أعمال العزل المائي – 10 سنوات",
+        "صيانة المبنى – 3 أشهر",
+        "قطع غيار المصعد – سنتان",
+        "ماكينة المصعد – 5 سنوات"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/modern-villa-in-al-shati-jeddah/brochure.pdf",
     "project": null,
@@ -6396,6 +8321,330 @@
         "قريب من طريق الحرمين",
         "ضمان إنشائي 10 سنوات",
         "قرب مطار الملك عبدالعزيز"
+      ]
+    },
+    "models": [
+      {
+        "name": {
+          "en": "Type AB apartment",
+          "ar": "نموذج شقة AB"
+        },
+        "bedrooms": 4,
+        "bathrooms": 5,
+        "areaSqm": 178,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Dining and living room",
+            "Kitchen",
+            "Maid's room",
+            "Laundry room",
+            "Dressing room"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة طعام ومعيشة",
+            "مطبخ",
+            "غرفة خادمة",
+            "غرفة غسيل",
+            "غرفة ملابس"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-01.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-01-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type A apartment",
+          "ar": "نموذج شقة A"
+        },
+        "bedrooms": 4,
+        "bathrooms": 5,
+        "areaSqm": 180,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Dining and living room",
+            "Kitchen",
+            "Maid's room",
+            "Laundry room",
+            "Dressing room"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة طعام ومعيشة",
+            "مطبخ",
+            "غرفة خادمة",
+            "غرفة غسيل",
+            "غرفة ملابس"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-02.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-02-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type D apartment",
+          "ar": "نموذج شقة D"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 147,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Dining and living room",
+            "Kitchen",
+            "Maid's room",
+            "Guest bathroom"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة طعام ومعيشة",
+            "مطبخ",
+            "غرفة خادمة",
+            "حمام ضيوف"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-03.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-03-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type B apartment",
+          "ar": "نموذج شقة B"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 147,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Dining and living room",
+            "Kitchen",
+            "Maid's room",
+            "Guest bathroom"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة طعام ومعيشة",
+            "مطبخ",
+            "غرفة خادمة",
+            "حمام ضيوف"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-04.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-04-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type B duplex",
+          "ar": "نموذج دوبلكس B"
+        },
+        "bedrooms": null,
+        "bathrooms": 4,
+        "areaSqm": 196,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Kitchen",
+            "Master bedroom",
+            "Maid's room",
+            "Dressing room"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "مطبخ",
+            "غرفة نوم ماستر",
+            "غرفة خادمة",
+            "غرفة ملابس"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-05.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-05-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type D duplex",
+          "ar": "نموذج دوبلكس D"
+        },
+        "bedrooms": null,
+        "bathrooms": 4,
+        "areaSqm": 196,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Kitchen",
+            "Master bedroom",
+            "Maid's room",
+            "Dressing room"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "مطبخ",
+            "غرفة نوم ماستر",
+            "غرفة خادمة",
+            "غرفة ملابس"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-06.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-06-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type C duplex",
+          "ar": "نموذج دوبلكس C"
+        },
+        "bedrooms": 4,
+        "bathrooms": 5,
+        "areaSqm": 202,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Kitchen",
+            "Maid's room",
+            "Dressing room"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "مطبخ",
+            "غرفة خادمة",
+            "غرفة ملابس"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-07.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-07-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type C apartment",
+          "ar": "نموذج شقة C"
+        },
+        "bedrooms": 4,
+        "bathrooms": 5,
+        "areaSqm": 199,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Kitchen",
+            "Maid's room",
+            "Dressing room"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "مطبخ",
+            "غرفة خادمة",
+            "غرفة ملابس"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-08.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-08-thumb.webp"
+        }
+      }
+    ],
+    "amenities": {
+      "en": [
+        "Retail shops",
+        "Mosques in the suburb",
+        "Schools in the suburb",
+        "Cafés in the suburb",
+        "Restaurants in the suburb",
+        "Children's play areas"
+      ],
+      "ar": [
+        "محلات تجارية",
+        "مساجد في الضاحية",
+        "مدارس في الضاحية",
+        "مقاهٍ في الضاحية",
+        "مطاعم في الضاحية",
+        "ملاعب للأطفال"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Haramain Road",
+        "King Abdulaziz Airport",
+        "King Abdullah Sports City and Al Jawhara Stadium",
+        "King Faisal Specialist Hospital",
+        "King Abdullah Medical Complex",
+        "Al Jawhara Mall",
+        "Al Ruhaili Station",
+        "Jeddah Economic City"
+      ],
+      "ar": [
+        "طريق الحرمين",
+        "مطار الملك عبدالعزيز",
+        "مدينة الملك عبدالله الرياضية واستاد الجوهرة",
+        "مستشفى الملك فيصل التخصصي",
+        "مجمع الملك عبدالله الطبي",
+        "الجوهرة مول",
+        "محطة الرحيلي",
+        "مدينة جدة الاقتصادية"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Structure: 10-year warranty",
+        "Thermal pipes: 10-year warranty",
+        "Waterproofing: 10-year warranty",
+        "Electrical panels: 20-year warranty",
+        "Electromechanical works: 1-year warranty",
+        "Wood, aluminium, paint and finishes: 1-year warranty"
+      ],
+      "ar": [
+        "الهيكل الإنشائي: ضمان 10 سنوات",
+        "الأنابيب الحرارية: ضمان 10 سنوات",
+        "العوازل المائية: ضمان 10 سنوات",
+        "لوحات الكهرباء: ضمان 20 سنة",
+        "أعمال الإلكتروميكانيك: ضمان سنة",
+        "الخشب والألمنيوم والدهان والتشطيبات: ضمان سنة"
       ]
     },
     "virtualTourUrl": null,
@@ -6872,6 +9121,115 @@
         "مرافق مجتمعية على مقربة"
       ]
     },
+    "models": [
+      {
+        "name": {
+          "en": "Rehab",
+          "ar": "نموذج رحاب"
+        },
+        "bedrooms": 4,
+        "bathrooms": 6,
+        "areaSqm": 271.47,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Family majlis (first floor)",
+            "Two dining areas",
+            "Kitchen",
+            "Entrance",
+            "Dressing room",
+            "Terrace",
+            "Maid's room",
+            "Front roof",
+            "Back roof",
+            "Open parking space"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "مجلس عائلي (الدور الأول)",
+            "منطقتا طعام",
+            "مطبخ",
+            "مدخل",
+            "غرفة ملابس",
+            "تراس",
+            "غرفة خادمة",
+            "سطح أمامي",
+            "سطح خلفي",
+            "موقف سيارة مكشوف"
+          ]
+        },
+        "availability": {
+          "en": "39 villas",
+          "ar": "39 فيلا"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/rihab-villas-wajhat-al-warf/plan-01.jpg",
+          "thumb": "/listings/rihab-villas-wajhat-al-warf/plan-01-thumb.webp"
+        }
+      }
+    ],
+    "amenities": {
+      "en": [
+        "21 commercial centres",
+        "Community centre",
+        "Security centre",
+        "Two health centres",
+        "Seven mosques",
+        "Five Friday mosques",
+        "Ten schools",
+        "1.3 million m² of parks and green space",
+        "Safe planned pedestrian network"
+      ],
+      "ar": [
+        "21 مركزًا تجاريًا",
+        "مركز اجتماعي",
+        "مركز أمني",
+        "مركزان صحيان",
+        "سبعة مساجد",
+        "خمسة جوامع",
+        "عشر مدارس",
+        "1.3 مليون م² من الحدائق والمساحات الخضراء",
+        "شبكة مشي آمنة ومخططة"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Heart of Jeddah",
+        "Historic Jeddah",
+        "Business centres",
+        "Main city entrances"
+      ],
+      "ar": [
+        "قلب مدينة جدة",
+        "جدة التاريخية",
+        "مراكز الأعمال",
+        "مداخل المدينة الرئيسية"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "One-year finishing works warranty",
+        "One-year plumbing warranty",
+        "One-year electrical works warranty",
+        "Ten-year building warranty",
+        "Ten-year insulation warranty",
+        "Ten-year anti-termite soil treatment warranty",
+        "Ten-year concrete structure warranty"
+      ],
+      "ar": [
+        "ضمان التشطيبات النهائية لمدة سنة",
+        "ضمان السباكة لمدة سنة",
+        "ضمان الأعمال الكهربائية لمدة سنة",
+        "ضمان المباني لمدة 10 سنوات",
+        "ضمان العزل لمدة 10 سنوات",
+        "ضمان معالجة التربة ضد الحشرات لمدة 10 سنوات",
+        "ضمان الهيكل الخرساني لمدة 10 سنوات"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/rihab-villas-wajhat-al-warf/brochure.pdf",
     "project": {
@@ -7159,6 +9517,34 @@
         "أرضيات تيراكوتا وجسور خشبية"
       ]
     },
+    "amenities": {
+      "en": [
+        "Private swimming pool",
+        "Landscaped garden with palms and lawns",
+        "Balconies and terraces",
+        "Separate laundry and service passage"
+      ],
+      "ar": [
+        "مسبح خاص",
+        "حديقة منسقة بالنخيل والمسطحات الخضراء",
+        "شرفات وتراسات",
+        "غرفة غسيل وممر خدمة مستقل"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Obhur marinas",
+        "Beaches close by",
+        "Resorts close by",
+        "Coastal roads into Jeddah"
+      ],
+      "ar": [
+        "مراسي أبحر",
+        "شواطئ قريبة",
+        "منتجعات قريبة",
+        "طرق ساحلية إلى وسط جدة"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/seafront-villa-al-lulu-north-obhur/brochure.pdf",
     "project": null,
@@ -7290,6 +9676,518 @@
         "دخول ذكي وتطبيق للسكان"
       ]
     },
+    "models": [
+      {
+        "name": {
+          "en": "A-M01",
+          "ar": "نموذج A-M01"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 90,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-M01, first floor (mezzanine)",
+          "ar": "الوحدة A-M01، الدور الأول (الميزانين)"
+        },
+        "price": 780000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-M02",
+          "ar": "نموذج A-M02"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 86,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-M02, first floor (mezzanine)",
+          "ar": "الوحدة A-M02، الدور الأول (الميزانين)"
+        },
+        "price": 750000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-M06",
+          "ar": "نموذج A-M06"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 117,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-M06, first floor (mezzanine)",
+          "ar": "الوحدة A-M06، الدور الأول (الميزانين)"
+        },
+        "price": 850000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-201",
+          "ar": "نموذج A-201"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 110,
+        "rooms": {
+          "en": [
+            "Terrace"
+          ],
+          "ar": [
+            "تراس"
+          ]
+        },
+        "availability": {
+          "en": "Unit A-01, second floor",
+          "ar": "الوحدة A-01، الدور الثاني"
+        },
+        "price": 830000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-202",
+          "ar": "نموذج A-202"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 100,
+        "rooms": {
+          "en": [
+            "Terrace"
+          ],
+          "ar": [
+            "تراس"
+          ]
+        },
+        "availability": {
+          "en": "Unit A-02, second floor",
+          "ar": "الوحدة A-02، الدور الثاني"
+        },
+        "price": 800000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-203",
+          "ar": "نموذج A-203"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 145,
+        "rooms": {
+          "en": [
+            "Terrace"
+          ],
+          "ar": [
+            "تراس"
+          ]
+        },
+        "availability": {
+          "en": "Units A-03 and A-06, second floor",
+          "ar": "الوحدتان A-03 وA-06، الدور الثاني"
+        },
+        "price": 820000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-204",
+          "ar": "نموذج A-204"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 171,
+        "rooms": {
+          "en": [
+            "Terrace"
+          ],
+          "ar": [
+            "تراس"
+          ]
+        },
+        "availability": {
+          "en": "Units A-04 and A-05, second floor",
+          "ar": "الوحدتان A-04 وA-05، الدور الثاني"
+        },
+        "price": 850000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-207",
+          "ar": "نموذج A-207"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 105,
+        "rooms": {
+          "en": [
+            "Terrace"
+          ],
+          "ar": [
+            "تراس"
+          ]
+        },
+        "availability": {
+          "en": "Unit A-07, second floor",
+          "ar": "الوحدة A-07، الدور الثاني"
+        },
+        "price": 820000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-208",
+          "ar": "نموذج A-208"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 110,
+        "rooms": {
+          "en": [
+            "Terrace"
+          ],
+          "ar": [
+            "تراس"
+          ]
+        },
+        "availability": {
+          "en": "Unit A-08, second floor",
+          "ar": "الوحدة A-08، الدور الثاني"
+        },
+        "price": 830000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-01",
+          "ar": "نموذج A-01"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 86,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-01, floors 3 to 6",
+          "ar": "الوحدة A-01، الأدوار من الثالث إلى السادس"
+        },
+        "price": 810000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-02",
+          "ar": "نموذج A-02"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 76,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-02, floors 3 to 6",
+          "ar": "الوحدة A-02، الأدوار من الثالث إلى السادس"
+        },
+        "price": 780000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-03",
+          "ar": "نموذج A-03"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 73,
+        "rooms": null,
+        "availability": {
+          "en": "Units A-03 and A-06, floors 3 to 6",
+          "ar": "الوحدتان A-03 وA-06، الأدوار من الثالث إلى السادس"
+        },
+        "price": 760000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-04",
+          "ar": "نموذج A-04"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 77,
+        "rooms": null,
+        "availability": {
+          "en": "Units A-04 and A-05, floors 3 to 6",
+          "ar": "الوحدتان A-04 وA-05، الأدوار من الثالث إلى السادس"
+        },
+        "price": 780000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-07",
+          "ar": "نموذج A-07"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 81,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-07, floors 3 to 6",
+          "ar": "الوحدة A-07، الأدوار من الثالث إلى السادس"
+        },
+        "price": 800000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-08",
+          "ar": "نموذج A-08"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 85,
+        "rooms": null,
+        "availability": {
+          "en": "Unit A-08, floors 3 to 6",
+          "ar": "الوحدة A-08، الأدوار من الثالث إلى السادس"
+        },
+        "price": 830000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-09",
+          "ar": "نموذج A-09"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 73,
+        "rooms": null,
+        "availability": {
+          "en": "Units A-09 and A-10, floors 3 to 6",
+          "ar": "الوحدتان A-09 وA-10، الأدوار من الثالث إلى السادس"
+        },
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "B-01",
+          "ar": "نموذج B-01"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 72,
+        "rooms": null,
+        "availability": {
+          "en": "Units B-01 and B-12, floors 2 to 7",
+          "ar": "الوحدتان B-01 وB-12، الأدوار من الثاني إلى السابع"
+        },
+        "price": 730000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "B-02",
+          "ar": "نموذج B-02"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 75,
+        "rooms": null,
+        "availability": {
+          "en": "Units B-02, B-05, B-08 and B-11, floors 2 to 7",
+          "ar": "الوحدات B-02 وB-05 وB-08 وB-11، الأدوار من الثاني إلى السابع"
+        },
+        "price": 700000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "B-03",
+          "ar": "نموذج B-03"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 74,
+        "rooms": null,
+        "availability": {
+          "en": "Units B-03 and B-04, floors 2 to 7",
+          "ar": "الوحدتان B-03 وB-04، الأدوار من الثاني إلى السابع"
+        },
+        "price": 680000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "B-L01",
+          "ar": "نموذج B-L01"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 83,
+        "rooms": null,
+        "availability": {
+          "en": "Lofts B-L01 to B-L04, floors 2+3, 4+5 and 6+7",
+          "ar": "وحدات اللوفت من B-L01 إلى B-L04، الأدوار 2+3 و4+5 و6+7"
+        },
+        "price": 650000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-L01",
+          "ar": "نموذج A-L01"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 93,
+        "rooms": null,
+        "availability": {
+          "en": "Lofts A-L01, A-L03, A-L04 and A-L06, floors 2+3, 4+5 and 6+7",
+          "ar": "وحدات اللوفت A-L01 وA-L03 وA-L04 وA-L06، الأدوار 2+3 و4+5 و6+7"
+        },
+        "price": 710000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "A-L02",
+          "ar": "نموذج A-L02"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 85,
+        "rooms": null,
+        "availability": {
+          "en": "Lofts A-L02 and A-L05, floors 2+3, 4+5 and 6+7",
+          "ar": "وحدتا اللوفت A-L02 وA-L05، الأدوار 2+3 و4+5 و6+7"
+        },
+        "price": 700000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "R-B06",
+          "ar": "نموذج R-B06"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 84,
+        "rooms": null,
+        "availability": {
+          "en": "Annex R-B06, seventh floor",
+          "ar": "الملحق R-B06، الدور السابع"
+        },
+        "price": 770000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      },
+      {
+        "name": {
+          "en": "R-B03",
+          "ar": "نموذج R-B03"
+        },
+        "bedrooms": null,
+        "bathrooms": null,
+        "areaSqm": 115,
+        "rooms": null,
+        "availability": {
+          "en": "Annexes R-B03 and R-B04, seventh floor",
+          "ar": "الملحقان R-B03 وR-B04، الدور السابع"
+        },
+        "price": 900000,
+        "subsidisedPrice": null,
+        "floorPlan": null
+      }
+    ],
+    "amenities": {
+      "en": [
+        "Men's health club",
+        "Women's health club",
+        "Residents' lounge",
+        "Kids' zone",
+        "Housekeeping service",
+        "High-speed Wi-Fi",
+        "Security cameras",
+        "Resident app",
+        "Smart entry",
+        "Smart home system",
+        "Hotel-style entrance",
+        "Hotel-grade finishes",
+        "High ceilings",
+        "Wide windows"
+      ],
+      "ar": [
+        "نادٍ صحي للرجال",
+        "نادٍ صحي للنساء",
+        "لاونج للسكان",
+        "منطقة أطفال",
+        "خدمة التدبير المنزلي",
+        "إنترنت عالي السرعة",
+        "كاميرات أمنية",
+        "تطبيق خاص بالسكان",
+        "دخول ذكي",
+        "نظام المنزل الذكي",
+        "مدخل بطابع فندقي",
+        "تشطيبات فندقية",
+        "أسقف عالية",
+        "نوافذ واسعة"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Close to main roads",
+        "Close to the airport",
+        "Close to everyday services"
+      ],
+      "ar": [
+        "بالقرب من الطرق الرئيسية",
+        "بالقرب من المطار",
+        "بالقرب من الخدمات"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Structure: 10 years, natural disasters excluded",
+        "Sanitary fittings: 5 years",
+        "Electrical sockets: 10 years, supplier's warranty",
+        "Plumbing: 24 months"
+      ],
+      "ar": [
+        "الهيكل الإنشائي: 10 سنوات ولا يشمل الكوارث الطبيعية",
+        "الأدوات الصحية: 5 سنوات",
+        "الأفياش: 10 سنوات حسب ضمان الوكيل",
+        "السباكة: 24 شهراً"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/the-river-residences-al-salamah-jeddah/brochure.pdf",
     "project": {
@@ -7416,6 +10314,106 @@
         "مجلسان رئيسي وعائلي",
         "موقع جنوب شرق جدة",
         "ضمان هيكلي 10 سنوات"
+      ]
+    },
+    "models": [
+      {
+        "name": {
+          "en": "Sa'a",
+          "ar": "نموذج سعة"
+        },
+        "bedrooms": 4,
+        "bathrooms": 5,
+        "areaSqm": 224.3,
+        "rooms": {
+          "en": [
+            "Living hall",
+            "Kitchen",
+            "Open kitchen",
+            "Majlis",
+            "Family majlis",
+            "Dining area",
+            "Dressing room",
+            "Terrace",
+            "Roof",
+            "Open parking for one car"
+          ],
+          "ar": [
+            "صالة معيشة",
+            "مطبخ",
+            "مطبخ مفتوح",
+            "مجلس",
+            "مجلس عائلي",
+            "ركن طعام",
+            "غرفة ملابس",
+            "تراس",
+            "سطح",
+            "موقف مفتوح لسيارة واحدة"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/wharf-destination-villas-jeddah/plan-01.jpg",
+          "thumb": "/listings/wharf-destination-villas-jeddah/plan-01-thumb.webp"
+        }
+      }
+    ],
+    "amenities": {
+      "en": [
+        "Green spaces and parks",
+        "Planned pedestrian network",
+        "10 schools",
+        "7 mosques and 5 Friday mosques",
+        "2 health centres",
+        "21 commercial centres",
+        "Social centre",
+        "Security centre"
+      ],
+      "ar": [
+        "مساحات خضراء وحدائق",
+        "شبكة مشاة مخططة",
+        "10 مدارس",
+        "7 مساجد و5 جوامع",
+        "مركزان صحيان",
+        "21 مركزًا تجاريًا",
+        "مركز اجتماعي",
+        "مركز أمني"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Jeddah city centre",
+        "Main city entrances",
+        "Historic Jeddah",
+        "Business centres"
+      ],
+      "ar": [
+        "قلب مدينة جدة",
+        "مداخل المدينة الرئيسية",
+        "جدة التاريخية",
+        "مراكز الأعمال"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "10-year concrete structure warranty",
+        "10-year building warranty",
+        "10-year insulation warranty",
+        "10-year soil anti-insect treatment warranty",
+        "1-year final finishes warranty",
+        "1-year plumbing warranty",
+        "1-year electrical works warranty"
+      ],
+      "ar": [
+        "ضمان الهيكل الخرساني 10 سنوات",
+        "ضمان المباني 10 سنوات",
+        "ضمان العزل 10 سنوات",
+        "ضمان معالجة التربة ضد الحشرات 10 سنوات",
+        "ضمان التشطيبات النهائية سنة كاملة",
+        "ضمان السباكة سنة كاملة",
+        "ضمان أعمال الكهرباء سنة كاملة"
       ]
     },
     "virtualTourUrl": null,

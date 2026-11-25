@@ -129,6 +129,404 @@
       "موقع في جنوب شرق جدة"
     ]
   },
+  "models": [
+    {
+      "name": {
+        "en": "Model A",
+        "ar": "نموذج A"
+      },
+      "bedrooms": 3,
+      "bathrooms": 4,
+      "areaSqm": 183.68,
+      "rooms": {
+        "en": [
+          "Living room",
+          "Kitchen",
+          "Majlis",
+          "Family majlis",
+          "Dining room",
+          "Dressing room",
+          "Roof 92.03 m²"
+        ],
+        "ar": [
+          "صالة معيشة",
+          "مطبخ",
+          "مجلس",
+          "مجلس عائلي",
+          "غرفة طعام",
+          "غرفة ملابس",
+          "سطح 92.03 م²"
+        ]
+      },
+      "availability": {
+        "en": "84 villas; 2 floors; plot 249.64–314.6 m²",
+        "ar": "84 فيلا، طابقان، مساحة الأرض 249.64–314.6 م²"
+      },
+      "price": null,
+      "subsidisedPrice": null,
+      "floorPlan": {
+        "src": "/listings/al-warf-district-jeddah/plan-01.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/plan-01-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Model B",
+        "ar": "نموذج B"
+      },
+      "bedrooms": 4,
+      "bathrooms": 5,
+      "areaSqm": 240.56,
+      "rooms": {
+        "en": [
+          "Living room",
+          "Kitchen",
+          "Majlis",
+          "Family majlis",
+          "Dining room",
+          "Two master bedrooms",
+          "Rooftop stair room",
+          "Roof 95.64 m²"
+        ],
+        "ar": [
+          "صالة معيشة",
+          "مطبخ",
+          "مجلس",
+          "مجلس عائلي",
+          "غرفة طعام",
+          "غرفتا نوم رئيسيتان",
+          "غرفة درج السطح",
+          "سطح 95.64 م²"
+        ]
+      },
+      "availability": {
+        "en": "54 villas; 3 floors; plot 249.90–317.86 m²",
+        "ar": "54 فيلا، ثلاثة طوابق، مساحة الأرض 249.90–317.86 م²"
+      },
+      "price": null,
+      "subsidisedPrice": null,
+      "floorPlan": {
+        "src": "/listings/al-warf-district-jeddah/plan-02.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/plan-02-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Model C",
+        "ar": "نموذج C"
+      },
+      "bedrooms": 4,
+      "bathrooms": 6,
+      "areaSqm": 243.33,
+      "rooms": {
+        "en": [
+          "Living room",
+          "Kitchen",
+          "Majlis",
+          "Family majlis",
+          "Dining room",
+          "Terrace 14.49 m²",
+          "Rooftop stair room",
+          "Roof 97.20 m²"
+        ],
+        "ar": [
+          "صالة معيشة",
+          "مطبخ",
+          "مجلس",
+          "مجلس عائلي",
+          "غرفة طعام",
+          "تراس 14.49 م²",
+          "غرفة درج السطح",
+          "سطح 97.20 م²"
+        ]
+      },
+      "availability": {
+        "en": "19 villas; 3 floors; plot 249.95–474.95 m²",
+        "ar": "19 فيلا، ثلاثة طوابق، مساحة الأرض 249.95–474.95 م²"
+      },
+      "price": null,
+      "subsidisedPrice": null,
+      "floorPlan": {
+        "src": "/listings/al-warf-district-jeddah/plan-03.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/plan-03-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Model D",
+        "ar": "نموذج D"
+      },
+      "bedrooms": 4,
+      "bathrooms": 5,
+      "areaSqm": 268.71,
+      "rooms": {
+        "en": [
+          "Living room",
+          "Kitchen",
+          "Majlis",
+          "First-floor family majlis",
+          "Dining room",
+          "Dressing room",
+          "Rooftop stair room",
+          "Front and back roofs"
+        ],
+        "ar": [
+          "صالة معيشة",
+          "مطبخ",
+          "مجلس",
+          "مجلس عائلي في الطابق الأول",
+          "غرفة طعام",
+          "غرفة ملابس",
+          "غرفة درج السطح",
+          "سطح أمامي وسطح خلفي"
+        ]
+      },
+      "availability": {
+        "en": "24 villas; 3 floors; plot 350.2–544.05 m²",
+        "ar": "24 فيلا، ثلاثة طوابق، مساحة الأرض 350.2–544.05 م²"
+      },
+      "price": null,
+      "subsidisedPrice": null,
+      "floorPlan": {
+        "src": "/listings/al-warf-district-jeddah/plan-04.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/plan-04-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Ufuq",
+        "ar": "نموذج أفق"
+      },
+      "bedrooms": 3,
+      "bathrooms": 4,
+      "areaSqm": 161.02,
+      "rooms": {
+        "en": [
+          "Living room",
+          "Kitchen",
+          "Majlis",
+          "Family majlis",
+          "Dining room",
+          "Terrace 20.16 m²",
+          "Rooftop stair room",
+          "Roof 54.80 m²"
+        ],
+        "ar": [
+          "صالة معيشة",
+          "مطبخ",
+          "مجلس",
+          "مجلس عائلي",
+          "غرفة طعام",
+          "تراس 20.16 م²",
+          "غرفة درج السطح",
+          "سطح 54.80 م²"
+        ]
+      },
+      "availability": {
+        "en": "70 townhouses; 3 floors; plot 200 m²",
+        "ar": "70 تاون هاوس، ثلاثة طوابق، مساحة الأرض 200 م²"
+      },
+      "price": null,
+      "subsidisedPrice": null,
+      "floorPlan": {
+        "src": "/listings/al-warf-district-jeddah/plan-05.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/plan-05-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Marin",
+        "ar": "نموذج مرن"
+      },
+      "bedrooms": 3,
+      "bathrooms": 4,
+      "areaSqm": 192,
+      "rooms": {
+        "en": [
+          "Living room",
+          "Kitchen",
+          "Majlis",
+          "Family majlis",
+          "Dining room",
+          "Entrance hall",
+          "Two terraces",
+          "Dressing room",
+          "Rooftop stair room",
+          "Roof 82.40 m²"
+        ],
+        "ar": [
+          "صالة معيشة",
+          "مطبخ",
+          "مجلس",
+          "مجلس عائلي",
+          "غرفة طعام",
+          "مدخل",
+          "تراسان",
+          "غرفة ملابس",
+          "غرفة درج السطح",
+          "سطح 82.40 م²"
+        ]
+      },
+      "availability": {
+        "en": "134 townhouses; 3 floors; plot 200 m²",
+        "ar": "134 تاون هاوس، ثلاثة طوابق، مساحة الأرض 200 م²"
+      },
+      "price": null,
+      "subsidisedPrice": null,
+      "floorPlan": {
+        "src": "/listings/al-warf-district-jeddah/plan-06.jpg",
+        "thumb": "/listings/al-warf-district-jeddah/plan-06-thumb.webp"
+      }
+    },
+    {
+      "name": {
+        "en": "Sa'ah",
+        "ar": "نموذج سعة"
+      },
+      "bedrooms": 4,
+      "bathrooms": 5,
+      "areaSqm": 224.3,
+      "rooms": {
+        "en": [
+          "Living room",
+          "Kitchen",
+          "Open kitchen",
+          "Majlis",
+          "Family majlis",
+          "Dining room",
+          "Entrance hall",
+          "Dressing room",
+          "Terrace 19.43 m²",
+          "Rooftop stair room",
+          "Roof 84.85 m²"
+        ],
+        "ar": [
+          "صالة معيشة",
+          "مطبخ",
+          "مطبخ مفتوح",
+          "مجلس",
+          "مجلس عائلي",
+          "غرفة طعام",
+          "مدخل",
+          "غرفة ملابس",
+          "تراس 19.43 م²",
+          "غرفة درج السطح",
+          "سطح 84.85 م²"
+        ]
+      },
+      "availability": {
+        "en": "269 villas; 3 floors; plot 250 m²",
+        "ar": "269 فيلا، ثلاثة طوابق، مساحة الأرض 250 م²"
+      },
+      "price": null,
+      "subsidisedPrice": null,
+      "floorPlan": null
+    },
+    {
+      "name": {
+        "en": "Rehab",
+        "ar": "نموذج رحاب"
+      },
+      "bedrooms": 4,
+      "bathrooms": 6,
+      "areaSqm": 271.47,
+      "rooms": {
+        "en": [
+          "Living room",
+          "Kitchen",
+          "Majlis",
+          "First-floor family majlis",
+          "Dining room",
+          "Entrance hall",
+          "Dressing room",
+          "Terrace 11.02 m²",
+          "Roof-level maid's room",
+          "Front and back roofs"
+        ],
+        "ar": [
+          "صالة معيشة",
+          "مطبخ",
+          "مجلس",
+          "مجلس عائلي في الطابق الأول",
+          "غرفة طعام",
+          "مدخل",
+          "غرفة ملابس",
+          "تراس 11.02 م²",
+          "غرفة خادمة في دور السطح",
+          "سطح أمامي وسطح خلفي"
+        ]
+      },
+      "availability": {
+        "en": "39 villas; 3 floors; plot 275 m²",
+        "ar": "39 فيلا، ثلاثة طوابق، مساحة الأرض 275 م²"
+      },
+      "price": null,
+      "subsidisedPrice": null,
+      "floorPlan": null
+    }
+  ],
+  "amenities": {
+    "en": [
+      "21 commercial centres",
+      "10 schools",
+      "7 mosques and 5 Friday mosques",
+      "Two health centres",
+      "Community centre",
+      "Security centre",
+      "Over 1.3 million m² of parks and green space",
+      "Planned safe walking network",
+      "Garden irrigation water points",
+      "One open parking space per home"
+    ],
+    "ar": [
+      "21 مركزاً تجارياً",
+      "10 مدارس",
+      "7 مساجد و5 جوامع",
+      "مركزان صحيان",
+      "مركز اجتماعي",
+      "مركز أمني",
+      "أكثر من 1.3 مليون م² من الحدائق والمساحات الخضراء",
+      "شبكة مشي آمنة ومخططة",
+      "مصادر مياه لري الحدائق",
+      "موقف سيارة مكشوف لكل منزل"
+    ]
+  },
+  "nearby": {
+    "en": [
+      "Jeddah city centre",
+      "Main city entrances",
+      "Historic Jeddah",
+      "Business centres",
+      "Daily services within a 5–10 minute walk"
+    ],
+    "ar": [
+      "قلب مدينة جدة",
+      "مداخل المدينة الرئيسية",
+      "جدة التاريخية",
+      "مراكز الأعمال",
+      "خدمات يومية على بعد 5–10 دقائق مشياً"
+    ]
+  },
+  "warranties": {
+    "en": [
+      "10-year concrete structure warranty",
+      "10-year building warranty",
+      "10-year insulation warranty",
+      "10-year anti-termite soil treatment warranty",
+      "1-year electrical works warranty",
+      "1-year plumbing warranty",
+      "1-year final finishes warranty"
+    ],
+    "ar": [
+      "ضمان الهيكل الخرساني 10 سنوات",
+      "ضمان المباني 10 سنوات",
+      "ضمان العزل 10 سنوات",
+      "ضمان معالجة التربة ضد الحشرات 10 سنوات",
+      "ضمان الأعمال الكهربائية سنة كاملة",
+      "ضمان السباكة سنة كاملة",
+      "ضمان التشطيبات النهائية سنة كاملة"
+    ]
+  },
   "virtualTourUrl": null,
   "brochureUrl": "https://bona-real-estate.com/listings/al-warf-district-jeddah/brochure.pdf",
   "project": {

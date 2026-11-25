@@ -129,6 +129,66 @@
       "ضمان إنشائي 25 سنة"
     ]
   },
+  "amenities": {
+    "en": [
+      "Bohemian-style architecture",
+      "High ceilings",
+      "Wide windows",
+      "Hotel-style entrances",
+      "Smart entry system",
+      "Security cameras",
+      "Upper-level landscaping",
+      "Building elevator"
+    ],
+    "ar": [
+      "تصميم بطابع بوهيمي",
+      "أسقف عالية",
+      "نوافذ واسعة",
+      "مداخل بطابع فندقي",
+      "نظام دخول ذكي",
+      "كاميرات مراقبة",
+      "تنسيق نباتي في الطوابق العلوية",
+      "مصعد في العمارة"
+    ]
+  },
+  "nearby": {
+    "en": [
+      "Near Prince Sultan Street",
+      "Near Al-Yamamah Walkway",
+      "Near the Arab Open University",
+      "Near the University of Jeddah",
+      "Near CBA University",
+      "5 minutes from the Corniche",
+      "10 minutes from the airport"
+    ],
+    "ar": [
+      "بالقرب من شارع الأمير سلطان",
+      "بالقرب من ممشى اليمامة",
+      "بالقرب من الجامعة العربية المفتوحة",
+      "بالقرب من جامعة جدة",
+      "بالقرب من جامعة CBA",
+      "5 دقائق من الكورنيش",
+      "10 دقائق من المطار"
+    ]
+  },
+  "warranties": {
+    "en": [
+      "Structural frame: 25 years, natural disasters excluded",
+      "Sockets and switches: 25 years (dealer's warranty)",
+      "Grohe sanitary ware: 5 years (dealer's warranty)",
+      "Alfanar electrical wiring: 20 years (dealer's warranty)",
+      "Concealed internal plumbing: 2 years",
+      "Elevator: 2 years (supplier's warranty)"
+    ],
+    "ar": [
+      "الهيكل الإنشائي: 25 سنة، لا يشمل الكوارث الطبيعية",
+      "الأفياش: 25 سنة حسب ضمان الوكيل",
+      "الأدوات الصحية (غروهي): 5 سنوات حسب ضمان الوكيل",
+      "الأسلاك الكهربائية (الفنار): 20 سنة حسب ضمان الوكيل",
+      "السباكة والتمديدات الداخلية المدفونة: سنتان",
+      "المصعد: سنتان حسب ضمان الشركة الموردة"
+    ]
+  },
   "virtualTourUrl": null,
   "brochureUrl": "https://bona-real-estate.com/listings/alhayat-residence-al-salama/brochure.pdf",
   "project": {
