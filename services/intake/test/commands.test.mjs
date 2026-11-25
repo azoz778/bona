@@ -133,6 +133,87 @@ describe('parsePriceHint', () => {
     assert.equal(parsePriceHint('SAR 4,500,000 metro nearby').amount, 4500000);
     assert.equal(parsePriceHint('SAR 4,500,000 per year').amount, 4500000);
   });
+
+  // r1 review (Claude + Codex): every caption below read wrongly at cbf3ad4, most of them on main too.
+  const hint = (c) => { const p = parsePriceHint(c); return p && `${p.currency} ${p.amount}`; };
+
+  it('reads each line on its own: an area on the next line never cancels the price', () => {
+    assert.equal(hint('Price: 4.5m SAR\nSqm: 12,000'), 'SAR 4500000');
+    assert.equal(hint('Bedrooms: 4\nAED 450,000'), 'AED 450000');
+    assert.equal(hint('Price SAR 4,500,000\n4 bedrooms'), 'SAR 4500000');
+  });
+
+  it('never runs a figure into the number after it', () => {
+    assert.equal(hint('SAR 4,500,000 4 bedrooms'), 'SAR 4500000');
+    assert.equal(hint('SAR 4,500,000, 5 bedrooms'), 'SAR 4500000');
+    assert.equal(hint('SAR 950,000 120 units'), 'SAR 950000');
+    assert.equal(hint('SAR 4 500 000'), 'SAR 4500000');
+    assert.equal(hint('SAR 4,500,000.'), 'SAR 4500000');
+    assert.equal(hint('SAR 4,500,000.00'), 'SAR 4500000');
+  });
+
+  it('reads the Arabic decimal and thousands separators', () => {
+    assert.equal(hint('السعر ٤٫٥ مليون ريال'), 'SAR 4500000');
+    assert.equal(hint('السعر ٤٬٥٠٠٬٠٠٠ ريال'), 'SAR 4500000');
+  });
+
+  it('reads the multiplier words it used to read, and their Arabic endings', () => {
+    assert.equal(hint('السعر ٨٥٠ ألفاً ريال'), 'SAR 850000');
+    assert.equal(hint('السعر ٨٥٠ ألف ريال'), 'SAR 850000');
+    assert.equal(hint('4.5 millions SAR'), 'SAR 4500000');
+    assert.equal(hint('4.5mil SAR'), 'SAR 4500000');
+    assert.equal(hint('4.5 mln'), 'SAR 4500000');
+    assert.equal(hint('4.5M'), 'SAR 4500000');
+  });
+
+  it('never reads a spaced or written-out square metre as millions', () => {
+    for (const caption of ['Villa 450 m 2', 'Villa 450 m ²', 'Villa 450 m^2', 'Villa 450 M 2 for sale', 'Land 12,000 m 2']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+  });
+
+  it('never reads the m of a street width as millions', () => {
+    assert.equal(hint('Villa 600 m2 on a 20m street, SAR 3,200,000'), 'SAR 3200000');
+    assert.equal(hint('Villa on a 20 m road, 3.2m SAR'), 'SAR 3200000');
+  });
+
+  it('knows more ways to write an area', () => {
+    for (const caption of [
+      'Land 12,000 (sqm)', 'أرض ١٢٠٠٠ أمتار مربعة', 'أرض 12000 م', 'المساحة 12000م', 'Land 12,000 sq yd', 'Land 12,000 ft²',
+      'Land 12,000 sq mt', 'Land 12,000 square-meters', 'Land 12,000 meter2', 'أرض 12000 مترا', 'أرض 12000 مـ2', 'أرض 12000 ‏م2',
+    ]) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+  });
+
+  it('never takes a figure whose label says area or rate per metre', () => {
+    for (const caption of [
+      'Area: 12,000', 'Sqm: 12,000', 'Plot area 12,000', 'سعر المتر: ٣٥٠٠ ريال', '٣٥٠٠ ريال / المتر المربع',
+      'Price per sqm SAR 3,500', 'المساحة: ١٢٠٠٠', 'أرض 12000 م2 سعر المتر 3500 ريال',
+    ]) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    assert.equal(hint('Area 450 m2, price 4.5m'), 'SAR 4500000');
+    assert.equal(hint('Size: 450 m2 / Price: 4,500,000'), 'SAR 4500000');
+  });
+
+  it('never takes a phone, licence or id number as the price', () => {
+    assert.equal(hint('SAR 4,500,000 call 0555226302'), 'SAR 4500000');
+    assert.equal(parsePriceHint('ترخيص 7200012345'), null);
+    assert.equal(parsePriceHint('call 0555226302'), null);
+    assert.equal(parsePriceHint('رقم الهوية 1012345678'), null);
+    // written in groups: a figure straight after another figure is part of a longer number
+    assert.equal(parsePriceHint('+966 55 522 6302'), null);
+    assert.equal(parsePriceHint('call 0555 226 302'), null);
+    assert.equal(hint('SAR 4,500,000 call 0555 226 302'), 'SAR 4500000');
+  });
+
+  it('reads a bare m after 1,000 or more as metres, and a distance as no price', () => {
+    for (const caption of ['Land 12,000 m', 'SAR 4,500,000 m', 'street 20m', 'شارع 20m', '15,000 km from the city', 'أرض 12000 مترمربع']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    assert.equal(hint('Villa on street 20m, 4.5m SAR'), 'SAR 4500000');
+  });
 });
 
 // Review finding: both of these used to be hand-written copies of the site's rules, which is

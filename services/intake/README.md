@@ -67,6 +67,7 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    | `rent`, `للإيجار` | category = rent (period defaults to `year`; `per month` sets month) |
    | `off-plan`, `international` | sets the category |
    | `SAR 4,500,000`, `4.5m`, `990,000 ر.س`, `٤٥٠٠٠٠٠ ريال` | the asking price, overriding the PDF |
+   | `450 m2`, `12,000 sqm`, `3,500/m2`, `Area: 12,000`, `15 km`, a phone number | never read as a price (an area, a rate per m², a distance); when the caption carries no other figure, the PDF's price stands |
    | `#test` | dry run — the bot replies with the listing it *would* publish and writes nothing |
    | `#nobrochure` | publish the listing with **no** downloadable brochure |
    | `#brochure` | nothing (a no-op alias — every brochure is re-published by default) |
