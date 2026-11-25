@@ -62,7 +62,14 @@ test('build.mjs refuses a unit model whose floor plan or its thumbnail is not in
   const dir = tree(listing.slug);
   try {
     const file = path.join(dir, 'scripts/curate/inbox', name);
-    const plan = { src: `/listings/${listing.slug}/plan-01.jpg`, thumb: `/listings/${listing.slug}/plan-01-thumb.webp` };
+    // A plan number the listing does not have on disk yet: the intake adds real plan-NN files over time (the
+    // W003 backfill gave the first listing plan-01), and the listing's own files are linked into the tree, so
+    // reusing a real name would make the "missing" step build and the writes below go through the link.
+    const own = path.join(ROOT, 'public/listings', listing.slug);
+    const nn = Array.from({ length: 99 }, (_, i) => String(i + 1).padStart(2, '0'))
+      .find((n) => !fs.existsSync(path.join(own, `plan-${n}.jpg`)) && !fs.existsSync(path.join(own, `plan-${n}-thumb.webp`)));
+    assert.ok(nn, 'a plan number the listing does not use');
+    const plan = { src: `/listings/${listing.slug}/plan-${nn}.jpg`, thumb: `/listings/${listing.slug}/plan-${nn}-thumb.webp` };
     fs.writeFileSync(file, JSON.stringify({
       ...listing,
       models: [{ name: { en: 'A1', ar: 'نموذج A1' }, bedrooms: 2, bathrooms: 2, areaSqm: 120, rooms: null, availability: null, price: null, subsidisedPrice: null, floorPlan: plan }],
