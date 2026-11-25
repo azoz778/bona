@@ -9,7 +9,7 @@ export const CURRENCIES = ['SAR', 'AED', 'EUR', 'USD', 'OMR'];
 // JavaScript's \b is ASCII-only, so Arabic alternatives must live in their own patterns
 // without word boundaries — "للإيجار" would never match inside a \b(...)\b group.
 const CATEGORY_HINTS = [
-  [/#?\b(for[- ]?rent|rent|rental)\b/i, 'rent'],
+  [/#?\b(for[- ]?rent|rent|rental|lease|leasing)\b/i, 'rent'],
   [/(إيجار|للإيجار|للايجار|ايجار)/, 'rent'],
   [/#?\b(off[- ]?plan|under[- ]?construction)\b/i, 'off-plan'],
   [/(على ?الخارطة|تحت الإنشاء|على الخريطة)/, 'off-plan'],
@@ -20,10 +20,10 @@ const CATEGORY_HINTS = [
 ];
 
 const PERIOD_HINTS = [
-  [/\b(per|\/)\s*(year|yr|annum)\b|\b(?:yearly|annually|a year)\b/i, 'year'],
+  [/(?:\bper|\/)\s*(year|yr|annum)\b/i, 'year'],
   [/(سنوي|سنويا|سنوياً|\/ ?سنة|في السنة)/, 'year'],
-  [/\b(per|\/)\s*(month|mo)\b|\b(?:monthly|a month)\b/i, 'month'],
-  [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر|الشهر)/, 'month'],
+  [/(?:\bper|\/)\s*(month|mo)\b/i, 'month'],
+  [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر)/, 'month'],
 ];
 
 // The caption price overrides the PDF's, so it is read STRICTLY: the caption sets a price only when it
@@ -42,7 +42,10 @@ const AR = String.raw`\u0621-\u064A`; // Arabic letters (tanween and other marks
 // The currencies the site prices in, as codes, symbols and words ("ريال" alone is the Saudi riyal).
 const CURRENCY_WORDS = [
   ['OMR', String.raw`OMR|RO|ر\.ع|(?:بال|ال)?ريال(?:ا)? (?:ال)?عماني|omani (?:riyals?|rials?)`],
-  ['SAR', String.raw`SAR|SR|saudi (?:riyals?|rials?)|riyals?|ر\.س|(?:بال|ال)?ريال(?:ا)?(?: (?:ال)?سعودي)?`],
+  ['SAR', String.raw`SAR|SR|saudi (?:riyals?|rials?)|ر\.س|(?:بال|ال)?ريال(?:ا)? (?:ال)?سعودي`],
+  // A riyal with no country: Saudi on most listings, but an Omani brochure prices in ريال too. Read as
+  // SAR, yet not as a currency the owner wrote, so the brochure's own currency stands.
+  ['RIYAL', String.raw`riyals?|(?:بال|ال)?ريال(?:ا)?`],
   ['AED', String.raw`AED|DHS?|dirhams?|د\.إ|(?:بال|ال)?درهم(?:ا)?(?: (?:ال)?إماراتي)?`],
   ['USD', String.raw`USD|US\$|\$|(?:us )?dollars?|(?:بال|ال)?دولار(?:ا)?(?: (?:ال)?أمريكي)?`],
   ['EUR', String.raw`EUR|€|euros?|(?:بال|ال)?يورو`],
@@ -53,7 +56,7 @@ const tokenRe = (body) => String.raw`(?<![A-Za-z${AR}])(?:${body})(?![A-Za-z${AR
 const CURRENCY_SYMBOL = String.raw`US\$|\$|€`;
 const CURRENCY_TOKEN_RE = new RegExp(String.raw`${CURRENCY_SYMBOL}|` + CURRENCY_WORDS.map(([, re]) => tokenRe(re)).join('|'), 'gi');
 // The words a price-only caption may hold besides the figure, its multiplier and its currency.
-const ALLOWED_WORD_RE = new RegExp(tokenRe(String.raw`price|prices|asking|total|for|sale|rent|rental|lease|is|of|at|a|an|per|year|years|yearly|annum|annually|month|monthly|only|net|cash|final|firm|negotiable|السعر|سعر|بسعر|المطلوب|هو|ب|للبيع|بيع|للإيجار|للايجار|إيجار|ايجار|الإيجار|الايجار|في|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية|فقط|كاش|نهائي|قابل|للتفاوض`), 'gi');
+const ALLOWED_WORD_RE = new RegExp(tokenRe(String.raw`price|prices|asking|total|for|sale|rent|rental|lease|is|of|at|a|an|per|year|years|yearly|annum|annually|month|monthly|only|cash|final|firm|negotiable|السعر|سعر|بسعر|المطلوب|هو|ب|للبيع|بيع|للإيجار|للايجار|إيجار|ايجار|الإيجار|الايجار|في|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية|فقط|كاش|نهائي|قابل|للتفاوض`), 'gi');
 // Every run of digits, with the separators that join it, is one figure.
 const DIGIT_RUN_RE = /[0-9]+(?:[,،٬.٫][0-9]+)*/g;
 // A figure written as a price: thousands in groups of three with one separator, or no separator; a
@@ -68,7 +71,10 @@ const LEFTOVER_OK_RE = /^[\s.,،;؛:!?؟()[\]{}"'`«»“”‘’\-–—_/\\|*
 // A period ("per year", "شهرياً") makes the figure a rent; on a caption with no rent word it is an
 // instalment or an income ("3,500 ريال شهرياً فقط", "Net SAR 450,000 per year"), not the price.
 const PERIOD_WORD_RE = new RegExp(tokenRe(String.raw`per|year|years|yearly|annum|annually|month|monthly|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية`), 'i');
+const MONTH_WORD_RE = new RegExp(tokenRe(String.raw`month|monthly|شهر|الشهر|شهري|شهريا|شهرية`), 'i');
+const YEAR_WORD_RE = new RegExp(tokenRe(String.raw`year|years|yearly|annum|annually|سنة|السنة|سنوي|سنويا|سنوية`), 'i');
 const RENT_WORD_RE = new RegExp(String.raw`(?<![A-Za-z])(?:rent|rental|lease|for-?rent)(?![A-Za-z])|(?:لل|ال)?[إا]يجار`, 'i');
+const SALE_WORD_RE = new RegExp(String.raw`(?<![A-Za-z])(?:sale|for-?sale|buy)(?![A-Za-z])|للبيع|(?<![${AR}])بيع(?![${AR}])`, 'i');
 // Dollars of other countries ("A$ 1.2m", "HK$ 1.2m"): no caption price.
 const OTHER_DOLLAR_RE = /(?<![A-Za-z])(?:A|AU|C|CA|NZ|HK|S|NT|R|MX)\$/i;
 const FLAG_TAG_RE = /#(?:test|dry|draft|brochure|pdf|nobrochure|nopdf|no-brochure|no-pdf|hidden|private|rent|rental|forrent|for-rent|sale|forsale|for-sale|buy|offplan|off-plan|international|overseas)(?![A-Za-z0-9_-])/gi;
@@ -87,9 +93,18 @@ export function parsePriceHint(caption) {
   // ("#Deposit 50,000" is a deposit).
   const folded = String(caption || '').replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
   const text = westernise(folded).replace(INVISIBLE_RE, '')
-    .replace(FLAG_TAG_RE, ' ').replace(/#[^\s#]*[0-9][^\s#]*/g, ' ').replace(/#/g, ' ').replace(/\s+/g, ' ').trim();
+    .replace(FLAG_TAG_RE, ' ').replace(/#/g, ' ').replace(/\s+/g, ' ').trim();
+  // A hashtag holding a digit ("#1stPayment", "#250000", "#2BR") may label or be the figure: no price.
+  if (/#[A-Za-z0-9_\-\u0621-\u064A]*[0-9]/.test(westernise(folded).replace(FLAG_TAG_RE, ' '))) return null;
   if (/[\p{Nd}\p{No}]/u.test(text.replace(/[0-9]/g, '')) || OTHER_DOLLAR_RE.test(text)) return null;
   if (PERIOD_WORD_RE.test(text) && !RENT_WORD_RE.test(westernise(folded))) return null;
+  const rent = RENT_WORD_RE.test(westernise(folded));
+  if (rent && SALE_WORD_RE.test(westernise(folded))) return null;
+  // The rent period, read from this closed caption ("Rent SAR 4,500 month"); both words ("a month for a
+  // year") leave it unclear: no price.
+  const month = MONTH_WORD_RE.test(text), year = YEAR_WORD_RE.test(text);
+  if (month && year) return null;
+  const period = month ? 'month' : year ? 'year' : null;
   const runs = [...text.matchAll(DIGIT_RUN_RE)];
   if (runs.length !== 1) return null;
   const [run] = runs;
@@ -124,17 +139,21 @@ export function parsePriceHint(caption) {
   const word = (mult?.groups.lmult || mult?.groups.amult || '').toLowerCase();
   const factor = /^(m|mn|mil|mln|millions?|مليون|ملايين)$/.test(word) ? 1e6 : /^(k|thousands?|ألف|الف)$/.test(word) ? 1e3 : 1;
   const amount = Number(digits);
-  // A bare "450 m" is as likely metres as millions: with no currency, it is millions only below 100.
-  if (word === 'm' && !currency && amount >= 100) return null;
+  // A bare "450 m" is as likely metres as millions: with no currency, it is millions only below 100
+  // and written onto the figure ("25m"; "#sale 25 m" may be a frontage).
+  if (word === 'm' && !currency && (amount >= 100 || /^ /.test(mult[0]))) return null;
   // The amount as typed; a multiplier's float noise (2.05 x 1e6 = 2049999.9999999998) rounded away.
-  if (factor === 1e6 && amount >= 1000) return null;
+  if ((factor === 1e6 && amount >= 1000) || (factor === 1e3 && amount >= 100000)) return null;
   const value = factor === 1 ? amount : Math.round(amount * factor * 1000) / 1000;
   if (!Number.isFinite(value) || value > 1e10) return null;
   // A bare number only counts as a price when it is plausibly one (>= 10,000) —
   // otherwise "3 bedrooms" would become a price.
   if (!currency && factor === 1 && value < 10000) return null;
   if (value < 1000) return null;
-  return { amount: value, currency: currency || 'SAR', explicitCurrency: Boolean(currency) };
+  // Under 10,000 is a rent at most: on any other caption it is a rate per metre or a fee, not the price.
+  if (!rent && value < 10000) return null;
+  const written = Boolean(currency) && currency !== 'RIYAL';
+  return { amount: value, currency: written ? currency : 'SAR', explicitCurrency: written, period };
 }
 
 /**
@@ -160,9 +179,11 @@ export function parseCaption(caption) {
   for (const [re, value] of PERIOD_HINTS) {
     if (re.test(text)) { period = value; break; }
   }
+  const price = parsePriceHint(text);
+  // A caption price brings its own period, read from its closed word list.
+  if (price) period = price.period;
   if (category === 'rent' && !period) period = 'year';
   if (category !== 'rent') period = null;
-  const price = parsePriceHint(text);
   return {
     text,
     tags,
@@ -282,7 +303,9 @@ export function parseCommand(text) {
       const rest = parts.slice(2).join(' ');
       if (/^\s*(on ?request|onrequest|عند الطلب)\s*$/i.test(rest)) return { cmd: 'price', id, onRequest: true };
       const p = parsePriceHint(rest);
-      if (!p) return { cmd: 'error', message: 'usage: price BONA-W001 4500000  |  price BONA-W001 onrequest' };
+      // setPrice cannot change the rent period, so a figure with one is refused (it would be published as
+      // the listing's own period).
+      if (!p || p.period) return { cmd: 'error', message: 'usage: price BONA-W001 4500000  |  price BONA-W001 onrequest' };
       // A currency only when the owner wrote one: setPrice keeps the listing's own otherwise.
       return { cmd: 'price', id, amount: p.amount, currency: p.explicitCurrency ? p.currency : null, onRequest: false };
     }
