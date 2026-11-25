@@ -79,19 +79,20 @@ const SALE_WORD_RE = new RegExp(String.raw`(?<![A-Za-z])(?:sale|for-?sale|buy)(?
 // Dollars of other countries ("A$ 1.2m", "AUS$", "HK$"): letters on a "$" are US, or an allowed word
 // of three letters or more ("Price$450,000"); anything else is no caption price.
 const ALLOWED_WHOLE_RE = new RegExp(String.raw`^(?:${ALLOWED_WORD_RE.source})$`, 'i');
-const otherDollar = (text) => [...text.matchAll(/([A-Za-z]+)\$/g)]
+// (Anchored at the start of the letter run: from every letter it would rescan the run, in square time.)
+const otherDollar = (text) => [...text.matchAll(/(?<![A-Za-z])([A-Za-z]+)\$/g)]
   .some(([, w]) => !/^us$/i.test(w) && !(w.length >= 3 && ALLOWED_WHOLE_RE.test(w)));
 const FLAG_TAG_RE = /#(?:test|dry|draft|brochure|pdf|nobrochure|nopdf|no-brochure|no-pdf|hidden|private|rent|rental|forrent|for-rent|sale|forsale|for-sale|buy|offplan|off-plan|international|overseas)(?![A-Za-z0-9_-])/gi;
 // Direction marks, the tatweel and the vowel marks are invisible ("عُماني" is "عماني", "بـ" is "ب").
 const INVISIBLE_RE = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069\u0640\u064B-\u0652]/g;
 
+/** The currency a riyal with no country means on a listing priced in `listingCurrency`. */
+export const riyalCurrency = (listingCurrency) => (listingCurrency === 'OMR' ? 'OMR' : 'SAR');
+
 /**
  * A price the OWNER typed in the caption. Never an estimate — this only reads an explicit
  * figure. Returns null unless the caption is nothing but that price (see above).
  */
-/** The currency a riyal with no country means on a listing priced in `listingCurrency`. */
-export const riyalCurrency = (listingCurrency) => (listingCurrency === 'OMR' ? 'OMR' : 'SAR');
-
 export function parsePriceHint(caption, { command = false } = {}) {
   // Fullwidth characters ("４．５m") become their ASCII forms; any other non-ASCII digit, a superscript
   // or a footnote mark ("450000¹") included, is not ours to read. All white space, line breaks included,
