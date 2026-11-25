@@ -407,6 +407,10 @@ one quota notice rather than repeated failure replies. No provider limits are by
 The service runs from `~/bona` and writes to a **separate clone** so that a `git pull` during
 a publish can never rewrite the code running the publish.
 
+**Node 24 or newer is required** (`services/package.json` engines, and what CI runs). Node 22
+cannot parse the inline regex modifiers `(?-i:…)` in `lib/price.mjs` and `lib/pipeline.mjs`, so
+the intake will not even start on it. Check with `node --version` before installing.
+
 ```bash
 # 1. the publishing clone (once)
 gh repo clone azoz778/bona ~/bona-bot

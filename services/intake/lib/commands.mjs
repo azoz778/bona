@@ -26,6 +26,15 @@ const PERIOD_HINTS = [
   [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر)/, 'month'],
 ];
 
+// A multiplier is a whole word: what follows it is the end, a space or punctuation, or a currency
+// typed straight after it ("4.5mSAR"). Without this the m of "450 m2" and "10 mins" read as
+// million and the k of "15 km" as thousand.
+const MULTIPLIER_END = String.raw`(?=$|[^A-Za-z0-9²³ء-ي]|SAR|AED|EUR|USD|OMR|ريال|ر\.س)`;
+
+// A figure followed by an area unit is an area ("12,000 sqm", "450 m²", "12000 م2"), and one
+// followed by "/m2" or "per sqm" is a rate per square metre: neither is the price, however large.
+const AREA_AFTER_RE = /^\s*(?:(?:\/|per\b|لكل|لل)\s*)?(?:m\s*[2²]|m\^2|sqm|sqft|sq\.?\s*(?:m|ft|feet|met(?:er|re)s?)\b|square\s*(?:m|f(?:ee|oo)t|met(?:er|re)s?)\b|met(?:er|re)s?\b|م\s*[2²]|متر(?:\s*مربع|(?![ء-ي])))/i;
+
 /**
  * A price the OWNER typed in the caption. Never an estimate — this only reads an
  * explicit figure. Returns null when the caption carries no number.
@@ -33,9 +42,13 @@ const PERIOD_HINTS = [
 export function parsePriceHint(caption) {
   const s = westernise(caption || '');
   // "SAR 4,500,000" | "4.5m sar" | "٤٥٠٠٠٠٠ ريال" | "price 750000"
-  const re = /(?:^|[\s(])(?:(SAR|AED|EUR|USD|OMR|ر\.س|ريال)\s*)?([0-9][0-9,،.\s]*)\s*(m|mn|million|k|مليون|ألف|الف)?\s*(SAR|AED|EUR|USD|OMR|ر\.س|ريال)?/gi;
+  const re = new RegExp(
+    String.raw`(?:^|[\s(])(?:(SAR|AED|EUR|USD|OMR|ر\.س|ريال)\s*)?([0-9][0-9,،.\s]*)\s*(?:(m|mn|million|k|مليون|ألف|الف)${MULTIPLIER_END})?\s*(SAR|AED|EUR|USD|OMR|ر\.س|ريال)?`,
+    'gi',
+  );
   let best = null;
   for (const m of s.matchAll(re)) {
+    if (AREA_AFTER_RE.test(s.slice(m.index + m[0].length))) continue;
     const rawNum = m[2].replace(/[,،\s]/g, '');
     if (!rawNum || !/^\d+(\.\d+)?$/.test(rawNum)) continue;
     let amount = Number(rawNum);

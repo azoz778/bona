@@ -92,6 +92,47 @@ describe('parsePriceHint', () => {
   it('takes the largest figure when several appear', () => {
     assert.equal(parsePriceHint('was 3,000,000 now SAR 4,500,000').amount, 4500000);
   });
+
+  // The m of "m2" used to be read as "million": "Villa 450 m2" became SAR 450,000,000, larger
+  // than the real price, so it won. A multiplier must be a whole word now.
+  it('never reads the m of an area unit as millions', () => {
+    for (const caption of ['Villa 450 m2', 'Villa 450m2', 'Villa 450 m²', 'villa 450 M2 for sale']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    assert.equal(parsePriceHint('Villa 450 m2 SAR 4,500,000').amount, 4500000);
+    assert.equal(parsePriceHint('SAR 4,500,000 villa 450m2').amount, 4500000);
+  });
+
+  it('never reads the m or k of a word that only starts with one as a multiplier', () => {
+    assert.equal(parsePriceHint('10 mins to the airport'), null);
+    assert.equal(parsePriceHint('15 km from the corniche'), null);
+    assert.equal(parsePriceHint('15 km from the corniche, 2.5m SAR').amount, 2500000);
+  });
+
+  // A bare figure of 10,000 or more used to pass as a price even when it was the plot area.
+  it('never takes an area as the price, however large', () => {
+    for (const caption of [
+      'Land 12,000 sqm', 'Land 12,000 sq m', 'Land 12,000 sq. m', 'Land 12000m2', 'Land 12,000 square meters',
+      'Land 120,000 sq ft', 'أرض 12000 م2', 'أرض ١٢٠٠٠ م²', 'أرض 12000 متر مربع',
+    ]) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    assert.equal(parsePriceHint('Land 12,000 sqm SAR 9,000,000').amount, 9000000);
+  });
+
+  it('never takes a rate per square metre as the price', () => {
+    for (const caption of ['SAR 3,500/m2', '3,500 SAR per sqm', '3500 ريال للمتر', '3500 ريال / م2']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    assert.equal(parsePriceHint('Land 12,000 m2 at SAR 3,500/m2, total SAR 42,000,000').amount, 42000000);
+  });
+
+  it('keeps a price that is only followed by a word that starts like a unit', () => {
+    assert.equal(parsePriceHint('4,500,000 ريال مترو الرياض قريب').amount, 4500000);
+    assert.equal(parsePriceHint('4,500,000 ريال للبيع').amount, 4500000);
+    assert.equal(parsePriceHint('SAR 4,500,000 metro nearby').amount, 4500000);
+    assert.equal(parsePriceHint('SAR 4,500,000 per year').amount, 4500000);
+  });
 });
 
 // Review finding: both of these used to be hand-written copies of the site's rules, which is
