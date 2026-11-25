@@ -1,0 +1,41 @@
+name: CI
+
+# The PR check: the same checks the deploy's build job runs (deploy.yml), on the PR's own code, without
+# the TK listings sync (network, and it edits listings.json) and without Pages. The `main` ruleset
+# requires this job's check, `ci`, before a PR can merge. It is a separate file so a PR never shares
+# deploy.yml's `pages` concurrency group, which cancels a deploy in progress.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Unit tests (site scripts + social publishers)
+        run: npm test
+      - name: Unit tests (WhatsApp intake)
+        run: node --test services/intake/test/*.test.mjs
+      - name: Unit tests (two-model review gate)
+        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+      - run: node scripts/curate/validate.mjs
+      - run: node scripts/og/gen-llms.mjs
+      - run: npm run build
+      - run: npm run test:dist
