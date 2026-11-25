@@ -1694,6 +1694,41 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
         await assert.rejects(run(r), (err) => err.stage === 'price' && /could not be checked/.test(err.reason) && /try again later/.test(err.reason) && !/could not be confirmed/.test(err.reason));
       } finally { r.cleanup(); }
     }
+    // r14e (Codex r14d #1): the clean page is looked at first, but the page it outranked stays the second look — Villa A's
+    // own price beside its area on p2 is still checked when Villa B's clean p3 refuses.
+    {
+      const r = await rig({ listing: sale(450000), pageText: [`Overview${PAD}`, `Villa A asking price SAR 450,000 — 250 m²${PAD}`, `Villa B asking price SAR 450,000${PAD}`, 'Contact'],
+        facts: { 2: [{ fig: 450000, mark: 'SAR', kind: 'whole' }] } });
+      try {
+        const report = await run(r);
+        assert.equal(report.listingPreview.price.amount, 450000);
+        assert.deepEqual(r.calls().filter((c) => c.tool === 'claude-confirm').map((c) => c.page), [3, 2]);
+      } finally { r.cleanup(); }
+    }
+    // r14e (Codex r14d #2): the quota stopped the headline, so its Sakani price was never checked: a copy that states the
+    // Sakani price refuses the run with "try again later", not "resend with the price in the caption".
+    {
+      const a = withModels([], { price: { amount: 1250000, subsidisedAmount: 1100000, currency: 'SAR', from: false, period: null, onRequest: false }, priceEvidence: null });
+      a.listing.category = 'buy';
+      a.listing.highlights.en = ['Sakani price 1,100,000', ...a.listing.highlights.en.slice(1)];
+      const r = await rig({ listing: a, pageText: [`Overview${PAD}`, 'Location', `Club access per person\nAsking price SAR 1,250,000${PAD}`, 'Contact'], confirm: [], confirmFail: 'quota' });
+      try {
+        await assert.rejects(run(r), (err) => err.stage === 'price' && /states the price 1,100,000/.test(err.reason) && /try again later/.test(err.reason) && !/resend with the price/.test(err.reason));
+      } finally { r.cleanup(); }
+    }
+    assert.equal(measureNear('2,500 ريال للمترالمربع', 2500), true, 'a text layer that drops the space before المربع (Codex r14d NB2)');
+    // r14e (Claude r14d NB8 / NB9): the visual "²  م" with more spaces; Persian digits; a glued مترمكعب.
+    for (const t of ['²  م12,500', '²   م12,500', 'م۲ 12,500', '12,500 م۲', '12,500 مترمكعب']) assert.equal(measureNear(t, 12500), true, t);
+    // r14e (Claude r14d NB3): a unit-model figure whose check could not be completed, stated in the copy, refuses the
+    // run with "try again later" — never "could not be confirmed … resend with the price".
+    {
+      const a = withModels([model('Nawras', 419994, null, 3), model('Lulu', 319015, null, 3)]);
+      a.listing.description.en = ['Two-bedroom apartments from 319,015 in phase one.', 'Two.'];
+      const r = await rig({ listing: a, modelConfirmFail: true });
+      try {
+        await assert.rejects(run(r), (err) => err.stage === 'price' && /states the price 319,015/.test(err.reason) && /try again later/.test(err.reason) && !/could not be confirmed/.test(err.reason));
+      } finally { r.cleanup(); }
+    }
     // NB1: a short-stay figure the copy states under the owner's caption price goes to its page too, and is refused.
     {
       const a = sale(1200);
@@ -2505,7 +2540,10 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       // "1 night"; the spelling twins of r14c.
       ['اإليجار\n60,000 ريال', 60000], ['في األسبوع\n700 ريال', 700], ['المبيت\n700 ريال', 700], ['الويكند\n700 ريال', 700],
       ['700 ريال للشخص', 700], ['SAR 700 per person', 700], ['SAR 700 per hour', 700], ['SAR 700 per stay', 700], ['SAR 700 / 1 night', 700],
-      ['ايام الأسبوع\n700 ريال', 700], ['نهايه الأسبوع\n700 ريال', 700], ['ليلتان\n1,800 ريال', 1800], ['ليالي\n1,800 ريال', 1800]]) {
+      ['ايام الأسبوع\n700 ريال', 700], ['نهايه الأسبوع\n700 ريال', 700], ['ليلتان\n1,800 ريال', 1800], ['ليالي\n1,800 ريال', 1800],
+      // r14e (Claude r14d NB7): the Arabic short-stay twins and the English hyphen and overnight forms.
+      ['700 ريال بالساعة', 700], ['700 ريال للإقامة', 700], ['700 ريال للفرد', 700], ['الويك اند\n700 ريال', 700],
+      ['SAR 700 overnight', 700], ['SAR 1,800 2-night stay', 1800]]) {
       const o = await outcome({ listing: sale(amount), pageText: pages(p3), confirm: [] });
       assert.deepEqual(o.checks.map((c) => [c.amount, c.page, c.sale]), [[amount, 3, true]], p3);
       assert.equal(o.price.onRequest, true, p3);

@@ -203,9 +203,9 @@ const MEASURE_WORD_RE = new RegExp([
   String.raw`m[²³23]`,
   String.raw`(?<![a-z])(?:sq\.?\s?(?:m|ft|yds?)|square\s+(?:met(?:re|er)s?|feet|foot|yards?))`,
   String.raw`(?<![a-z])(?:met(?:re|er)s?|ft|feet|hectares?|acres?|km|bua|gfa|areas?)(?![a-z])`,
-  String.raw`(?<!${AR_LETTER})${AR_CLITICS}م\s?(?:[²³]|[23٢٣](?![\d٠-٩۰-۹]))`,
-  String.raw`(?:[²³]|(?<![\d٠-٩۰-۹][.,٫٬]?)[23٢٣])\s?م(?!${AR_LETTER})`,
-  String.raw`(?<!${AR_LETTER})${AR_CLITICS}(?:متر(?:ا|ان|ين|ات|ها|ه|\s*مربع(?:ا)?)?|[أا]متار(?:ا|ها|ه)?|هكتار(?:ات|ا|ان|ين|ها|ه)?|مساح(?:ة|ه|ات|ته|تها))(?!${AR_LETTER})`,
+  String.raw`(?<!${AR_LETTER})${AR_CLITICS}م[^\S\n]*(?:[²³]|[23٢٣۲۳](?![\d٠-٩۰-۹]))`,
+  String.raw`(?:[²³]|(?<![\d٠-٩۰-۹][.,٫٬]?)[23٢٣۲۳])[^\S\n]*م(?!${AR_LETTER})`,
+  String.raw`(?<!${AR_LETTER})${AR_CLITICS}(?:متر(?:ا|ان|ين|ات|ها|ه|\s*(?:ال)?مربع(?:ا)?|\s*(?:ال)?مكعب(?:ا)?)?|[أا]متار(?:ا|ها|ه)?|هكتار(?:ات|ا|ان|ين|ها|ه)?|مساح(?:ة|ه|ات|ته|تها))(?!${AR_LETTER})`,
   String.raw`(?<!${AR_LETTER})كم(?!${AR_LETTER})`,
 ].join('|'), 'i');
 /** A line as printed and NFKC-folded with no tatweel or harakat: "²" is a unit as printed, presentation forms are letters folded. */

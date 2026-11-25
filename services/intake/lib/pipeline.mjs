@@ -277,14 +277,14 @@ const PERIOD_PHRASE = String.raw`(?:a\s+(?:night|week|day)|per\s+day)`;
 const RENT_WORDING_RE = new RegExp([
   String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|returns?|roi|revenues?|tenant(?:s|ed)?|tenancy|let\s+at|daily|weekend\s+rates?)\b`,
   String.raw`\b${PERIOD_PHRASE}\b`,
-  String.raw`\b(?:weekdays?|weekends?|night\s+rates?|(?:one|every|\d+)\s+night|(?:two|three|four|five|six|seven|\d+)\s+nights|per\s+(?:person|hour|stay))\b`,
+  String.raw`\b(?:weekdays?|weekends?|night\s+rates?|(?:one|every|\d+)\s+night|(?:two|three|four|five|six|seven|\d+)\s+nights|per\s+(?:person|hour|stay)|overnight|\d+-nights?)\b`,
   String.raw`\/\s*(?:day|night|week)\b`,
   arabicWords(String.raw`[إاأ]يجار(?:ات)?(?:ي|ية|يه|يا|ا|${RENT_SUFFIX})?|استئجار|تأجير|تاجير|أجرة|اجرة|أجره|اجره|[أا]جرت(?:ه|ها|هم)|مؤجر|مؤجرة|مؤجره|مؤجرا|`
     + String.raw`موجر|موجرة|مستأجر|مستأجرة|دخل(?:ا|${RENT_SUFFIX})?|عائد(?:ات)?(?:ا|${RENT_SUFFIX})?|عوائد(?:ا|${RENT_SUFFIX})?|[إا]يراد(?:ات)?(?:ا|${RENT_SUFFIX})?|`
     + String.raw`ريع(?:ا|${RENT_SUFFIX})?|مردود(?:ا|${RENT_SUFFIX})?`, { ka: true }),
   arabicWords(String.raw`بالليل[ةه]|في\s+الليل[ةه]|كل\s+ليل[ةه]|باليوم|في\s+(?:الأسبوع|الاسبوع)|بال[أا]سبوع|`
     + String.raw`سعر\s+الليل[ةه]|لليوم|لل[أا]سبوع|ليليا|ت[أا]جيري[ةه]|للعام|كل\s+عام|لكل\s+[أا]سبوع|سعر\s+اليومي|`
-    + String.raw`سعر\s+ال[أا]سبوعي|سعر\s+ال[أا]سبوع|ليل[ةه]\s+(?:ال)?واحد[ةه]|كل\s+يوم|(?:أيام|ايام|نهاية|نهايه|وسط)\s+ال[أا]سبوع|ليلتين|ليلتان|ليال(?:ي)?|مبيت|ويكند|للشخص|لكل\s+شخص`),
+    + String.raw`سعر\s+ال[أا]سبوعي|سعر\s+ال[أا]سبوع|ليل[ةه]\s+(?:ال)?واحد[ةه]|كل\s+يوم|(?:أيام|ايام|نهاية|نهايه|وسط)\s+ال[أا]سبوع|ليلتين|ليلتان|ليال(?:ي)?|مبيت|ويكند|الويك\s*[اإ]ند|للشخص|لكل\s+شخص|بالساع[ةه]|للإقام[ةه]|للاقام[ةه]|للفرد`),
   String.raw`\/\s*(?:ال)?(?:ليل[ةه]|يوم|[أا]سبوع|عام)(?!${AR_LETTER})`,
   RENT_PERIOD,
 ].join('|'), 'i');
@@ -1002,8 +1002,10 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     if (cited !== null && carries(cited)) return [cited, doubted(cited) ? clean : null].filter((n, k, all) => n !== null && all.indexOf(n) === k);
     const rendered = pageImages.find((p) => carries(p.page));
     const i = pageText.findIndex((t) => priceAppearsIn(t ?? '', amount));
-    const inText = clean ?? (rendered ? rendered.page : i === -1 ? null : i + 1);
-    return [inText, cited].filter((n, k, all) => n !== null && all.indexOf(n) === k);
+    const inText = rendered ? rendered.page : i === -1 ? null : i + 1;
+    // The clean page first, and the page it outranked as the second look, so a price printed beside its own area on one
+    // page is still checked when another page's clean figure is someone else's (Codex r14d #1); two looks at most.
+    return [clean, inText, cited].filter((n, k, all) => n !== null && all.indexOf(n) === k).slice(0, 2);
   };
   /**
    * Makes sure page `want` is among the rendered pages: renders it (into `headline-pages`) when it is not
@@ -1160,6 +1162,9 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
     });
     ai.models = mp.models;
     rejectedPrices.push(...mp.refused);
+    // A figure whose check could not be done (a render, a failed call, a spent quota) is unchecked, not refused: a copy
+    // that states it refuses the run with "try again later" (Claude r14d NB3).
+    for (const n of mp.incomplete) uncheckedPrices.set(n, mp.fatal ? 'the AI quota ran out' : 'the check of its page failed');
     if (mp.fatal) quotaHit = true;
     // Two kinds of refusal, two warnings. `mp.incomplete`: figures whose check could not be done for
     // a reason that is ours, not the brochure's — their page did not render, the second model's call
@@ -1419,7 +1424,8 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
           ? `the subsidised (Sakani) price could not be checked on the brochure (${uncheckedWhy(evidence)}), so only the regular price is shown for now — try again later`
           : 'the subsidised (Sakani) price could not be confirmed on the brochure, so only the regular price is shown');
       }
-      if (price.subsidisedAmount > 0) rejectedPrices.push(price.subsidisedAmount);
+      // Never checked because a spent quota cleared the headline first: unchecked, not refused (Codex r14d #2).
+      if (price.subsidisedAmount > 0) refuse(price.subsidisedAmount, evidence ?? (quotaHit ? { unchecked: true, uncheckedWhy: 'quota' } : null));
       price.subsidisedAmount = null;
     }
   }
