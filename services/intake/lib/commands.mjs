@@ -32,23 +32,32 @@ const PERIOD_HINTS = [
 // - a second figure anywhere (an area, a room count, a phone, a second price);
 // - two different currencies, or one this site does not price in;
 // - a unit after the figure ("450 m2", "12,000 sqm", "3,500/m2", "15 km", "/m");
-// - a label before it that says what else it is ("Area:", "Deposit", "was", "Call", "سعر المتر").
+// - a label before or after it that says what else it is ("Area:", "Deposit", "was", "Call",
+//   "سعر المتر", "50,000 off"), or a caption that says the price is on request.
 // Then the PDF's own price stands, the bot's reply shows what was published, and `price <id> …` sets
 // a price by hand. (A free-text reader that picked the likeliest figure kept misreading captions
 // through nine review rounds; the owner's captions so far carry no price at all.)
 const AR = String.raw`\u0621-\u064A`; // Arabic letters (tanween and other marks are outside it)
+const W = String.raw`0-9A-Za-z${AR}`; // word characters, for "not a word character" classes
 // The currencies the site prices in, as codes, symbols and words ("ريال" alone is the Saudi riyal).
+const FOREIGN_RIYAL = String.raw`(?:ال)?(?:عماني|قطري|يمني|إيراني|ايراني)`;
 const CURRENCY_WORDS = [
-  ['OMR', String.raw`OMR(?![A-Za-z])|ر\.ع|ريال(?:اً|ا)?[ ]+عماني|omani rials?(?![A-Za-z])`],
-  ['SAR', String.raw`SAR(?![A-Za-z])|SR(?![A-Za-z])|riyals?(?![A-Za-z])|ر\.س|ريال(?:اً|ا)?(?:[ ]+سعودي)?(?![ ]*(?:عماني|قطري|يمني|إيراني|ايراني))(?![${AR}])`],
-  ['AED', String.raw`AED(?![A-Za-z])|DHS?(?![A-Za-z])|dirhams?(?![A-Za-z])|د\.إ|درهم(?:اً|ا)?(?:[ ]+إماراتي)?(?![${AR}])`],
-  ['USD', String.raw`USD(?![A-Za-z])|US\$|\$|dollars?(?![A-Za-z])|دولار(?:اً|ا)?(?:[ ]+أمريكي)?(?![${AR}])`],
-  ['EUR', String.raw`EUR(?![A-Za-z])|€|euros?(?![A-Za-z])|يورو(?![${AR}])`],
+  ['OMR', String.raw`OMR(?![A-Za-z])|ر\.ع|(?:بال|ال)?ريال(?:اً|ا)?[ ]+(?:ال)?عماني|omani (?:riyals?|rials?)(?![A-Za-z])`],
+  ['SAR', String.raw`SAR(?![A-Za-z])|SR(?![A-Za-z])|(?<!(?:qatari|omani|yemeni|iranian) )riyals?(?![A-Za-z])|ر\.س|(?:بال|ال)?ريال(?:اً|ا)?(?:[ ]+(?:ال)?سعودي)?(?![ ]*${FOREIGN_RIYAL})(?![${AR}])`],
+  ['AED', String.raw`AED(?![A-Za-z])|DHS?(?![A-Za-z])|dirhams?(?![A-Za-z])|د\.إ|(?:بال|ال)?درهم(?:اً|ا)?(?:[ ]+(?:ال)?إماراتي)?(?![${AR}])`],
+  ['USD', String.raw`USD(?![A-Za-z])|US\$|\$|(?<!million[ \-])dollars?(?![A-Za-z\-])|(?:بال|ال)?دولار(?:اً|ا)?(?:[ ]+(?:ال)?أمريكي)?(?![${AR}])`],
+  ['EUR', String.raw`EUR(?![A-Za-z])|€|euros?(?![A-Za-z\-])|(?:بال|ال)?يورو(?![${AR}])`],
 ];
 const CURRENCY = CURRENCY_WORDS.map(([, re]) => re).join('|');
-const CURRENCY_RE = new RegExp(String.raw`(?:(?<![A-Za-z${AR}])|(?<=[0-9](?:mill?ions?|mill|mln|mil|mn|m|k)))(?:${CURRENCY})`, 'gi');
+const MULT_LATIN = String.raw`mill?ions?|mill|mln|mil|mn|m|thousands?|k`;
+const CURRENCY_RE = new RegExp(String.raw`(?:(?<![A-Za-z${AR}])|(?<=[0-9] ?(?:${MULT_LATIN})))(?:${CURRENCY})`, 'gi');
+const CURRENCY_ANY_RE = new RegExp(String.raw`(?:${CURRENCY})`, 'i');
+const CURRENCY_AT_START_RE = new RegExp(String.raw`^(?:${CURRENCY})`, 'i');
+const CURRENCY_AT_END_RE = new RegExp(String.raw`(?:${CURRENCY})$`, 'i');
 // A currency the site does not price in: no caption price.
-const OTHER_CURRENCY_RE = new RegExp(String.raw`(?<![A-Za-z])(?:QAR|KWD|BHD|GBP|EGP|JOD|TRY|INR|PKR)(?![A-Za-z])|£|₹|ريال(?:اً|ا)?[ ]+(?:قطري|يمني|إيراني|ايراني)|دينار|جنيه|ليرة|روبية`, 'i');
+const OTHER_CURRENCY_RE = new RegExp(String.raw`(?<![A-Za-z])(?:QAR|KWD|BHD|GBP|EGP|JOD|TRY|TL|INR|PKR|pounds?|lira|liras|rupees?)(?![A-Za-z])|£|₹|₺|(?:qatari|yemeni|iranian|kuwaiti|bahraini) (?:riyals?|rials?|dinars?)|ريال(?:اً|ا)?[ ]+(?:ال)?(?:قطري|يمني|إيراني|ايراني)|دينار|جنيه|ليرة|روبية`, 'i');
+// The caption says the price is not given: "price on request", "السعر على الخاص", "عند الطلب".
+const ON_REQUEST_RE = /\b(?:on request|upon request|poa|price on application)\b|على الخاص|في الخاص|عند الطلب|بالخاص/i;
 // Every run of digits, with the separators that join it, is one figure.
 const DIGIT_RUN_RE = /[0-9]+(?:[,،٬.٫][0-9]+)*/g;
 // A figure written as a price: thousands in groups of three with one separator, or no separator; a
@@ -56,20 +65,35 @@ const DIGIT_RUN_RE = /[0-9]+(?:[,،٬.٫][0-9]+)*/g;
 const FIGURE_RE = /^(?:[0-9]{1,3}([,،٬])[0-9]{3}(?:\1[0-9]{3})*|[0-9]+)(?:[.٫][0-9]+)?$/;
 // A multiplier right after the figure, as a whole word ("4.5m", "1.2 million", "850k", "٤٫٥ مليون",
 // "٨٥٠ ألفاً"); not the m of "m2" or "mins", not the k of "km".
-const MULTIPLIER_RE = new RegExp(String.raw`^ ?(?:(?<lmult>mill?ions?|mill|mln|mil|mn|m|thousands?|k)(?=$|[^A-Za-z0-9^${AR}]|${CURRENCY})|(?<amult>مليون|ملايين|[أا]لف)(?:اً|ًا|ا|ً)?(?![${AR}]))`, 'i');
+const MULTIPLIER_RE = new RegExp(String.raw`^ ?(?:(?<lmult>${MULT_LATIN})(?=$|[^A-Za-z0-9^${AR}]|${CURRENCY})|(?<amult>مليون|ملايين|[أا]لف)(?:اً|ًا|ا|ً)?(?![${AR}]))`, 'i');
+// Spelled-out amounts ("مليون و200 ألف", "3 مليون و نص"): any multiplier word besides the figure's own.
+const MULTIPLIER_WORD_RE = new RegExp(String.raw`(?<![A-Za-z])(?:mill?ions?|thousands?)(?![A-Za-z])|(?<![${AR}])(?:مليون|ملايين|مليونين|ألف|الف|آلاف|الاف|ألفين)(?![${AR}])|(?<![${AR}])و ?(?:نص|نصف|ربع)(?![${AR}])`, 'gi');
 // A unit after the figure: an area, a distance, or a rate per square metre or per month ("/m").
-const UNIT_AFTER_RE = new RegExp(String.raw`^ ?(?:\( ?)?(?:(?:\/|per\b|لكل|لل) ?)?(?:m ?2|m ?\^ ?2|m\.? ?sq\b|m\b|sq[ .\-]*(?:met(?:er|re)s?|m|mt|mtr|ft|feet|foot|yds?|yards?)\b|sqm|sqft|psf\b|psm\b|square|met(?:er|re)s?\b|ft ?2|bua\b|gfa\b|hectares?\b|ha\b|acres?\b|kms?\b|kilomet|(?:ال)?(?:متر|مترا|أمتار|امتار)|م ?2|م(?![${AR}])|كم(?![${AR}])|كيلو|هكتار|دونم|فدان)`, 'i');
+const UNIT_AFTER_RE = new RegExp(String.raw`^[ \-—–:|(]*(?:(?:\/|per\b|a(?= )|لكل|لل) ?)?(?:m ?2|m ?\^ ?2|m\.? ?sq\b|m\b|sq[ .\-]*(?:met(?:er|re)s?|m|mt|mtr|ft|feet|foot|yds?|yards?)\b|sqm|sqft|psf\b|psm\b|square|met(?:er|re)s?\b|ft ?2|bua\b|gfa\b|hectares?\b|ha\b|acres?\b|kms?\b|kilomet|(?:ال)?(?:متر|مترا|أمتار|امتار)|م ?2|م(?![${AR}])|كم(?![${AR}])|كيلو|هكتار|دونم|فدان)`, 'i');
 // A label right before the figure that says it is not the price.
-const NOT_PRICE_LABEL_RE = new RegExp(String.raw`(?:\b(?:area|size|plot|bua|sqm|m2|deposit|down ?payment|service ?charges?|maintenance|commission|instal(?:l)?ments?|booking|income|yield|return|discount|off|delivery|was|previously|old price|rejected|refused|declined|ref(?:erence)?|no\.?|number|phone|tel|mobile|call|whatsapp|licen[cs]e|permit|id|floor|built|year|handover|street|road|width|height|frontage|per ?(?:sqm|m2|met(?:er|re)|square ?(?:m|met(?:er|re)s?|f(?:ee|oo)t)))|(?:^|[^${AR}])(?:ال)?(?:مساحة|عربون|عمولة|صيانة|قسط|رسوم|دفعة|دخل|عائد|خصم|دور|تسليم|شارع|عرض|ارتفاع|واجهة|ترخيص|رخصة|هوية|جوال|هاتف|رقم)(?:[ ](?:ال)?(?:أولى|اولى|سنوي|السنوي))?|سعر ?(?:ال)?متر|للمتر|السعر السابق|سابقاً?|اتصال|واتساب|بناء|سنة|عام|مرفوض)[^0-9A-Za-z${AR}]*$`, 'i');
+const NOT_PRICE_BEFORE_RE = new RegExp(String.raw`(?:\b(?:(?:area|size|plot|bua|sqm|m2|deposit|down ?payment|service ?charges?|maintenance|commission|instal(?:l)?ments?|booking|reserve|reservation|income|yield|return|discount|price drop|drop|reduced by|reduction|off|delivery|insurance|was|previously|old price|previous(?: [a-z]+)? price|last sold(?: for)?|sold for|rejected|refused|declined)(?: (?:with|of|at|for|is|by))?|ref(?:erence)?|no\.?|number|phone|tel|mobile|call|whatsapp|licen[cs]e|permit|id|floor|built|year|handover|street|road|width|height|frontage|per ?(?:sqm|m2|met(?:er|re)|square ?(?:m|met(?:er|re)s?|f(?:ee|oo)t)))|(?:^|[^${AR}])(?:و|ب|بال|ال|لل)?(?:مساحة|مساحتها|عربون|عمولة|صيانة|قسط|رسوم|دفعة|مقدم|حجز|تأمين|تامين|سعي|دخل|عائد|خصم|تخفيض|دور|تسليم|شارع|عرض|ارتفاع|واجهة|ترخيص|رخصة|هوية|جوال|هاتف|رقم|متر)(?:ها|ه)?(?:[ ](?:ال)?(?:أولى|اولى|سنوي|السنوي|شهري|الشهري|الإجمالية|الاجمالية|حجز|الحجز|مربع|المربع))?(?:[ ]?ب)?|سعر ?(?:ال)?متر(?: (?:ال)?مربع)?|للمتر|السعر السابق|سابقاً?|اتصال|واتساب|بناء|سنة|عام|مرفوض)[^${W}]*$`, 'i');
 // ...unless a fee word is negated right before it: "السعر بدون عمولة 4,500,000", "Price incl. commission: 2.5m".
-const NEGATED_FEE_RE = new RegExp(String.raw`(?:\b(?:without|no|zero|free|incl\.?|including|inclusive of|excl\.?|excluding)|بدون|بلا|شامل|شاملة|غير شامل|(?:^|[^${AR}])لا) (?:ال)?(?:commission|fees?|vat|عمولة|العمولة|رسوم|الرسوم|ضريبة)[^0-9A-Za-z${AR}]*$`, 'i');
+const NEGATED_FEE_RE = new RegExp(String.raw`(?:\b(?:without|no|zero|free|incl\.?|including|inclusive of|excl\.?|excluding)|بدون|بلا|شامل|شاملة|غير شامل|(?:^|[^${AR}])لا) (?:ال)?(?:commission|fees?|vat|عمولة|العمولة|رسوم|الرسوم|ضريبة)[^${W}]*$`, 'i');
+// A word right after the figure (and its currency) that says it is not the price: "AED 50,000 off".
+const NOT_PRICE_AFTER_RE = new RegExp(String.raw`^[^${W}]*(?:off|discount|deposit|down(?: ?payment)?|booking|reservation|commission|fees?|service charge|maintenance|(?:annual |yearly |rental |rent )?income|yield|return|insurance|خصم|تخفيض|عربون|دفعة|مقدم|حجز|تأمين|عمولة|سعي|رسوم|صيانة|دخل|عائد)(?![A-Za-z${AR}])`, 'i');
 // A bare figure (no currency, no multiplier) is a price only right after a price word, or alone.
-const PRICE_WORD_BEFORE_RE = new RegExp(String.raw`(?:\b(?:price|asking|total|for sale|sale|for rent|rent|rental)|(?:^|[^${AR}])(?:ال)?سعر|بسعر|المطلوب|للبيع|للإيجار|للايجار|(?:ال)?[إا]يجار)[^0-9A-Za-z${AR}]*$`, 'i');
-// Spelled-out amounts ("مليون و200 ألف", "3 مليون ونص"): any multiplier word beyond the figure's own.
-const MULTIPLIER_WORD_RE = new RegExp(String.raw`(?<![A-Za-z])(?:mill?ions?|thousands?)(?![A-Za-z])|(?<![${AR}])(?:مليون|ملايين|مليونين|ألف|الف|آلاف|الاف|ألفين|ونص|ونصف|وربع)(?![${AR}])`, 'gi');
-
+const PRICE_WORD_BEFORE_RE = new RegExp(String.raw`(?:\b(?:price|asking|total|for sale|sale|for rent|rent|rental)(?: (?:is|of|at))?|(?:^|[^${AR}])(?:ال)?سعر|بسعر|المطلوب|للبيع|للإيجار|للايجار|(?:ال)?[إا]يجار)[^${W}]*$`, 'i');
+const NOT_WORD_RUN_RE = new RegExp(String.raw`[^${W}]+`, 'g');
+const STARTS_WITH_WORD_RE = new RegExp(String.raw`^ ?[${W}]`);
+const PRICE_TAIL_WORD_RE = new RegExp(String.raw`^ ?(?:only|net|cash|final|firm|negotiable|per (?:year|annum|month)|a (?:year|month)|yearly|monthly|annually|فقط|كاش|نهائي|قابل للتفاوض|سنوي|سنويا|سنوياً|شهري|شهريا|شهرياً)(?![A-Za-z${AR}])`, 'i');
 // Direction marks and the tatweel are invisible: م2 behind a right-to-left mark, or م + tatweel + 2, must read as م2.
 const INVISIBLE_RE = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069\u0640]/g;
+
+/** Strip currencies and punctuation from the end (or start) of s, one at a time (no backtracking). */
+function stripCurrencies(s, fromStart) {
+  for (;;) {
+    const t = fromStart
+      ? s.replace(new RegExp(String.raw`^[^${W}$€]+`), '').replace(CURRENCY_AT_START_RE, '')
+      : s.replace(new RegExp(String.raw`[^${W}$€]+$`), '').replace(CURRENCY_AT_END_RE, '');
+    if (t === s) return s;
+    s = t;
+  }
+}
 
 /**
  * A price the OWNER typed in the caption. Never an estimate — this only reads an
@@ -82,21 +106,23 @@ export function parsePriceHint(caption) {
   // not depend on lines.
   const norm = String(caption || '').normalize('NFKC');
   const text = westernise(norm).replace(INVISIBLE_RE, '').replace(/\s+/g, ' ')
-    // hashtags and listing or unit ids ("#rent", "BONA-W023", "A-12") are not figures; an id leaves a
-    // neutral word, so a label before it ("Ref: BONA-W123, 1,850,000") does not reach the figure
     // the bot's own flags go; any other hashtag keeps its word ("#Deposit 50,000" is still a deposit)
     .replace(/#(?:test|dry|draft|brochure|pdf|nobrochure|nopdf|no-brochure|no-pdf|hidden|private)(?![A-Za-z0-9_-])/gi, ' ')
     .replace(/#([^\s#0-9]+)(?=\s|$)/g, ' $1 ').replace(/#[^\s#]+/g, ' ').replace(/ +/g, ' ')
+    // listing or unit ids ("BONA-W023", "A-12") are not figures; an id leaves a neutral word, so a
+    // label before it ("Ref: BONA-W123, 1,850,000") does not reach the figure
     .replace(/\b(?:BONA|TK)-?[A-Z]{0,2}[0-9]{1,6}\b(?![.,،٬٫]?[0-9])|\b(?!(?:SAR|AED|USD|EUR|OMR|SR|DHS?)-)[A-Z]{1,3}-[0-9]{1,4}\b(?![.,،٬٫]?[0-9])/g, 'listing');
   if (/\p{Nd}/u.test(text.replace(/[0-9]/g, ''))) return null;
-  if (OTHER_CURRENCY_RE.test(text)) return null;
+  if (OTHER_CURRENCY_RE.test(text) || ON_REQUEST_RE.test(text)) return null;
   const runs = [...text.matchAll(DIGIT_RUN_RE)];
   if (runs.length !== 1) return null;
   const [run] = runs;
   const num = run[0];
   if (!FIGURE_RE.test(num)) return null;
-  // ".5 million", "-450,000", "4.5.6": a sign or a mark glued to the figure makes it unreadable.
-  // (a hyphen after a word is a separator: "Price-4,500,000", "SAR-4.5m")
+  // "4,500.000": thousands groups then ".000" is a typo for something, not 4,500 (OMR 175,000.125 is fine).
+  if (/[,،٬][0-9]{3}[.٫]000$/.test(num)) return null;
+  // ".5 million", "-450,000", "4.5.6": a sign or a mark glued to the figure makes it unreadable
+  // (a hyphen after a word is a separator: "Price-4,500,000", "SAR-4.5m").
   if (new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$`).test(text.slice(0, run.index))) return null;
   const currencies = new Set([...text.matchAll(CURRENCY_RE)].map((c) => {
     const found = c[0];
@@ -106,35 +132,37 @@ export function parsePriceHint(caption) {
   const currency = currencies.size ? [...currencies][0] : null;
 
   // Currencies (and punctuation) between a label and the figure, or between the figure and its unit,
-  // do not hide them: "Deposit: AED: 50,000", "3,500 SAR SAR per sqm".
-  const CURRENCIES_END_RE = new RegExp(String.raw`(?:(?:${CURRENCY})[^0-9A-Za-z${AR}]*)+$`, 'i');
-  const CURRENCIES_START_RE = new RegExp(String.raw`^(?:[^0-9A-Za-z${AR}]*(?:${CURRENCY}))+`, 'i');
-  const before = text.slice(0, run.index).slice(-60).replace(CURRENCIES_END_RE, '');
-  if (NOT_PRICE_LABEL_RE.test(before) && !NEGATED_FEE_RE.test(before)) return null;
-  let after = text.slice(run.index + num.length);
+  // do not hide them: "Deposit: AED: 50,000", "3,500 SAR — per sqm".
+  const rawBefore = text.slice(Math.max(0, run.index - 80), run.index);
+  const before = stripCurrencies(rawBefore, false);
+  const currencyBefore = CURRENCY_ANY_RE.test(rawBefore.slice(before.length));
+  if (NOT_PRICE_BEFORE_RE.test(before) && !NEGATED_FEE_RE.test(before)) return null;
+  let after = text.slice(run.index + num.length, run.index + num.length + 120);
   if (UNIT_AFTER_RE.test(after) && !MULTIPLIER_RE.exec(after)?.groups.lmult) return null;
   const mult = MULTIPLIER_RE.exec(after);
   if (mult) after = after.slice(mult[0].length);
   // "4.5m2" or "450 m 2" is an area, not 4.5 million; "4.5m sqm" too.
   if (mult && (/^ ?[2^]/.test(after) || UNIT_AFTER_RE.test(after))) return null;
-  // A multiplier counts only before the end, punctuation or a currency: "4.5m", "4.5m SAR", "850k,";
-  // "30m street", "50k down", "3 مليون ونص" are something else.
-  const CURRENCY_NEXT_RE = new RegExp(String.raw`^[^0-9A-Za-z${AR}]*(?:${CURRENCY})`, 'i');
-  if (mult && !CURRENCY_NEXT_RE.test(after) && /^[^0-9A-Za-z${AR}]*[0-9A-Za-z${AR}]/.test(after) && !/^[^A-Za-z${AR}0-9]*(?:only|net|cash|final|negotiable|فقط|كاش|نهائي|قابل للتفاوض)(?![A-Za-z${AR}])[^0-9A-Za-z${AR}]*$/i.test(after)) return null;
-  const multWords = [...text.matchAll(MULTIPLIER_WORD_RE)].length;
-  if (multWords > (mult ? 1 : 0)) return null;
-  const afterCurrency = after.replace(CURRENCIES_START_RE, '');
+  const afterCurrency = stripCurrencies(after, true);
+  const currencyAfter = CURRENCY_ANY_RE.test(after.slice(0, after.length - afterCurrency.length));
   if (afterCurrency !== after && UNIT_AFTER_RE.test(afterCurrency)) return null;
+  if (NOT_PRICE_AFTER_RE.test(afterCurrency) || NOT_PRICE_AFTER_RE.test(after)) return null;
+  // A multiplier counts only before the end, punctuation or a currency: "4.5m", "4.5m SAR", "850k,",
+  // "2.5m (negotiable)"; "30m street", "50k down" are something else.
+  if (mult && !currencyAfter && STARTS_WITH_WORD_RE.test(after) && !PRICE_TAIL_WORD_RE.test(after)) return null;
+  // Any other multiplier word, before the figure or after its own: a spelled-out amount.
+  if ([...(text.slice(0, run.index) + ' ' + after).matchAll(MULTIPLIER_WORD_RE)].length) return null;
 
   const digits = num.replace(/[,،٬]/g, '').replace('٫', '.');
+  const nextTo = currencyBefore || currencyAfter; // a currency written right next to the figure
   // The caption is nothing but the figure (and its currency): "4500000", "SAR 4,500,000", the price command.
-  const alone = !text.replace(CURRENCY_RE, ' ').replace(num, ' ').replace(/[^0-9A-Za-z${AR}]+/g, '');
-  // A phone, licence or id number: no price starts with 0, and a bare run of ten or more digits
-  // (or a Saudi mobile without its 0) is never one.
+  const alone = !text.replace(CURRENCY_RE, ' ').replace(num, ' ').replace(NOT_WORD_RUN_RE, '');
+  // A phone, licence or id number: no price starts with 0, and a run of ten or more digits (or a
+  // Saudi mobile without its 0) without a currency right next to it is never one.
   if (!mult && /^0[0-9]/.test(digits)) return null;
-  if (!mult && !currency && (/^[0-9]{10,}$/.test(digits) || /^5[0-9]{8}$/.test(digits))) return null;
-  // A year is no price ("delivery 2027, prices in SAR").
-  if (!mult && /^(?:19|20)[0-9]{2}$/.test(digits)) return null;
+  if (!mult && !nextTo && (/^[0-9]{10,}$/.test(digits) || /^5[0-9]{8}$/.test(digits))) return null;
+  // A year is no price ("delivery 2027, prices in SAR"); "AED 2,000" is.
+  if (!mult && !nextTo && /^(?:19|20)[0-9]{2}$/.test(num)) return null;
   // A bare figure needs a price word right before it ("price 750000", "#rent 120,000 per year"), or to
   // stand alone: "Al Rawdah, Jeddah 23434" (a postal code) is no price.
   if (!mult && !currency && !alone && !PRICE_WORD_BEFORE_RE.test(before)) return null;

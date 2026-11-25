@@ -248,9 +248,53 @@ describe('parsePriceHint', () => {
     assert.equal(parseCommand('price BONA-W001 $1.2m').currency, 'USD');
   });
 
+  // r11 review (Codex)
+  it('round 11: Arabic context, more currency forms, labels before and after, spelled-out amounts', () => {
+    for (const caption of [
+      'الرمز البريدي ٢٣٤٣٤', 'المساحة الإجمالية ١٢٬٠٠٠', 'Asking 450,000 Qatari riyals', 'سعر المتر المربع: ٣٬٥٠٠ ريال',
+      '3,500 SAR — per sqm', 'السعر على الخاص، دفعة الحجز ٥٠ ألف ريال', 'Previous sale price: AED 450,000',
+      'AED 50,000 off the asking price', 'Price on request in AED. WhatsApp me at 500000000', 'السعر مليون و٢٠٠k ريال',
+      'السعر ٣ مليون ريال و نص',
+    ]) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    for (const [caption, want] of [
+      ['Asking 450 k€', 'EUR 450000'],
+      ['السعر ٤٥٠٬٠٠٠ بالريال العماني', 'OMR 450000'],
+      ['Sale price is 450,000', 'SAR 450000'],
+      ['Asking 2.5m (negotiable for serious buyers)', 'SAR 2500000'],
+      ['Rent AED 2,000 per month', 'AED 2000'],
+    ]) {
+      assert.equal(hint(caption), want, caption);
+    }
+  });
+
+  // r11 review (Claude)
+  it('round 11 (Claude): Arabic text in every check, currency words, labels with particles, after the figure', () => {
+    for (const caption of [
+      'أرض مساحتها 12500', 'فيلا في حي الروضة، جدة 23434', 'أرض 12000 مربع', 'يبعد 50m عن البحر',
+      'Doha apartment 2,000,000 Qatari riyals', 'Price 850,000 pounds', 'Price TL 8.5m',
+      'Villa with a million-dollar view, asking 4.5m',
+      'المتر بـ 4,000 ريال', 'بمقدم 100 ألف ريال', 'الحجز بـ 10,000 ريال', 'Reserve with SAR 10,000', 'التأمين 5000 ريال',
+      'السعي 50,000 ريال', 'تخفيض 500 ألف', 'Price drop 500k', 'بعربون 10,000 ريال', 'بقسط شهري 3,500 ريال',
+      'عمارة دخلها 450 ألف سنوياً', 'Only SAR 50,000 down payment', 'AED 50,000 deposit',
+      'Building with 450,000 SAR annual income', 'Land SAR 3,500 a metre', 'SAR 4,500.000',
+    ]) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    for (const [caption, want] of [
+      ['Price: 185,000 Omani Riyal', 'OMR 185000'],
+      ['Villa 4.5m, Euro-style finishing', 'SAR 4500000'],
+      ['#rent 85k per year', 'SAR 85000'],
+      ['Price 4.5m firm', 'SAR 4500000'],
+    ]) {
+      assert.equal(hint(caption), want, caption);
+    }
+  });
+
   it('runs in linear time on long captions', () => {
     const t0 = performance.now();
-    for (const s of ['1 '.repeat(20000), ' '.repeat(100000) + '4.5m', 'Price AED 450,000' + '\r\n'.repeat(5000) + 'x', 'ً'.repeat(60000) + ' 4.5m', ('Area: ').repeat(5000) + '4.5m']) parsePriceHint(s);
+    for (const s of ['1 '.repeat(20000), ' '.repeat(100000) + '4.5m', 'Price AED 450,000' + '\r\n'.repeat(5000) + 'x', 'ً'.repeat(60000) + ' 4.5m', ('Area: ').repeat(5000) + '4.5m', '$'.repeat(5000) + ' Price: 450,000', '450,000 ' + 'SAR '.repeat(5000), 'SAR'.repeat(3000) + ' 4.5m']) parsePriceHint(s);
     assert.ok(performance.now() - t0 < 1000);
   });
 });
