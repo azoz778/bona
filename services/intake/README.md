@@ -64,10 +64,10 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
 
    | caption | effect |
    |---|---|
-   | `rent`, `للإيجار` | category = rent (period defaults to `year`; `per month` sets month) |
+   | `rent`, `للإيجار` | category = rent (`per month` sets month, `per year` year; with no period in the caption the brochure's period stands, and `year` when it has none) |
    | `off-plan`, `international` | sets the category |
-   | `SAR 4,500,000`, `4.5m`, `990,000 ر.س`, `٤٥٠٠٠٠٠ ريال سعودي` | the asking price, overriding the PDF |
-   | `Villa 450 m2`, `Deposit 50,000`, `Villa for sale in Obhur 4.5m`, `SAR 4,500,000 4 bedrooms`, `4.5m (USD 1.2m)`, `٤٥٠٠٠٠٠ ريال` / `Dhs 1.2m` (a riyal or dirham with no country) | no caption price: the caption sets a price only when it is nothing but a price — one figure with its multiplier and currency, and only words like price / asking / for sale / rent / per year / negotiable (السعر، للبيع، إيجار، سنوياً). Anything else and the PDF's price stands; send `price <id> …` to set one |
+   | `SAR 4,500,000`, `4.5m`, `990,000 ر.س`, `٤٥٠٠٠٠٠ ريال سعودي`, `US$ 1.2m`, `rent SAR 45,000 per year` | the asking price (a rent's with its period), overriding the PDF |
+   | `Villa 450 m2`, `Deposit 50,000`, `Villa for sale in Obhur 4.5m`, `SAR 4,500,000 4 bedrooms`, `4.5m (USD 1.2m)`, `٤٥٠٠٠٠٠ ريال` / `Dhs 1.2m` / `$1.2m` (a riyal, dirham or dollar with no country), `rent SAR 45,000` (a rent with no period), `SAR 4.5m?` | no caption price: the caption sets a price only when it is nothing but a price — one figure with its multiplier and currency, and only words like price / asking / for sale / rent / per year / negotiable (السعر، للبيع، إيجار، سنوياً). Anything else and the PDF's price stands; send `price <id> …` to set one |
    | `#test` | dry run — the bot replies with the listing it *would* publish and writes nothing |
    | `#nobrochure` | publish the listing with **no** downloadable brochure |
    | `#brochure` | nothing (a no-op alias — every brochure is re-published by default) |

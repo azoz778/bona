@@ -127,7 +127,7 @@ describe('parsePriceHint', () => {
       ['Rent AED 2,000 per month', 'AED 2000'],
       ['Asking ４．５m SAR', 'SAR 4500000'],
       ['Asking 12,000\nk SAR', 'SAR 12000000'],
-      ['Price 1.2 million dollars', 'USD 1200000'],
+      ['Price 1.2 million US dollars', 'USD 1200000'],
     ]) {
       assert.equal(hint(caption), want, caption);
     }
@@ -145,7 +145,7 @@ describe('parsePriceHint', () => {
       ['Price 4.5m Saudi riyals', 'SAR 4500000'],
       ['Asking €450,000', 'EUR 450000'],
       ['Asking 450 k€', 'EUR 450000'],
-      ['Asking $450,000', 'USD 450000'],
+      ['Asking US$450,000', 'USD 450000'],
       ['السعر 2,400,000 درهم إماراتي', 'AED 2400000'],
       ['1,200,000 UAE dirhams', 'AED 1200000'],
     ]) {
@@ -201,7 +201,7 @@ describe('parsePriceHint', () => {
     assert.equal(parseCommand('price BONA-W001 4.5m').amount, 4500000);
     assert.equal(parseCommand('price BONA-W001 4.5 million').amount, 4500000);
     assert.equal(parseCommand('price BONA-W001 SAR 4,500,000').amount, 4500000);
-    assert.equal(parseCommand('price BONA-W001 $1.2m').currency, 'USD');
+    assert.equal(parseCommand('price BONA-W001 US$1.2m').currency, 'USD');
     assert.equal(parseCommand('price BONA-W001 onrequest').onRequest, true);
     assert.equal(parseCommand('price BONA-W001 4,500,000 SAR per sqm').cmd, 'error');
     assert.equal(parseCommand('price BONA-W001 450 m2').cmd, 'error');
@@ -209,7 +209,7 @@ describe('parsePriceHint', () => {
 
   // r13 review (Codex)
   it('round 13: symbols and scripts that are not ours, footnote digits, digit hashtags', () => {
-    assert.equal(hint('Price$450,000'), 'USD 450000');
+    assert.equal(hint('Price US$450,000'), 'USD 450000');
     for (const caption of ['450,000 SAR€', '#international ฿4,500,000', '#international 4,500,000 บาท', '📏 30 m', 'SAR 450000¹', '#250000', 'Villa 450 m²']) {
       assert.equal(parsePriceHint(caption), null, caption);
     }
@@ -240,6 +240,32 @@ describe('parsePriceHint', () => {
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال سعودي').price, { amount: 190000, currency: 'SAR' });
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال عماني').price, { amount: 190000, currency: 'OMR' });
     assert.equal(hint('#sale 25m'), 'SAR 25000000');
+  });
+
+  // r17 review (Claude)
+  it('round 17 (Claude): a spaced "m" on 100 or more, the period hints are main\'s', () => {
+    assert.equal(parsePriceHint('Price SAR 950 m'), null);
+    assert.equal(hint('SAR 4.5 m'), 'SAR 4500000');
+    assert.equal(hint('SAR 950m'), 'SAR 950000000');
+    // no caption price: main's period hints ("/ month" needs no space before it), so this stays the
+    // brochure's period, not a month
+    assert.equal(parseCaption('Rent: annual lease / month-to-month option available').period, null);
+    // a caption price reads its own period whatever the spacing
+    assert.equal(parseCaption('Rent AED 5,000 / month').period, 'month');
+  });
+
+  // r17 review (Codex)
+  it('round 17: a dollar with no country, a question', () => {
+    // "$" and "dollars" alone may be US, Canadian, Australian …: no caption price (as a bare riyal or dirham)
+    for (const caption of ['#international For sale $850,000', '$1.2m', 'Asking $450,000', 'Price$450,000', '1.2m dollars', 'السعر 1,200,000 دولار']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    for (const [caption, want] of [['US$ 850,000', 'USD 850000'], ['USD 1.2m', 'USD 1200000'], ['1.2m US dollars', 'USD 1200000'], ['السعر 1,200,000 دولار أمريكي', 'USD 1200000']]) {
+      assert.equal(hint(caption), want, caption);
+    }
+    assert.equal(parseCommand('price BONA-W001 $1.2m').cmd, 'error');
+    // a question states no price
+    for (const caption of ['Is rent €4,500 a month?', 'SAR 4.5m?', 'السعر ٤٫٥ مليون ريال سعودي؟']) assert.equal(parsePriceHint(caption), null, caption);
   });
 
   // r16 review (Claude)
@@ -288,7 +314,7 @@ describe('parsePriceHint', () => {
     for (const caption of ['Price: AUS$ 450,000', 'CAD$ 450,000', 'is$450,000', '~SAR 4.5m~', 'SAR 4.5m+', '≈ SAR 4.5m', '#سِعر450000', '#سعر450000']) {
       assert.equal(parsePriceHint(caption), null, caption);
     }
-    assert.equal(hint('Price$450,000'), 'USD 450000');
+    assert.equal(hint('Price US$450,000'), 'USD 450000');
     assert.equal(hint('US$ 450,000'), 'USD 450000');
     const c = parseCaption('#rent_monthly AED 5,000');
     assert.deepEqual([c.price, c.period], [null, null]);

@@ -100,7 +100,7 @@ export function buildPrompt({ extraction, sheets, caption, pageImages = [], page
   const captionLines = [];
   const c = caption || {};
   captionLines.push(fence('the caption the owner typed', c.text ? c.text : '(no caption)'));
-  if (c.category) captionLines.push(`- The owner says the category is: ${c.category}${c.period ? ` (per ${c.period})` : ''}. Use it.`);
+  if (c.category) captionLines.push(`- The owner says the category is: ${c.category}${c.period ? ` (per ${c.period})` : c.category === 'rent' ? ' (for the period the PDF prints; a year if it prints none)' : ''}. Use it.`);
   if (c.price) captionLines.push(`- The owner gave the price explicitly: ${c.price.amount}${c.price.currency ? ` ${c.price.currency}` : ' (in the currency the PDF prices in)'}. Use it, it overrides the PDF.`);
   if (c.dryRun) captionLines.push('- #test: this is a dry run; produce the listing anyway.');
   if (!c.price) captionLines.push('- No price in the caption: use the price printed in the PDF, or onRequest if there is none.');

@@ -20,9 +20,9 @@ const CATEGORY_HINTS = [
 ];
 
 const PERIOD_HINTS = [
-  [/(?:\bper|\/)\s*(year|yr|annum)\b/i, 'year'],
+  [/\b(per|\/)\s*(year|yr|annum)\b/i, 'year'],
   [/(سنوي|سنويا|سنوياً|\/ ?سنة|في السنة)/, 'year'],
-  [/(?:\bper|\/)\s*(month|mo)\b/i, 'month'],
+  [/\b(per|\/)\s*(month|mo)\b/i, 'month'],
   [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر)/, 'month'],
 ];
 
@@ -39,17 +39,17 @@ const PERIOD_HINTS = [
 // a price by hand. (Readers that picked a figure out of free text kept misreading captions through
 // twelve review rounds; the owner's captions so far carry no price at all.)
 const AR = String.raw`\u0621-\u064A`; // Arabic letters (tanween and other marks are outside it)
-// The currencies the site prices in, as codes, symbols and words. A riyal or a dirham with no country
-// ("ريال", "riyals", "درهم", "Dhs") may be Saudi or Omani, Emirati or Moroccan: no caption price (the
-// PDF's stands; `price <id> 4.5m` keeps the listing's own currency).
+// The currencies the site prices in, as codes, symbols and words. A riyal, a dirham or a dollar with no
+// country ("ريال", "riyals", "درهم", "Dhs", "$", "dollars") may be Saudi or Omani, Emirati or Moroccan, US or
+// Canadian: no caption price (the PDF's stands; `price <id> 4.5m` keeps the listing's own currency).
 const CURRENCY_WORDS = [
   ['OMR', String.raw`OMR|RO|ر\.ع|(?:بال|ال)?ريال(?:ا)? (?:ال)?عماني|omani (?:riyals?|rials?)`],
   ['SAR', String.raw`SAR|SR|saudi (?:riyals?|rials?)|ر\.س|(?:بال|ال)?ريال(?:ا)? (?:ال)?سعودي`],
   ['AED', String.raw`AED|د\.إ|(?:uae|emirati) dirhams?|(?:بال|ال)?درهم(?:ا)? (?:ال)?إماراتي`],
-  ['USD', String.raw`USD|US\$|\$|(?:us )?dollars?|(?:بال|ال)?دولار(?:ا)?(?: (?:ال)?أمريكي)?`],
+  ['USD', String.raw`USD|US\$|us dollars?|(?:بال|ال)?دولار(?:ا)? (?:ال)?أمريكي`],
   ['EUR', String.raw`EUR|€|euros?|(?:بال|ال)?يورو`],
   // Last, so "ريال سعودي" and "درهم إماراتي" are read whole first.
-  ['?', String.raw`riyals?|rials?|(?:بال|ال)?ريال(?:ا)?|dhs?|dirhams?|(?:بال|ال)?درهم(?:ا)?`],
+  ['?', String.raw`riyals?|rials?|(?:بال|ال)?ريال(?:ا)?|dhs?|dirhams?|(?:بال|ال)?درهم(?:ا)?|\$|dollars?|(?:بال|ال)?دولار(?:ا)?`],
   // (US$, $ and € are also matched as bare symbols, see CURRENCY_TOKEN_RE)
 ];
 // A currency token: a whole word, so "European" is no EUR; a symbol stands anywhere ("Price$450,000").
@@ -69,8 +69,9 @@ const MULTIPLIER_RE = new RegExp(String.raw`^ ?(?:(?<lmult>millions?|mln|mil|mn|
 // What may be left once the figure, its multiplier, its currency and the allowed words are taken out:
 // white space and ordinary punctuation. Any other letter (in any script), symbol or emoji ("฿", "📏")
 // means the caption says more than a price.
-// Not "~" (WhatsApp strikethrough, or "about"), "≈" or "+" ("4.5m+"): those qualify the figure.
-const LEFTOVER_OK_RE = /^[\s.,،;؛:!?؟()[\]{}"'`«»“”‘’\-–—_/\\|*•·…=&]*$/;
+// Not "~" (WhatsApp strikethrough, or "about"), "≈" or "+" ("4.5m+"): those qualify the figure; nor
+// "?" or "؟": a question ("Is rent €4,500 a month?") states no price.
+const LEFTOVER_OK_RE = /^[\s.,،;؛:!()[\]{}"'`«»“”‘’\-–—_/\\|*•·…=&]*$/;
 // A period ("per year", "شهرياً") makes the figure a rent; on a caption with no rent word it is an
 // instalment or an income ("3,500 ريال شهرياً فقط", "Net SAR 450,000 per year"), not the price.
 const PERIOD_WORD_RE = new RegExp(tokenRe(String.raw`per|year|years|yearly|yr|annum|annually|month|monthly|mo|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية`), 'i');
@@ -155,8 +156,8 @@ export function parsePriceHint(caption, { command = false } = {}) {
   const factor = /^(m|mn|mil|mln|millions?|مليون|ملايين)$/.test(word) ? 1e6 : /^(k|thousands?|ألف|الف)$/.test(word) ? 1e3 : 1;
   const amount = Number(digits);
   // A bare "450 m" is as likely metres as millions: with no currency, it is millions only below 100
-  // and written onto the figure ("25m"; "#sale 25 m" may be a frontage).
-  if (word === 'm' && !currency && (amount >= 100 || /^ /.test(mult[0]))) return null;
+  // and written onto the figure ("25m"; "#sale 25 m" may be a frontage); "SAR 950 m" is no price either.
+  if (word === 'm' && ((!currency && (amount >= 100 || /^ /.test(mult[0]))) || (amount >= 100 && /^ /.test(mult[0])))) return null;
   // The amount as typed; a multiplier's float noise (2.05 x 1e6 = 2049999.9999999998) rounded away.
   if ((factor === 1e6 && amount >= 1000) || (factor === 1e3 && amount >= 100000)) return null;
   const value = factor === 1 ? amount : Math.round(amount * factor * 1000) / 1000;
