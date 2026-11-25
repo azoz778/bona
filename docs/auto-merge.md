@@ -3,9 +3,9 @@
 Every pull request into `main` gets two checks. The `main` ruleset requires both, so a PR can merge itself
 (GitHub auto-merge) as soon as they are green, and nobody has to watch it.
 
-**Status: live since 2026-11-25 21:13 (+03).** Rollout, in order: the two checks (#74); the owner-approved
-settings (below); the owner's local helper (`~/.claude/scripts/automerge-on.py`); live tests on throwaway PRs;
-then #71 as the first real PR through the flow. What the live tests showed:
+**Status: live since 2026-11-25 21:13 (+03).** Rollout: the two checks (#74); the owner-approved settings
+(below); the owner's local helper (`~/.claude/scripts/automerge-on.py`); live tests on throwaway PRs (#76, #77),
+during which #71 became the first real PR to merge itself. What the tests showed:
 - The owner's account (repo admin, allowed to bypass the ruleset) sees a PR with pending checks as `blocked`,
   so the helper can arm it, and GitHub does not merge it at once (#76).
 - Auto-merge armed by that account still waits for both checks. It stayed blocked with `ci` green and no
@@ -13,8 +13,9 @@ then #71 as the first real PR through the flow. What the live tests showed:
   both verdicts but `ci` red (#77). Both were closed unmerged.
 - The `two-model-review` status written by the workflow token satisfies the check pinned to GitHub Actions:
   #71 merged itself about 20 seconds after its second verdict.
-- A new commit does not cancel an armed auto-merge (it stays armed, enabled at the same time), and the new head
-  has no `two-model-review` status, so it waits for fresh verdicts.
+- A new commit pushed to the PR's branch by the owner's account (write access) did not cancel the armed
+  auto-merge (still armed, same enabled time), and the new head had no `two-model-review` status, so it waited
+  (#76). GitHub's docs say a push by someone without write access does turn auto-merge off.
 
 | Check | Where | Green when |
 |---|---|---|
@@ -25,17 +26,20 @@ then #71 as the first real PR through the flow. What the live tests showed:
 
 1. Open the PR. Turn auto-merge on right away (Claude, on the owner's PC):
    `~/.claude/scripts/automerge-on.py azoz778/bona <N> <full head sha>`.
-   It arms GitHub auto-merge (squash, pinned to that head) only for a same-repo PR into `main` that GitHub
-   reports as blocked, when the rules require both checks; it never merges anything itself. The owner's local
+   It arms GitHub auto-merge (squash; GitHub checks that head when arming) only for a same-repo PR into `main`
+   that GitHub reports as blocked, when the rules require both checks; it never merges anything itself. The owner's local
    merge guard keeps refusing `gh pr merge` (with or without `--auto`) until CI and both verdicts are in.
-   The owner can use GitHub's "Enable auto-merge" button instead; it skips the helper's checks, so it is
-   safe only while the ruleset above is in place.
+   The owner can use GitHub's "Enable auto-merge" button instead. It skips the helper's checks, so use it only
+   on a PR into `main` while the ruleset above is active, and never with the "bypass rules" option: the merge
+   must wait for green `ci` and both `SHIP` verdicts for the current head.
 2. Claude and Codex review that head. Post both verdicts as PR **comments**, one line each.
 3. `two-model-review` turns green; once `ci` is green too, GitHub merges, and `deploy.yml` deploys `main`.
 4. A new commit resets the gate: the new head has no `two-model-review` status at all ("Expected"), so the PR
    waits until fresh verdicts for that head are posted. The gate runs only on the owner's PR comments. The armed
-   auto-merge stays armed across the commit (tested); if `gh pr view <N> -R azoz778/bona --json autoMergeRequest`
-   ever shows `null`, run the helper again with the new head.
+   auto-merge stays armed across the commit (tested). If `gh pr view <N> -R azoz778/bona --json autoMergeRequest`
+   shows `null`, run the helper again with the new head, unless someone turned it off on purpose ("Stopping a
+   PR"); if unsure, ask the owner. If a PR with both checks green has not merged after a few minutes, tell the
+   owner rather than trying other ways to merge it.
 
 ## Stopping a PR
 
@@ -83,8 +87,9 @@ then #71 as the first real PR through the flow. What the live tests showed:
 - GitHub keeps at most 1,000 statuses per commit and context; each gate run writes two. Not reachable in
   practice (about 500 owner comments on one commit).
 - Verdict lines in review bodies count (as in the local guard), but only comments re-run the gate.
-- Any workflow in this repo could post `two-model-review` itself (one in a same-repo PR, or one pushed on any
-  other branch), and a PR can change its own `ci.yml`. With auto-merge armed before the reviews, such a status
+- Any workflow in this repo that asks for a token allowed to write commit statuses (`statuses: write`) could
+  post `two-model-review` itself (one in a same-repo PR, or one pushed on any other branch), and a PR can change
+  its own `ci.yml`. With auto-merge armed before the reviews, such a status
   could merge a PR before anyone looks. It is a process check for agents that follow these rules, not a security
   boundary; the owner's token can also bypass the ruleset.
 - A verdict withdrawn while a gate run is reading can be overwritten by that run's green (the window is the
