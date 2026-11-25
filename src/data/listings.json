@@ -7334,6 +7334,78 @@
         "ضمان إنشائي لعشر سنوات"
       ]
     },
+    "amenities": {
+      "en": [
+        "Private pool with outdoor seating",
+        "Private elevator",
+        "Guest majlis",
+        "Roof majlis",
+        "Two roof terraces",
+        "Side family entrance",
+        "Guard's room",
+        "Maid's room",
+        "Laundry and storage room",
+        "Parking for two cars",
+        "Basement service area"
+      ],
+      "ar": [
+        "مسبح خاص مع جلسة خارجية",
+        "مصعد خاص",
+        "مجلس ضيوف",
+        "مجلس في طابق الروف",
+        "تراسان في طابق الروف",
+        "مدخل عائلي جانبي",
+        "غرفة حارس",
+        "غرفة خادمة",
+        "غرفة غسيل وتخزين",
+        "موقفان للسيارات",
+        "منطقة خدمات في القبو"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Al Nakheel Park — 2 minutes",
+        "Four Seasons Hotel — 2 minutes",
+        "Sari Street — 2 minutes",
+        "Corniche Road — 3 minutes",
+        "King Abdulaziz Road — 4 minutes",
+        "King Road Tower — 5 minutes",
+        "Al Nawras Square — 7 minutes",
+        "Jeddah Promenade — 8 minutes"
+      ],
+      "ar": [
+        "منتزه النخيل – دقيقتان",
+        "فندق فور سيزونز – دقيقتان",
+        "شارع صاري – دقيقتان",
+        "طريق الكورنيش – 3 دقائق",
+        "طريق الملك عبدالعزيز – 4 دقائق",
+        "برج طريق الملك (برج الشاشة) – 5 دقائق",
+        "ساحة النورس – 7 دقائق",
+        "جدة بروميناد – 8 دقائق"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Concrete structure — 10 years",
+        "Electrical works — 2 years",
+        "Plumbing works — 2 years",
+        "Roof rain insulation — 10 years",
+        "Waterproofing works — 10 years",
+        "Building maintenance — 3 months",
+        "Elevator spare parts — 2 years",
+        "Elevator motor — 5 years"
+      ],
+      "ar": [
+        "الهيكل الخرساني – 10 سنوات",
+        "أعمال الكهرباء – سنتان",
+        "أعمال السباكة – سنتان",
+        "عزل الأسطح ضد الأمطار – 10 سنوات",
+        "أعمال العزل المائي – 10 سنوات",
+        "صيانة المبنى – 3 أشهر",
+        "قطع غيار المصعد – سنتان",
+        "ماكينة المصعد – 5 سنوات"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/modern-villa-in-al-shati-jeddah/brochure.pdf",
     "project": null,
