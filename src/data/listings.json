@@ -6748,6 +6748,330 @@
         "قرب مطار الملك عبدالعزيز"
       ]
     },
+    "models": [
+      {
+        "name": {
+          "en": "Type AB apartment",
+          "ar": "نموذج شقة AB"
+        },
+        "bedrooms": 4,
+        "bathrooms": 5,
+        "areaSqm": 178,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Dining and living room",
+            "Kitchen",
+            "Maid's room",
+            "Laundry room",
+            "Dressing room"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة طعام ومعيشة",
+            "مطبخ",
+            "غرفة خادمة",
+            "غرفة غسيل",
+            "غرفة ملابس"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-01.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-01-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type A apartment",
+          "ar": "نموذج شقة A"
+        },
+        "bedrooms": 4,
+        "bathrooms": 5,
+        "areaSqm": 180,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Dining and living room",
+            "Kitchen",
+            "Maid's room",
+            "Laundry room",
+            "Dressing room"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة طعام ومعيشة",
+            "مطبخ",
+            "غرفة خادمة",
+            "غرفة غسيل",
+            "غرفة ملابس"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-02.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-02-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type D apartment",
+          "ar": "نموذج شقة D"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 147,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Dining and living room",
+            "Kitchen",
+            "Maid's room",
+            "Guest bathroom"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة طعام ومعيشة",
+            "مطبخ",
+            "غرفة خادمة",
+            "حمام ضيوف"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-03.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-03-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type B apartment",
+          "ar": "نموذج شقة B"
+        },
+        "bedrooms": 3,
+        "bathrooms": null,
+        "areaSqm": 147,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Dining and living room",
+            "Kitchen",
+            "Maid's room",
+            "Guest bathroom"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة طعام ومعيشة",
+            "مطبخ",
+            "غرفة خادمة",
+            "حمام ضيوف"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-04.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-04-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type B duplex",
+          "ar": "نموذج دوبلكس B"
+        },
+        "bedrooms": null,
+        "bathrooms": 4,
+        "areaSqm": 196,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Kitchen",
+            "Master bedroom",
+            "Maid's room",
+            "Dressing room"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "مطبخ",
+            "غرفة نوم ماستر",
+            "غرفة خادمة",
+            "غرفة ملابس"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-05.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-05-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type D duplex",
+          "ar": "نموذج دوبلكس D"
+        },
+        "bedrooms": null,
+        "bathrooms": 4,
+        "areaSqm": 196,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Kitchen",
+            "Master bedroom",
+            "Maid's room",
+            "Dressing room"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "مطبخ",
+            "غرفة نوم ماستر",
+            "غرفة خادمة",
+            "غرفة ملابس"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-06.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-06-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type C duplex",
+          "ar": "نموذج دوبلكس C"
+        },
+        "bedrooms": 4,
+        "bathrooms": 5,
+        "areaSqm": 202,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Kitchen",
+            "Maid's room",
+            "Dressing room"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "مطبخ",
+            "غرفة خادمة",
+            "غرفة ملابس"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-07.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-07-thumb.webp"
+        }
+      },
+      {
+        "name": {
+          "en": "Type C apartment",
+          "ar": "نموذج شقة C"
+        },
+        "bedrooms": 4,
+        "bathrooms": 5,
+        "areaSqm": 199,
+        "rooms": {
+          "en": [
+            "Majlis",
+            "Living room",
+            "Kitchen",
+            "Maid's room",
+            "Dressing room"
+          ],
+          "ar": [
+            "مجلس",
+            "صالة معيشة",
+            "مطبخ",
+            "غرفة خادمة",
+            "غرفة ملابس"
+          ]
+        },
+        "availability": null,
+        "price": null,
+        "subsidisedPrice": null,
+        "floorPlan": {
+          "src": "/listings/nuzul-khayala-residences-north-jeddah/plan-08.jpg",
+          "thumb": "/listings/nuzul-khayala-residences-north-jeddah/plan-08-thumb.webp"
+        }
+      }
+    ],
+    "amenities": {
+      "en": [
+        "Retail shops",
+        "Mosques in the suburb",
+        "Schools in the suburb",
+        "Cafés in the suburb",
+        "Restaurants in the suburb",
+        "Children's play areas"
+      ],
+      "ar": [
+        "محلات تجارية",
+        "مساجد في الضاحية",
+        "مدارس في الضاحية",
+        "مقاهٍ في الضاحية",
+        "مطاعم في الضاحية",
+        "ملاعب للأطفال"
+      ]
+    },
+    "nearby": {
+      "en": [
+        "Haramain Road",
+        "King Abdulaziz Airport",
+        "King Abdullah Sports City and Al Jawhara Stadium",
+        "King Faisal Specialist Hospital",
+        "King Abdullah Medical Complex",
+        "Al Jawhara Mall",
+        "Al Ruhaili Station",
+        "Jeddah Economic City"
+      ],
+      "ar": [
+        "طريق الحرمين",
+        "مطار الملك عبدالعزيز",
+        "مدينة الملك عبدالله الرياضية واستاد الجوهرة",
+        "مستشفى الملك فيصل التخصصي",
+        "مجمع الملك عبدالله الطبي",
+        "الجوهرة مول",
+        "محطة الرحيلي",
+        "مدينة جدة الاقتصادية"
+      ]
+    },
+    "warranties": {
+      "en": [
+        "Structure: 10-year warranty",
+        "Thermal pipes: 10-year warranty",
+        "Waterproofing: 10-year warranty",
+        "Electrical panels: 20-year warranty",
+        "Electromechanical works: 1-year warranty",
+        "Wood, aluminium, paint and finishes: 1-year warranty"
+      ],
+      "ar": [
+        "الهيكل الإنشائي: ضمان 10 سنوات",
+        "الأنابيب الحرارية: ضمان 10 سنوات",
+        "العوازل المائية: ضمان 10 سنوات",
+        "لوحات الكهرباء: ضمان 20 سنة",
+        "أعمال الإلكتروميكانيك: ضمان سنة",
+        "الخشب والألمنيوم والدهان والتشطيبات: ضمان سنة"
+      ]
+    },
     "virtualTourUrl": null,
     "brochureUrl": "https://bona-real-estate.com/listings/nuzul-khayala-residences-north-jeddah/brochure.pdf",
     "project": {
