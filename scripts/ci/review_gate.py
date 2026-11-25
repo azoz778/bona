@@ -6,7 +6,8 @@ a PR comment for the head commit, one line each:  Claude review: SHIP <sha7>  / 
 The status is `success` only when, for EACH model, the newest verdict-like line written by a trusted
 author (comments and submitted, non-dismissed reviews; quotes and code blocks ignored) is exactly a
 SHIP for a prefix of the CURRENT head. Anything else is `pending` with a short reason, so a new commit
-resets the gate. The `main` ruleset requires this status (and `ci`) before a PR can merge.
+resets the gate. The `main` ruleset (docs/auto-merge.md, once live) requires this status (and `ci`) before a
+PR can merge.
 
 The parsing (VERDICT_START, CANONICAL, verdicts) is a verbatim copy of the owner's local merge guard
 (~/.claude/hooks/guard-main.py), so the server and the guard read the same comments the same way.
@@ -176,7 +177,7 @@ def evaluate(repo, number, token, event):
         time.sleep(CATCH_UP_WAIT)
         comments = pages(f"/repos/{repo}/issues/{number}/comments", token)
         if not caught_up(event, comments):
-            return head, "pending", "GitHub's comment list is behind the comment that started this run; post a new comment"
+            return head, "pending", "GitHub's comment list is behind the comment that started this run; post a new owner comment"
     items = [from_comment(c) for c in comments]
     items += [from_review(r) for r in pages(f"/repos/{repo}/pulls/{number}/reviews", token)]
     return (head,) + decide(items, head)

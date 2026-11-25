@@ -2,7 +2,7 @@ name: CI
 
 # The PR check: the same checks the deploy's build job runs (deploy.yml), on the PR's own code, without
 # the TK listings sync (network, and it edits listings.json) and without Pages. The `main` ruleset
-# requires this job's check, `ci`, before a PR can merge. It is a separate file so a PR never shares
+# (docs/auto-merge.md, once live) requires this job's check, `ci`, before a PR can merge. It is a separate file so a PR never shares
 # deploy.yml's `pages` concurrency group, which cancels a deploy in progress.
 
 on:

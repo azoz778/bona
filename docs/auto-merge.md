@@ -5,8 +5,8 @@ requires both, so a PR can merge itself (GitHub auto-merge) as soon as they are 
 watch it.
 
 **Status: rolling out (2026-11-25), not live yet.** Until this line says "live since <date>", auto-merge is
-not used on this repo: the owner merges, after checking that `ci` is green and both verdicts name the PR's
-current head; only the owner's throwaway tests (step 4) arm auto-merge. Rollout steps, in order:
+not used on this repo: the owner merges, after checking that `ci` is green and that both verdicts are
+`SHIP` for the PR's current head; only the owner's throwaway tests (step 4) arm auto-merge. Rollout steps, in order:
 1. The two checks (this file's PR).
 2. Owner-approved settings (below): `allow_auto_merge` and the ruleset.
 3. The owner's local helper is installed (`~/.claude/scripts/automerge-on.py`).
