@@ -67,8 +67,7 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
    | `rent`, `للإيجار` | category = rent (period defaults to `year`; `per month` sets month) |
    | `off-plan`, `international` | sets the category |
    | `SAR 4,500,000`, `4.5m`, `990,000 ر.س`, `٤٥٠٠٠٠٠ ريال` | the asking price, overriding the PDF |
-   | `450 m2`, `12,000 sqm`, `3,500/m2`, `Area: 12,000`, `15 km`, `20m street`, `was 5m`, `Deposit 50,000`, `العربون 100 ألف`, a phone number | never read as a price (an area, a rate per m², a distance, metres, an old price, a fee or deposit); of the figures left, the largest is the price |
-   | `450 m 2`, `4,500, 000`, `SAR 4500 000` | unclear, so the caption sets no price at all and the PDF's price stands (send `price <id> …` to set it); the same when a figure set aside on a guess (`Area 1,200,000`, `4.5m from the owner`) is larger than the one left |
+   | `Villa 450 m2`, `Area: 12,000`, `Deposit 50,000`, `was 5m`, `SAR 4,500,000 4 bedrooms`, `4.5m (USD 1.2m)` | no caption price: the caption sets a price only when it holds exactly ONE figure, written as a price, with no unit after it and no label before it that says it is something else; otherwise the PDF's price stands (send `price <id> …` to set one) |
    | `#test` | dry run — the bot replies with the listing it *would* publish and writes nothing |
    | `#nobrochure` | publish the listing with **no** downloadable brochure |
    | `#brochure` | nothing (a no-op alias — every brochure is re-published by default) |

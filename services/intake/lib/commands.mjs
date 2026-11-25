@@ -26,312 +26,90 @@ const PERIOD_HINTS = [
   [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر)/, 'month'],
 ];
 
-// The caption price overrides the PDF's. The largest figure in the caption is the price, as before,
-// once three kinds of figure are dealt with:
-// - CERTAIN non-prices are set aside: a figure's own unit (an area, a distance, a rate per square
-//   metre), a phone, licence or id number, a date, and metres that cannot be anything else ("12,000 m",
-//   "30m x 40m").
-// - Anything set aside because of a WORD near it is a guess: a fee, deposit, old-price, rate or area
-//   label, or a street, width, height or distance word after a small bare m. A guess can be wrong
-//   ("السعر بدون عمولة 4,500,000" is a price, "4.5m Street-facing" too), so if a figure set aside on a
-//   guess would be larger than the price finally read, the caption gives no price: a guess can lose a
-//   price but never hand its slot to a smaller figure.
-// - An UNCLEAR caption gives no price at all: "450 m 2", "4,500, 000", "SAR 4500 000", a street then
-//   20m, a currency-only line between two figures.
-// Whenever the caption gives no price, the PDF's own price stands; the bot's reply shows the owner
-// what was published.
+// The caption price overrides the PDF's, so it is read STRICTLY. The caption sets a price only when
+// it holds exactly ONE figure, written as a price: "4.5m", "SAR 4,500,000", "#rent 120,000 per year",
+// "٤٫٥ مليون ريال". Any of these and the caption sets no price:
+// - a second figure anywhere (an area, a room count, a phone, a second price);
+// - two different currencies;
+// - a unit after the figure ("450 m2", "12,000 sqm", "3,500/m2", "15 km");
+// - a label before it that says what else it is ("Area:", "Deposit", "was", "Call", "سعر المتر").
+// Then the PDF's own price stands, the bot's reply shows what was published, and `price <id> …` sets
+// a price by hand. (A free-text reader that picked the likeliest figure kept misreading captions
+// through nine review rounds; the owner's captions so far carry no price at all.)
 const AR = String.raw`\u0621-\u064A`; // Arabic letters (tanween and other marks are outside it)
-const EOL = String.raw`\n`; // every line break is a \n by the time these run (see parsePriceHint)
-
-// Whole words only: "European" is no EUR.
 const CURRENCY = String.raw`(?:SAR|AED|EUR|USD|OMR)(?![A-Za-z])|ر\.س|ريال(?:اً|ا)?(?![${AR}])`;
-
-// One figure. Thousands groups are exactly three digits with ONE separator throughout ("4,500,000",
-// Arabic "4٬500٬000"), so "4,500,000 4 bedrooms" ends where the price ends. A space never groups
-// thousands: it joined phone numbers ("555 226 302") and unit counts into prices. Then an optional
-// decimal part ("4.5", Arabic "4٫5").
-const FIGURE = String.raw`[0-9]{1,3}(?<sep>[,،٬])[0-9]{3}(?:\k<sep>[0-9]{3})*(?:[.٫][0-9]+)?(?![0-9])|[0-9]+(?:[.٫][0-9]+)?`;
-
-// A Latin multiplier is a whole word (not the m of "10 mins" or "m²", not the k of "15 km"). An Arabic
-// one takes its usual endings ("ألفاً") but no further letter, so "الف" in "الفلل" is not one.
-const MULTIPLIER = String.raw`(?<lmult>mill?ions?|mill|mln|mil|mn|m|k)(?=$|[^A-Za-z0-9²³${AR}]|${CURRENCY})|(?<amult>مليون|ملايين|[أا]لف)(?:اً|ًا|ا|ً)?(?![${AR}])`;
-
-// A currency between two figures ("Floor 12 AED 2,000,000", "Built 2019 SAR 4,500,000") belongs to the
-// figure after it, so a currency after a figure is its own only when no figure follows, or when it is
-// written onto the figure ("450,000AED 5 bedrooms").
-// A match starts at the start, after a space, "(", "~" or "≈", or after a comma that is not inside a
-// figure ("Price,4,500,000"; a comma right before a currency: "4,500,000,USD 900,000"). Never at a comma
-// between digits, which would read "🔥12,500,000" as 500,000.
-const PRICE_RE_SOURCE = String.raw`(?:^|[\s(~≈]|(?<![0-9٬٫.])[,،]|[,،](?=(?:${CURRENCY})))(?:(?<pre>${CURRENCY})[ \t]*)?(?<num>${FIGURE})(?:[ \t]*(?:${MULTIPLIER}))?(?:(?<post>${CURRENCY})|[ \t]+(?<spacedPost>${CURRENCY})(?![ \t]*[0-9]))?`;
-
-// After a bare m with no currency after it: the first side of a size ("30m x 40m") is metres for
-// certain. A street, a width, a height or a distance word only suggests metres ("4.5m Street-facing
-// villa" is a price), so below 100 it is a guess; from 100 up ("300m from the beach") it is certain.
-const METRES_CERTAIN_AFTER_RE = /^[ \t]*[x×*](?=[ \t]*[0-9.]+[ \t]*m\b)/i;
-const METRES_WORD_AFTER_RE = new RegExp(String.raw`^(?:-|[ \t]*)(?:(?:by|and|&)(?=[ \t]*[0-9.]+[ \t]*m\b)|streets?\b|st\b|roads?\b|rd\b|wide\b|width\b|ceilings?\b|height\b|frontage\b|from\b|away\b|walk|high\b|tall\b|deep\b|depth\b|long\b|length\b|شارع|طريق|سقف|ارتفاع)`, 'i');
-// Before a bare m: the second side of a size ("30m x 40m") is certain. A dimension label right before
-// it ("Height 3m", "Frontage 25m", "ارتفاع السقف 3m") or the second of two widths ("20m and 15m",
-// "25m by 40m") is a guess ("sea frontage 3.2m" may be a price).
-const METRES_CERTAIN_BEFORE_RE = /[0-9][ \t]*m?[ \t]*[x×*][ \t]*$/i;
-const METRES_WORD_BEFORE_RE = new RegExp(String.raw`[0-9][ \t]*m[ \t]*(?:by|and|&|و)[ \t]*$|(?:\b(?:frontage|width|height|depth|length|ceilings?(?:[ \t]+height)?)|عرض[ \t]+(?:ال)?شارع|ارتفاع(?:[ \t]+(?:ال)?سقف)?|(?:ال)?سقف|(?:ال)?واجهة)[ \t:]*$`, 'i');
-const STREET_BEFORE_RE = new RegExp(String.raw`(?:\b(?:streets?|st\.?|roads?|rd\.?)|شارع|طريق)[ \t:]*$`, 'i');
-
-// A unit right after a figure with no currency makes it an area ("12,000 sqm", "450m2", "12000 م2")
-// or a distance ("15,000 km"). "/m2" or "per sqm" after any figure makes it a rate per square metre,
-// unless a number follows the unit ("per sqm 7,200" labels the 7,200).
-const AREA_UNIT = String.raw`(?:bua\b|gfa\b|m2(?![0-9])|m[ \t]*²|m[ \t]*\^[ \t]*2(?![0-9])|met(?:er|re)s?2(?![0-9])|sqm|sqft|sq[ .\-]*(?:m|mt|mtr|met(?:er|re)s?|ft|feet|foot|yds?|yards?)\b|square[ \-]*(?:m|met(?:er|re)s?|f(?:ee|oo)t|yards?)\b|ft2(?![0-9])|ft[ \t]*²|m\.?[ \t]*sq\b(?![ \t.]*f(?:ee|oo)?t)|met(?:er|re)s?\b|(?:ال)?(?:متر|أمتار|امتار)[ \t]*مربع|(?:ال)?(?:متر|مترا|أمتار|امتار)(?![${AR}])|م[ \t]*[2²](?![0-9])|م(?![${AR}]))`;
-const DISTANCE_UNIT = String.raw`(?:kms?|kilomet(?:er|re)s?|كم|كيلو)(?![A-Za-z${AR}])`;
-const AREA_AFTER_RE = new RegExp(String.raw`^[ \t]*(?:\([ \t]*)?(?:${AREA_UNIT}|${DISTANCE_UNIT})`, 'i');
-// ...unless the unit labels the next figure: "4,500,000 (sqm: 450)", "1.85M (sqm price AED 4,500)",
-// "3 مليون (المتر 1500 ريال)", "12,000 sqm: ...", and a rate idiom followed by money ("السعر 900,000 المتر
-// 1500 ريال", "sqm price AED 4,500"). A plain unit followed by money ("450,000 sqft USD 0.20/sqft") stays a unit.
-const AREA_LABEL_AFTER_RE = new RegExp(String.raw`^[ \t]*(?:\([ \t]*(?:${AREA_UNIT}|${DISTANCE_UNIT})[^)\n]{0,30}?[0-9]|(?:${AREA_UNIT}|${DISTANCE_UNIT})[ \t]*[:=：]|(?:(?:ال|لل)متر(?:[ \t]+(?:ال)?مربع)?|(?:sqm|sq\.?[ \t]*m|m2|m²|sqft)[ \t]+price)[ \t]*(?:(?:${CURRENCY})[ \t]*[0-9]|[0-9][0-9,.٬٫]*[ \t]*(?:${CURRENCY})))`, 'i');
-const RATE_AFTER_RE = new RegExp(String.raw`^[ \t]*(?:\([ \t]*)?(?:\/|per\b|لكل|لل)[ \t]*(?=(?<rateUnit>${AREA_UNIT}|m\b|ft\b))\k<rateUnit>(?![ \t]*[:=：]?[ \t]*(?:(?:${CURRENCY})[ \t]*)?[0-9])`, 'i');
-// "/m" or "per m" on its own may be per month: in a rent caption it is ("Rent AED 12,000 / m"), elsewhere
-// it is only a guess.
-const RENT_RE = new RegExp(String.raw`\b(?:rent|rental|lease|leasing)\b|(?:ال|لل)?[إا]يجار`, 'i');
-const RATE_PER_M_RE = /^[ \t]*(?:\([ \t]*)?(?:\/|per\b)[ \t]*m\b(?![ \t]*[2²^])/i;
-// "/m sq" spells out square metres even in a rent caption (but only as a guess: "/m sqft 850" is per month).
-const RATE_PER_M_SQ_RE = /^[ \t]*(?:\([ \t]*)?(?:\/|per\b)[ \t]*m\b[ \t.]*sq\b/i;
-// "450 m 2" or "4.5m 2 floors": a square metre, or 4.5 million and two of something. Unclear, unless
-// what follows is a count ("1.2M 2 bedrooms" is 1.2 million).
-const SPACED_M2_RE = /^[ \t]*m[ \t]+2(?![0-9])/i;
-const SPACED_M2_COUNT_RE = /^[ \t]*m[ \t]+2[ \t]*(?:bed|br\b|bath|room|floor|stor|unit|park|payment|instal|villa|apartment|غرف|دور|أدوار|ادوار|حمام|دورات|دفع|شقق|شقة|موقف)/i;
-// A date ("30.06.2027", "2027-06-30", "30/6/2027") is no figure at all.
-const DATE_RE = /^[0-9]{1,4}[./\-][0-9]{1,2}[./\-][0-9]{1,4}(?![0-9])/;
-
-// Labels just before a figure, all guesses: an old price ("was", "السعر السابق"), a fee or deposit
-// ("Deposit 50,000", "العربون 100 ألف"; not after "without", "incl.", "بدون", "شامل"), a rate per
-// square metre ("price per sqm", "سعر المتر") on any figure, an area ("Area:", "plot", "المساحة") on a
-// bare one.
-const LABEL_END = String.raw`[ \t]*[:：=\-–]?[ \t]*$`;
-const RATE_LABEL = String.raw`(?:\bper[ \t]*(?:sqm|sq[ .]*m|m2|m²|met(?:er|re)|square[ \t\-]*(?:m|met(?:er|re)s?|f(?:ee|oo)t))|سعر[ \t]+(?:ال)?متر|للمتر|^[ \t]*(?:ال)?متر)`;
-const AREA_LABEL = String.raw`(?:\b(?:area|size|plot|bua)(?:[ \t]*\([^)]*\))?|\b(?:sqm|sq[ .]*m|m2|m²)[ \t]*:|(?:ال)?مساحة)`;
-const OLD_PRICE_LABEL = String.raw`(?:\bwas|\bpreviously|\bold[ \t]+price|\binstead[ \t]+of|السعر[ \t]+السابق|(?:^|[^${AR}])(?:سابقا|سابقاً|كان)|بدلا[ \t]+من|بدلاً[ \t]+من)`;
-const FEE_LABEL = String.raw`(?:\b(?:deposit|down[ \t]*payment|(?:monthly[ \t]+|annual[ \t]+|yearly[ \t]+)?instal(?:l)?ments?|service[ \t]*charges?|maintenance(?:[ \t]*fees?)?|commission|(?:booking|reservation|agency|brokerage|registration)(?:[ \t]*fees?)?|(?:annual|rental|rent)[ \t]+income|income)|(?:^|[^${AR}])(?:ال)?(?:عربون|قسط(?:[ \t]+(?:ال)?شهري)?|دفعة[ \t]+(?:ال)?أولى|رسوم[ \t]+(?:ال)?(?:خدمة|خدمات|صيانة|حجز|تسجيل)|عمولة|صيانة|حجز|دخل|عائد)(?:[ \t]+(?:ال)?سنوي)?)`;
-const FEE_LABEL_BEFORE_RE = new RegExp(FEE_LABEL + LABEL_END, 'i');
-const FEE_NEGATED_RE = new RegExp(String.raw`(?:\b(?:without|no|zero|free|incl\.?|including|inclusive|excl\.?|excluding|plus)\b|بدون|بلا|شامل|شاملة|غير|مع|(?:^|[^${AR}])لا(?![${AR}]))[^0-9\n]{0,30}$`, 'i');
-const RATE_LABEL_BEFORE_RE = new RegExp(RATE_LABEL + LABEL_END, 'i');
-const AREA_LABEL_BEFORE_RE = new RegExp(AREA_LABEL + LABEL_END, 'i');
-const OLD_PRICE_LABEL_BEFORE_RE = new RegExp(OLD_PRICE_LABEL + LABEL_END, 'i');
-// The line above (blank lines skipped) labels a figure that starts its line only when it ends in a
-// colon ("Price per sqm:") or is nothing but a label ("سعر المتر"); "Villa in Al Olaya area" is not.
-const LABEL_LINE_RE = new RegExp(String.raw`[:：][ \t]*$|^[^${AR}A-Za-z0-9]*(?:(?:price|asking|السعر|سعر)[ \t]+)?(?:${RATE_LABEL}|${AREA_LABEL}|${OLD_PRICE_LABEL}|${FEE_LABEL})${LABEL_END}`, 'i');
-
-// A currency that ends a line and does not follow a figure ("Price: AED", "Unit A12 price: AED") belongs
-// to the figure that starts the next line ("450,000").
-const CURRENCY_AT_LINE_END_RE = new RegExp(String.raw`(?<![0-9][ \t]*(?:mill?ions?|mill|mln|mil|mn|m|k|مليون|ملايين|[أا]لف[اً]*)?[ \t]*)(?<![A-Za-z${AR}])(${CURRENCY})[ \t]*(?:${EOL}[ \t]*)+(?=[0-9])`, 'gi');
-
-// A line that starts with a currency and holds no figure belongs to the figure that ends the line above
-// ("450,000" / "AED", "450,000" / "AED negotiable"),
-// unless a figure also starts the line below ("Floor 3" / "AED" / "450,000"): then it cannot be told whose it is.
-const FIGURE_END = String.raw`[0-9](?:[ \t]*(?:mill?ions?|mill|mln|mil|mn|m|k|مليون|ملايين|[أا]لف(?:اً|ًا|ا|ً)?)(?![A-Za-z${AR}]))?`;
-const CURRENCY_LINE_RE = new RegExp(String.raw`(${FIGURE_END})[ \t]*(?:${EOL}[ \t]*)+(${CURRENCY})(?=[^0-9${EOL}]*(?:${EOL}|$))(?![ \t]*(?:${EOL}[ \t]*)*[0-9])`, 'gi');
-const CURRENCY_LINE_BETWEEN_FIGURES_RE = new RegExp(String.raw`${FIGURE_END}[ \t]*(?:${EOL}[ \t]*)+(?:${CURRENCY})[ \t]*(?:${EOL}[ \t]*)+[0-9]`, 'i');
-
-// Two or more currencies in one caption ("SAR 6,200,000 (EUR 1,519,000)", "4.5M AED, instalment 15,000
-// SAR"): only a figure with its own written currency counts; the largest of those is the price.
-const ANY_CURRENCY_RE = new RegExp(String.raw`(?:(?<![A-Za-z${AR}])|(?<=[0-9](?:mill?ions?|mill|mln|mil|mn|m|k)))(${CURRENCY})`, 'gi');
-const normCurrency = (c) => { const u = (c || '').toUpperCase(); return u === 'ر.س' || u.startsWith('ريال') ? 'SAR' : CURRENCIES.includes(u) ? u : null; };
-
-// A price word right before a figure ("Asking 4,500,000 (sqm: 450)", "السعر 900,000 المتر 1500 ريال").
-const PRICE_WORD_BEFORE_RE = new RegExp(String.raw`(?:\b(?:price|asking|total|cost)|(?:^|[^${AR}])(?:ال)?سعر|بسعر|المطلوب|(?:ال)?[إا]جمالي)[ \t:：=\-–]*$`, 'i');
-
+const CURRENCY_RE = new RegExp(String.raw`(?<![A-Za-z${AR}])(?:${CURRENCY})`, 'gi');
+// Every run of digits, with the separators that join it, is one figure.
+const DIGIT_RUN_RE = /[0-9]+(?:[,،٬.٫][0-9]+)*/g;
+// A figure written as a price: thousands in groups of three with one separator, or no separator; a
+// decimal part. "4,5000", "4.500.000" and the like are not read.
+const FIGURE_RE = /^(?:[0-9]{1,3}([,،٬])[0-9]{3}(?:\1[0-9]{3})*|[0-9]+)(?:[.٫][0-9]+)?$/;
+// A multiplier right after the figure, as a whole word ("4.5m", "1.2 million", "850k", "٤٫٥ مليون",
+// "٨٥٠ ألفاً"); not the m of "m2" or "mins", not the k of "km".
+const MULTIPLIER_RE = new RegExp(String.raw`^[ \t]*(?:(?<lmult>mill?ions?|mill|mln|mil|mn|m|k)(?=$|[^A-Za-z0-9²³^${AR}]|${CURRENCY})|(?<amult>مليون|ملايين|[أا]لف)(?:اً|ًا|ا|ً)?(?![${AR}]))`, 'i');
+// A unit after the figure: an area, a distance, or a rate per square metre or per month ("/m").
+const UNIT_AFTER_RE = new RegExp(String.raw`^[ \t]*(?:\([ \t]*)?(?:(?:\/|per\b|لكل|لل)[ \t]*)?(?:m[ \t]*[2²]|m[ \t]*\^[ \t]*2|m\.?[ \t]*sq\b|m\b|sq[ .\-]*(?:m|mt|mtr|ft|feet|foot|yds?|yards?)\b|sqm|sqft|square|met(?:er|re)s?\b|ft[ \t]*[2²]|bua\b|gfa\b|kms?\b|kilomet|(?:ال)?(?:متر|مترا|أمتار|امتار)|م[ \t]*[2²]|م(?![${AR}])|كم(?![${AR}])|كيلو)`, 'i');
+// A label right before the figure that says it is not the price.
+const NOT_PRICE_LABEL_RE = new RegExp(String.raw`(?:\b(?:area|size|plot|bua|sqm|m2|deposit|down[ \t]*payment|service[ \t]*charges?|maintenance|commission|instal(?:l)?ments?|booking|income|was|previously|old[ \t]+price|ref(?:erence)?|no\.?|number|phone|tel|mobile|call|whatsapp|licen[cs]e|permit|id|floor|built|year|handover|street|road|width|height|frontage|per[ \t]*(?:sqm|m2|m²|met(?:er|re)|square[ \t]*(?:m|met(?:er|re)s?|f(?:ee|oo)t)))|(?:^|[^${AR}])(?:ال)?(?:مساحة|عربون|عمولة|صيانة|قسط|رسوم|دور|تسليم|شارع|عرض|ارتفاع|واجهة|ترخيص|رخصة|هوية|جوال|هاتف|رقم)|سعر[ \t]+(?:ال)?متر|للمتر|السعر[ \t]+السابق|سابقاً?|اتصال|واتساب|بناء|سنة|عام)[^0-9A-Za-z${AR}]*$`, 'i');
+// ...unless the fee word is negated: "السعر بدون عمولة 4,500,000", "Price incl. commission: 2.5m".
+const NEGATED_RE = new RegExp(String.raw`(?:\b(?:without|no|zero|free|incl\.?|including|inclusive|excl\.?|excluding)\b|بدون|بلا|شامل|شاملة|غير|(?:^|[^${AR}])لا(?![${AR}]))[^0-9]{0,30}$`, 'i');
 // Direction marks and the tatweel are invisible: م2 behind a right-to-left mark, or م + tatweel + 2, must read as م2.
 const INVISIBLE_RE = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069\u0640]/g;
 
 /**
  * A price the OWNER typed in the caption. Never an estimate — this only reads an
- * explicit figure. Returns null when the caption carries no number, or one that cannot
- * be read with certainty.
+ * explicit figure. Returns null when the caption carries no figure, or anything that
+ * makes the one figure doubtful (see above).
  */
 export function parsePriceHint(caption) {
-  // One kind of line break (a \r\n read as one or two breaks made the joins below backtrack exponentially),
-  // one space for any run of spaces.
-  const plain = westernise(caption || '').replace(INVISIBLE_RE, '').replace(/\r\n?|[\u2028\u2029]/g, '\n')
-    .replace(/[\u00A0\u2007\u202F]/g, ' ').replace(/[ \t]+/g, ' ');
-  if (CURRENCY_LINE_BETWEEN_FIGURES_RE.test(plain)) return null;
-  const currencies = new Set([...plain.matchAll(ANY_CURRENCY_RE)].map((c) => normCurrency(c[1])));
-  const text = plain.replace(CURRENCY_LINE_RE, '$1 $2').replace(CURRENCY_AT_LINE_END_RE, '$1 ');
-  // "SAR 4,500,000" | "4.5m sar" | "٤٥٠٠٠٠٠ ريال" | "price 750000"
-  const readings = []; // currencies can still move between readings until every line is read
-  let guessed = 0; // the largest figure set aside on a guess
-  let conflict = false; // one figure claimed by two different currencies it holds firmly
-  const consider = (r) => { readings.push(r); };
-  // One line at a time: a figure, its unit and its label never reach across a line break.
-  const rent = RENT_RE.test(text);
-  const lines = text.split('\n');
-  let carry = null; // the figure that ended the last non-blank line, for a currency starting the next one
-  for (const [i, line] of lines.entries()) {
-    if (!line.trim()) continue;
-    const lineCarry = carry;
-    carry = null;
-    // The figure just before on this line, with no currency of its own: { amount, end, reading }.
-    let prev = null;
-    let prevEnd = null; // where the figure just before ended, whatever became of it
-    for (const m of line.matchAll(new RegExp(PRICE_RE_SOURCE, 'dgi'))) {
-      const last = prev;
-      prev = null;
-      const lastEnd = prevEnd;
-      prevEnd = m.index + m[0].length;
-      const g = m.groups;
-      const post = g.post || g.spacedPost;
-      const preCurrency = normCurrency(g.pre);
-      // A currency before the figure that sits right after another figure may be that one's ("3500 ريال
-      // 2,000,000 AED", "12,000 SAR 20m street").
-      const borrowed = Boolean(g.pre) && lastEnd !== null && !line.slice(lastEnd, m.indices.groups.pre[0]).trim();
-      // A currency on each side: the one before is the figure's own ("AED 450,000 EUR equivalent: 115,000"),
-      // unless it may be borrowed; then the one after is.
-      let currency = (preCurrency && !borrowed ? preCurrency : normCurrency(post)) || preCurrency;
-      let money = Boolean(g.pre || post);
-      // The currency before may be the figure's just before, with only spaces between ("4,500,000 AED 5 bedrooms").
-      const between = Boolean(preCurrency && last && !line.slice(last.end, m.indices.groups.pre[0]).trim());
-      let handed = false;
-      // force: the figure after is an area, a rate or metres, so the currency is surely the one before's,
-      // even over a currency that figure took from its left ("2,500,000 AED 2,553,000 SAR 450 sqm").
-      const handBack = (force = false) => {
-        if (handed) return;
-        handed = true;
-        const r = last.reading;
-        // A currency the figure holds firmly (written after it, or before it and not borrowed) is never replaced:
-        // a different one arriving means the caption cannot be read ("SAR 4,500,000 AED 4,400,000").
-        if (r && r.firm && r.currency !== preCurrency) conflict = true;
-        else if (r) { if (force || !r.explicitCurrency || !r.firm) Object.assign(r, { currency: preCurrency, explicitCurrency: true, firm: true }); }
-        else if (last.amount >= 1000) consider({ amount: last.amount, currency: preCurrency, explicitCurrency: true, firm: true });
-      };
-      if (g.pre && post && between) handBack();
-      const [numStart, numEnd] = m.indices.groups.num;
-      const afterNum = line.slice(numEnd);
-      const tail = line.slice(m.index + m[0].length);
-      // A date is no figure; a currency it reached is the figure's before ("450,000 AED 2027-06-30 handover").
-      if (DATE_RE.test(line.slice(numStart))) { if (between) handBack(); continue; }
+  const text = westernise(caption || '').replace(INVISIBLE_RE, '').replace(/[\u00A0\u2007\u202F]/g, ' ')
+    // hashtags and listing or unit ids ("#rent", "BONA-W023", "A-12") are not figures; a neutral word
+    // keeps a label before them ("Ref: BONA-W123, 1,850,000") from reaching the figure
+    .replace(/#[^\s#]+/g, ' tag ').replace(/\b[A-Za-z]+-[A-Za-z]*[0-9]+\b/g, ' listing ');
+  const runs = [...text.matchAll(DIGIT_RUN_RE)];
+  if (runs.length !== 1) return null;
+  const [run] = runs;
+  const num = run[0];
+  if (!FIGURE_RE.test(num)) return null;
+  const currencies = new Set([...text.matchAll(CURRENCY_RE)].map((c) => {
+    const u = c[0].toUpperCase();
+    return u === 'ر.س' || u.startsWith('ريال') ? 'SAR' : u;
+  }));
+  if (currencies.size > 1) return null;
+  const currency = currencies.size ? [...currencies][0] : null;
 
-      // Unclear figures: no caption price at all.
-      if (SPACED_M2_RE.test(afterNum) && !SPACED_M2_COUNT_RE.test(afterNum)) return null;
-      // "4,5000" or "4500,000": the figure stops short of more digits.
-      if (/^[,،٬.٫][0-9]/.test(afterNum)) return null;
-      // "4,500, 000", "4,500 000", "SAR 4500 000": three more digits after a grouped figure or after money,
-      // carrying no unit of their own.
-      const loose = /^[,،٬]?[ \t]+[0-9]{3}(?![0-9])/.exec(afterNum);
-      if ((g.sep || money) && loose && !AREA_AFTER_RE.test(afterNum.slice(loose[0].length))) return null;
+  // A currency between a label and the figure ("Service charge SAR 12,000"), or between the figure and
+  // its unit ("3,500 SAR per sqm"), does not hide them.
+  const CURRENCY_END_RE = new RegExp(String.raw`(?:${CURRENCY})[ \t]*$`, 'i');
+  const CURRENCY_START_RE = new RegExp(String.raw`^[ \t]*(?:${CURRENCY})`, 'i');
+  const before = text.slice(0, run.index).slice(-60).replace(CURRENCY_END_RE, '');
+  if (NOT_PRICE_LABEL_RE.test(before) && !NEGATED_RE.test(before)) return null;
+  let after = text.slice(run.index + num.length);
+  if (UNIT_AFTER_RE.test(after) && !MULTIPLIER_RE.exec(after)?.groups.lmult) return null;
+  const mult = MULTIPLIER_RE.exec(after);
+  if (mult) after = after.slice(mult[0].length);
+  // "4.5m2" or "450 m 2" is an area, not 4.5 million; "4.5m sqm" too.
+  if (mult && (/^[ \t]*[2²^]/.test(after) || UNIT_AFTER_RE.test(after))) return null;
+  const afterCurrency = after.replace(CURRENCY_START_RE, '');
+  if (afterCurrency !== after && UNIT_AFTER_RE.test(afterCurrency) && !/^[ \t]*m\b(?![ \t]*[2²^.])/i.test(afterCurrency)) return null;
 
-      let amount = Number(g.num.replace(/[,،٬]/g, '').replace('٫', '.'));
-      if (!Number.isFinite(amount)) continue;
-      const mult = (g.lmult || g.amult || '').toLowerCase();
-      const factor = /^(m|mn|mil|mill|mln|mill?ions?|مليون|ملايين)$/.test(mult) ? 1e6 : /^(k|ألف|الف)$/.test(mult) ? 1e3 : 1;
-      const value = Math.round(amount * factor * 1000) / 1000;
-      // Set aside on a guess: remembered, so that it can still veto a smaller price.
-      const guess = () => { if (value >= (currency && !between ? 1000 : 10000)) guessed = Math.max(guessed, value); };
-
-      // A rate, an area or metres right after a figure whose currency sits between it and the figure
-      // before ("450,000 AED 450/m2", "1,250,000 USD 2,400 sqft"): the currency is the figure's before,
-      // and the figure itself is set aside as a guess ("2019 SAR 4,500,000 متر" then reads no price).
-      const perM = RATE_PER_M_RE.test(afterNum) || RATE_PER_M_RE.test(tail);
-      const perMSq = RATE_PER_M_SQ_RE.test(afterNum) || RATE_PER_M_SQ_RE.test(tail);
-      if ((RATE_AFTER_RE.test(afterNum) || RATE_AFTER_RE.test(tail)) && !(perM && rent && !perMSq)) {
-        if (between) handBack(true);
-        if (between || perM) guess();
-        continue;
-      }
-      // A figure first on its line (bullets aside) takes its label from the line above, if that is a label.
-      const before = line.slice(0, m.index).slice(-100);
-      let label = before;
-      if (!before.replace(/[^\p{L}\p{N}]+/gu, '')) {
-        let j = i - 1;
-        while (j >= 0 && !lines[j].trim()) j -= 1;
-        if (j >= 0 && LABEL_LINE_RE.test(lines[j].slice(-100))) label = lines[j].slice(-100);
-      }
-      // A price word right before the figure (or ending the line above) makes it money as much as a currency does.
-      const priced = money || PRICE_WORD_BEFORE_RE.test(label);
-      const unitLabelsNext = AREA_LABEL_AFTER_RE.test(afterNum) || AREA_LABEL_AFTER_RE.test(tail);
-      // A bare figure whose unit labels the next one ("Warehouse 12,000 sqm: suitable for logistics") may
-      // still be an area: a guess, unless a price word stands right before it.
-      if (unitLabelsNext && !priced) { guess(); continue; }
-      // A unit after a multiplier on a priced figure ("Asking 4.5m sq ft 12,000") belongs to the next figure.
-      const unitAfterMultiplierOnly = !AREA_AFTER_RE.test(afterNum) && Boolean(g.lmult || g.amult);
-      if ((AREA_AFTER_RE.test(afterNum) || AREA_AFTER_RE.test(tail)) && !unitLabelsNext && !(priced && !money && unitAfterMultiplierOnly)) {
-        // A unit that starts right at the figure ("450 m ^ 2", "12,000 sqm") makes it an area; one after a
-        // multiplier ("Land 1.2m sqm") is unusual enough to be a guess.
-        if (!money && (AREA_AFTER_RE.test(afterNum) || (!g.lmult && !g.amult))) continue;
-        // Money with an area unit ("SAR 4,500,000 sqm 450", "EUR 1,500 sqft"): its currency is the figure's
-        // before if there is one; either way the figure is set aside as a guess.
-        if (between) handBack(true);
-        guess();
-        continue;
-      }
-      const bare = !g.lmult && !g.amult && !money;
-      const fee = FEE_LABEL_BEFORE_RE.test(label) && !FEE_NEGATED_RE.test(label);
-      if (fee || OLD_PRICE_LABEL_BEFORE_RE.test(label) || RATE_LABEL_BEFORE_RE.test(label) || (bare && AREA_LABEL_BEFORE_RE.test(label))) {
-        guess();
-        continue;
-      }
-      // A phone, licence or id number: ungrouped digits with a leading 0 (no price starts with 0, whatever
-      // currency is next to it), or, on a bare figure, ten or more of them or a Saudi mobile without its 0.
-      if (/^[0-9]+$/.test(g.num) && !g.lmult && !g.amult && /^0[0-9]/.test(g.num)) { if (between) handBack(true); continue; }
-      if (bare && /^[0-9]+$/.test(g.num) && (g.num.length >= 10 || /^5[0-9]{8}$/.test(g.num))) continue;
-
-      if (/^m$/i.test(g.lmult || '')) {
-        // A bare m after a figure of 1,000 or more is metres ("Land 12,000 m").
-        if (amount >= 1000) { if (between) handBack(true); continue; }
-        // A currency after the m makes it money ("4.5m SAR from the developer"); otherwise metres may be meant.
-        if (!post) {
-          const rest = line.slice(m.indices.groups.lmult[1]);
-          const certainMetres = METRES_CERTAIN_AFTER_RE.test(rest) || (!money && METRES_CERTAIN_BEFORE_RE.test(before));
-          const wordMetres = METRES_WORD_AFTER_RE.test(rest) || (!priced && METRES_WORD_BEFORE_RE.test(before));
-          // A currency written before the figure makes it money ("SAR 150m high yield", "AED 4.5m from the
-          // developer"), unless that currency sits right after another figure and may be its own ("12,000 SAR
-          // 20m street"): then the metre word is a guess.
-          if (certainMetres || (wordMetres && amount >= 100 && !priced)) { if (between) handBack(true); continue; }
-          if (wordMetres && (!priced || borrowed)) { if (between) handBack(true); guess(); continue; }
-          // After a street, 4.5m is a price ("Olaya Street 4.5m") but 20m may be its width: unclear.
-          if (!priced && amount >= 10 && STREET_BEFORE_RE.test(before)) return null;
-        }
-      }
-      // A currency between two figures where the second is a small detail (under 10,000: "1,250,000 AED 2027
-      // handover") is the first's: the price comes first, its details after. A larger second figure may be
-      // money itself ("2.4 million USD 654,000 approx."), so the currency stays with it. (An area, rate or metres
-      // after it was dealt with above.)
-      // A bare figure, a currency, then a smaller figure of 10,000 or more ("2.4m AED 12,000 service charge",
-      // "2.4 million USD 654,000 approx."): the currency may be either's, so no caption price.
-      // The same across a comma or a line break ("Price 980,000, OMR 196,000 to book", "Price 2,000,000" /
-      // "AED 450,000 down payment"). With SAR there is no doubt: a bare figure is SAR anyway.
-      const preStart = g.pre ? m.indices.groups.pre[0] : 0;
-      const near = !g.pre ? null
-        : last ? (/^[ \t]*[,،]?[ \t]*$/.test(line.slice(last.end, preStart)) ? last : null)
-          : lastEnd === null && lineCarry && !line.slice(0, preStart).trim() ? lineCarry : null;
-      if (near && !post && preCurrency !== 'SAR' && value >= 10000 && value < near.amount && !(near.reading && near.reading.explicitCurrency)) return null;
-      if (between && !post && value >= 1000 && value < 10000 && value < last.amount) {
-        handBack();
-        currency = null;
-        money = false;
-      }
-      amount = value;
-      // A count the currency reached ("4,500,000 AED 5 bedrooms"): the currency is the figure's before.
-      if (amount < 1000) { if (between) handBack(true); if (!money) prev = { amount, end: m.index + m[0].length, reading: null }; continue; }
-      // A bare number only counts as a price when it is plausibly one (>= 10,000) —
-      // otherwise "3 bedrooms" would become a price. It is kept as the figure before, in case a
-      // currency after it is its own ("8,500 AED 3 bedrooms").
-      if (!currency && amount < 10000) { prev = { amount, end: m.index + m[0].length, reading: null }; continue; }
-      const reading = { amount, currency: currency || 'SAR', explicitCurrency: Boolean(currency), firm: Boolean(post) || (Boolean(g.pre) && !borrowed) };
-      // A figure whose only currency came from its left may still take the one after it (see handBack).
-      if (!post) prev = { amount, end: m.index + m[0].length, reading };
-      consider(reading);
-    }
-    if (prev && !line.slice(prev.end).replace(/[ \t,،.;:!\-–]+/g, '')) carry = prev;
-  }
-  let pool = readings;
-  let unsure = 0; // several currencies: a figure without its own cannot be told apart, so it can only veto
-  if (currencies.size > 1) {
-    for (const r of readings) if (!r.explicitCurrency) unsure = Math.max(unsure, r.amount);
-    pool = pool.filter((r) => r.explicitCurrency);
-  }
-  let best = null;
-  for (const r of pool) {
-    if (!best || r.amount > best.amount || (r.amount === best.amount && r.explicitCurrency && !best.explicitCurrency)) best = r;
-  }
-  // A figure set aside on a guess that is larger than the price read: the guess may have been wrong.
-  if (conflict || (best && (guessed > best.amount || unsure > best.amount))) return null;
-  return best && { amount: best.amount, currency: best.currency, explicitCurrency: best.explicitCurrency };
+  const digits = num.replace(/[,،٬]/g, '').replace('٫', '.');
+  // A phone, licence or id number: no price starts with 0, and a bare run of ten or more digits
+  // (or a Saudi mobile without its 0) is never one.
+  if (!mult && /^0[0-9]/.test(digits)) return null;
+  if (!mult && !currency && (/^[0-9]{10,}$/.test(digits) || /^5[0-9]{8}$/.test(digits))) return null;
+  const word = (mult?.groups.lmult || mult?.groups.amult || '').toLowerCase();
+  const factor = /^(m|mn|mil|mill|mln|mill?ions?|مليون|ملايين)$/.test(word) ? 1e6 : /^(k|ألف|الف)$/.test(word) ? 1e3 : 1;
+  const amount = Number(digits);
+  if (!Number.isFinite(amount)) return null;
+  // A bare "450 m" is as likely metres as millions: with no currency, only below 100 is it millions.
+  if (word === 'm' && !currency && amount >= 100) return null;
+  const value = Math.round(amount * factor * 1000) / 1000;
+  // A bare number only counts as a price when it is plausibly one (>= 10,000) —
+  // otherwise "3 bedrooms" would become a price.
+  if (!currency && factor === 1 && value < 10000) return null;
+  if (value < 1000) return null;
+  return { amount: value, currency: currency || 'SAR', explicitCurrency: Boolean(currency) };
 }
 
 /**
