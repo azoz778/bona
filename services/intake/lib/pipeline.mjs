@@ -277,14 +277,15 @@ const PERIOD_PHRASE = String.raw`(?:a\s+(?:night|week|day)|per\s+day)`;
 const RENT_WORDING_RE = new RegExp([
   String.raw`\b(?:rent(?:al|als|s|ed|ing)?|leas(?:e|es|ed|ing)|yields?|incomes?|returns?|roi|revenues?|tenant(?:s|ed)?|tenancy|let\s+at|daily|weekend\s+rates?)\b`,
   String.raw`\b${PERIOD_PHRASE}\b`,
-  String.raw`\b(?:weekdays?|weekends?|night\s+rates?|(?:one|every|\d+)\s+night|(?:two|three|four|five|six|seven|\d+)\s+nights|per\s+(?:person|hour|stay)|overnight|\d+[-\u2010\u2011\u2013]nights?)\b`,
+  String.raw`\b(?:weekdays?|weekends?|night\s+rates?|(?:one|every|\d+)\s+night|(?:two|three|four|five|six|seven|\d+)\s+nights|per\s+(?:person|hour|stay)|overnight|(?:\d+|one|two|three|four|five|six|seven)[-\u2010\u2011\u2013]nights?|hourly|per\s+hr)\b`,
+  String.raw`\/\s*(?:hour|hr|person|pax)\b`,
   String.raw`\/\s*(?:day|night|week)\b`,
   arabicWords(String.raw`[إاأ]يجار(?:ات)?(?:ي|ية|يه|يا|ا|${RENT_SUFFIX})?|استئجار|تأجير|تاجير|أجرة|اجرة|أجره|اجره|[أا]جرت(?:ه|ها|هم)|مؤجر|مؤجرة|مؤجره|مؤجرا|`
     + String.raw`موجر|موجرة|مستأجر|مستأجرة|دخل(?:ا|${RENT_SUFFIX})?|عائد(?:ات)?(?:ا|${RENT_SUFFIX})?|عوائد(?:ا|${RENT_SUFFIX})?|[إا]يراد(?:ات)?(?:ا|${RENT_SUFFIX})?|`
     + String.raw`ريع(?:ا|${RENT_SUFFIX})?|مردود(?:ا|${RENT_SUFFIX})?`, { ka: true }),
   arabicWords(String.raw`بالليل[ةه]|في\s+الليل[ةه]|كل\s+ليل[ةه]|باليوم|في\s+(?:الأسبوع|الاسبوع)|بال[أا]سبوع|`
     + String.raw`سعر\s+الليل[ةه]|لليوم|لل[أا]سبوع|ليليا|ت[أا]جيري[ةه]|للعام|كل\s+عام|لكل\s+[أا]سبوع|سعر\s+اليومي|`
-    + String.raw`سعر\s+ال[أا]سبوعي|سعر\s+ال[أا]سبوع|ليل[ةه]\s+(?:ال)?واحد[ةه]|كل\s+يوم|(?:أيام|ايام|نهاية|نهايه|وسط)\s+ال[أا]سبوع|ليلتين|ليلتان|ليال(?:ي)?|مبيت|ويكند|الويك\s*[اإ]ند|للشخص|لكل\s+شخص|بالساع[ةه]|للإقام[ةه]|للاقام[ةه]|للفرد`),
+    + String.raw`سعر\s+ال[أا]سبوعي|سعر\s+ال[أا]سبوع|ليل[ةه]\s+(?:ال)?واحد[ةه]|كل\s+يوم|(?:أيام|ايام|نهاية|نهايه|وسط)\s+ال[أا]سبوع|ليلتين|ليلتان|ليال(?:ي)?|مبيت|ويكند|ويك\s*[اإ]ند|للشخص|لكل\s+شخص|بالساع[ةه]|للساع[ةه]|لكل\s+ساع[ةه]|في\s+الساع[ةه]|للإقام[ةه]|للاقام[ةه]|لكل\s+[إا]قام[ةه]|للفرد|لكل\s+فرد`),
   String.raw`\/\s*(?:ال)?(?:ليل[ةه]|يوم|[أا]سبوع|عام)(?!${AR_LETTER})`,
   RENT_PERIOD,
 ].join('|'), 'i');

@@ -1718,7 +1718,9 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
     }
     assert.equal(measureNear('2,500 ريال للمترالمربع', 2500), true, 'a text layer that drops the space before المربع (Codex r14d NB2)');
     // r14e (Claude r14d NB8 / NB9): the visual "²  م" with more spaces; Persian digits; a glued مترمكعب.
-    for (const t of ['²  م12,500', '²   م12,500', 'م۲ 12,500', '12,500 م۲', '12,500 مترمكعب']) assert.equal(measureNear(t, 12500), true, t);
+    for (const t of ['²  م12,500', '²   م12,500', 'م۲ 12,500', '12,500 م۲', '12,500 مترمكعب',
+      // r14g (Claude r14e NB6): the ²-first branch with a Persian digit, the م-first branch with spaces.
+      '۲ م12,500', 'م  2 12,500']) assert.equal(measureNear(t, 12500), true, t);
     // r14e (Claude r14d NB3): a unit-model figure whose check could not be completed, stated in the copy, refuses the
     // run with "try again later" — never "could not be confirmed … resend with the price".
     {
@@ -2577,7 +2579,11 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       ['ايام الأسبوع\n700 ريال', 700], ['نهايه الأسبوع\n700 ريال', 700], ['ليلتان\n1,800 ريال', 1800], ['ليالي\n1,800 ريال', 1800],
       // r14e (Claude r14d NB7): the Arabic short-stay twins and the English hyphen and overnight forms.
       ['700 ريال بالساعة', 700], ['700 ريال للإقامة', 700], ['700 ريال للفرد', 700], ['الويك اند\n700 ريال', 700],
-      ['SAR 700 overnight', 700], ['SAR 1,800 2-night stay', 1800], ['SAR 1,800 2\u2011night stay', 1800]]) {
+      ['SAR 700 overnight', 700], ['SAR 1,800 2-night stay', 1800], ['SAR 1,800 2\u2011night stay', 1800],
+      // r14g (Claude r14e NB4 / NB5): the bare ويك اند, the hourly and per-person forms, the word-number hyphen.
+      ['ويك اند\n700 ريال', 700], ['700 ريال للساعة', 700], ['700 ريال لكل ساعة', 700], ['700 ريال في الساعة', 700],
+      ['700 ريال لكل إقامة', 700], ['700 ريال لكل فرد', 700], ['SAR 1,800 two-night stay', 1800], ['SAR 700/hour', 700],
+      ['SAR 700 /hr', 700], ['SAR 700 per hr', 700], ['SAR 700 hourly', 700], ['SAR 700/person', 700], ['SAR 700/pax', 700]]) {
       const o = await outcome({ listing: sale(amount), pageText: pages(p3), confirm: [] });
       assert.deepEqual(o.checks.map((c) => [c.amount, c.page, c.sale]), [[amount, 3, true]], p3);
       assert.equal(o.price.onRequest, true, p3);
