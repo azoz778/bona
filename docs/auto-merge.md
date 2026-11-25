@@ -88,14 +88,17 @@ during which #71 became the first real PR to merge itself. What the tests showed
 - GitHub keeps at most 1,000 statuses per commit and context; each gate run writes two. Not reachable in
   practice (about 500 owner comments on one commit).
 - Verdict lines in review bodies count (as in the local guard), but only comments re-run the gate.
-- The required checks are bound to the GitHub Actions app, not to these workflows. Any workflow run in this
-  repo can satisfy them: a job named `ci` or `two-model-review` gives a check run of that name, and a job allowed
-  to write commit statuses (`statuses: write`) can post the status. That includes a same-repo PR's own
-  workflows, one pushed on any other branch, and a **fork PR's** workflows (GitHub runs a fork PR's own workflow
-  files once a first-time contributor is approved), and a PR can change its own `ci.yml`. So green checks on a
-  fork PR prove nothing: never arm or merge a fork PR on its checks; the helper refuses forks. With auto-merge
-  armed before the reviews, such a check could merge a same-repo PR before anyone looks. It is a process check
-  for agents that follow these rules, not a security boundary; the owner's token can also bypass the ruleset.
+- The required checks are bound to the GitHub Actions app, not to these workflows. Two things satisfy them: a
+  check run from a job named `ci` or `two-model-review` in a workflow started by a push or pull-request event
+  (not a manual run), and a commit status of that name posted by a job allowed to write statuses
+  (`statuses: write`); if both exist under one name, both must pass. A same-repo PR's own workflows, or one
+  pushed on another branch, can do either, and a PR can change its own `ci.yml`. A **fork PR's** own workflows
+  run too (after a first-time contributor is approved, at once for anyone who has had a change merged before);
+  a fork's token cannot write statuses, but a job name is enough. So green checks on a fork PR prove nothing:
+  never arm or merge a fork PR on its checks; the helper refuses forks. With auto-merge armed before the
+  reviews (owner decision 2026-11-25), such a check could merge a same-repo PR before anyone looks. It is a
+  process check for agents that follow these rules, not a security boundary; the owner's token can also bypass
+  the ruleset.
 - A verdict withdrawn while a gate run is reading can be overwritten by that run's green (the window is the
   length of one read). Use `--disable-auto` to stop a PR.
 - A very long run of `-` or `'` on a comment line that also names a model and says "review" or "verdict" makes
