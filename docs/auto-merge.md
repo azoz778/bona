@@ -89,8 +89,9 @@ during which #71 became the first real PR to merge itself. What the tests showed
   practice (about 500 owner comments on one commit).
 - Verdict lines in review bodies count (as in the local guard), but only comments re-run the gate.
 - The required checks are bound to the GitHub Actions app, not to these workflows. Two things satisfy them: a
-  check run from a job named `ci` or `two-model-review` in a workflow started by a push or pull-request event
-  (not a manual run), and a commit status of that name posted by a job allowed to write statuses
+  check run from a job named `ci` or `two-model-review` in a workflow started by an event GitHub counts for
+  required checks (for example `push` or `pull_request`; not a manual `workflow_dispatch` run), on the commit
+  GitHub evaluates, and a commit status of that name posted by a job allowed to write statuses
   (`statuses: write`); if both exist under one name, both must pass. A same-repo PR's own workflows, or one
   pushed on another branch, can do either, and a PR can change its own `ci.yml`. A **fork PR's** own workflows
   run too (after a first-time contributor is approved, at once for anyone who has had a change merged before);
