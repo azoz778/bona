@@ -240,6 +240,23 @@ describe('parsePriceHint', () => {
     assert.equal(hint('#sale 25m'), 'SAR 25000000');
   });
 
+  // r24 review (Codex)
+  it('round 24: "total" and "cash" are no words; flags come out of the raw caption only', () => {
+    for (const caption of ['Rent: AED 60,000 total (cash monthly)', 'Price SAR 4.5m cash', 'Total SAR 4.5m', 'السعر ٤٫٥ مليون ريال سعودي كاش']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    // a tag that only the cleaning makes a flag is a word: no price (parseCaption sees no category there)
+    for (const caption of ['#inter\u200Enational €450k', '#ｉｎｔｅｒｎａｔｉｏｎａｌ €450k', '#ｔｅｓｔ SAR 4.5m', '#\u200Ftest SAR 4.5m', '#tـest SAR 4.5m']) {
+      assert.equal(parsePriceHint(caption), null, JSON.stringify(caption));
+    }
+    // a fullwidth rent tag is the word "rent" to the price reader and no category to parseCaption: no caption price
+    assert.equal(parseCaption('#ｒｅｎｔ AED 45k per year').price, null);
+    // a flag the caption reader reads is no word, a direction mark after it included
+    assert.equal(hint('#international €450k'), 'EUR 450000');
+    assert.equal(hint('#rent\u200E AED 45k per year'), 'AED 45000');
+    assert.equal(parseCaption('#rent\u200E AED 45k per year').category, 'rent');
+  });
+
   // r23 review (Codex)
   it('round 23: "بيع" alone (sale or sold) is no word; parseCaption reads as main does', () => {
     for (const caption of ['#international بيع بسعر €450k', 'بيع بسعر ٤٥٠ ألف ريال سعودي', 'بيع SAR 450,000']) assert.equal(parsePriceHint(caption), null, caption);

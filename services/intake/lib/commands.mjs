@@ -32,7 +32,7 @@ const PERIOD_HINTS = [
 // - price words (price, asking, السعر, المطلوب);
 // - rent or sale (#rent, للبيع, إيجار);
 // - a period (per year, شهرياً);
-// - only, cash, negotiable.
+// - only, negotiable.
 // Any other word (a place, a feature, a label such as "Deposit" or "Area", a unit such as "m2"),
 // a second figure, two currencies or one the site does not price in, and the caption sets no price.
 // Then the PDF's own price stands, the bot's reply shows what was published, and `price <id> …` sets
@@ -61,7 +61,7 @@ const CURRENCY_TOKEN_RE = new RegExp(String.raw`${CURRENCY_SYMBOL}|` + CURRENCY_
 // ("-SAR 50,000", "-US dollars 450,000", "-ر.س 450,000"): no price. Built from every currency token above.
 const SIGN_BEFORE_RE = new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$|(?:^|[^A-Za-z${AR}0-9])[+\-−–] ?(?:${CURRENCY_TOKEN_RE.source}) ?$`, 'i');
 // The words a price-only caption may hold besides the figure, its multiplier and its currency.
-const ALLOWED_WORD_RE = new RegExp(tokenRe(String.raw`price|prices|asking|total|for|sale|rent|rental|of|at|a month|a year|per|year|years|yearly|yr|annum|annually|month|monthly|mo|only|cash|final|firm|negotiable|السعر|سعر|بسعر|المطلوب|هو|ب|للبيع|للإيجار|للايجار|إيجار|ايجار|الإيجار|الايجار|في|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية|فقط|كاش|نهائي|قابل|للتفاوض`), 'gi');
+const ALLOWED_WORD_RE = new RegExp(tokenRe(String.raw`price|prices|asking|for|sale|rent|rental|of|at|a month|a year|per|year|years|yearly|yr|annum|annually|month|monthly|mo|only|final|firm|negotiable|السعر|سعر|بسعر|المطلوب|هو|ب|للبيع|للإيجار|للايجار|إيجار|ايجار|الإيجار|الايجار|في|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية|فقط|نهائي|قابل|للتفاوض`), 'gi');
 // Every run of digits, with the separators that join it, is one figure.
 const DIGIT_RUN_RE = /[0-9]+(?:[,،٬.٫][0-9]+)*/g;
 // A figure written as a price: thousands in groups of three with one separator, or no separator; a
@@ -109,11 +109,15 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // ("#Deposit 50,000" is a deposit).
   // A fullwidth "＃" ("＃test") is a flag parseCaption does not read: no caption price beside it.
   if (/＃/.test(String(caption || ''))) return null;
-  const folded = String(caption || '').replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
-  const text = westernise(folded).replace(INVISIBLE_RE, '')
-    .replace(FLAG_TAG_RE, ' ').replace(/#/g, ' ').replace(/\s+/g, ' ').trim();
+  const raw = String(caption || '');
+  const fold = (s) => s.replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  const folded = fold(raw);
+  // The flags come out of the RAW caption, as parseCaption reads them: a tag only the cleaning below makes a
+  // flag ("#inter" + a direction mark + "national", "#ｉｎｔｅｒｎａｔｉｏｎａｌ") is a word, so no price.
+  const unflagged = westernise(fold(raw.replace(FLAG_TAG_RE, ' '))).replace(INVISIBLE_RE, '');
+  const text = unflagged.replace(/#/g, ' ').replace(/\s+/g, ' ').trim();
   // A hashtag holding a digit ("#1stPayment", "#250000", "#2BR") may label or be the figure: no price.
-  if (/#[^\s#]*[0-9]/.test(westernise(folded).replace(INVISIBLE_RE, '').replace(FLAG_TAG_RE, ' '))) return null;
+  if (/#[^\s#]*[0-9]/.test(unflagged)) return null;
   if (/[\p{Nd}\p{No}]/u.test(text.replace(/[0-9]/g, '')) || otherDollar(text)) return null;
   // Rent and sale words are read on the cleaned text ("للإيـجار" is "للإيجار"), hashtags still on.
   const clean = westernise(folded).replace(INVISIBLE_RE, '');
