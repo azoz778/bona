@@ -157,7 +157,9 @@ pc_wa_files() {
 
 # pc_wa_dropin_ok → 0 when the PC bona-api unit loads $PC_WA_ENV after bona-services.env and that
 # file sets BONA_WA_INSTANCE (not the owner's personal instance) and BONA_WA_INSTANCE_JID, both
-# non-empty. Otherwise 1, with the reason in PC_WA_WHY (paths only, never a value).
+# non-empty, the JID a phone JID by lib/wa.mjs PHONE_JID_RE (bona-api treats any other value as
+# unset and falls back to the owner's number, "invalid" on /health). Otherwise 1, with the reason
+# in PC_WA_WHY (paths only, never a value).
 pc_wa_dropin_ok() {
   local files wa_at shared_at inst jid
   PC_WA_WHY=
@@ -178,6 +180,23 @@ pc_wa_dropin_ok() {
   if [ "$inst" = "$PC_PERSONAL_INSTANCE" ]; then
     PC_WA_WHY="$PC_WA_ENV names the owner's personal instance"; return 1
   fi
+  # Only systemd reads this file (EnvironmentFile=; lib/env.mjs never does). Every line must be blank, a
+  # comment (# or ;), or one plain KEY=value on that line: no `export` (systemd ignores such a line), no
+  # backslash or carriage return (escapes, continuation, a CR line break), and quotes only around the whole
+  # value with none inside. Anything else systemd may read differently from env_value (Codex r1+r2, Claude r2).
+  if awk -v q="'" '
+      BEGIN { plain = "^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*([^\"" q "\\\\\r]*|\"[^\"\\\\\r]*\"|" q "[^" q "\\\\\r]*" q ")[ \t]*$" }
+      { l = $0; sub(/\r$/, "", l)
+        if (l ~ /^[ \t]*$/ || l ~ /^[ \t]*[#;]/) next
+        if (l !~ plain) bad = 1 }
+      END { exit !bad }' "$PC_WA_ENV"; then
+    PC_WA_WHY="$PC_WA_ENV has a line that is not a plain KEY=value (no export, no backslash, quotes only around the whole value), which systemd could read differently"; return 1
+  fi
+  # Same test as PHONE_JID_RE in services/api/lib/wa.mjs: digits[:device][@s.whatsapp.net], ASCII digits,
+  # one line (grep -x matches line by line, so a newline is refused first).
+  if [[ $jid == *$'\n'* ]] || ! printf '%s' "$jid" | LC_ALL=C grep -Eqx '[0-9]{8,15}(:[0-9]+)?(@s\.whatsapp\.net)?'; then
+    PC_WA_WHY="$PC_WA_ENV sets BONA_WA_INSTANCE_JID to something that is not a phone JID (digits@s.whatsapp.net)"; return 1
+  fi
 }
 
 # pc_wa_dropin_help → stderr: how to give the twin its drop-in (as in services/README.md).
@@ -192,7 +211,7 @@ item 7). See services/README.md, "The PC bona-api twin since the WhatsApp move".
   EnvironmentFile=%h/.secrets/bona-api-pc-wa.env
 
   # $PC_WA_ENV (mode 0600)
-  BONA_WA_INSTANCE=bona
+  BONA_WA_INSTANCE=bona2
   BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net
 
 then \`systemctl --user daemon-reload\` and run this again. Only when the VPS env and the site are

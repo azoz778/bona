@@ -7,6 +7,7 @@ import net from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PHONE_JID_RE } from '../lib/wa.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VPS = path.resolve(HERE, '../../deploy/vps');
@@ -204,8 +205,21 @@ function pcWa(home, kind) {
   const file = {
     dropin: PC_WA_LINES, early: PC_WA_LINES, 'no-file': null, none: null,
     'no-jid': 'BONA_WA_INSTANCE=bona\n', 'blank-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=\n',
+    // Not a phone JID (lib/wa.mjs PHONE_JID_RE): bona-api would run as "invalid", on the owner's number.
+    'bad-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=bona\n',
+    'lid-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=123456789012345@lid\n',
+    'device-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=966576267694:12@s.whatsapp.net\n',
+    // systemd reads these JIDs over two lines (an open quote, a trailing backslash); line by line the
+    // last BONA_WA_INSTANCE_JID= line looks valid (Codex r1).
+    'multiline-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID="bona\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n"\n',
+    'continued-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=bona\\\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n',
     personal: 'BONA_WA_INSTANCE=abdulaziz-personal\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n',
     'quoted-export': 'export BONA_WA_INSTANCE="bona"\nexport BONA_WA_INSTANCE_JID=\'966576267694@s.whatsapp.net\'\n',
+    quoted: 'BONA_WA_INSTANCE="bona"\nBONA_WA_INSTANCE_JID=\'966576267694@s.whatsapp.net\'\n',
+    'semicolon-comment': '; example="old\n# another "open\n\nBONA_WA_INSTANCE=bona\r\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\r\n',
+    'escaped-quote': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID="bad\\"\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n"\n',
+    'reopened-quote': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID="bona" "\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n"\n',
+    'cr-mid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=bona\rBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n',
     'show-fails': PC_WA_LINES,
   }[kind];
   assert.ok(file !== undefined, `unknown PC_WA kind ${kind}`);
@@ -372,17 +386,39 @@ const refusedUntouched = (r, why) => {
   }
 };
 
+// What the refusal says for the JID cases (lib.sh pc_wa_dropin_ok PC_WA_WHY, printed by pc_wa_preflight).
+const REFUSAL_REASON = {
+  'bad-jid': 'BONA_WA_INSTANCE_JID to something that is not a phone JID',
+  'lid-jid': 'BONA_WA_INSTANCE_JID to something that is not a phone JID',
+  'multiline-jid': 'is not a plain KEY=value',
+  'continued-jid': 'is not a plain KEY=value',
+  'escaped-quote': 'is not a plain KEY=value',
+  'reopened-quote': 'is not a plain KEY=value',
+  'cr-mid': 'is not a plain KEY=value',
+  'quoted-export': 'is not a plain KEY=value',
+};
+
 for (const [kind, why] of [
   ['none', 'no drop-in'],
   ['no-file', 'the drop-in names an env file that is not there'],
   ['no-jid', 'the env file has no BONA_WA_INSTANCE_JID'],
   ['blank-jid', 'the env file leaves BONA_WA_INSTANCE_JID empty'],
+  ['bad-jid', 'the env file sets BONA_WA_INSTANCE_JID to an instance name, not a phone JID'],
+  ['lid-jid', 'the env file sets BONA_WA_INSTANCE_JID to a @lid JID, not a phone JID'],
+  ['multiline-jid', 'the env file has a quoted value that runs over two lines'],
+  ['continued-jid', 'the env file has a line ending in a backslash'],
+  ['escaped-quote', 'the env file has an escaped quote that keeps the value open'],
+  ['reopened-quote', 'the env file opens a second quote after the value'],
+  ['cr-mid', 'the env file has a bare carriage return inside a line'],
+  ['quoted-export', 'the env file uses export, which systemd does not read'],
   ['personal', "the env file names the owner's personal instance"],
   ['early', 'the env file is loaded before bona-services.env, so it does not win'],
   ['show-fails', 'systemctl --user show failed'],
 ]) {
   test(`rollback.sh: PC twin WhatsApp guard refuses before anything is stopped (${why})`, () => {
-    refusedUntouched(runShimmed('rollback.sh', [], { PC_WA: kind }), why);
+    const r = runShimmed('rollback.sh', [], { PC_WA: kind });
+    refusedUntouched(r, why);
+    if (REFUSAL_REASON[kind]) assert.ok(r.out.includes(REFUSAL_REASON[kind]), `${why}: the refusal should say ${REFUSAL_REASON[kind]}\n${r.out}`);
   });
 }
 
@@ -392,8 +428,29 @@ test('rollback.sh --copy-back: no drop-in — refused before the VPS is stopped 
   assert.ok(!r.lines.some((l) => /^systemctl --user is-active/.test(l)), r.lines.join('\n'));
 });
 
-test('rollback.sh: the drop-in env file may use export and quotes (as lib/env.mjs and systemd read it)', () => {
-  const r = runShimmed('rollback.sh', [], { PC_WA: 'quoted-export' });
+test('rollback.sh: the drop-in env file may quote whole values, use # and ; comments, blank lines and CRLF (as systemd reads it)', () => {
+  for (const kind of ['quoted', 'semicolon-comment']) {
+    const r = runShimmed('rollback.sh', [], { PC_WA: kind });
+    assert.equal(r.status, 0, `${kind}: ${r.out}`);
+    assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.pcStart);
+  }
+});
+
+test('lib.sh checks BONA_WA_INSTANCE_JID with the same pattern as PHONE_JID_RE in lib/wa.mjs (no drift)', () => {
+  const lib = readFileSync(path.join(VPS, 'lib.sh'), 'utf8');
+  const m = /if \[\[ \$jid == \*\$'\\n'\* \]\] \|\| ! printf '%s' "\$jid" \| LC_ALL=C grep -Eqx '([^']+)'; then/.exec(lib);
+  assert.ok(m, 'the JID check in pc_wa_dropin_ok (newline guard + grep)');
+  const values = ['966576267694', '966576267694@s.whatsapp.net', '966576267694:12@s.whatsapp.net', '12345678', '123456789012345',
+    '1234567', '1234567890123456', 'bona', 'bona2', '', ' 966576267694', '966576267694 ', '966576267694@lid', '123@g.us',
+    '966576267694@s.whatsapp.netX', '966576267694:@s.whatsapp.net', '+966576267694', '٩٦٦٥٧٦٢٦٧٦٩٤', '966576267694\n966576267694'];
+  for (const v of values) {
+    const shell = spawnSync('bash', ['-c', `[[ $1 == *$'\\n'* ]] && exit 1; printf '%s' "$1" | LC_ALL=C grep -Eqx '${m[1]}'`, '_', v]).status === 0;
+    assert.equal(shell, PHONE_JID_RE.test(v), `lib.sh and PHONE_JID_RE disagree on ${JSON.stringify(v)}`);
+  }
+});
+
+test('rollback.sh: a phone JID with a device suffix passes the twin check (as PHONE_JID_RE accepts it)', () => {
+  const r = runShimmed('rollback.sh', [], { PC_WA: 'device-jid' });
   assert.equal(r.status, 0, r.out);
   assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.pcStart);
 });
@@ -447,6 +504,14 @@ for (const [kind, why] of [
 // exactly the calls they make on a PC that was never locked.
 const REPO_ROOT = path.resolve(HERE, '../../..');
 const PLAN = path.join(REPO_ROOT, 'docs/superpowers/plans/2026-11-19-wa-own-number.md');
+// The VPS runs this suite from its sparse checkout (install-vps.sh: services + src/data), which has
+// no docs/ at all: there the five lock tests are skipped. Anywhere else (the PC, a worktree; CI does not
+// run this suite) they run, and a missing docs/ or plan fails in lockCommand(), so a moved or renamed
+// plan, or a deleted docs/, cannot turn them off.
+const SPARSE = existsSync(path.join(REPO_ROOT, '.git', 'info', 'sparse-checkout'));
+const NO_DOCS = SPARSE && !existsSync(path.join(REPO_ROOT, 'docs'))
+  ? 'docs/ is not in this sparse checkout (the VPS: services + src/data); the lock command is read from the plan'
+  : false;
 const LOCK_REL = '.config/systemd/user/bona-api.service.d/LOCKED';
 function lockCommand() {
   const plan = readFileSync(PLAN, 'utf8');
@@ -477,7 +542,7 @@ const lockedUntouched = (r, why) => {
   }
 };
 
-test('the runbook B5a lock: a drop-in whose AssertPathExists names the LOCKED file it creates, then daemon-reload', () => {
+test('the runbook B5a lock: a drop-in whose AssertPathExists names the LOCKED file it creates, then daemon-reload', { skip: NO_DOCS }, () => {
   const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
   lockTwin(home, 'locked');
   const dropin = readFileSync(path.join(home, '.config/systemd/user/bona-api.service.d/locked.conf'), 'utf8');
@@ -488,27 +553,27 @@ test('the runbook B5a lock: a drop-in whose AssertPathExists names the LOCKED fi
   assert.deepEqual(readFileSync(path.join(home, 'lock.log'), 'utf8').split('\n').filter(Boolean), ['systemctl --user daemon-reload']);
 });
 
-test('install.sh: locked — refused before it writes or starts anything (with and without --restart), saying why', () => {
+test('install.sh: locked — refused before it writes or starts anything (with and without --restart), saying why', { skip: NO_DOCS }, () => {
   for (const args of [[], ['--restart'], ['--no-dns'], ['--restart', '--no-dns']]) {
     lockedUntouched(runInstall(args, { PC_LOCK: 'locked' }), `install.sh ${args.join(' ') || '(no flags)'}`);
   }
 });
 
-test('install.sh --uninstall still runs while locked: stopping the units is always allowed', () => {
+test('install.sh --uninstall still runs while locked: stopping the units is always allowed', { skip: NO_DOCS }, () => {
   const r = runInstall(['--uninstall'], { PC_LOCK: 'locked' });
   assert.equal(r.status, 0, r.out);
   assert.ok(r.lines.some((l) => /^systemctl --user disable --now bona-api\.service$/.test(l)), r.lines.join('\n'));
   assert.ok(!r.lines.some((l) => /^systemctl --user (start|restart|enable )/.test(l)), r.lines.join('\n'));
 });
 
-test('rollback.sh: locked — refused before anything is stopped, copied or started (every flag), saying why', () => {
+test('rollback.sh: locked — refused before anything is stopped, copied or started (every flag), saying why', { skip: NO_DOCS }, () => {
   for (const args of [[], ['--copy-back'], ['--personal-instance'], ['--copy-back', '--personal-instance']]) {
     lockedUntouched(runShimmed('rollback.sh', args, { PC_LOCK: 'locked' }), `rollback.sh ${args.join(' ') || '(no flags)'}`);
     lockedUntouched(runShimmed('rollback.sh', args, { PC_LOCK: 'locked', PC_WA: 'none' }), `rollback.sh ${args.join(' ') || '(no flags)'}, no WhatsApp drop-in`);
   }
 });
 
-test('unlocked (rm LOCKED): install.sh and rollback.sh make exactly the calls of a PC that was never locked', () => {
+test('unlocked (rm LOCKED): install.sh and rollback.sh make exactly the calls of a PC that was never locked', { skip: NO_DOCS }, () => {
   for (const args of [[], ['--restart']]) {
     const never = runInstall(args);
     const unlocked = runInstall(args, { PC_LOCK: 'unlocked' });
