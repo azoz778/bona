@@ -57,6 +57,9 @@ const tokenRe = (body) => String.raw`(?<![A-Za-z${AR}])(?:${body})(?![A-Za-z${AR
 const CURRENCY_SYMBOL = String.raw`US ?\$|\$|€`;
 const CURRENCY_WHOLE = CURRENCY_WORDS.map(([code, re]) => [code, new RegExp(String.raw`^(?:${re})$`, 'i')]);
 const CURRENCY_TOKEN_RE = new RegExp(String.raw`${CURRENCY_SYMBOL}|` + CURRENCY_WORDS.map(([, re]) => tokenRe(re)).join('|'), 'gi');
+// A figure glued to a mark or a sign ("4.500.000" read from its end, "-450,000"), or a sign before its currency
+// ("-SAR 50,000", "-US dollars 450,000", "-ر.س 450,000"): no price. Built from every currency token above.
+const SIGN_BEFORE_RE = new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$|(?:^|[^A-Za-z${AR}0-9])[+\-−–] ?(?:${CURRENCY_TOKEN_RE.source}) ?$`, 'i');
 // The words a price-only caption may hold besides the figure, its multiplier and its currency.
 const ALLOWED_WORD_RE = new RegExp(tokenRe(String.raw`price|prices|asking|total|for|sale|rent|rental|of|at|a month|a year|per|year|years|yearly|yr|annum|annually|month|monthly|mo|only|cash|final|firm|negotiable|السعر|سعر|بسعر|المطلوب|هو|ب|للبيع|بيع|للإيجار|للايجار|إيجار|ايجار|الإيجار|الايجار|في|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية|فقط|كاش|نهائي|قابل|للتفاوض`), 'gi');
 // Every run of digits, with the separators that join it, is one figure.
@@ -133,7 +136,7 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // ".5 million", "-450,000": a mark or a sign glued to the figure (a hyphen after a word is a
   // separator: "Price-4,500,000").
   const before = text.slice(0, run.index);
-  if (new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$|(?:^|[^A-Za-z${AR}0-9])[+\-−–] ?(?:US ?\$|\$|€|SAR|AED|USD|EUR|OMR|SR|RO|DHS?) ?$`, 'i').test(before)) return null;
+  if (SIGN_BEFORE_RE.test(before)) return null;
   let after = text.slice(run.index + num.length);
   const mult = MULTIPLIER_RE.exec(after);
   if (mult) after = after.slice(mult[0].length);
@@ -161,6 +164,8 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // and written onto the figure ("25m"; "#sale 25 m" may be a frontage); "SAR 950 m" is no price either.
   if (word === 'm' && ((!currency && (amount >= 100 || /^ /.test(mult[0]))) || (amount >= 100 && /^ /.test(mult[0])))) return null;
   // The amount as typed; a multiplier's float noise (2.05 x 1e6 = 2049999.9999999998) rounded away.
+  // A grouped figure with a multiplier is a decimal comma as often ("€15,500k" may be €15,500): no price.
+  if (factor !== 1 && /[,،٬]/.test(num)) return null;
   if ((factor === 1e6 && amount >= 1000) || (factor === 1e3 && amount >= 100000)) return null;
   const value = factor === 1 ? amount : Math.round(amount * factor * 1000) / 1000;
   if (!Number.isFinite(value) || value > 1e10) return null;
@@ -210,7 +215,7 @@ export function parseCaption(caption) {
   // A caption with a figure that is no caption price ("Rent $3,000 per month": a dollar with no country)
   // sets no period either: its period belongs to that figure, and on the brochure's own it would turn a
   // yearly rent into a monthly one.
-  else if (/\p{Nd}/u.test(text)) period = null;
+  else if (/[\p{Nd}\p{No}]/u.test(text)) period = null;
   if (category !== 'rent') period = null;
   return {
     text,

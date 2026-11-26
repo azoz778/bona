@@ -816,11 +816,13 @@ export async function processPdf({ pdfPath, cfg, caption = {}, workDir, dryRun =
   // A page that mentions subsidy beneficiaries prints TWO prices per unit. A number found in its
   // text layer proves the number is printed, not WHICH price it is — so text found only on such
   // pages never settles a price; the page image does (those pages are always rendered, see
-  // price-pages.mjs). The caption is the owner's own words and always counts. `textPages`: the text layer page by
-  // page (the whole text when there is none per page), for the sale-line rent check (r8 #6).
+  // price-pages.mjs). The caption counts only when it IS the owner's price (commands.mjs parsePriceHint): a
+  // caption that sets none ("Asking AED 4.5m; deposit AED 50,000") is no evidence, or a deposit it names would
+  // prove a reading that took it for the headline. `textPages`: the text layer page by page (the whole text when
+  // there is none per page), for the sale-line rent check (r8 #6).
   const textPages = pageText.length ? pageText.filter((t) => !isSubsidyPricePage(t)) : [extraction.text || ''];
   const plainText = textPages.join('\n');
-  const haystack = `${plainText}\n${caption.text || ''}`;
+  const haystack = caption.price ? `${plainText}\n${caption.text || ''}` : plainText;
   // The country the property is in — the listing's own on an enrichment — and the currency it prices in,
   // when the site prints that one (model-prices.mjs homeCurrency). A figure printed with no currency at all
   // is taken for that currency only; a property abroad needs its currency printed beside the figure.

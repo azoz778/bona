@@ -17,6 +17,7 @@ import { copyProblems } from '../lib/claude.mjs';
 import { measureNear, priceAppearsIn, printedInCurrency } from '../lib/price.mjs';
 import { classifyRun, planBackfill } from '../lib/backfill.mjs';
 import * as msg from '../lib/messages.mjs';
+import { parseCaption } from '../lib/commands.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -1671,6 +1672,17 @@ describe('processPdf: unit-model prices (every figure confirmed on its page, one
       try {
         const report = await run(r, { text: 'For sale — plot size 4,500 sq ft' });
         assert.equal(report.priceEvidence.inText, false, 'the caption area is not printed-price evidence');
+        assert.equal(report.listingPreview.price.onRequest, true);
+      } finally { r.cleanup(); }
+    }
+    // PR #75 r20 (Codex): a caption that sets no caption price is no evidence either — a deposit it names would
+    // prove a reading that took the deposit for the headline.
+    {
+      const r = await rig({ listing: sale(50000), pageText: [`Overview${PAD}`, 'Location', `Specification${PAD}`], confirm: [] });
+      try {
+        const text = 'Asking SAR 4.5m; deposit SAR 50,000';
+        const report = await run(r, { ...parseCaption(text), text });
+        assert.equal(report.priceEvidence.inText, false, 'a rejected caption is not printed-price evidence');
         assert.equal(report.listingPreview.price.onRequest, true);
       } finally { r.cleanup(); }
     }

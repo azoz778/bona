@@ -111,7 +111,7 @@ describe('parsePriceHint', () => {
       ['Asking 4.5mUSD', 'USD 4500000'],
       ['SAR 150m', 'SAR 150000000'],
       ['SAR 2.05M', 'SAR 2050000'],
-      ['SAR 1,500 thousand', 'SAR 1500000'],
+      ['SAR 1500 thousand', 'SAR 1500000'],
       ['Asking OMR 175,000.125', 'OMR 175000.125'],
       ['Price: SAR 12,345.6789', 'SAR 12345.6789'],
       ['AED 1000000000', 'AED 1000000000'],
@@ -126,7 +126,7 @@ describe('parsePriceHint', () => {
       ['#rent 85k per year', 'SAR 85000'],
       ['Rent AED 2,000 per month', 'AED 2000'],
       ['Asking ４．５m SAR', 'SAR 4500000'],
-      ['Asking 12,000\nk SAR', 'SAR 12000000'],
+      ['Asking 12000\nk SAR', 'SAR 12000000'],
       ['Price 1.2 million US dollars', 'USD 1200000'],
     ]) {
       assert.equal(hint(caption), want, caption);
@@ -240,6 +240,17 @@ describe('parsePriceHint', () => {
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال سعودي').price, { amount: 190000, currency: 'SAR' });
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال عماني').price, { amount: 190000, currency: 'OMR' });
     assert.equal(hint('#sale 25m'), 'SAR 25000000');
+  });
+
+  // r20 review (Codex, Claude)
+  it('round 20: a grouped figure with a multiplier, a sign before any currency, a fraction and the period', () => {
+    for (const caption of ['€15,500k', '1,200k', 'SAR 1,500 mln', '-US dollars 450,000', '-ر.س 450,000', '- SAR 50,000', 'SAR -450,000']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    assert.equal(parseCommand('price BONA-W001 €15,500k').cmd, 'error');
+    assert.equal(hint('€850k'), 'EUR 850000');
+    assert.equal(hint('Price - SAR 450,000'), null);
+    assert.equal(parseCaption('Rent AED ½m per month').period, null);
   });
 
   // r19 review (Codex)
