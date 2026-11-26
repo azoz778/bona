@@ -61,7 +61,7 @@ const CURRENCY_TOKEN_RE = new RegExp(String.raw`${CURRENCY_SYMBOL}|` + CURRENCY_
 // ("-SAR 50,000", "-US dollars 450,000", "-ر.س 450,000"): no price. Built from every currency token above.
 const SIGN_BEFORE_RE = new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$|(?:^|[^A-Za-z${AR}0-9])[+\-−–] ?(?:${CURRENCY_TOKEN_RE.source}) ?$`, 'i');
 // The words a price-only caption may hold besides the figure, its multiplier and its currency.
-const ALLOWED_WORD_RE = new RegExp(tokenRe(String.raw`price|prices|asking|total|for|sale|rent|rental|of|at|a month|a year|per|year|years|yearly|yr|annum|annually|month|monthly|mo|only|cash|final|firm|negotiable|السعر|سعر|بسعر|المطلوب|هو|ب|للبيع|بيع|للإيجار|للايجار|إيجار|ايجار|الإيجار|الايجار|في|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية|فقط|كاش|نهائي|قابل|للتفاوض`), 'gi');
+const ALLOWED_WORD_RE = new RegExp(tokenRe(String.raw`price|prices|asking|total|for|sale|rent|rental|of|at|a month|a year|per|year|years|yearly|yr|annum|annually|month|monthly|mo|only|cash|final|firm|negotiable|السعر|سعر|بسعر|المطلوب|هو|ب|للبيع|للإيجار|للايجار|إيجار|ايجار|الإيجار|الايجار|في|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية|فقط|كاش|نهائي|قابل|للتفاوض`), 'gi');
 // Every run of digits, with the separators that join it, is one figure.
 const DIGIT_RUN_RE = /[0-9]+(?:[,،٬.٫][0-9]+)*/g;
 // A figure written as a price: thousands in groups of three with one separator, or no separator; a
@@ -107,6 +107,8 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // is one space. The bot's flags and categories ("#test", "#rent") are read by parseCaption and are not
   // words here, nor is a hashtag holding a digit ("#250000", "#2BR"); any other hashtag is its word
   // ("#Deposit 50,000" is a deposit).
+  // A fullwidth "＃" ("＃test") is a flag parseCaption does not read: no caption price beside it.
+  if (/＃/.test(String(caption || ''))) return null;
   const folded = String(caption || '').replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
   const text = westernise(folded).replace(INVISIBLE_RE, '')
     .replace(FLAG_TAG_RE, ' ').replace(/#/g, ' ').replace(/\s+/g, ' ').trim();
@@ -200,10 +202,7 @@ export function parsePriceHint(caption, { command = false } = {}) {
  * a listing with no downloadable document at all. Both together: `#nobrochure` wins.
  */
 export function parseCaption(caption) {
-  // Read with fullwidth characters folded to ASCII, as parsePriceHint reads it, so "＃test" is the dry-run
-  // flag; `text` stays the owner's own words.
-  const raw = String(caption || '').trim();
-  const text = raw.replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  const text = String(caption || '').trim();
   const tags = [...text.matchAll(/#([A-Za-z0-9_-]{1,32})/g)].map((m) => m[1].toLowerCase());
   const has = (t) => tags.includes(t);
   let category = null;
@@ -230,7 +229,7 @@ export function parseCaption(caption) {
   else if (/[\p{Nd}\p{No}]/u.test(text)) period = null;
   if (category !== 'rent') period = null;
   return {
-    text: raw,
+    text,
     tags,
     dryRun: has('test') || has('dry') || has('draft'),
     // Kept for the reply/summary wording and for old captions; the pipeline does not branch

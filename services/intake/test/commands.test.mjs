@@ -240,6 +240,17 @@ describe('parsePriceHint', () => {
     assert.equal(hint('#sale 25m'), 'SAR 25000000');
   });
 
+  // r23 review (Codex)
+  it('round 23: "بيع" alone (sale or sold) is no word; parseCaption reads as main does', () => {
+    for (const caption of ['#international بيع بسعر €450k', 'بيع بسعر ٤٥٠ ألف ريال سعودي', 'بيع SAR 450,000']) assert.equal(parsePriceHint(caption), null, caption);
+    assert.deepEqual(parseCaption('للبيع SAR 450,000').price, { amount: 450000, currency: 'SAR' });
+    assert.equal(parseCaption('#international for sale SAR 4.5m').category, 'international');
+    // no fold in parseCaption: a fullwidth period word or dash changes nothing there (main's reading)
+    assert.equal(parseCaption('Rent not per ｍｏｎｔｈ').period, null);
+    assert.equal(parseCaption('#test－ AED 450k').dryRun, true); // the tag stops at the fullwidth dash, as on main
+    assert.equal(parseCaption('#test－ AED 450k').price, null);
+  });
+
   // r22 review (Codex, Claude)
   it('round 22: a bare figure of one comma group, the em dash, a fullwidth flag', () => {
     // a caption cannot know the listing's currency, so a bare "175,125" may be OMR 175.125: no caption price
@@ -248,8 +259,9 @@ describe('parsePriceHint', () => {
     // the price command names its listing: a bare "450,000" passes, and setPrice decides (listing.test.mjs)
     assert.equal(parseCommand('price BONA-W001 450,000').oneGroup, true);
     assert.equal('oneGroup' in parseCommand('price BONA-W001 SAR 450,000'), false);
-    assert.equal(parseCaption('＃test AED 450k').dryRun, true);
-    assert.equal(parseCaption('＃test AED 450k').text, '＃test AED 450k');
+    // a fullwidth "＃" is a flag parseCaption does not read (main reads none either): no caption price beside it (r23)
+    assert.equal(parsePriceHint('＃test AED 450k'), null);
+    assert.equal(parseCaption('＃test AED 450k').price, null);
   });
 
   // r21 review (Codex)
