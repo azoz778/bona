@@ -280,9 +280,9 @@ test('the AI phone assistant section: who answers, the recording, where the voic
   // The call alert (~/bona-line call_alert.py, 2026-11-26): every call's number and details also go to the
   // owner's WhatsApp from the Bona number, and a deletion request for a call covers that note too.
   assert.ok(en.includes('until you ask us to delete them. After each call, Bona’s WhatsApp number also sends the owner of Bona a short WhatsApp note about it, with the number you called from and the details you gave'), en);
-  assert.match(en, /deleting a call deletes that note too\./);
+  assert.match(en, /so that a principal can get back to you; a request to delete a call also deletes that note\./);
   assert.ok(ar.includes('إلى أن تطلب منا حذفها. وبعد كل مكالمة، يُرسل رقم واتساب بونا إلى مالك بونا ملاحظة قصيرة عنها عبر واتساب، فيها الرقم الذي اتصلت منه والبيانات التي ذكرتها'), ar);
-  assert.match(ar, /وعند حذف مكالمة تُحذف هذه الملاحظة أيضاً\./);
+  assert.match(ar, /ليتواصل معك أحد شركاء الدار؛ وطلب حذف مكالمة يشمل حذف هذه الملاحظة أيضاً\./);
   for (const gone of ['kept as an enquiry, like any other', 'the enquiry it produced']) assert.ok(!en.includes(gone), `en still says: ${gone}`);
   for (const gone of ['بوصفها استفساراً كأي استفسار آخر', 'الاستفسار الناتج عنها']) assert.ok(!ar.includes(gone), `ar still says: ${gone}`);
   assert.match(en, /To have a call recording, its transcript or your details deleted, message us on WhatsApp/);
@@ -318,6 +318,13 @@ test('the business-partner sentence (owner OK 2026-11-26) sits with the WhatsApp
   const changes = section('changes');
   assert.ok(changes.body.en.some((p) => /^26 November 2026:.*business partner of the owner of Bona/.test(p)));
   assert.ok(changes.body.ar.some((p) => /^26 نوفمبر 2026:.*شريك أعمال لمالك بونا/.test(p)));
+});
+
+test('the 26 Nov change line mentions the call alert note (until its 30 days are up, 2026-12-26)', () => {
+  if (new Date().toISOString().slice(0, 10) >= '2026-12-26') return;
+  const changes = section('changes');
+  assert.ok(changes.body.en.some((p) => /^26 November 2026:.*after each call, the owner of Bona gets a short WhatsApp note about it\./.test(p)));
+  assert.ok(changes.body.ar.some((p) => /^26 نوفمبر 2026:.*وتصل مالكَ بونا بعد كل مكالمة ملاحظةٌ قصيرة عنها عبر واتساب\./.test(p)));
 });
 
 test('a deletion or data request is sent on WhatsApp, never by phone (a call reaches the AI line, 2026-11-26)', () => {

@@ -1627,6 +1627,15 @@ A4. AI line privacy gate: the privacy text promises "audio kept up to 90 days". 
     carried out there, because deleting a lead in the dashboard does not touch it: the caller's
     number → `~/bona-line/calls/records/<call_id>.json` and `.wav`, and
     `~/bona-line/calls/<call_id>.txt`, `-down.tsr`, `-up.tsr` (call_record.py header).
+    Since 26 Nov each call also has a WhatsApp alert note to the owner (~/bona-line call_alert.py: sent
+    from `bona2` to his personal number, up to 3 copies, each ending "(call <call_id>)"). The privacy
+    notice says deleting a call deletes that note too, so a deletion request also covers: (1) every copy
+    in the Bona chat on the Fold and in the owner's chat on his phone ("Delete for everyone" from the Fold
+    while WhatsApp still offers it, about 2 days; after that delete it on each phone); (2) Evolution's
+    stored copies for both instances, `bona2` (sent) and `abdulaziz-personal` (received): on hermes-vps,
+    in evolution-postgres, the "Message" rows of those two instances whose `message`::text contains
+    "(call <call_id>)" (SELECT them first, then DELETE exactly those rows); (3) the alert's marker
+    `~/bona-line/calls/alerts/<call_id>.sent`.
 A5. Lebara SIM: validity and credit on a reminder (a lapsed SIM can lose the WhatsApp account).
 A6. CLICK-TO-WHATSAPP ADS FIRST: the owner opens Meta Ads Manager, filters Active, and checks for
     any ad whose destination is WhatsApp. Such ads route to the personal number; plan to pause
@@ -1815,10 +1824,13 @@ C2. Brochures (26 Nov): `services/intake/brochure_pdf.py` prints `site.json` pho
     published brochures keep the old number (and its wa.me link) until re-rendered; after B7 nothing reads
     that number, so re-render them (intake `brochure <id>`), coordinated with the session that owns the
     intake. New intake brochures follow site.json once ~/bona is pulled to the merged main. Daily property
-    posts: the WhatsApp number in captions is the new one; the REGA advertiser line keeps
-    site.advertiser.phone (the REGA-registered number) until the owner updates REGA (Phase 3).
-    Done 26 Nov ~13:05: the 18 that still had the old number were re-rendered through the intake's
-    brochure path (commits `intake: rebuild brochure <id>`, 2beb5d0..22aec9b); the other 3 already had it.
+    posts carry no WhatsApp number: their only number is the REGA advertiser line, which keeps
+    site.advertiser.phone (+966593296933, the REGA-registered number; it reaches the owner's personal
+    WhatsApp, not the Bona inbox) until the owner updates REGA (Phase 3).
+    Done 26 Nov ~13:05: 18 brochures re-rendered through the intake's brochure path (18 commits
+    `intake: rebuild brochure <id>`, 0c674db..22aec9b). Left: W011, W018, W024, whose backfill was
+    rejected for the owner (district, prices); their old brochures still print the old number (text,
+    no link) until he fixes them (a `price` fix rebuilds the brochure) or asks for a rebuild.
 C3. Chats still open on the personal number: the owner finishes them by hand from his phone;
     a dashboard reply to such a lead now comes from the Bona number.
 C4. Hermes memory (~/.hermes/memories/MEMORY.md lines about the dashboard code and Bona's
@@ -1894,7 +1906,7 @@ R4. If WhatsApp bans the new number: R1 + R2 the same day (the site, brochures a
 Only what is his to decide or to do; everything else above has a default.
 
 1. **OK the privacy notice and FAQ text (Appendix A, EN and AR)** before the merge. With it, one yes/no: Tarek's full access through Lisa (approvals 2026-11-17) reaches the Evolution gateway and the PC call files, while Bona's notice says only "the owner of Bona and authorised members of the Bona team" read conversations and recordings. Add the optional partner sentence (A2Z's notice v1.1 already says the same for A2Z), or leave it out?
-2. **Adverts beside the FAL licence before REGA is updated.** From the first social run after the merge (the publishers check out `origin/main` before every run), and in new intake brochures once `~/bona` is pulled, the WhatsApp number printed next to FAL 1100313556 is +966 57 626 7694, while the REGA ad licences still list 059 329 6933 (the advertiser block, `site.advertiser.phone`, stays on it, so the 31 reviews stay valid; `site.phone` moved to the new number too, owner decision 26 Nov). O1 (lawyer OK) already says the REGA line switches too. Default: go ahead, and he updates the REGA records when convenient (Phase 3). The alternative, holding cards and brochures on the old number until then, needs a small code change.
+2. **Adverts beside the FAL licence before REGA is updated.** Since the 26 Nov cutover, Bona brochures print +966 57 626 7694 as Bona's phone and WhatsApp next to FAL 1100313556, while the REGA ad licences still list 059 329 6933. Daily property posts print no WhatsApp number: their only number is the advertiser line, `site.advertiser.phone`, which stays on 059 329 6933 so the 31 reviews stay valid and match REGA (it reaches the owner's personal WhatsApp, not the Bona inbox). `site.phone` moved to the new number too (owner decision 26 Nov). O1 (lawyer OK) already says the REGA line switches too. Default: go ahead, and he updates the REGA records when convenient (Phase 3). The alternative, holding cards and brochures on the old number until then, needs a small code change.
 3. **His hands at cutover (no decision):** the ~3 warm-up days on a linked device, one message from his personal WhatsApp to the Bona number, Dana off on the Team page before the switch (and back on later), the Ads Manager check and the FB/IG WhatsApp button, merging the PR.
 4. **WhatsApp calls to the Bona number.** The AI line answers phone calls only; the FAQ and the notice now say so and ask callers on WhatsApp to write instead. Default: leave WhatsApp calls ringing (runbook B2 creates the instance with `"rejectCall":false`), so a call he or the team picks up by hand still works. The alternative, `"rejectCall":true` with a `"msgCall"` text (Evolution declines every WhatsApp call and sends that text), also blocks the calls he would take himself.
 

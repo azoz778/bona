@@ -12,6 +12,8 @@
 //   2. After the deploy, draft and approve every property review again (draft-property-reviews.mjs and
 //      approve-property-review.mjs read the LIVE catalogue, so this cannot happen before the merge).
 //      Until then the daily property posts stop on their own; nothing else is affected.
+//   3. Once every approved review carries the new fingerprint (this test then says so as a diagnostic),
+//      delete advertiser-change.json in the next PR, so the check is strict again.
 // An advertiser that changes without that file, or with a fingerprint that is not the built one, still fails.
 // No approved review at all (every property withdrawn) is a legitimate state: there is nothing to protect.
 import assert from 'node:assert/strict';
@@ -22,13 +24,16 @@ import { advertiserFingerprint } from '../scripts/social/lib/property-daily.mjs'
 const read = (rel) => JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), 'utf8'));
 const CHANGE = new URL('../marketing/daily/advertiser-change.json', import.meta.url);
 
-test('every approved property review still matches the advertiser the built site publishes, unless the change is declared', () => {
+test('every approved property review still matches the advertiser the built site publishes, unless the change is declared', (t) => {
   const catalogue = read('../dist/social-catalogue.json');
   const site = read('../src/data/site.json');
   const reviews = read('../marketing/daily/property-reviews.json');
   const approved = Object.entries(reviews).filter(([, r]) => r && typeof r === 'object' && r.status === 'approved');
   const fp = advertiserFingerprint(catalogue.advertiser);
   const stale = approved.filter(([, r]) => r.advertiserSha256 !== fp).map(([id]) => id);
+  if (!stale.length && fs.existsSync(CHANGE)) {
+    t.diagnostic('marketing/daily/advertiser-change.json is no longer needed (every approved review matches): delete it');
+  }
   if (stale.length) {
     const change = fs.existsSync(CHANGE) ? JSON.parse(fs.readFileSync(CHANGE, 'utf8')) : null;
     assert.equal(change?.advertiserSha256, fp,

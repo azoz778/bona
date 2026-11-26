@@ -323,7 +323,7 @@ never logged. `process.env` always wins over a file.
 | `BONA_WA_NOTIFY` | `1` | `0` stops the WhatsApp lead note and team members' replies from the dashboard inbox; login codes still go |
 | `BONA_WA_POLL` | `1` | the in-process WhatsApp poller defaults to ON inside the process (`lib/config.mjs`); opt out with `BONA_WA_POLL=0` in `bona-services.env`. No unit sets it — an `Environment=` line would override the file (§10) |
 | `BONA_WA_POLL_MS` | `20000` | poll interval; each tick reads the last 2 minutes of `chat/findMessages`. 20 s since Phase 2 of the team inbox (it was 45 s); the VPS sets it in `bona-services.env`, and a value there wins over this default |
-| `BONA_WA_INSTANCE` | `abdulaziz-personal` | the Evolution instance every read and send uses (poller, backfill, notes, codes, replies, Dana). On the VPS `bona` (Bona's own WhatsApp) since the 2026-11-19 move; the PC file keeps `abdulaziz-personal` for bona-intake |
+| `BONA_WA_INSTANCE` | `abdulaziz-personal` | the Evolution instance every read and send uses (poller, backfill, notes, codes, replies, Dana). On the VPS `bona2` (Bona's own WhatsApp) since the 26 Nov 2026 cutover (the first instance, `bona`, was logged out by WhatsApp and deleted); the PC file keeps `abdulaziz-personal` for bona-intake |
 | `BONA_WA_INSTANCE_JID` | unset | that instance's own number (`966576267694@s.whatsapp.net` on the VPS): the chat the poller never reads, the number a sent record's alt may name, outside the shared send budget. Unset or blank = `BONA_OWNER_JID`, the state before the move: removing the line is the rollback. Never defaulted by `provision.mjs`; a value that is not a phone jid is treated as unset (the owner's number; `/health` `ownNumber` = `"invalid"`) and logged at start-up (`wa.instance_jid_invalid`, no value) |
 | `BONA_OWNER_JID` | `966593296933@s.whatsapp.net` | the owner: where lead notes and his login codes go (sent from the instance), the owner account seeded on every start, the one login code that may pass the Sending switch |
 | `BONA_FANOUT_MS` | `20000` | fan-out worker interval (Meta CAPI, GA4 MP, Snap CAPI) |
@@ -634,7 +634,7 @@ Groups, status broadcasts and the instance's own chat (`BONA_WA_INSTANCE_JID`, e
 from `key.remoteJidAlt` and stores both jids. Evolution is **never** given a webhook: until the
 2026-11-19 move the instance was your personal WhatsApp, which another agent also uses, and
 nothing consumes its events (checked 2026-09-27: no webhook, websocket or queue; Lisa reads on
-demand and sends only on your request, through the same API). Bona's own instance (`bona`) is
+demand and sends only on your request, through the same API). Bona's own instance (`bona2`) was
 created with none either.
 
 *Matched-only storage* (your decision). An incoming message is kept, as a new lead or on the

@@ -180,8 +180,21 @@ pc_wa_dropin_ok() {
   if [ "$inst" = "$PC_PERSONAL_INSTANCE" ]; then
     PC_WA_WHY="$PC_WA_ENV names the owner's personal instance"; return 1
   fi
-  # Same test as PHONE_JID_RE in services/api/lib/wa.mjs: digits[:device][@s.whatsapp.net].
-  if ! printf '%s' "$jid" | grep -Eqx '[0-9]{8,15}(:[0-9]+)?(@s\.whatsapp\.net)?'; then
+  # systemd reads a quoted value, or a line ending in a backslash, on into the next line(s); env_value
+  # reads line by line, so such a file could pass here while bona-api gets another value (Codex r1).
+  if awk -v q="'" '
+      { l = $0; sub(/\r$/, "", l); gsub(/^[ \t]+|[ \t]+$/, "", l)
+        if (l == "" || substr(l, 1, 1) == "#") next
+        if (substr(l, length(l), 1) == "\\") bad = 1
+        eq = index(l, "="); if (!eq) next
+        v = substr(l, eq + 1); sub(/^[ \t]+/, "", v); f = substr(v, 1, 1)
+        if ((f == "\"" || f == q) && (length(v) < 2 || substr(v, length(v), 1) != f)) bad = 1 }
+      END { exit !bad }' "$PC_WA_ENV"; then
+    PC_WA_WHY="$PC_WA_ENV has a value that runs over more than one line (an open quote or a trailing backslash); write each KEY=value on one line"; return 1
+  fi
+  # Same test as PHONE_JID_RE in services/api/lib/wa.mjs: digits[:device][@s.whatsapp.net], ASCII digits,
+  # one line (grep -x matches line by line, so a newline is refused first).
+  if [[ $jid == *$'\n'* ]] || ! printf '%s' "$jid" | LC_ALL=C grep -Eqx '[0-9]{8,15}(:[0-9]+)?(@s\.whatsapp\.net)?'; then
     PC_WA_WHY="$PC_WA_ENV sets BONA_WA_INSTANCE_JID to something that is not a phone JID (digits@s.whatsapp.net)"; return 1
   fi
 }

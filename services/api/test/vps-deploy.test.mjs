@@ -7,6 +7,7 @@ import net from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PHONE_JID_RE } from '../lib/wa.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VPS = path.resolve(HERE, '../../deploy/vps');
@@ -208,6 +209,10 @@ function pcWa(home, kind) {
     'bad-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=bona\n',
     'lid-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=123456789012345@lid\n',
     'device-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=966576267694:12@s.whatsapp.net\n',
+    // systemd reads these JIDs over two lines (an open quote, a trailing backslash); line by line the
+    // last BONA_WA_INSTANCE_JID= line looks valid (Codex r1).
+    'multiline-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID="bona\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n"\n',
+    'continued-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=bona\\\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n',
     personal: 'BONA_WA_INSTANCE=abdulaziz-personal\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n',
     'quoted-export': 'export BONA_WA_INSTANCE="bona"\nexport BONA_WA_INSTANCE_JID=\'966576267694@s.whatsapp.net\'\n',
     'show-fails': PC_WA_LINES,
@@ -376,6 +381,14 @@ const refusedUntouched = (r, why) => {
   }
 };
 
+// What the refusal says for the JID cases (lib.sh pc_wa_dropin_ok PC_WA_WHY, printed by pc_wa_preflight).
+const REFUSAL_REASON = {
+  'bad-jid': 'BONA_WA_INSTANCE_JID to something that is not a phone JID',
+  'lid-jid': 'BONA_WA_INSTANCE_JID to something that is not a phone JID',
+  'multiline-jid': 'runs over more than one line',
+  'continued-jid': 'runs over more than one line',
+};
+
 for (const [kind, why] of [
   ['none', 'no drop-in'],
   ['no-file', 'the drop-in names an env file that is not there'],
@@ -383,12 +396,16 @@ for (const [kind, why] of [
   ['blank-jid', 'the env file leaves BONA_WA_INSTANCE_JID empty'],
   ['bad-jid', 'the env file sets BONA_WA_INSTANCE_JID to an instance name, not a phone JID'],
   ['lid-jid', 'the env file sets BONA_WA_INSTANCE_JID to a @lid JID, not a phone JID'],
+  ['multiline-jid', 'the env file has a quoted value that runs over two lines'],
+  ['continued-jid', 'the env file has a line ending in a backslash'],
   ['personal', "the env file names the owner's personal instance"],
   ['early', 'the env file is loaded before bona-services.env, so it does not win'],
   ['show-fails', 'systemctl --user show failed'],
 ]) {
   test(`rollback.sh: PC twin WhatsApp guard refuses before anything is stopped (${why})`, () => {
-    refusedUntouched(runShimmed('rollback.sh', [], { PC_WA: kind }), why);
+    const r = runShimmed('rollback.sh', [], { PC_WA: kind });
+    refusedUntouched(r, why);
+    if (REFUSAL_REASON[kind]) assert.ok(r.out.includes(REFUSAL_REASON[kind]), `${why}: the refusal should say ${REFUSAL_REASON[kind]}\n${r.out}`);
   });
 }
 
@@ -402,6 +419,19 @@ test('rollback.sh: the drop-in env file may use export and quotes (as lib/env.mj
   const r = runShimmed('rollback.sh', [], { PC_WA: 'quoted-export' });
   assert.equal(r.status, 0, r.out);
   assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.pcStart);
+});
+
+test('lib.sh checks BONA_WA_INSTANCE_JID with the same pattern as PHONE_JID_RE in lib/wa.mjs (no drift)', () => {
+  const lib = readFileSync(path.join(VPS, 'lib.sh'), 'utf8');
+  const m = /if \[\[ \$jid == \*\$'\\n'\* \]\] \|\| ! printf '%s' "\$jid" \| LC_ALL=C grep -Eqx '([^']+)'; then/.exec(lib);
+  assert.ok(m, 'the JID check in pc_wa_dropin_ok (newline guard + grep)');
+  const values = ['966576267694', '966576267694@s.whatsapp.net', '966576267694:12@s.whatsapp.net', '12345678', '123456789012345',
+    '1234567', '1234567890123456', 'bona', 'bona2', '', ' 966576267694', '966576267694 ', '966576267694@lid', '123@g.us',
+    '966576267694@s.whatsapp.netX', '966576267694:@s.whatsapp.net', '+966576267694', '٩٦٦٥٧٦٢٦٧٦٩٤', '966576267694\n966576267694'];
+  for (const v of values) {
+    const shell = spawnSync('bash', ['-c', `[[ $1 == *$'\\n'* ]] && exit 1; printf '%s' "$1" | LC_ALL=C grep -Eqx '${m[1]}'`, '_', v]).status === 0;
+    assert.equal(shell, PHONE_JID_RE.test(v), `lib.sh and PHONE_JID_RE disagree on ${JSON.stringify(v)}`);
+  }
 });
 
 test('rollback.sh: a phone JID with a device suffix passes the twin check (as PHONE_JID_RE accepts it)', () => {
@@ -460,11 +490,13 @@ for (const [kind, why] of [
 const REPO_ROOT = path.resolve(HERE, '../../..');
 const PLAN = path.join(REPO_ROOT, 'docs/superpowers/plans/2026-11-19-wa-own-number.md');
 // The VPS runs this suite from its sparse checkout (install-vps.sh: services + src/data), which has
-// no docs/ at all: there the five lock tests are skipped. A checkout that has docs/ but lost the plan
-// still fails in lockCommand(), so a moved or renamed plan cannot turn the tests off on the PC or in CI.
-const NO_DOCS = existsSync(path.join(REPO_ROOT, 'docs'))
-  ? false
-  : 'docs/ is not in this checkout (the VPS sparse checkout is services + src/data); the lock command is read from the plan';
+// no docs/ at all: there the five lock tests are skipped. Anywhere else (the PC, a worktree; CI does not
+// run this suite) they run, and a missing docs/ or plan fails in lockCommand(), so a moved or renamed
+// plan, or a deleted docs/, cannot turn them off.
+const SPARSE = existsSync(path.join(REPO_ROOT, '.git', 'info', 'sparse-checkout'));
+const NO_DOCS = SPARSE && !existsSync(path.join(REPO_ROOT, 'docs'))
+  ? 'docs/ is not in this sparse checkout (the VPS: services + src/data); the lock command is read from the plan'
+  : false;
 const LOCK_REL = '.config/systemd/user/bona-api.service.d/LOCKED';
 function lockCommand() {
   const plan = readFileSync(PLAN, 'utf8');
