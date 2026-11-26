@@ -20,9 +20,10 @@ const CATEGORY_HINTS = [
 ];
 
 // For a caption with no price: main's hints, plus a spaced "/" ("#rent /year", which \b before "/" misses)
-// only when it ends its line, an "only" at most after it: "/ month to month", "/ month notice", "/ month
-// free", "Sa / Mo" say something else. A caption whose hints name both periods names neither (parseCaption).
-const SPACED_SLASH = (unit) => new RegExp(String.raw`(?:^|\s)\/[ \t]*(?:${unit})(?:[ \t]+only)?(?=[ \t]*(?:\r?\n|$))`, 'i');
+// only when it ends the caption, an "only" at most after it: "/ month to month" (on one line or two), "/ month
+// notice", "/ month free", "Sa / Mo" say something else. A caption whose hints name both periods names
+// neither (parseCaption).
+const SPACED_SLASH = (unit) => new RegExp(String.raw`(?:^|\s)\/[ \t]*(?:${unit})(?:[ \t]+only)?\s*$`, 'i');
 const PERIOD_HINTS = [
   [/\b(per|\/)\s*(year|yr|annum)\b/i, 'year'],
   [SPACED_SLASH('year|yr|annum'), 'year'],
@@ -215,6 +216,9 @@ export function parsePriceHint(caption, { command = false } = {}) {
   if ((factor === 1e6 && amount >= 1000) || (factor === 1e3 && amount >= 100000)) return null;
   const value = factor === 1 ? amount : Math.round(amount * factor * 1000) / 1000;
   // A whole amount only: the brochure prints none other ("OMR 1,175.125" would save and lose the brochure).
+  // Counted on the digits, before any rounding: a multiplier takes up to 3 ("k") or 6 ("m") decimals.
+  const decimals = (digits.split('.')[1] || '').replace(/0+$/, '').length;
+  if (decimals > (factor === 1e6 ? 6 : factor === 1e3 ? 3 : 0)) return null;
   if (!Number.isFinite(value) || value > 1e10 || !Number.isInteger(value)) return null;
   // One comma group ("175,125", "4,500") is a decimal comma as often in euros (4,5) and Omani rials, which
   // count three decimals (175.125): no price there. Two groups or more ("1,200,000") are thousands. With no
@@ -244,6 +248,9 @@ export function parsePriceHint(caption, { command = false } = {}) {
  * happens. `#nobrochure` (`#nopdf`) is the flag that changes anything — it is how to publish
  * a listing with no downloadable document at all. Both together: `#nobrochure` wins.
  */
+// A figure spelled out ("أربعة آلاف", "four thousand"): its period is its own, as a written figure's.
+const SPELLED_FIGURE_RE = /(?<![A-Za-z])(?:thousands?|millions?)(?![A-Za-z])|(?:ألف|آلاف|الاف|ألاف|مليون|ملايين)/i;
+
 export function parseCaption(caption) {
   const text = String(caption || '').trim();
   const tags = [...text.matchAll(/#([A-Za-z0-9_-]{1,32})/g)].map((m) => m[1].toLowerCase());
@@ -253,7 +260,8 @@ export function parseCaption(caption) {
     if (re.test(text)) { category = value; break; }
   }
   const hinted = new Set(PERIOD_HINTS.filter(([re]) => re.test(text)).map(([, value]) => value));
-  let period = hinted.size === 1 ? [...hinted][0] : null;
+  // One period hinted, and the caption names no other ("Rent yearly, payable / month" names both: neither).
+  let period = hinted.size === 1 && !(MONTH_WORD_RE.test(text) && YEAR_WORD_RE.test(text)) ? [...hinted][0] : null;
   let price = parsePriceHint(text);
   // The price reader and the category reader must agree on a rent ("#rent_monthly AED 5,000", "Lease
   // AED 2,000", "Rent45,000" are one to the first only), and a sale word must have made a sale category
@@ -267,7 +275,7 @@ export function parseCaption(caption) {
   // A caption with a figure that is no caption price ("Rent $3,000 per month": a dollar with no country)
   // sets no period either: its period belongs to that figure, and on the brochure's own it would turn a
   // yearly rent into a monthly one.
-  else if (/[\p{Nd}\p{No}]/u.test(text)) period = null;
+  else if (/[\p{Nd}\p{No}]/u.test(text) || SPELLED_FIGURE_RE.test(text)) period = null;
   if (category !== 'rent') period = null;
   return {
     text,

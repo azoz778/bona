@@ -239,13 +239,30 @@ describe('parsePriceHint', () => {
     assert.equal(hint('#sale SAR 25m'), 'SAR 25000000');
   });
 
+  // r34 review (Codex)
+  it('round 34: a multiplier takes only the decimals it absorbs; a spelled-out figure keeps its period', () => {
+    assert.equal(parseCommand('price BONA-W001 OMR 1.1750001k').cmd, 'error');
+    // (Claude r34) a caption naming both periods anywhere names neither; and no figure takes 10 decimals
+    for (const caption of ['#rent / year / month', 'Rent yearly, payable / month', 'Rent yearly, payable per month']) assert.equal(parseCaption(caption).period, null, caption);
+    assert.equal(parsePriceHint('SAR 1.0000000001m'), null);
+    assert.equal(parsePriceHint('SAR 4.5000001m'), null);
+    assert.equal(hint('SAR 4.567891m'), 'SAR 4567891');
+    assert.equal(hint('SAR 450.5k'), 'SAR 450500');
+    for (const caption of ['للإيجار بسعر أربعة آلاف شهريا', 'Rent four thousand per month', 'للإيجار بسعر خمسة ملايين سنوياً']) {
+      const c = parseCaption(caption);
+      assert.deepEqual([c.price, c.period], [null, null], caption);
+    }
+  });
+
   // r33 review (Codex)
   it('round 33: main\'s attached "/year" hint, no compound after a spaced slash, whole amounts', () => {
     assert.equal(parseCaption('#rent/year').period, 'year');
     assert.equal(parseCaption('#rent/month').period, 'month');
     assert.equal(parseCaption('#rent /year').period, 'year');
     assert.equal(parseCaption('#rent / month only').period, 'month');
-    assert.equal(parseCaption('#rent villa\nRent / year\nJeddah').period, 'year');
+    // only at the end of the caption: a line break may split "month to month" (r34)
+    assert.equal(parseCaption('#rent villa\nRent / year\nJeddah').period, null);
+    assert.equal(parseCaption('Rent: annual lease / month\nto month option available').period, null);
     for (const caption of ['Rent: annual lease / month to month option available', 'Rent: annual lease / month–to–month', 'Rent: annual lease / month-to-month option available', 'Rent: yearly lease / month till June',
       // (Claude r33) the spaced slash counts only at the end of its line
       '#rent yearly / month to month', 'Rent yearly / month notice', '#rent / month free', '#rent / month or year', '#rent viewing Sa / Mo']) {
@@ -261,8 +278,8 @@ describe('parsePriceHint', () => {
     assert.equal(parseCaption('#rent / month').period, 'month');
     // not before a compound, and naming both periods names neither
     assert.equal(parseCaption('Rent: annual lease / month-to-month option available').period, null);
-    // "/ year" here does not end its line (r33), so only "per month" speaks, as on main
-    assert.equal(parseCaption('#rent / year per month').period, 'month');
+    // a caption naming both a year and a month names neither (r34)
+    assert.equal(parseCaption('#rent / year per month').period, null);
     assert.equal(parseCaption('#rent per year per month').period, null); // both periods named: neither
     // a decimal part settles the comma, but a price is a whole amount (the brochure prints no other: r33)
     assert.equal(parseCommand('price BONA-W001 OMR 1,175.125').cmd, 'error');
