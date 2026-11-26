@@ -46,7 +46,7 @@ const CURRENCY_WORDS = [
   ['OMR', String.raw`OMR|RO|ر\.ع|(?:بال|ال)?ريال(?:ا)? (?:ال)?عماني|omani (?:riyals?|rials?)`],
   ['SAR', String.raw`SAR|SR|saudi (?:riyals?|rials?)|ر\.س|(?:بال|ال)?ريال(?:ا)? (?:ال)?سعودي`],
   ['AED', String.raw`AED|د\.إ|(?:uae|emirati) dirhams?|(?:بال|ال)?درهم(?:ا)? (?:ال)?إماراتي`],
-  ['USD', String.raw`USD|US ?\$|us dollars?|(?:بال|ال)?دولار(?:ا)? (?:ال)?أم(?:ريكي|يركي)`],
+  ['USD', String.raw`USD|US ?\$|us dollars?|(?:بال|ال)?دولار(?:ا)? (?:ال)?[أا]م(?:ريكي|يركي)(?:ا)?`],
   ['EUR', String.raw`EUR|€|euros?|(?:بال|ال)?يورو`],
   // Last, so "ريال سعودي" and "درهم إماراتي" are read whole first.
   ['?', String.raw`riyals?|rials?|(?:بال|ال)?ريال(?:ا)?|dhs?|dirhams?|(?:بال|ال)?درهم(?:ا)?|\$|dollars?|(?:بال|ال)?دولار(?:ا)?`],
@@ -65,8 +65,9 @@ const DIGIT_RUN_RE = /[0-9]+(?:[,،٬.٫][0-9]+)*/g;
 // decimal part. "4,5000", "4.500.000", ".5" and "-450,000" are not read.
 // A grouped figure starts with 1-9: "0,850" is a decimal comma (€0.85m), not 850 thousand.
 const FIGURE_RE = /^(?:[1-9][0-9]{0,2}([,،٬])[0-9]{3}(?:\1[0-9]{3})*|[0-9]+)(?:[.٫][0-9]+)?$/;
-// A multiplier right after the figure ("4.5m", "1.2 million", "850k", "٤٫٥ مليون", "٨٥٠ ألف").
-const MULTIPLIER_RE = new RegExp(String.raw`^ ?(?:(?<lmult>millions?|mln|mil|mn|m|thousands?|k)|(?<amult>مليون|ملايين|ألف|الف)(?:ا)?)(?:(?![A-Za-z0-9${AR}])|(?=(?:SAR|AED|USD|EUR|OMR|SR|RO|DHS?)(?![A-Za-z])|[$€]))`, 'i');
+// A multiplier right after the figure ("4.5m", "1.2 million", "850k", "٤٫٥ مليون", "٨٥٠ ألف"); not "mil",
+// a thousand in Spanish and Portuguese ("€450 mil").
+const MULTIPLIER_RE = new RegExp(String.raw`^ ?(?:(?<lmult>millions?|mln|mn|m|thousands?|k)|(?<amult>مليون|ملايين|ألف|الف)(?:ا)?)(?:(?![A-Za-z0-9${AR}])|(?=(?:SAR|AED|USD|EUR|OMR|SR|RO|DHS?)(?![A-Za-z])|[$€]))`, 'i');
 // What may be left once the figure, its multiplier, its currency and the allowed words are taken out:
 // white space and ordinary punctuation. Any other letter (in any script), symbol or emoji ("฿", "📏")
 // means the caption says more than a price.
@@ -132,7 +133,7 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // ".5 million", "-450,000": a mark or a sign glued to the figure (a hyphen after a word is a
   // separator: "Price-4,500,000").
   const before = text.slice(0, run.index);
-  if (new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$|(?:^|[^A-Za-z${AR}0-9])[+\-−–] ?(?:US\$|\$|€|SAR|AED|USD|EUR|OMR|SR|RO|DHS?) ?$`, 'i').test(before)) return null;
+  if (new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$|(?:^|[^A-Za-z${AR}0-9])[+\-−–] ?(?:US ?\$|\$|€|SAR|AED|USD|EUR|OMR|SR|RO|DHS?) ?$`, 'i').test(before)) return null;
   let after = text.slice(run.index + num.length);
   const mult = MULTIPLIER_RE.exec(after);
   if (mult) after = after.slice(mult[0].length);
@@ -154,7 +155,7 @@ export function parsePriceHint(caption, { command = false } = {}) {
   if (!mult && !currency && (/^[0-9]{10,}$/.test(digits) || /^5[0-9]{8}$/.test(digits))) return null;
   if (!mult && /^(?:19|20)[0-9]{2}$/.test(num)) return null;
   const word = (mult?.groups.lmult || mult?.groups.amult || '').toLowerCase();
-  const factor = /^(m|mn|mil|mln|millions?|مليون|ملايين)$/.test(word) ? 1e6 : /^(k|thousands?|ألف|الف)$/.test(word) ? 1e3 : 1;
+  const factor = /^(m|mn|mln|millions?|مليون|ملايين)$/.test(word) ? 1e6 : /^(k|thousands?|ألف|الف)$/.test(word) ? 1e3 : 1;
   const amount = Number(digits);
   // A bare "450 m" is as likely metres as millions: with no currency, it is millions only below 100
   // and written onto the figure ("25m"; "#sale 25 m" may be a frontage); "SAR 950 m" is no price either.
@@ -209,7 +210,7 @@ export function parseCaption(caption) {
   // A caption with a figure that is no caption price ("Rent $3,000 per month": a dollar with no country)
   // sets no period either: its period belongs to that figure, and on the brochure's own it would turn a
   // yearly rent into a monthly one.
-  else if (/[0-9]/.test(westernise(text))) period = null;
+  else if (/\p{Nd}/u.test(text)) period = null;
   if (category !== 'rent') period = null;
   return {
     text,

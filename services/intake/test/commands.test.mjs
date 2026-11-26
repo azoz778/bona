@@ -105,7 +105,7 @@ describe('parsePriceHint', () => {
       ['للبيع بـ 4.5 مليون', 'SAR 4500000'],
       ['إيجار 45,000 ريال سعودي سنوياً', 'SAR 45000'],
       ['4.5 millions SAR', 'SAR 4500000'],
-      ['4.5mil SAR', 'SAR 4500000'],
+      ['4.5mln SAR', 'SAR 4500000'],
       ['4.5 mln', 'SAR 4500000'],
       ['4.5mSAR', 'SAR 4500000'],
       ['Asking 4.5mUSD', 'USD 4500000'],
@@ -242,6 +242,16 @@ describe('parsePriceHint', () => {
     assert.equal(hint('#sale 25m'), 'SAR 25000000');
   });
 
+  // r19 review (Codex)
+  it('round 19: "mil" is no multiplier, any digit counts for the period rule, a sign before "US $"', () => {
+    for (const caption of ['€450 mil', 'SAR 4.5 mil', '-US $450,000', '- US $450,000']) assert.equal(parsePriceHint(caption), null, caption);
+    assert.equal(parseCommand('price BONA-W001 €450 mil').cmd, 'error');
+    assert.equal(hint('SAR 4.5 mln'), 'SAR 4500000');
+    const c = parseCaption('Rent $３，０００ per month');
+    assert.deepEqual([c.price, c.period], [null, null]);
+    assert.deepEqual([parseCaption('إيجار $٣٬٠٠٠ شهريا').price, parseCaption('إيجار $٣٬٠٠٠ شهريا').period], [null, null]);
+  });
+
   // r18 review (Claude)
   it('round 18 (Claude): a figure that is no caption price sets no period; US $ and أميركي', () => {
     for (const caption of ['Rent $3,000 per month', 'للإيجار بسعر 4 الاف شهريا', 'Rent SAR 4,500 per month?']) {
@@ -252,6 +262,8 @@ describe('parsePriceHint', () => {
     assert.equal(parseCaption('#rent per month').period, 'month');
     assert.equal(hint('US $1.2m'), 'USD 1200000');
     assert.equal(hint('السعر 1,200,000 دولار أميركي'), 'USD 1200000');
+    assert.equal(hint('السعر 1,200,000 دولار امريكي'), 'USD 1200000');
+    assert.equal(hint('١٫٢ مليون دولارا أميركيا'), 'USD 1200000');
     assert.equal(parsePriceHint('BUS $1.2m'), null);
   });
 
