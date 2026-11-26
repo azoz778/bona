@@ -112,13 +112,11 @@ describe('parsePriceHint', () => {
       ['SAR 150m', 'SAR 150000000'],
       ['SAR 2.05M', 'SAR 2050000'],
       ['SAR 1500 thousand', 'SAR 1500000'],
-      ['Asking OMR 175,000.125', 'OMR 175000.125'],
+      ['Asking OMR 1,175,000.125', 'OMR 1175000.125'],
       ['Price: SAR 12,345.6789', 'SAR 12345.6789'],
       ['AED 1000000000', 'AED 1000000000'],
       ['SAR 4,500,000.', 'SAR 4500000'],
       ['Price:\nAED 450,000', 'AED 450000'],
-      ['Price-4,500,000', 'SAR 4500000'],
-      ['SAR-4.5m', 'SAR 4500000'],
       ['Sale price 450,000', 'SAR 450000'],
       ['for sale 4,500,000', 'SAR 4500000'],
       ['4.5m negotiable', 'SAR 4500000'],
@@ -138,12 +136,12 @@ describe('parsePriceHint', () => {
       ['السعر ٤٥٠٬٠٠٠ ريال عماني', 'OMR 450000'],
       ['السعر ٤٥٠٬٠٠٠ ريال عماني', 'OMR 450000'],
       ['السعر ٤٥٠٬٠٠٠ بالريال العماني', 'OMR 450000'],
-      ['Price: 185,000 Omani Riyal', 'OMR 185000'],
+      ['Price: 1,185,000 Omani Riyal', 'OMR 1185000'],
       ['Price RO 185k', 'OMR 185000'],
       ['السعر ٤٥٠٬٠٠٠ ريال سعودي', 'SAR 450000'],
       ['SR 4,500,000', 'SAR 4500000'],
       ['Price 4.5m Saudi riyals', 'SAR 4500000'],
-      ['Asking €450,000', 'EUR 450000'],
+      ['Asking €1,450,000', 'EUR 1450000'],
       ['Asking 450 k€', 'EUR 450000'],
       ['Asking US$450,000', 'USD 450000'],
       ['السعر 2,400,000 درهم إماراتي', 'AED 2400000'],
@@ -240,6 +238,25 @@ describe('parsePriceHint', () => {
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال سعودي').price, { amount: 190000, currency: 'SAR' });
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال عماني').price, { amount: 190000, currency: 'OMR' });
     assert.equal(hint('#sale 25m'), 'SAR 25000000');
+  });
+
+  // r21 review (Codex)
+  it('round 21: a minus sign anywhere, one comma group in euros or Omani rials', () => {
+    for (const caption of ['Rent AED: (- 4,500) per month', 'AED-450,000', 'Price-4,500,000', 'SAR-4.5m', 'SAR – 4.5m', 'for-sale SAR 4.5m',
+      'Rent RO175,125 per month', 'Asking €450,000', 'OMR 185,000', '€4,500']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    assert.equal(parseCommand('price BONA-W001 AED-450,000').cmd, 'error');
+    // the em dash is a separator; two comma groups, or SAR / AED / USD, are thousands
+    assert.equal(hint('Price — SAR 4.5m'), 'SAR 4500000');
+    // (Claude r21) three decimals before a thousand may be dot grouping
+    for (const caption of ['€15.500k', 'SAR 15.500 thousand', 'للبيع 15.500 ألف ريال سعودي']) assert.equal(parsePriceHint(caption), null, caption);
+    assert.equal(parseCommand('price BONA-W001 €15.500k').cmd, 'error');
+    assert.equal(hint('SAR 15.5k'), 'SAR 15500');
+    assert.equal(hint('€1,450,000'), 'EUR 1450000');
+    assert.equal(hint('OMR 1,185,000'), 'OMR 1185000');
+    assert.equal(hint('€450k'), 'EUR 450000');
+    assert.equal(hint('AED 450,000'), 'AED 450000');
   });
 
   // r20 review (Codex, Claude)

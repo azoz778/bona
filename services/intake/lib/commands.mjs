@@ -75,8 +75,9 @@ const MULTIPLIER_RE = new RegExp(String.raw`^ ?(?:(?<lmult>millions?|mln|mn|m|th
 // white space and ordinary punctuation. Any other letter (in any script), symbol or emoji ("฿", "📏")
 // means the caption says more than a price.
 // Not "~" (WhatsApp strikethrough, or "about"), "≈" or "+" ("4.5m+"): those qualify the figure; nor
-// "?" or "؟": a question ("Is rent €4,500 a month?") states no price.
-const LEFTOVER_OK_RE = /^[\s.,،;؛:!()[\]{}"'`«»“”‘’\-–—_/\\|*•·…=&]*$/;
+// "?" or "؟": a question ("Is rent €4,500 a month?") states no price; nor "-" or "–", which may be a minus
+// sign wherever it stands ("(- 4,500)", "AED-450,000"). The em dash "—" is a separator.
+const LEFTOVER_OK_RE = /^[\s.,،;؛:!()[\]{}"'`«»“”‘’—_/\\|*•·…=&]*$/;
 // A period ("per year", "شهرياً") makes the figure a rent; on a caption with no rent word it is an
 // instalment or an income ("3,500 ريال شهرياً فقط", "Net SAR 450,000 per year"), not the price.
 const PERIOD_WORD_RE = new RegExp(tokenRe(String.raw`per|year|years|yearly|yr|annum|annually|month|monthly|mo|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية`), 'i');
@@ -166,9 +167,14 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // The amount as typed; a multiplier's float noise (2.05 x 1e6 = 2049999.9999999998) rounded away.
   // A grouped figure with a multiplier is a decimal comma as often ("€15,500k" may be €15,500): no price.
   if (factor !== 1 && /[,،٬]/.test(num)) return null;
+  // …and three decimals before a thousand are dot grouping as often ("€15.500k" may be €15,500,000).
+  if (factor === 1e3 && /[.٫][0-9]{3}$/.test(num)) return null;
   if ((factor === 1e6 && amount >= 1000) || (factor === 1e3 && amount >= 100000)) return null;
   const value = factor === 1 ? amount : Math.round(amount * factor * 1000) / 1000;
   if (!Number.isFinite(value) || value > 1e10) return null;
+  // One comma group ("175,125", "4,500") is a decimal comma as often in euros (4,5) and Omani rials, which
+  // count three decimals (175.125): no price there. Two groups or more ("1,200,000") are thousands.
+  if ((currency === 'EUR' || currency === 'OMR') && /^[0-9]{1,3}[,،][0-9]{3}(?:[.٫][0-9]+)?$/.test(num)) return null;
   // A bare number only counts as a price when it is plausibly one (>= 10,000) —
   // otherwise "3 bedrooms" would become a price.
   if (!currency && factor === 1 && value < 10000) return null;
