@@ -46,7 +46,7 @@ describe('parseCaption', () => {
     assert.equal(parseCaption('للإيجار').category, 'rent');
     // null: buildListing takes the brochure's period, and a year only when it has none (listing.test.mjs)
     assert.equal(parseCaption('for rent').period, null);
-    assert.equal(parseCaption('for rent 250000 per month').period, 'month');
+    assert.equal(parseCaption('for rent SAR 250000 per month').period, 'month');
   });
 
   it('never sets a period on a sale', () => {
@@ -67,11 +67,11 @@ describe('parsePriceHint', () => {
   const cases = [
     ['SAR 4,500,000', 4500000, 'SAR'],
     ['4.5m SAR', 4500000, 'SAR'],
-    ['price 750000', 750000, 'SAR'],
+    ['price SAR 750000', 750000, 'SAR'],
     ['AED 2,000,000', 2000000, 'AED'],
     ['٤٥٠٠٠٠٠ ريال سعودي', 4500000, 'SAR'],
     ['990,000 ر.س', 990000, 'SAR'],
-    ['1.2 million', 1200000, 'SAR'],
+    ['1.2 million SAR', 1200000, 'SAR'],
     ['850k SAR', 850000, 'SAR'],
   ];
   for (const [input, amount, currency] of cases) {
@@ -96,17 +96,17 @@ describe('parsePriceHint', () => {
   it('reads a caption that is nothing but a price, however it is written', () => {
     for (const [caption, want] of [
       ['#rent SAR 120,000 per year', 'SAR 120000'],
-      ['#test 4.5m', 'SAR 4500000'],
-      ['4500000', 'SAR 4500000'],
+      ['#test SAR 4.5m', 'SAR 4500000'],
+      ['4500000 SAR', 'SAR 4500000'],
       ['السعر ٤٫٥ مليون ريال سعودي', 'SAR 4500000'],
       ['السعر ٤٬٥٠٠٬٠٠٠ ريال سعودي', 'SAR 4500000'],
       ['السعر ٨٥٠ ألفاً ريال سعودي', 'SAR 850000'],
-      ['السعر المطلوب هو ٤٥٠٬٠٠٠', 'SAR 450000'],
-      ['للبيع بـ 4.5 مليون', 'SAR 4500000'],
+      ['السعر المطلوب هو ٤٥٠٬٠٠٠ ريال سعودي', 'SAR 450000'],
+      ['للبيع بـ 4.5 مليون ر.س', 'SAR 4500000'],
       ['إيجار 45,000 ريال سعودي سنوياً', 'SAR 45000'],
       ['4.5 millions SAR', 'SAR 4500000'],
       ['4.5mln SAR', 'SAR 4500000'],
-      ['4.5 mln', 'SAR 4500000'],
+      ['4.5 mln SAR', 'SAR 4500000'],
       ['4.5mSAR', 'SAR 4500000'],
       ['Asking 4.5mUSD', 'USD 4500000'],
       ['SAR 150m', 'SAR 150000000'],
@@ -118,10 +118,10 @@ describe('parsePriceHint', () => {
       ['SAR 4,500,000.', 'SAR 4500000'],
       ['Price:\nAED 450,000', 'AED 450000'],
       ['Sale price SAR 450,000', 'SAR 450000'],
-      ['for sale 4,500,000', 'SAR 4500000'],
-      ['4.5m negotiable', 'SAR 4500000'],
-      ['Price 4.5m firm', 'SAR 4500000'],
-      ['#rent 85k per year', 'SAR 85000'],
+      ['for sale SAR 4,500,000', 'SAR 4500000'],
+      ['SAR 4.5m negotiable', 'SAR 4500000'],
+      ['Price SAR 4.5m firm', 'SAR 4500000'],
+      ['#rent SAR 85k per year', 'SAR 85000'],
       ['Rent AED 2,000 per month', 'AED 2000'],
       ['Asking ４．５m SAR', 'SAR 4500000'],
       ['Asking 12000\nk SAR', 'SAR 12000000'],
@@ -220,12 +220,12 @@ describe('parsePriceHint', () => {
     for (const caption of ['3,500 ريال شهرياً فقط', 'Net SAR 450,000 per year', 'A$ 1.2m', 'HK$ 1.2m', '-SAR 50,000', '4,500 مليون', 'Price 15,000m SAR']) {
       assert.equal(parsePriceHint(caption), null, caption);
     }
-    for (const [caption, want] of [['#rent SAR 120,000 per year', 'SAR 120000'], ['Rent AED 5,000 monthly', 'AED 5000'], ['إيجار الشهر 4,500 ريال سعودي', 'SAR 4500']]) {
+    for (const [caption, want] of [['#rent SAR 120,000 per year', 'SAR 120000'], ['Rent AED 5,000 monthly', 'AED 5000'], ['إيجار 4,500 ريال سعودي في الشهر', 'SAR 4500']]) {
       assert.equal(hint(caption), want, caption);
     }
-    assert.equal(parseCaption('4.5m').price.currency, null);
+    assert.equal(parseCaption('4.5m').price, null); // r25: a caption price writes its currency
     assert.equal(parseCaption('SAR 4.5m').price.currency, 'SAR');
-    assert.equal(parseCaption('إيجار الشهر 4,500 ريال سعودي').period, 'month');
+    assert.equal(parseCaption('إيجار 4,500 ريال سعودي في الشهر').period, 'month');
   });
 
   // r14 review (Codex)
@@ -237,7 +237,27 @@ describe('parsePriceHint', () => {
     assert.equal(parseCaption('السعر ١٩٠٬٠٠٠ ريال').price, null);
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال سعودي').price, { amount: 190000, currency: 'SAR' });
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال عماني').price, { amount: 190000, currency: 'OMR' });
-    assert.equal(hint('#sale 25m'), 'SAR 25000000');
+    assert.equal(hint('#sale SAR 25m'), 'SAR 25000000');
+  });
+
+  // r25 review (Codex, Claude)
+  it('round 25: a caption price writes its currency, its period follows the figure, digit hashtags before flags', () => {
+    // no currency written: the brochure reading's may be a fallback (a London brochure read as SAR)
+    for (const caption of ['4.5m', '#international ١٫٢٥ مليون', '450000', 'Price 4.5m firm', '#rent 85k per year']) assert.equal(parsePriceHint(caption), null, caption);
+    assert.equal(parseCommand('price BONA-W001 4.5m').amount, 4500000); // the command keeps the listing's currency
+    // the period stands right after the figure and its currency; before it, or a second one, it is the lease's
+    for (const caption of ['للإيجار سنة فقط\nالمطلوب ٤٬٥٠٠ ريال سعودي', 'إيجار شهر 4,500 ريال سعودي', 'Rent €4,500 for a year', 'Rent SAR 4,500 per month for a year', 'Rent per year SAR 45,000']) {
+      assert.equal(parsePriceHint(caption), null, JSON.stringify(caption));
+    }
+    for (const [caption, period] of [['Rent SAR 4,500 per month', 'month'], ['Rent 4,500 SAR / month', 'month'], ['#rent AED 60k/yr', 'year'], ['للإيجار ٤٥ ألف ريال سعودي سنوياً', 'year'], ['Rent SAR 45,000 a year', 'year'], ['rent SAR 4,500 per annum', 'year']]) {
+      assert.equal(parsePriceHint(caption)?.period, period, caption);
+    }
+    // a hashtag holding a digit is no price, the digits after a flag included
+    for (const caption of ['#sale١٢٣٤٥', '#sale12345', '#rent٤٥٠٠٠ SAR per year']) assert.equal(parsePriceHint(caption), null, caption);
+    // (Claude) a word glued to a flag is read for rent and sale: no price where the readers disagree
+    for (const caption of ['#hiddenｒｅｎｔ SAR 45,000 per year', '#hiddenｓａｌｅ SAR 4.5m', '#hidden\u200Esale Rent AED 60,000 per year']) {
+      assert.equal(parseCaption(caption).price, null, JSON.stringify(caption));
+    }
   });
 
   // r24 review (Codex)
@@ -272,7 +292,7 @@ describe('parsePriceHint', () => {
   it('round 22: a bare figure of one comma group, the em dash, a fullwidth flag', () => {
     // a caption cannot know the listing's currency, so a bare "175,125" may be OMR 175.125: no caption price
     for (const caption of ['Rent 175,125 per month', '450,000', 'Price: 450,000', 'Rent AED (— 4,500) per month']) assert.equal(parsePriceHint(caption), null, caption);
-    for (const [caption, want] of [['450k', 'SAR 450000'], ['450000', 'SAR 450000'], ['SAR 450,000', 'SAR 450000'], ['4,500,000', 'SAR 4500000']]) assert.equal(hint(caption), want, caption);
+    for (const [caption, want] of [['SAR 450k', 'SAR 450000'], ['450000 SAR', 'SAR 450000'], ['SAR 450,000', 'SAR 450000'], ['SAR 4,500,000', 'SAR 4500000']]) assert.equal(hint(caption), want, caption);
     // the price command names its listing: a bare "450,000" passes, and setPrice decides (listing.test.mjs)
     assert.equal(parseCommand('price BONA-W001 450,000').oneGroup, true);
     assert.equal('oneGroup' in parseCommand('price BONA-W001 SAR 450,000'), false);
@@ -431,7 +451,7 @@ describe('parsePriceHint', () => {
   // r14 review (Claude)
   it('round 14 (Claude): the period comes from the price caption itself', () => {
     for (const [caption, period] of [['Rent SAR 4,500 /month', 'month'], ['Rent 4,500 SAR / month', 'month'], ['rent 4,500 SAR month', 'month'],
-      ['إيجار 4,500 ريال سعودي شهر', 'month'], ['إيجار شهر 4,500 ريال سعودي', 'month'], ['إيجار الشهر 4,500 ريال سعودي', 'month'],
+      ['إيجار 4,500 ريال سعودي شهر', 'month'], ['إيجار 4,500 ريال سعودي شهرياً', 'month'], ['إيجار 4,500 ريال سعودي / شهر', 'month'],
       ['#rent SAR 60,000 yearly', 'year']]) {
       const c = parseCaption(caption);
       assert.ok(c.price, caption);
