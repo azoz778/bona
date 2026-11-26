@@ -239,6 +239,17 @@ describe('parsePriceHint', () => {
     assert.equal(hint('#sale SAR 25m'), 'SAR 25000000');
   });
 
+  // r32 review (Codex)
+  it('round 32: "/year" after a space, both periods named, a decimal part settles a comma', () => {
+    assert.equal(parseCaption('#rent /year').period, 'year');
+    assert.equal(parseCaption('#rent / month').period, 'month');
+    // not before a compound, and naming both periods names neither
+    assert.equal(parseCaption('Rent: annual lease / month-to-month option available').period, null);
+    assert.equal(parseCaption('#rent / year per month').period, null);
+    assert.equal(parseCommand('price BONA-W001 OMR 1,175.125').amount, 1175.125);
+    assert.equal(parsePriceHint('OMR 175,125'), null);
+  });
+
   // r31 review (Codex)
   it('round 31: a hashtag that is no bot flag is no price word', () => {
     for (const caption of ['Rent: AED 60,000 *#monthly only*', 'Rent AED 60,000 per year #monthly', '#price SAR 4.5m', '#للبيع SAR 4.5m', '#ｒｅｎｔ AED 45k per year']) {

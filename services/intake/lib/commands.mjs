@@ -19,10 +19,12 @@ const CATEGORY_HINTS = [
   [/(للبيع)/, 'buy'],
 ];
 
+// For a caption with no price. "/" counts after a space too ("#rent /year"), but not before a compound
+// ("annual lease / month-to-month option"); a caption naming both periods names neither (parseCaption).
 const PERIOD_HINTS = [
-  [/\b(per|\/)\s*(year|yr|annum)\b/i, 'year'],
+  [/(?:\bper|(?<![A-Za-z0-9])\/)\s*(year|yr|annum)(?![\w-])/i, 'year'],
   [/(سنوي|سنويا|سنوياً|\/ ?سنة|في السنة)/, 'year'],
-  [/\b(per|\/)\s*(month|mo)\b/i, 'month'],
+  [/(?:\bper|(?<![A-Za-z0-9])\/)\s*(month|mo)(?![\w-])/i, 'month'],
   [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر)/, 'month'],
 ];
 
@@ -116,10 +118,9 @@ const INVISIBLE_RE = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069\u0640\u064B]
  */
 export function parsePriceHint(caption, { command = false } = {}) {
   // Fullwidth characters ("４．５m") become their ASCII forms; any other non-ASCII digit, a superscript
-  // or a footnote mark ("450000¹") included, is not ours to read. All white space, line breaks included,
-  // is one space. The bot's flags and categories ("#test", "#rent") are read by parseCaption and are not
-  // words here, nor is a hashtag holding a digit ("#250000", "#2BR"); any other hashtag is its word
-  // ("#Deposit 50,000" is a deposit).
+  // or a footnote mark ("450000¹") included, is not ours to read. White space is one space, a line break
+  // one line break. The bot's flags ("#test", "#rent") are read by parseCaption and leave only FLAG_MARK
+  // here; any other hashtag ("#Deposit", "#monthly", "#2BR") means no caption price.
   // A fullwidth "＃" ("＃test") is a flag parseCaption does not read: no caption price beside it.
   if (/＃/.test(String(caption || ''))) return null;
   // A private-use character could pass for FLAG_MARK: no caption price beside one.
@@ -137,7 +138,7 @@ export function parsePriceHint(caption, { command = false } = {}) {
   if (unflagged.includes('#')) return null;
   // White space is one space, but a line break stays one (any of them: CR, LS, PS, NEL, VT, FF), so the
   // period must stand on the figure's line.
-  const text = unflagged.replace(/#/g, ' ').replace(/\r\n?|[\u2028\u2029\u0085\v\f]/g, '\n')
+  const text = unflagged.replace(/\r\n?|[\u2028\u2029\u0085\v\f]/g, '\n')
     .replace(/[^\S\n]+/g, ' ').replace(/ *\n\s*/g, '\n').trim();
   // A hashtag holding a digit ("#1stPayment", "#250000", "#2BR", "#sale١٢٣٤٥") may label or be the figure:
   // no price. Read before the flags come out, on the whole caption.
@@ -214,7 +215,8 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // count three decimals (175.125): no price there. Two groups or more ("1,200,000") are thousands. With no
   // currency written the figure takes the listing's, which a caption cannot know: no caption price either
   // (the price command names its listing: setPrice refuses it there on a euro or rial listing).
-  const oneGroup = /^[0-9]{1,3}[,،][0-9]{3}(?:[.٫][0-9]+)?$/.test(num);
+  // (A decimal part settles it: "1,175.125" has its decimal point, so its comma is thousands.)
+  const oneGroup = /^[0-9]{1,3}[,،][0-9]{3}$/.test(num);
   if (oneGroup && (currency === 'EUR' || currency === 'OMR' || (!currency && !command))) return null;
   // A bare number only counts as a price when it is plausibly one (>= 10,000) —
   // otherwise "3 bedrooms" would become a price.
@@ -245,10 +247,8 @@ export function parseCaption(caption) {
   for (const [re, value] of CATEGORY_HINTS) {
     if (re.test(text)) { category = value; break; }
   }
-  let period = null;
-  for (const [re, value] of PERIOD_HINTS) {
-    if (re.test(text)) { period = value; break; }
-  }
+  const hinted = new Set(PERIOD_HINTS.filter(([re]) => re.test(text)).map(([, value]) => value));
+  let period = hinted.size === 1 ? [...hinted][0] : null;
   let price = parsePriceHint(text);
   // The price reader and the category reader must agree on a rent ("#rent_monthly AED 5,000", "Lease
   // AED 2,000", "Rent45,000" are one to the first only), and a sale word must have made a sale category
