@@ -54,12 +54,14 @@ const CURRENCY_WORDS = [
 ];
 // A currency token: a whole word, so "European" is no EUR; a symbol stands anywhere ("Price$450,000").
 const tokenRe = (body) => String.raw`(?<![A-Za-z${AR}])(?:${body})(?![A-Za-z${AR}])`;
-const CURRENCY_SYMBOL = String.raw`US ?\$|\$|€`;
+const CURRENCY_SYMBOL = String.raw`(?<![A-Za-z])US ?\$|\$|€`;
 const CURRENCY_WHOLE = CURRENCY_WORDS.map(([code, re]) => [code, new RegExp(String.raw`^(?:${re})$`, 'i')]);
 const CURRENCY_TOKEN_RE = new RegExp(String.raw`${CURRENCY_SYMBOL}|` + CURRENCY_WORDS.map(([, re]) => tokenRe(re)).join('|'), 'gi');
-// A period right after the figure, past its currency and a "per", "a", "في" or "/" ("SAR 4,500 per month").
+// A period right after the figure (its currency already taken out), past a "per", "a", "في" or "/" and
+// WhatsApp's bold or italic marks ("SAR 4,500 per month", "*AED 5,000* per month"); not past a bracket
+// ("(سنة فقط)" may be the lease's). One pass, no nested choices: linear time.
 const PERIOD_TOKENS = String.raw`month|monthly|mo|شهر|الشهر|شهري|شهريا|شهرية|year|years|yearly|yr|annum|annually|سنة|السنة|سنوي|سنويا|سنوية`;
-const PERIOD_LEAD_RE = new RegExp(String.raw`^(?:[\s/:,.()]|${CURRENCY_TOKEN_RE.source})*(?:(?:per|a|في)\s+|/\s*)?(${PERIOD_TOKENS})(?![A-Za-z${AR}])`, 'i');
+const PERIOD_LEAD_RE = new RegExp(String.raw`^[\s/:,.*_]*(?:(?:per|a|في)\s+|/\s*)?(${PERIOD_TOKENS})(?![A-Za-z${AR}])`, 'i');
 // A figure glued to a mark or a sign ("4.500.000" read from its end, "-450,000"), or a sign before its currency
 // ("-SAR 50,000", "-US dollars 450,000", "-ر.س 450,000"): no price. Built from every currency token above.
 const SIGN_BEFORE_RE = new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$|(?:^|[^A-Za-z${AR}0-9])[+\-−–] ?(?:${CURRENCY_TOKEN_RE.source}) ?$`, 'i');
@@ -147,8 +149,9 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // The rent period stands right after the figure and its currency ("SAR 4,500 per month", "٤٬٥٠٠ ريال سعودي
   // شهرياً", "4.5m/yr"). Anywhere else it may be the lease's ("للإيجار سنة فقط" above the figure) or a
   // payment's ("for a year"): no price; so is a second one ("a month for a year").
-  const lead = PERIOD_LEAD_RE.exec(after);
-  if (PERIOD_WORD_RE.test(before) || PERIOD_WORD_RE.test(lead ? after.slice(lead[0].length) : after)) return null;
+  const tail = after.replace(CURRENCY_TOKEN_RE, ' ');
+  const lead = PERIOD_LEAD_RE.exec(tail);
+  if (PERIOD_WORD_RE.test(before) || PERIOD_WORD_RE.test(lead ? tail.slice(lead[0].length) : tail)) return null;
   const period = lead ? (MONTH_WORD_RE.test(lead[1]) ? 'month' : 'year') : null;
   // A rent caption must say its period: "Rent SAR 45,000" may be a year's or a month's (the price command
   // keeps the listing's own period).

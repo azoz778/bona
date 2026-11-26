@@ -240,6 +240,23 @@ describe('parsePriceHint', () => {
     assert.equal(hint('#sale SAR 25m'), 'SAR 25000000');
   });
 
+  // r26 review (Codex)
+  it('round 26: no bracket before the period, bold marks, a glued "US $", and the period reader is linear', () => {
+    assert.equal(parsePriceHint('للإيجار ٤٬٥٠٠ ريال سعودي\n(سنة فقط)'), null);
+    assert.equal(parsePriceHint('Rent SAR 4,500 (per month)'), null);
+    const bold = parsePriceHint('Rent *AED 5,000* per month');
+    assert.deepEqual([bold?.amount, bold?.currency, bold?.period], [5000, 'AED', 'month']);
+    assert.equal(parsePriceHint('RentUS $45,000'), null);
+    assert.equal(parseCommand('price BONA-W001 RentUS $45,000').cmd, 'error');
+    assert.equal(hint('US $45,000'), 'USD 45000');
+    // the period reader ran in exponential time on repeated currency marks (2.7 s for 30 "€")
+    for (const s of ['Rent 4,500 ' + '€'.repeat(3000), 'Rent 4,500 ' + 'US $'.repeat(3000), 'Rent 4,500 ' + 'ريال سعودي '.repeat(3000), 'Rent 4,500 ' + '/ '.repeat(3000) + 'month']) {
+      const t0 = Date.now();
+      parsePriceHint(s);
+      assert.ok(Date.now() - t0 < 500, `${JSON.stringify(s.slice(0, 16))}… took ${Date.now() - t0} ms`);
+    }
+  });
+
   // r25 review (Codex, Claude)
   it('round 25: a caption price writes its currency, its period follows the figure, digit hashtags before flags', () => {
     // no currency written: the brochure reading's may be a fallback (a London brochure read as SAR)
