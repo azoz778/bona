@@ -19,12 +19,16 @@ const CATEGORY_HINTS = [
   [/(للبيع)/, 'buy'],
 ];
 
-// For a caption with no price. "/" counts after a space too ("#rent /year"), but not before a compound
-// ("annual lease / month-to-month option"); a caption naming both periods names neither (parseCaption).
+// For a caption with no price: main's hints, plus a spaced "/" ("#rent /year", which \b before "/" misses)
+// only when it ends its line, an "only" at most after it: "/ month to month", "/ month notice", "/ month
+// free", "Sa / Mo" say something else. A caption whose hints name both periods names neither (parseCaption).
+const SPACED_SLASH = (unit) => new RegExp(String.raw`(?:^|\s)\/[ \t]*(?:${unit})(?:[ \t]+only)?(?=[ \t]*(?:\r?\n|$))`, 'i');
 const PERIOD_HINTS = [
-  [/(?:\bper|(?<![A-Za-z0-9])\/)\s*(year|yr|annum)(?![\w-])/i, 'year'],
+  [/\b(per|\/)\s*(year|yr|annum)\b/i, 'year'],
+  [SPACED_SLASH('year|yr|annum'), 'year'],
   [/(سنوي|سنويا|سنوياً|\/ ?سنة|في السنة)/, 'year'],
-  [/(?:\bper|(?<![A-Za-z0-9])\/)\s*(month|mo)(?![\w-])/i, 'month'],
+  [/\b(per|\/)\s*(month|mo)\b/i, 'month'],
+  [SPACED_SLASH('month'), 'month'],
   [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر)/, 'month'],
 ];
 
@@ -210,7 +214,8 @@ export function parsePriceHint(caption, { command = false } = {}) {
   if (factor === 1e3 && /[.٫][0-9]{3}$/.test(num)) return null;
   if ((factor === 1e6 && amount >= 1000) || (factor === 1e3 && amount >= 100000)) return null;
   const value = factor === 1 ? amount : Math.round(amount * factor * 1000) / 1000;
-  if (!Number.isFinite(value) || value > 1e10) return null;
+  // A whole amount only: the brochure prints none other ("OMR 1,175.125" would save and lose the brochure).
+  if (!Number.isFinite(value) || value > 1e10 || !Number.isInteger(value)) return null;
   // One comma group ("175,125", "4,500") is a decimal comma as often in euros (4,5) and Omani rials, which
   // count three decimals (175.125): no price there. Two groups or more ("1,200,000") are thousands. With no
   // currency written the figure takes the listing's, which a caption cannot know: no caption price either
