@@ -239,6 +239,17 @@ describe('parsePriceHint', () => {
     assert.equal(hint('#sale SAR 25m'), 'SAR 25000000');
   });
 
+  // r31 review (Codex)
+  it('round 31: a hashtag that is no bot flag is no price word', () => {
+    for (const caption of ['Rent: AED 60,000 *#monthly only*', 'Rent AED 60,000 per year #monthly', '#price SAR 4.5m', '#للبيع SAR 4.5m', '#ｒｅｎｔ AED 45k per year']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    // the bot's own flags still stand beside a price
+    for (const caption of ['#rent SAR 45,000 per year', '#test SAR 4.5m', '#forsale SAR 4.5m', '#international €450k', '#nobrochure SAR 4.5m']) {
+      assert.ok(parsePriceHint(caption), caption);
+    }
+  });
+
   // r30 review (Codex)
   it('round 30: a flag keeps its place, so no period is read across it', () => {
     for (const caption of ['Rent: *AED 5,000* *yearly #rental only*', 'Rent: AED 60,000 *monthly #rental only*', 'Rent SAR 4,500 #rent per month', 'Rent SAR 4,500 per month #rent']) {

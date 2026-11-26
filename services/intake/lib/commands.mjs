@@ -132,6 +132,9 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // Each flag leaves FLAG_MARK in its place: "yearly #rental only" keeps the flag between the period and the
   // qualifier, so the period is no billing period there.
   const unflagged = westernise(fold(raw.replace(FLAG_TAG_RE, ` ${FLAG_MARK} `))).replace(INVISIBLE_RE, '');
+  // Any other hashtag is no price word ("#monthly only" may be the payments', "#Deposit 50,000" a deposit):
+  // no caption price beside one.
+  if (unflagged.includes('#')) return null;
   // White space is one space, but a line break stays one (any of them: CR, LS, PS, NEL, VT, FF), so the
   // period must stand on the figure's line.
   const text = unflagged.replace(/#/g, ' ').replace(/\r\n?|[\u2028\u2029\u0085\v\f]/g, '\n')
