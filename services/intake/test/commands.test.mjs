@@ -119,7 +119,7 @@ describe('parsePriceHint', () => {
       ['Price:\nAED 450,000', 'AED 450000'],
       ['Price-4,500,000', 'SAR 4500000'],
       ['SAR-4.5m', 'SAR 4500000'],
-      ['Sale price is 450,000', 'SAR 450000'],
+      ['Sale price 450,000', 'SAR 450000'],
       ['for sale 4,500,000', 'SAR 4500000'],
       ['4.5m negotiable', 'SAR 4500000'],
       ['Price 4.5m firm', 'SAR 4500000'],
@@ -240,6 +240,29 @@ describe('parsePriceHint', () => {
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال سعودي').price, { amount: 190000, currency: 'SAR' });
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال عماني').price, { amount: 190000, currency: 'OMR' });
     assert.equal(hint('#sale 25m'), 'SAR 25000000');
+  });
+
+  // r18 review (Claude)
+  it('round 18 (Claude): a figure that is no caption price sets no period; US $ and أميركي', () => {
+    for (const caption of ['Rent $3,000 per month', 'للإيجار بسعر 4 الاف شهريا', 'Rent SAR 4,500 per month?']) {
+      const c = parseCaption(caption);
+      assert.deepEqual([c.price, c.category, c.period], [null, 'rent', null], caption);
+    }
+    // with no figure at all, main's period hints still speak
+    assert.equal(parseCaption('#rent per month').period, 'month');
+    assert.equal(hint('US $1.2m'), 'USD 1200000');
+    assert.equal(hint('السعر 1,200,000 دولار أميركي'), 'USD 1200000');
+    assert.equal(parsePriceHint('BUS $1.2m'), null);
+  });
+
+  // r18 review (Codex)
+  it('round 18: "is" and "lease" are no words, a group never starts with 0', () => {
+    for (const caption of ['Is rent €4,500 a month', 'Price is SAR 4.5m', 'Rent €4,500 (yearly lease)', 'For sale €0,850m', 'SAR 0,850,000', '0,850 SAR']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    assert.equal(hint('For sale €850k'), 'EUR 850000');
+    assert.equal(hint('For sale €0.85m'), 'EUR 850000');
+    assert.equal(hint('SAR 850,000'), 'SAR 850000');
   });
 
   // r17 review (Claude)

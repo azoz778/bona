@@ -46,7 +46,7 @@ const CURRENCY_WORDS = [
   ['OMR', String.raw`OMR|RO|ر\.ع|(?:بال|ال)?ريال(?:ا)? (?:ال)?عماني|omani (?:riyals?|rials?)`],
   ['SAR', String.raw`SAR|SR|saudi (?:riyals?|rials?)|ر\.س|(?:بال|ال)?ريال(?:ا)? (?:ال)?سعودي`],
   ['AED', String.raw`AED|د\.إ|(?:uae|emirati) dirhams?|(?:بال|ال)?درهم(?:ا)? (?:ال)?إماراتي`],
-  ['USD', String.raw`USD|US\$|us dollars?|(?:بال|ال)?دولار(?:ا)? (?:ال)?أمريكي`],
+  ['USD', String.raw`USD|US ?\$|us dollars?|(?:بال|ال)?دولار(?:ا)? (?:ال)?أم(?:ريكي|يركي)`],
   ['EUR', String.raw`EUR|€|euros?|(?:بال|ال)?يورو`],
   // Last, so "ريال سعودي" and "درهم إماراتي" are read whole first.
   ['?', String.raw`riyals?|rials?|(?:بال|ال)?ريال(?:ا)?|dhs?|dirhams?|(?:بال|ال)?درهم(?:ا)?|\$|dollars?|(?:بال|ال)?دولار(?:ا)?`],
@@ -54,16 +54,17 @@ const CURRENCY_WORDS = [
 ];
 // A currency token: a whole word, so "European" is no EUR; a symbol stands anywhere ("Price$450,000").
 const tokenRe = (body) => String.raw`(?<![A-Za-z${AR}])(?:${body})(?![A-Za-z${AR}])`;
-const CURRENCY_SYMBOL = String.raw`US\$|\$|€`;
+const CURRENCY_SYMBOL = String.raw`US ?\$|\$|€`;
 const CURRENCY_WHOLE = CURRENCY_WORDS.map(([code, re]) => [code, new RegExp(String.raw`^(?:${re})$`, 'i')]);
 const CURRENCY_TOKEN_RE = new RegExp(String.raw`${CURRENCY_SYMBOL}|` + CURRENCY_WORDS.map(([, re]) => tokenRe(re)).join('|'), 'gi');
 // The words a price-only caption may hold besides the figure, its multiplier and its currency.
-const ALLOWED_WORD_RE = new RegExp(tokenRe(String.raw`price|prices|asking|total|for|sale|rent|rental|lease|is|of|at|a month|a year|per|year|years|yearly|yr|annum|annually|month|monthly|mo|only|cash|final|firm|negotiable|السعر|سعر|بسعر|المطلوب|هو|ب|للبيع|بيع|للإيجار|للايجار|إيجار|ايجار|الإيجار|الايجار|في|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية|فقط|كاش|نهائي|قابل|للتفاوض`), 'gi');
+const ALLOWED_WORD_RE = new RegExp(tokenRe(String.raw`price|prices|asking|total|for|sale|rent|rental|of|at|a month|a year|per|year|years|yearly|yr|annum|annually|month|monthly|mo|only|cash|final|firm|negotiable|السعر|سعر|بسعر|المطلوب|هو|ب|للبيع|بيع|للإيجار|للايجار|إيجار|ايجار|الإيجار|الايجار|في|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية|فقط|كاش|نهائي|قابل|للتفاوض`), 'gi');
 // Every run of digits, with the separators that join it, is one figure.
 const DIGIT_RUN_RE = /[0-9]+(?:[,،٬.٫][0-9]+)*/g;
 // A figure written as a price: thousands in groups of three with one separator, or no separator; a
 // decimal part. "4,5000", "4.500.000", ".5" and "-450,000" are not read.
-const FIGURE_RE = /^(?:[0-9]{1,3}([,،٬])[0-9]{3}(?:\1[0-9]{3})*|[0-9]+)(?:[.٫][0-9]+)?$/;
+// A grouped figure starts with 1-9: "0,850" is a decimal comma (€0.85m), not 850 thousand.
+const FIGURE_RE = /^(?:[1-9][0-9]{0,2}([,،٬])[0-9]{3}(?:\1[0-9]{3})*|[0-9]+)(?:[.٫][0-9]+)?$/;
 // A multiplier right after the figure ("4.5m", "1.2 million", "850k", "٤٫٥ مليون", "٨٥٠ ألف").
 const MULTIPLIER_RE = new RegExp(String.raw`^ ?(?:(?<lmult>millions?|mln|mil|mn|m|thousands?|k)|(?<amult>مليون|ملايين|ألف|الف)(?:ا)?)(?:(?![A-Za-z0-9${AR}])|(?=(?:SAR|AED|USD|EUR|OMR|SR|RO|DHS?)(?![A-Za-z])|[$€]))`, 'i');
 // What may be left once the figure, its multiplier, its currency and the allowed words are taken out:
@@ -205,6 +206,10 @@ export function parseCaption(caption) {
   // only when it has none (buildListing, and the pipeline's listingPeriod: caption, reading, year); a
   // "year" set here would turn a monthly brochure's rent into a yearly one.
   if (price) period = price.period;
+  // A caption with a figure that is no caption price ("Rent $3,000 per month": a dollar with no country)
+  // sets no period either: its period belongs to that figure, and on the brochure's own it would turn a
+  // yearly rent into a monthly one.
+  else if (/[0-9]/.test(westernise(text))) period = null;
   if (category !== 'rent') period = null;
   return {
     text,
