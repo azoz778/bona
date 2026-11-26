@@ -280,7 +280,7 @@ test('the AI phone assistant section: who answers, the recording, where the voic
   // The call alert (~/bona-line call_alert.py, 2026-11-26): every call's number and details also go to the
   // owner's WhatsApp from the Bona number, and a deletion request for a call covers that note too.
   assert.ok(en.includes('until you ask us to delete them. After each call, Bona’s WhatsApp number also sends the owner of Bona a short WhatsApp note about it, with the number you called from and the details you gave'), en);
-  assert.match(en, /so that a principal can get back to you; a request to delete a call also deletes that note\./);
+  assert.match(en, /so that a principal can get back to you; a request to delete a call covers that note too\./);
   assert.ok(ar.includes('إلى أن تطلب منا حذفها. وبعد كل مكالمة، يُرسل رقم واتساب بونا إلى مالك بونا ملاحظة قصيرة عنها عبر واتساب، فيها الرقم الذي اتصلت منه والبيانات التي ذكرتها'), ar);
   assert.match(ar, /ليتواصل معك أحد شركاء الدار؛ وطلب حذف مكالمة يشمل حذف هذه الملاحظة أيضاً\./);
   for (const gone of ['kept as an enquiry, like any other', 'the enquiry it produced']) assert.ok(!en.includes(gone), `en still says: ${gone}`);

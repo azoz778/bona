@@ -215,6 +215,11 @@ function pcWa(home, kind) {
     'continued-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=bona\\\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n',
     personal: 'BONA_WA_INSTANCE=abdulaziz-personal\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n',
     'quoted-export': 'export BONA_WA_INSTANCE="bona"\nexport BONA_WA_INSTANCE_JID=\'966576267694@s.whatsapp.net\'\n',
+    quoted: 'BONA_WA_INSTANCE="bona"\nBONA_WA_INSTANCE_JID=\'966576267694@s.whatsapp.net\'\n',
+    'semicolon-comment': '; example="old\n# another "open\n\nBONA_WA_INSTANCE=bona\r\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\r\n',
+    'escaped-quote': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID="bad\\"\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n"\n',
+    'reopened-quote': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID="bona" "\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n"\n',
+    'cr-mid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=bona\rBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n',
     'show-fails': PC_WA_LINES,
   }[kind];
   assert.ok(file !== undefined, `unknown PC_WA kind ${kind}`);
@@ -385,8 +390,12 @@ const refusedUntouched = (r, why) => {
 const REFUSAL_REASON = {
   'bad-jid': 'BONA_WA_INSTANCE_JID to something that is not a phone JID',
   'lid-jid': 'BONA_WA_INSTANCE_JID to something that is not a phone JID',
-  'multiline-jid': 'runs over more than one line',
-  'continued-jid': 'runs over more than one line',
+  'multiline-jid': 'is not a plain KEY=value',
+  'continued-jid': 'is not a plain KEY=value',
+  'escaped-quote': 'is not a plain KEY=value',
+  'reopened-quote': 'is not a plain KEY=value',
+  'cr-mid': 'is not a plain KEY=value',
+  'quoted-export': 'is not a plain KEY=value',
 };
 
 for (const [kind, why] of [
@@ -398,6 +407,10 @@ for (const [kind, why] of [
   ['lid-jid', 'the env file sets BONA_WA_INSTANCE_JID to a @lid JID, not a phone JID'],
   ['multiline-jid', 'the env file has a quoted value that runs over two lines'],
   ['continued-jid', 'the env file has a line ending in a backslash'],
+  ['escaped-quote', 'the env file has an escaped quote that keeps the value open'],
+  ['reopened-quote', 'the env file opens a second quote after the value'],
+  ['cr-mid', 'the env file has a bare carriage return inside a line'],
+  ['quoted-export', 'the env file uses export, which systemd does not read'],
   ['personal', "the env file names the owner's personal instance"],
   ['early', 'the env file is loaded before bona-services.env, so it does not win'],
   ['show-fails', 'systemctl --user show failed'],
@@ -415,10 +428,12 @@ test('rollback.sh --copy-back: no drop-in — refused before the VPS is stopped 
   assert.ok(!r.lines.some((l) => /^systemctl --user is-active/.test(l)), r.lines.join('\n'));
 });
 
-test('rollback.sh: the drop-in env file may use export and quotes (as lib/env.mjs and systemd read it)', () => {
-  const r = runShimmed('rollback.sh', [], { PC_WA: 'quoted-export' });
-  assert.equal(r.status, 0, r.out);
-  assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.pcStart);
+test('rollback.sh: the drop-in env file may quote whole values, use # and ; comments, blank lines and CRLF (as systemd reads it)', () => {
+  for (const kind of ['quoted', 'semicolon-comment']) {
+    const r = runShimmed('rollback.sh', [], { PC_WA: kind });
+    assert.equal(r.status, 0, `${kind}: ${r.out}`);
+    assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.pcStart);
+  }
 });
 
 test('lib.sh checks BONA_WA_INSTANCE_JID with the same pattern as PHONE_JID_RE in lib/wa.mjs (no drift)', () => {

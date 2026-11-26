@@ -180,17 +180,17 @@ pc_wa_dropin_ok() {
   if [ "$inst" = "$PC_PERSONAL_INSTANCE" ]; then
     PC_WA_WHY="$PC_WA_ENV names the owner's personal instance"; return 1
   fi
-  # systemd reads a quoted value, or a line ending in a backslash, on into the next line(s); env_value
-  # reads line by line, so such a file could pass here while bona-api gets another value (Codex r1).
+  # Only systemd reads this file (EnvironmentFile=; lib/env.mjs never does). Every line must be blank, a
+  # comment (# or ;), or one plain KEY=value on that line: no `export` (systemd ignores such a line), no
+  # backslash or carriage return (escapes, continuation, a CR line break), and quotes only around the whole
+  # value with none inside. Anything else systemd may read differently from env_value (Codex r1+r2, Claude r2).
   if awk -v q="'" '
-      { l = $0; sub(/\r$/, "", l); gsub(/^[ \t]+|[ \t]+$/, "", l)
-        if (l == "" || substr(l, 1, 1) == "#") next
-        if (substr(l, length(l), 1) == "\\") bad = 1
-        eq = index(l, "="); if (!eq) next
-        v = substr(l, eq + 1); sub(/^[ \t]+/, "", v); f = substr(v, 1, 1)
-        if ((f == "\"" || f == q) && (length(v) < 2 || substr(v, length(v), 1) != f)) bad = 1 }
+      BEGIN { plain = "^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*([^\"" q "\\\\\r]*|\"[^\"\\\\\r]*\"|" q "[^" q "\\\\\r]*" q ")[ \t]*$" }
+      { l = $0; sub(/\r$/, "", l)
+        if (l ~ /^[ \t]*$/ || l ~ /^[ \t]*[#;]/) next
+        if (l !~ plain) bad = 1 }
       END { exit !bad }' "$PC_WA_ENV"; then
-    PC_WA_WHY="$PC_WA_ENV has a value that runs over more than one line (an open quote or a trailing backslash); write each KEY=value on one line"; return 1
+    PC_WA_WHY="$PC_WA_ENV has a line that is not a plain KEY=value (no export, no backslash, quotes only around the whole value), which systemd could read differently"; return 1
   fi
   # Same test as PHONE_JID_RE in services/api/lib/wa.mjs: digits[:device][@s.whatsapp.net], ASCII digits,
   # one line (grep -x matches line by line, so a newline is refused first).
