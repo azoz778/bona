@@ -95,7 +95,7 @@ describe('parsePriceHint', () => {
   // The rule this PR settles on: a caption that is nothing but a price, or no caption price at all.
   it('reads a caption that is nothing but a price, however it is written', () => {
     for (const [caption, want] of [
-      ['#rent 120,000 per year', 'SAR 120000'],
+      ['#rent SAR 120,000 per year', 'SAR 120000'],
       ['#test 4.5m', 'SAR 4500000'],
       ['4500000', 'SAR 4500000'],
       ['السعر ٤٫٥ مليون ريال سعودي', 'SAR 4500000'],
@@ -117,7 +117,7 @@ describe('parsePriceHint', () => {
       ['AED 1000000000', 'AED 1000000000'],
       ['SAR 4,500,000.', 'SAR 4500000'],
       ['Price:\nAED 450,000', 'AED 450000'],
-      ['Sale price 450,000', 'SAR 450000'],
+      ['Sale price SAR 450,000', 'SAR 450000'],
       ['for sale 4,500,000', 'SAR 4500000'],
       ['4.5m negotiable', 'SAR 4500000'],
       ['Price 4.5m firm', 'SAR 4500000'],
@@ -220,7 +220,7 @@ describe('parsePriceHint', () => {
     for (const caption of ['3,500 ريال شهرياً فقط', 'Net SAR 450,000 per year', 'A$ 1.2m', 'HK$ 1.2m', '-SAR 50,000', '4,500 مليون', 'Price 15,000m SAR']) {
       assert.equal(parsePriceHint(caption), null, caption);
     }
-    for (const [caption, want] of [['#rent 120,000 per year', 'SAR 120000'], ['Rent AED 5,000 monthly', 'AED 5000'], ['إيجار الشهر 4,500 ريال سعودي', 'SAR 4500']]) {
+    for (const [caption, want] of [['#rent SAR 120,000 per year', 'SAR 120000'], ['Rent AED 5,000 monthly', 'AED 5000'], ['إيجار الشهر 4,500 ريال سعودي', 'SAR 4500']]) {
       assert.equal(hint(caption), want, caption);
     }
     assert.equal(parseCaption('4.5m').price.currency, null);
@@ -240,6 +240,18 @@ describe('parsePriceHint', () => {
     assert.equal(hint('#sale 25m'), 'SAR 25000000');
   });
 
+  // r22 review (Codex, Claude)
+  it('round 22: a bare figure of one comma group, the em dash, a fullwidth flag', () => {
+    // a caption cannot know the listing's currency, so a bare "175,125" may be OMR 175.125: no caption price
+    for (const caption of ['Rent 175,125 per month', '450,000', 'Price: 450,000', 'Rent AED (— 4,500) per month']) assert.equal(parsePriceHint(caption), null, caption);
+    for (const [caption, want] of [['450k', 'SAR 450000'], ['450000', 'SAR 450000'], ['SAR 450,000', 'SAR 450000'], ['4,500,000', 'SAR 4500000']]) assert.equal(hint(caption), want, caption);
+    // the price command names its listing: a bare "450,000" passes, and setPrice decides (listing.test.mjs)
+    assert.equal(parseCommand('price BONA-W001 450,000').oneGroup, true);
+    assert.equal('oneGroup' in parseCommand('price BONA-W001 SAR 450,000'), false);
+    assert.equal(parseCaption('＃test AED 450k').dryRun, true);
+    assert.equal(parseCaption('＃test AED 450k').text, '＃test AED 450k');
+  });
+
   // r21 review (Codex)
   it('round 21: a minus sign anywhere, one comma group in euros or Omani rials', () => {
     for (const caption of ['Rent AED: (- 4,500) per month', 'AED-450,000', 'Price-4,500,000', 'SAR-4.5m', 'SAR – 4.5m', 'for-sale SAR 4.5m',
@@ -247,8 +259,8 @@ describe('parsePriceHint', () => {
       assert.equal(parsePriceHint(caption), null, caption);
     }
     assert.equal(parseCommand('price BONA-W001 AED-450,000').cmd, 'error');
-    // the em dash is a separator; two comma groups, or SAR / AED / USD, are thousands
-    assert.equal(hint('Price — SAR 4.5m'), 'SAR 4500000');
+    // no dash of any kind (r22); two comma groups, or SAR / AED / USD, are thousands
+    assert.equal(parsePriceHint('Price — SAR 4.5m'), null);
     // (Claude r21) three decimals before a thousand may be dot grouping
     for (const caption of ['€15.500k', 'SAR 15.500 thousand', 'للبيع 15.500 ألف ريال سعودي']) assert.equal(parsePriceHint(caption), null, caption);
     assert.equal(parseCommand('price BONA-W001 €15.500k').cmd, 'error');
@@ -384,7 +396,7 @@ describe('parsePriceHint', () => {
     // the price command names its listing, so a rent's figure under 10,000 is accepted there
     assert.deepEqual(parseCommand('price BONA-W001 5,000 AED'), { cmd: 'price', id: 'BONA-W001', amount: 5000, currency: 'AED', onRequest: false });
     assert.equal(parseCommand('price BONA-W001 190,000 ريال').cmd, 'error');
-    assert.deepEqual(parseCommand('price BONA-W001 190,000'), { cmd: 'price', id: 'BONA-W001', amount: 190000, currency: null, onRequest: false });
+    assert.deepEqual(parseCommand('price BONA-W001 190,000'), { cmd: 'price', id: 'BONA-W001', amount: 190000, currency: null, oneGroup: true, onRequest: false });
   });
 
   // r14 review (Claude)
@@ -428,7 +440,7 @@ describe('parsePriceHint', () => {
 
   it('reads monthly and yearly as the rent period', () => {
     assert.equal(parseCaption('Rent AED 5,000 monthly').period, 'month');
-    assert.equal(parseCaption('#rent 120,000 yearly').period, 'year');
+    assert.equal(parseCaption('#rent SAR 120,000 yearly').period, 'year');
     // two figures: no caption price, and no period main's hints read, so the brochure's stands (not a month)
     assert.equal(parseCaption('For rent: AED 45,000 annually\nParking AED 1,200 monthly').period, null);
   });

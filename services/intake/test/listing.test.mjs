@@ -742,6 +742,17 @@ describe('inbox + edits', () => {
     assert.equal(onReq.amount, null);
   });
 
+  it('price refuses a bare one-group figure on a euro or rial listing (a decimal comma there)', () => {
+    for (const cur of ['EUR', 'OMR']) {
+      edits.setPrice(tmp, 'BONA-W001', { amount: 2500000, currency: cur });
+      const res = edits.setPrice(tmp, 'BONA-W001', { amount: 175125, currency: null, oneGroup: true });
+      assert.match(res.error, new RegExp(`priced in ${cur}.*nothing was changed`));
+      assert.equal(edits.setPrice(tmp, 'BONA-W001', { amount: 175125, currency: cur }).listing.price.amount, 175125, 'the currency written: accepted');
+    }
+    edits.setPrice(tmp, 'BONA-W001', { amount: 2500000, currency: 'SAR' });
+    assert.equal(edits.setPrice(tmp, 'BONA-W001', { amount: 450000, currency: null, oneGroup: true }).listing.price.amount, 450000);
+  });
+
   it('price keeps the listing\'s currency when none is written', () => {
     const set = (args) => edits.setPrice(tmp, 'BONA-W001', args).listing.price;
     set({ amount: 2500000, currency: 'OMR' });

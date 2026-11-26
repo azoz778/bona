@@ -90,12 +90,16 @@ export function setHero(repo, id, n) {
  * The `price` command. `{ listing, modelPricesCleared }`: how many unit models lost their price to
  * the owner's figure (the reply says so; 0 when none carried one), or `{ error }` / null.
  */
-export function setPrice(repo, id, { amount, currency, onRequest }) {
+export function setPrice(repo, id, { amount, currency, oneGroup, onRequest }) {
   const found = findInbox(repo, id);
   if (!found) return null;
   const refused = withdrawnRefusal(repo, found.listing) ?? editRefusal(repo, found);
   if (refused) return refused;
   const p = found.listing.price;
+  // "450,000" with no currency on a euro or rial listing may be a decimal comma (€450, OMR 450.000): ask.
+  if (!onRequest && !currency && oneGroup && (p.currency === 'EUR' || p.currency === 'OMR')) {
+    return { error: `${id} is priced in ${p.currency}, where "${amount.toLocaleString('en-US')}" could be read with a decimal comma — write the currency and two comma groups or a multiplier (e.g. ${p.currency} 1,450,000 or ${p.currency} 450k); nothing was changed` };
+  }
   if (onRequest) { p.onRequest = true; p.amount = null; p.from = false; }
   else { p.onRequest = false; p.amount = amount; if (currency) p.currency = currency; }
   // A Sakani price read from the brochure belonged to the brochure's headline price; once the

@@ -76,8 +76,8 @@ const MULTIPLIER_RE = new RegExp(String.raw`^ ?(?:(?<lmult>millions?|mln|mn|m|th
 // means the caption says more than a price.
 // Not "~" (WhatsApp strikethrough, or "about"), "≈" or "+" ("4.5m+"): those qualify the figure; nor
 // "?" or "؟": a question ("Is rent €4,500 a month?") states no price; nor "-" or "–", which may be a minus
-// sign wherever it stands ("(- 4,500)", "AED-450,000"). The em dash "—" is a separator.
-const LEFTOVER_OK_RE = /^[\s.,،;؛:!()[\]{}"'`«»“”‘’—_/\\|*•·…=&]*$/;
+// sign wherever it stands ("(- 4,500)", "AED-450,000"), nor the em dash "—" ("(— 4,500)").
+const LEFTOVER_OK_RE = /^[\s.,،;؛:!()[\]{}"'`«»“”‘’_/\\|*•·…=&]*$/;
 // A period ("per year", "شهرياً") makes the figure a rent; on a caption with no rent word it is an
 // instalment or an income ("3,500 ريال شهرياً فقط", "Net SAR 450,000 per year"), not the price.
 const PERIOD_WORD_RE = new RegExp(tokenRe(String.raw`per|year|years|yearly|yr|annum|annually|month|monthly|mo|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية`), 'i');
@@ -132,10 +132,10 @@ export function parsePriceHint(caption, { command = false } = {}) {
   const [run] = runs;
   const num = run[0];
   if (!FIGURE_RE.test(num)) return null;
-  // "4,500.000" is a typo for something, not 4,500 (OMR 175,000.125 is fine).
+  // "4,500.000" is a typo for something, not 4,500 ("OMR 1,175,000.125" is read).
   if (/[,،٬][0-9]{3}[.٫]000$/.test(num)) return null;
-  // ".5 million", "-450,000": a mark or a sign glued to the figure (a hyphen after a word is a
-  // separator: "Price-4,500,000").
+  // ".5 million", "-450,000": a mark or a sign glued to the figure (a dash anywhere else is no allowed
+  // leftover either: "Price-4,500,000" is no price).
   const before = text.slice(0, run.index);
   if (SIGN_BEFORE_RE.test(before)) return null;
   let after = text.slice(run.index + num.length);
@@ -173,8 +173,11 @@ export function parsePriceHint(caption, { command = false } = {}) {
   const value = factor === 1 ? amount : Math.round(amount * factor * 1000) / 1000;
   if (!Number.isFinite(value) || value > 1e10) return null;
   // One comma group ("175,125", "4,500") is a decimal comma as often in euros (4,5) and Omani rials, which
-  // count three decimals (175.125): no price there. Two groups or more ("1,200,000") are thousands.
-  if ((currency === 'EUR' || currency === 'OMR') && /^[0-9]{1,3}[,،][0-9]{3}(?:[.٫][0-9]+)?$/.test(num)) return null;
+  // count three decimals (175.125): no price there. Two groups or more ("1,200,000") are thousands. With no
+  // currency written the figure takes the listing's, which a caption cannot know: no caption price either
+  // (the price command names its listing: setPrice refuses it there on a euro or rial listing).
+  const oneGroup = /^[0-9]{1,3}[,،][0-9]{3}(?:[.٫][0-9]+)?$/.test(num);
+  if (oneGroup && (currency === 'EUR' || currency === 'OMR' || (!currency && !command))) return null;
   // A bare number only counts as a price when it is plausibly one (>= 10,000) —
   // otherwise "3 bedrooms" would become a price.
   if (!currency && factor === 1 && value < 10000) return null;
@@ -182,7 +185,7 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // Under 10,000 is a rent at most: on any other caption it is a rate per metre or a fee, not the price
   // (the price command may set a rent's figure: the listing is named there).
   if (!command && !rent && value < 10000) return null;
-  return { amount: value, currency: currency || 'SAR', explicitCurrency: Boolean(currency), rent, sale, period };
+  return { amount: value, currency: currency || 'SAR', explicitCurrency: Boolean(currency), rent, sale, period, oneGroup };
 }
 
 /**
@@ -197,7 +200,10 @@ export function parsePriceHint(caption, { command = false } = {}) {
  * a listing with no downloadable document at all. Both together: `#nobrochure` wins.
  */
 export function parseCaption(caption) {
-  const text = String(caption || '').trim();
+  // Read with fullwidth characters folded to ASCII, as parsePriceHint reads it, so "＃test" is the dry-run
+  // flag; `text` stays the owner's own words.
+  const raw = String(caption || '').trim();
+  const text = raw.replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
   const tags = [...text.matchAll(/#([A-Za-z0-9_-]{1,32})/g)].map((m) => m[1].toLowerCase());
   const has = (t) => tags.includes(t);
   let category = null;
@@ -224,7 +230,7 @@ export function parseCaption(caption) {
   else if (/[\p{Nd}\p{No}]/u.test(text)) period = null;
   if (category !== 'rent') period = null;
   return {
-    text,
+    text: raw,
     tags,
     dryRun: has('test') || has('dry') || has('draft'),
     // Kept for the reply/summary wording and for old captions; the pipeline does not branch
@@ -346,7 +352,8 @@ export function parseCommand(text) {
       // a period is refused (it would be published as the listing's own: a sale's price, a yearly rent).
       if (!p || p.period || p.rent || p.sale) return { cmd: 'error', message: 'usage: price BONA-W001 4500000  |  price BONA-W001 onrequest' };
       // A currency only when the owner wrote one: setPrice keeps the listing's own otherwise.
-      return { cmd: 'price', id, amount: p.amount, currency: p.explicitCurrency ? p.currency : null, onRequest: false };
+      // `oneGroup`: "450,000" with no currency; setPrice refuses it on a euro or rial listing (a decimal comma there).
+      return { cmd: 'price', id, amount: p.amount, currency: p.explicitCurrency ? p.currency : null, ...(p.oneGroup && !p.explicitCurrency ? { oneGroup: true } : {}), onRequest: false };
     }
     case 'brochure':
     case 'pdf': {
