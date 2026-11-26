@@ -64,9 +64,10 @@ Nothing about this service is exposed to the internet: it makes outbound calls o
 
    | caption | effect |
    |---|---|
-   | `rent`, `للإيجار` | category = rent (period defaults to `year`; `per month` sets month) |
+   | `rent`, `للإيجار` | category = rent (`per month` sets month, `per year` year; with no period in the caption the brochure's period stands, and `year` when it has none) |
    | `off-plan`, `international` | sets the category |
-   | `SAR 4,500,000`, `4.5m`, `990,000 ر.س`, `٤٥٠٠٠٠٠ ريال` | the asking price, overriding the PDF |
+   | `SAR 4,500,000`, `SAR 4.5m`, `990,000 ر.س`, `٤٥٠٠٠٠٠ ريال سعودي`, `US$ 1.2m`, `rent SAR 45,000 per year` | the asking price (a rent's with its period right after the figure), overriding the PDF — the currency is always written, and flags (`#rent`, `#test` …) go before the price: one after a rent's period, or any other hashtag, means no caption price |
+   | `Villa 450 m2`, `Deposit 50,000`, `Villa for sale in Obhur 4.5m`, `SAR 4,500,000 4 bedrooms`, `4.5m (USD 1.2m)`, `٤٥٠٠٠٠٠ ريال` / `Dhs 1.2m` / `$1.2m` (a riyal, dirham or dollar with no country), `rent SAR 45,000` (a rent with no period), `SAR 4.5m?`, `SAR-4.5m` (a minus sign), `4.5m` / `450,000` (no currency written), `للإيجار سنة … ٤٬٥٠٠ ريال سعودي` (a period away from the figure), `€450,000` / `OMR 185,000` (one comma group with no currency, or in euros or rials, may be a decimal comma: write `SAR 450,000`, `SAR 450k`, `€450k` or `€1,450,000`; `price <id> 450,000` asks for the currency on a euro or rial listing) | no caption price: the caption sets a price only when it is nothing but a price — one figure with its multiplier and currency, and only words like price / asking / for sale / rent / per year / negotiable (السعر، للبيع، إيجار، سنوياً). Anything else and the PDF's price stands; send `price <id> …` to set one |
    | `#test` | dry run — the bot replies with the listing it *would* publish and writes nothing |
    | `#nobrochure` | publish the listing with **no** downloadable brochure |
    | `#brochure` | nothing (a no-op alias — every brochure is re-published by default) |
@@ -406,6 +407,10 @@ one quota notice rather than repeated failure replies. No provider limits are by
 
 The service runs from `~/bona` and writes to a **separate clone** so that a `git pull` during
 a publish can never rewrite the code running the publish.
+
+**Node 24 or newer is required** (`services/package.json` engines, and what CI runs). Node 22
+cannot parse the inline regex modifiers `(?-i:…)` in `lib/price.mjs` and `lib/pipeline.mjs`, so
+the intake will not even start on it. Check with `node --version` before installing.
 
 ```bash
 # 1. the publishing clone (once)

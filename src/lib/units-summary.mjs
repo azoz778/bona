@@ -1,5 +1,5 @@
 /* Summarise a developer unit sheet (src/data/units.json record) for the listing page.
-   Plain JS so Astro and `node --test` (Node 22 in CI, no TS stripping) import the same code.
+   Plain JS so Astro and `node --test` (no TS stripping) import the same code.
    Every number comes from the sheet; a unit without a printed cash price is skipped (TAQEEM). */
 
 export const MAX_SHEET_AGE_DAYS = 90;

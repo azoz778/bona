@@ -19,6 +19,9 @@ const CATEGORY_HINTS = [
   [/(للبيع)/, 'buy'],
 ];
 
+// For a caption with no price: main's hints, unchanged. (A spaced "/ month" is not read, as main does not
+// read it: three review rounds found it naming installments, notice or a lease option.) A caption naming
+// both periods names neither (parseCaption).
 const PERIOD_HINTS = [
   [/\b(per|\/)\s*(year|yr|annum)\b/i, 'year'],
   [/(سنوي|سنويا|سنوياً|\/ ?سنة|في السنة)/, 'year'],
@@ -26,32 +29,208 @@ const PERIOD_HINTS = [
   [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر)/, 'month'],
 ];
 
+// The caption price overrides the PDF's, so it is read STRICTLY: the caption sets a price only when it
+// is nothing but a price. That is one figure ("4.5m", "SAR 4,500,000", "٤٫٥ مليون ريال سعودي"), with its
+// multiplier and currency, and words from a short list:
+// - price words (price, asking, السعر, المطلوب);
+// - rent or sale (#rent, للبيع, إيجار);
+// - a period (per year, شهرياً);
+// - only, negotiable.
+// Any other word (a place, a feature, a label such as "Deposit" or "Area", a unit such as "m2"),
+// a second figure, two currencies or one the site does not price in, and the caption sets no price.
+// Then the PDF's own price stands, the bot's reply shows what was published, and `price <id> …` sets
+// a price by hand. (Readers that picked a figure out of free text kept misreading captions through
+// twelve review rounds; the owner's captions so far carry no price at all.)
+const AR = String.raw`\u0621-\u064A`; // Arabic letters (tanween and other marks are outside it)
+// The currencies the site prices in, as codes, symbols and words. A riyal, a dirham or a dollar with no
+// country ("ريال", "riyals", "درهم", "Dhs", "$", "dollars") may be Saudi or Omani, Emirati or Moroccan, US or
+// Canadian: no caption price (the PDF's stands; `price <id> 4.5m` keeps the listing's own currency).
+const CURRENCY_WORDS = [
+  ['OMR', String.raw`OMR|RO|ر\.ع|(?:بال|ال)?ريال(?:ا)? (?:ال)?عماني|omani (?:riyals?|rials?)`],
+  ['SAR', String.raw`SAR|SR|saudi (?:riyals?|rials?)|ر\.س|(?:بال|ال)?ريال(?:ا)? (?:ال)?سعودي`],
+  ['AED', String.raw`AED|د\.إ|(?:uae|emirati) dirhams?|(?:بال|ال)?درهم(?:ا)? (?:ال)?إماراتي`],
+  ['USD', String.raw`USD|US ?\$|us dollars?|(?:بال|ال)?دولار(?:ا)? (?:ال)?[أا]م(?:ريكي|يركي)(?:ا)?`],
+  ['EUR', String.raw`EUR|€|euros?|(?:بال|ال)?يورو`],
+  // Last, so "ريال سعودي" and "درهم إماراتي" are read whole first.
+  ['?', String.raw`riyals?|rials?|(?:بال|ال)?ريال(?:ا)?|dhs?|dirhams?|(?:بال|ال)?درهم(?:ا)?|\$|dollars?|(?:بال|ال)?دولار(?:ا)?`],
+  // (US$, $ and € are also matched as bare symbols, see CURRENCY_TOKEN_RE)
+];
+// A currency token: a whole word, so "European" is no EUR; a symbol stands anywhere ("Price$450,000").
+const tokenRe = (body) => String.raw`(?<![A-Za-z${AR}])(?:${body})(?![A-Za-z${AR}])`;
+const CURRENCY_SYMBOL = String.raw`(?<![A-Za-z])US ?\$|\$|€`;
+const CURRENCY_WHOLE = CURRENCY_WORDS.map(([code, re]) => [code, new RegExp(String.raw`^(?:${re})$`, 'i')]);
+const CURRENCY_TOKEN_RE = new RegExp(String.raw`${CURRENCY_SYMBOL}|` + CURRENCY_WORDS.map(([, re]) => tokenRe(re)).join('|'), 'gi');
+// A period right after the figure (its currency already taken out), on its line, past only spaces and
+// WhatsApp's bold or italic marks: an adverb on its own ("monthly", "سنوياً") or a noun after "per", "a",
+// "في" or "/" ("per month", "a year", "في السنة", "/ شهر"). A bare noun ("سنة فقط", "4,500 SAR month") may be
+// the lease's length, and nothing past a bracket, a full stop, a comma, a colon or a line break ("(سنة
+// فقط)", "…ريال سعودي.\n*شهر فقط*") is the figure's. One pass, no nested choices: linear time.
+const PERIOD_NOUNS = String.raw`month|mo|شهر|الشهر|year|years|yr|annum|سنة|السنة`;
+const PERIOD_ADVERBS = String.raw`monthly|شهري|شهريا|شهرية|yearly|annually|سنوي|سنويا|سنوية`;
+const PERIOD_LEAD_RE = new RegExp(String.raw`^[ /*_]*(?:(?:(?:per|a|في) +|/ *)(${PERIOD_NOUNS})|(${PERIOD_ADVERBS}))(?![A-Za-z${AR}])`, 'i');
+// After the period only a closing qualifier may follow ("per month only", "سنوياً قابل للتفاوض"): another word
+// ("yearly rental only") makes the period the lease's. Words and marks never overlap: linear time.
+const PERIOD_TAIL_OK_RE = new RegExp(String.raw`^(?:[\s.,،;؛:!()*_…"'«»“”]|${tokenRe(String.raw`only|negotiable|firm|final|فقط|نهائي|قابل|للتفاوض`)})*$`, 'i');
+// A figure glued to a mark or a sign ("4.500.000" read from its end, "-450,000"), or a sign before its currency
+// ("-SAR 50,000", "-US dollars 450,000", "-ر.س 450,000"): no price. Built from every currency token above.
+const SIGN_BEFORE_RE = new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$|(?:^|[^A-Za-z${AR}0-9])[+\-−–] ?(?:${CURRENCY_TOKEN_RE.source}) ?$`, 'i');
+// The words a price-only caption may hold besides the figure, its multiplier and its currency.
+const ALLOWED_WORD_RE = new RegExp(tokenRe(String.raw`price|prices|asking|for|sale|rent|rental|of|at|a month|a year|per|year|years|yearly|yr|annum|annually|month|monthly|mo|only|final|firm|negotiable|السعر|سعر|بسعر|المطلوب|هو|ب|للبيع|للإيجار|للايجار|إيجار|ايجار|الإيجار|الايجار|في|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية|فقط|نهائي|قابل|للتفاوض`), 'gi');
+// Every run of digits, with the separators that join it, is one figure.
+const DIGIT_RUN_RE = /[0-9]+(?:[,،٬.٫][0-9]+)*/g;
+// A figure written as a price: thousands in groups of three with one separator, or no separator; a
+// decimal part. "4,5000", "4.500.000", ".5" and "-450,000" are not read.
+// A grouped figure starts with 1-9: "0,850" is a decimal comma (€0.85m), not 850 thousand.
+const FIGURE_RE = /^(?:[1-9][0-9]{0,2}([,،٬])[0-9]{3}(?:\1[0-9]{3})*|[0-9]+)(?:[.٫][0-9]+)?$/;
+// A multiplier right after the figure ("4.5m", "1.2 million", "850k", "٤٫٥ مليون", "٨٥٠ ألف"); not "mil",
+// a thousand in Spanish and Portuguese ("€450 mil").
+const MULTIPLIER_RE = new RegExp(String.raw`^ ?(?:(?<lmult>millions?|mln|mn|m|thousands?|k)|(?<amult>مليون|ملايين|ألف|الف)(?:ا)?)(?:(?![A-Za-z0-9${AR}])|(?=(?:SAR|AED|USD|EUR|OMR|SR|RO|DHS?)(?![A-Za-z])|[$€]))`, 'i');
+// What may be left once the figure, its multiplier, its currency and the allowed words are taken out:
+// white space and ordinary punctuation. Any other letter (in any script), symbol or emoji ("฿", "📏")
+// means the caption says more than a price.
+// Not "~" (WhatsApp strikethrough, or "about"), "≈" or "+" ("4.5m+"): those qualify the figure; nor
+// "?" or "؟": a question ("Is rent €4,500 a month?") states no price; nor "-" or "–", which may be a minus
+// sign wherever it stands ("(- 4,500)", "AED-450,000"), nor the em dash "—" ("(— 4,500)").
+// FLAG_MARK: where a flag tag stood (see parsePriceHint) — no word, but no period may be read across it.
+const FLAG_MARK = '\uE000';
+const LEFTOVER_OK_RE = /^[\s.,،;؛:!()[\]{}"'`«»“”‘’_/\\|*•·…=&\uE000]*$/;
+// A period ("per year", "شهرياً") makes the figure a rent; on a caption with no rent word it is an
+// instalment or an income ("3,500 ريال شهرياً فقط", "Net SAR 450,000 per year"), not the price.
+const PERIOD_WORD_RE = new RegExp(tokenRe(String.raw`per|year|years|yearly|yr|annum|annually|month|monthly|mo|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية`), 'i');
+const MONTH_WORD_RE = new RegExp(tokenRe(String.raw`month|monthly|mo|شهر|الشهر|شهري|شهريا|شهرية`), 'i');
+const YEAR_WORD_RE = new RegExp(tokenRe(String.raw`year|years|yearly|yr|annum|annually|سنة|السنة|سنوي|سنويا|سنوية`), 'i');
+const RENT_WORD_RE = new RegExp(String.raw`(?<![A-Za-z])(?:rent|rental|lease|for-?rent)(?![A-Za-z])|(?:لل|ال)?[إا]يجار`, 'i');
+const SALE_WORD_RE = new RegExp(String.raw`(?<![A-Za-z])(?:sale|for-?sale|buy)(?![A-Za-z])|للبيع|(?<![${AR}])بيع(?![${AR}])`, 'i');
+// Dollars of other countries ("A$ 1.2m", "AUS$", "HK$"): letters on a "$" are US, or an allowed word
+// of three letters or more ("Price$450,000"); anything else is no caption price.
+const ALLOWED_WHOLE_RE = new RegExp(String.raw`^(?:${ALLOWED_WORD_RE.source})$`, 'i');
+// (Anchored at the start of the letter run: from every letter it would rescan the run, in square time.)
+// A letter right after the "$" ("$A1.2m") is another dollar too.
+const otherDollar = (text) => /\$[A-Za-z]/.test(text) || [...text.matchAll(/(?<![A-Za-z])([A-Za-z]+)\$/g)]
+  .some(([, w]) => !/^us$/i.test(w) && !(w.length >= 3 && ALLOWED_WHOLE_RE.test(w)));
+const FLAG_TAG_RE = /#(?:test|dry|draft|brochure|pdf|nobrochure|nopdf|no-brochure|no-pdf|hidden|private|rent|rental|forrent|for-rent|sale|forsale|for-sale|buy|offplan|off-plan|international|overseas)(?![A-Za-z0-9_-])/gi;
+// Direction marks, the tatweel ("بـ" is "ب") and the tanween of "شهرياً" are invisible. Any other vowel
+// mark stays, and so is no price: it can make one word another ("بِيعَ", was sold, is not "بيع").
+const INVISIBLE_RE = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069\u0640\u064B]/g;
+
 /**
- * A price the OWNER typed in the caption. Never an estimate — this only reads an
- * explicit figure. Returns null when the caption carries no number.
+ * A price the OWNER typed in the caption. Never an estimate — this only reads an explicit
+ * figure. Returns null unless the caption is nothing but that price (see above).
  */
-export function parsePriceHint(caption) {
-  const s = westernise(caption || '');
-  // "SAR 4,500,000" | "4.5m sar" | "٤٥٠٠٠٠٠ ريال" | "price 750000"
-  const re = /(?:^|[\s(])(?:(SAR|AED|EUR|USD|OMR|ر\.س|ريال)\s*)?([0-9][0-9,،.\s]*)\s*(m|mn|million|k|مليون|ألف|الف)?\s*(SAR|AED|EUR|USD|OMR|ر\.س|ريال)?/gi;
-  let best = null;
-  for (const m of s.matchAll(re)) {
-    const rawNum = m[2].replace(/[,،\s]/g, '');
-    if (!rawNum || !/^\d+(\.\d+)?$/.test(rawNum)) continue;
-    let amount = Number(rawNum);
-    if (!Number.isFinite(amount)) continue;
-    const mult = (m[3] || '').toLowerCase();
-    if (/^(m|mn|million|مليون)$/.test(mult)) amount *= 1e6;
-    else if (/^(k|ألف|الف)$/.test(mult)) amount *= 1e3;
-    const cur = (m[1] || m[4] || '').toUpperCase();
-    const currency = cur === 'ر.س' || cur === 'ريال' ? 'SAR' : CURRENCIES.includes(cur) ? cur : null;
-    // A bare number only counts as a price when it is plausibly one (>= 10,000) —
-    // otherwise "3 bedrooms" would become a price.
-    if (!currency && amount < 10000) continue;
-    if (amount < 1000) continue;
-    if (!best || amount > best.amount) best = { amount, currency: currency || 'SAR', explicitCurrency: Boolean(currency) };
-  }
-  return best;
+export function parsePriceHint(caption, { command = false } = {}) {
+  // Fullwidth characters ("４．５m") become their ASCII forms; any other non-ASCII digit, a superscript
+  // or a footnote mark ("450000¹") included, is not ours to read. White space is one space, a line break
+  // one line break. The bot's flags ("#test", "#rent") are read by parseCaption and leave only FLAG_MARK
+  // here; any other hashtag ("#Deposit", "#monthly", "#2BR") means no caption price.
+  // A fullwidth "＃" ("＃test") is a flag parseCaption does not read: no caption price beside it.
+  if (/＃/.test(String(caption || ''))) return null;
+  // A private-use character could pass for FLAG_MARK: no caption price beside one.
+  if (/[\uE000-\uF8FF]/.test(String(caption || ''))) return null;
+  const raw = String(caption || '');
+  const fold = (s) => s.replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  const folded = fold(raw);
+  // The flags come out of the RAW caption, as parseCaption reads them: a tag only the cleaning below makes a
+  // flag ("#inter" + a direction mark + "national", "#ｉｎｔｅｒｎａｔｉｏｎａｌ") is a word, so no price.
+  // Each flag leaves FLAG_MARK in its place: "yearly #rental only" keeps the flag between the period and the
+  // qualifier, so the period is no billing period there.
+  const unflagged = westernise(fold(raw.replace(FLAG_TAG_RE, ` ${FLAG_MARK} `))).replace(INVISIBLE_RE, '');
+  // Any other hashtag is no price word ("#monthly only" may be the payments', "#Deposit 50,000" a deposit):
+  // no caption price beside one.
+  if (unflagged.includes('#')) return null;
+  // White space is one space, but a line break stays one (any of them: CR, LS, PS, NEL, VT, FF), so the
+  // period must stand on the figure's line.
+  const text = unflagged.replace(/\r\n?|[\u2028\u2029\u0085\v\f]/g, '\n')
+    .replace(/[^\S\n]+/g, ' ').replace(/ *\n\s*/g, '\n').trim();
+  // A hashtag holding a digit ("#1stPayment", "#250000", "#2BR", "#sale١٢٣٤٥") may label or be the figure:
+  // no price. Read before the flags come out, on the whole caption.
+  if (/#[^\s#]*[0-9]/.test(westernise(folded).replace(INVISIBLE_RE, ''))) return null;
+  if (/[\p{Nd}\p{No}]/u.test(text.replace(/[0-9]/g, '')) || otherDollar(text)) return null;
+  // Rent and sale words are read on the cleaned text ("للإيـجار" is "للإيجار"), the flags still on but set
+  // apart, so a word glued to one ("#hiddenｒｅｎｔ") is read too.
+  const clean = westernise(fold(raw.replace(FLAG_TAG_RE, ' $& '))).replace(INVISIBLE_RE, '');
+  const rent = RENT_WORD_RE.test(clean);
+  const sale = SALE_WORD_RE.test(clean);
+  if (PERIOD_WORD_RE.test(text) && !rent) return null;
+  if (rent && sale) return null;
+  const runs = [...text.matchAll(DIGIT_RUN_RE)];
+  if (runs.length !== 1) return null;
+  const [run] = runs;
+  const num = run[0];
+  if (!FIGURE_RE.test(num)) return null;
+  // "4,500.000" is a typo for something, not 4,500 ("OMR 1,175,000.125" is read).
+  if (/[,،٬][0-9]{3}[.٫]000$/.test(num)) return null;
+  // ".5 million", "-450,000": a mark or a sign glued to the figure (a dash anywhere else is no allowed
+  // leftover either: "Price-4,500,000" is no price).
+  const before = text.slice(0, run.index);
+  if (SIGN_BEFORE_RE.test(before)) return null;
+  let after = text.slice(run.index + num.length);
+  const mult = MULTIPLIER_RE.exec(after);
+  if (mult) after = after.slice(mult[0].length);
+  // The rent period stands right after the figure and its currency ("SAR 4,500 per month", "٤٬٥٠٠ ريال سعودي
+  // شهرياً", "4.5m/yr"). Anywhere else it may be the lease's ("للإيجار سنة فقط" above the figure) or a
+  // payment's ("for a year"): no price; so is a second one ("a month for a year").
+  const tail = after.replace(CURRENCY_TOKEN_RE, ' ');
+  const lead = PERIOD_LEAD_RE.exec(tail);
+  if (PERIOD_WORD_RE.test(before) || PERIOD_WORD_RE.test(lead ? tail.slice(lead[0].length) : tail)) return null;
+  if (lead && !PERIOD_TAIL_OK_RE.test(tail.slice(lead[0].length))) return null;
+  const period = lead ? (MONTH_WORD_RE.test(lead[1] ?? lead[2]) ? 'month' : 'year') : null;
+  // A rent caption must say its period: "Rent SAR 45,000" may be a year's or a month's (the price command
+  // keeps the listing's own period).
+  if (rent && !period && !command) return null;
+
+  // Nothing else: once the currencies and the allowed words are taken out, only punctuation is left.
+  const currencies = new Set();
+  const rest = (before + ' ' + after).replace(CURRENCY_TOKEN_RE, (c) => {
+    currencies.add((CURRENCY_WHOLE.find(([, re]) => re.test(c)) || ['?'])[0]);
+    return ' ';
+  }).replace(ALLOWED_WORD_RE, ' ');
+  if (!LEFTOVER_OK_RE.test(rest)) return null;
+  if (currencies.size > 1 || currencies.has('?')) return null;
+  const currency = currencies.size ? [...currencies][0] : null;
+  // A caption price writes its currency: with none the figure takes the brochure reading's, which may be a
+  // fallback (a London brochure read as SAR) the caption price would skip checking. The price command
+  // names a published listing, whose currency stands.
+  if (!currency && !command) return null;
+
+  const digits = num.replace(/[,،٬]/g, '').replace('٫', '.');
+  // A phone or id number: no price starts with 0; ten or more bare digits, or a Saudi mobile without
+  // its 0, is never one. A year is no price either ("2027").
+  if (!mult && /^0[0-9]/.test(digits)) return null;
+  if (!mult && !currency && (/^[0-9]{10,}$/.test(digits) || /^5[0-9]{8}$/.test(digits))) return null;
+  if (!mult && /^(?:19|20)[0-9]{2}$/.test(num)) return null;
+  const word = (mult?.groups.lmult || mult?.groups.amult || '').toLowerCase();
+  const factor = /^(m|mn|mln|millions?|مليون|ملايين)$/.test(word) ? 1e6 : /^(k|thousands?|ألف|الف)$/.test(word) ? 1e3 : 1;
+  const amount = Number(digits);
+  // A bare "450 m" is as likely metres as millions: with no currency, it is millions only below 100
+  // and written onto the figure ("25m"; "#sale 25 m" may be a frontage); "SAR 950 m" is no price either.
+  if (word === 'm' && ((!currency && (amount >= 100 || /^ /.test(mult[0]))) || (amount >= 100 && /^ /.test(mult[0])))) return null;
+  // The amount as typed; a multiplier's float noise (2.05 x 1e6 = 2049999.9999999998) rounded away.
+  // A grouped figure with a multiplier is a decimal comma as often ("€15,500k" may be €15,500): no price.
+  if (factor !== 1 && /[,،٬]/.test(num)) return null;
+  // …and three decimals before a thousand are dot grouping as often ("€15.500k" may be €15,500,000).
+  if (factor === 1e3 && /[.٫][0-9]{3}$/.test(num)) return null;
+  if ((factor === 1e6 && amount >= 1000) || (factor === 1e3 && amount >= 100000)) return null;
+  const value = factor === 1 ? amount : Math.round(amount * factor * 1000) / 1000;
+  // A whole amount only: the brochure prints none other ("OMR 1,175.125" would save and lose the brochure).
+  // Counted on the digits, before any rounding: a multiplier takes up to 3 ("k") or 6 ("m") decimals.
+  const decimals = (digits.split('.')[1] || '').replace(/0+$/, '').length;
+  if (decimals > (factor === 1e6 ? 6 : factor === 1e3 ? 3 : 0)) return null;
+  if (!Number.isFinite(value) || value > 1e10 || !Number.isInteger(value)) return null;
+  // One comma group ("175,125", "4,500") is a decimal comma as often in euros (4,5) and Omani rials, which
+  // count three decimals (175.125): no price there. Two groups or more ("1,200,000") are thousands. With no
+  // currency written the figure takes the listing's, which a caption cannot know: no caption price either
+  // (the price command names its listing: setPrice refuses it there on a euro or rial listing).
+  // (A decimal part settles it: "1,175.125" has its decimal point, so its comma is thousands.)
+  const oneGroup = /^[0-9]{1,3}[,،][0-9]{3}$/.test(num);
+  if (oneGroup && (currency === 'EUR' || currency === 'OMR' || (!currency && !command))) return null;
+  // A bare number only counts as a price when it is plausibly one (>= 10,000) —
+  // otherwise "3 bedrooms" would become a price.
+  if (!currency && factor === 1 && value < 10000) return null;
+  if (value < 1000) return null;
+  // Under 10,000 is a rent at most: on any other caption it is a rate per metre or a fee, not the price
+  // (the price command may set a rent's figure: the listing is named there).
+  if (!command && !rent && value < 10000) return null;
+  return { amount: value, currency: currency || 'SAR', explicitCurrency: Boolean(currency), rent, sale, period, oneGroup };
 }
 
 /**
@@ -65,6 +244,15 @@ export function parsePriceHint(caption) {
  * happens. `#nobrochure` (`#nopdf`) is the flag that changes anything — it is how to publish
  * a listing with no downloadable document at all. Both together: `#nobrochure` wins.
  */
+// A figure spelled out ("أربعة آلاف", "twelve hundred"), or a currency named, in a caption that set no
+// price: the period is that figure's, as a written figure's is.
+const SPELLED_FIGURE_RE = /(?<![A-Za-z])(?:hundreds?|thousands?|millions?)(?![A-Za-z])|(?:مئة|مائة|مية|مئات|ألف|الف|آلاف|الاف|ألاف|مليون|ملايين)/i;
+// Every word of either period, for "names both" (a wider net than the period readers: "annual", "شهور").
+// (CURRENCY_TOKEN_RE is global, so stateful under .test(): a copy without the flag.)
+const CURRENCY_NAMED_RE = new RegExp(CURRENCY_TOKEN_RE.source, 'i');
+const ANY_MONTH_RE = /(?<![A-Za-z])(?:months?|monthly|mo)(?![A-Za-z])|(?:شهر|شهور|أشهر|اشهر)/i;
+const ANY_YEAR_RE = /(?<![A-Za-z])(?:years?|yearly|yr|annum|annual|annually|p\.\s?a\.?)(?![A-Za-z])|(?:سنة|سنوات|سنين|سنوي|عام|سنوياً)/i;
+
 export function parseCaption(caption) {
   const text = String(caption || '').trim();
   const tags = [...text.matchAll(/#([A-Za-z0-9_-]{1,32})/g)].map((m) => m[1].toLowerCase());
@@ -73,13 +261,25 @@ export function parseCaption(caption) {
   for (const [re, value] of CATEGORY_HINTS) {
     if (re.test(text)) { category = value; break; }
   }
-  let period = null;
-  for (const [re, value] of PERIOD_HINTS) {
-    if (re.test(text)) { period = value; break; }
-  }
-  if (category === 'rent' && !period) period = 'year';
+  const hinted = new Set(PERIOD_HINTS.filter(([re]) => re.test(text)).map(([, value]) => value));
+  // One period hinted, and the caption names no other ("Rent yearly, payable per month", "annual rent,
+  // installments per month" name both: neither).
+  let period = hinted.size === 1 && !(ANY_MONTH_RE.test(text) && ANY_YEAR_RE.test(text)) ? [...hinted][0] : null;
+  let price = parsePriceHint(text);
+  // The price reader and the category reader must agree on a rent ("#rent_monthly AED 5,000", "Lease
+  // AED 2,000", "Rent45,000" are one to the first only), and a sale word must have made a sale category
+  // ("بيع SAR 450,000" sets none, so a rental brochure would publish it as its rent): else no caption price.
+  if (price && (price.rent !== (category === 'rent') || (price.sale && (category === null || category === 'rent')))) price = null;
+  // A caption price brings its own period, read from its closed word list (a rent caption price always
+  // has one). With no period in the caption it stays null, so the brochure's own period stands and a year
+  // only when it has none (buildListing, and the pipeline's listingPeriod: caption, reading, year); a
+  // "year" set here would turn a monthly brochure's rent into a yearly one.
+  if (price) period = price.period;
+  // A caption with a figure that is no caption price ("Rent $3,000 per month": a dollar with no country)
+  // sets no period either: its period belongs to that figure, and on the brochure's own it would turn a
+  // yearly rent into a monthly one.
+  else if (/[\p{Nd}\p{No}]/u.test(text) || SPELLED_FIGURE_RE.test(text) || CURRENCY_NAMED_RE.test(text)) period = null;
   if (category !== 'rent') period = null;
-  const price = parsePriceHint(text);
   return {
     text,
     tags,
@@ -90,7 +290,9 @@ export function parseCaption(caption) {
     noBrochure: has('nobrochure') || has('nopdf') || has('no-brochure') || has('no-pdf'),
     hidden: has('hidden') || has('private'),
     category,
-    price: price ? { amount: price.amount, currency: price.currency } : null,
+    // A currency only when the owner wrote one: otherwise the brochure's own currency stands (an AED
+    // listing priced "4.5m" stays in AED).
+    price: price ? { amount: price.amount, currency: price.explicitCurrency ? price.currency : null } : null,
     period,
   };
 }
@@ -196,9 +398,13 @@ export function parseCommand(text) {
       if (!id) return { cmd: 'error', message: 'usage: price BONA-W001 4500000  |  price BONA-W001 onrequest' };
       const rest = parts.slice(2).join(' ');
       if (/^\s*(on ?request|onrequest|عند الطلب)\s*$/i.test(rest)) return { cmd: 'price', id, onRequest: true };
-      const p = parsePriceHint(rest);
-      if (!p) return { cmd: 'error', message: 'usage: price BONA-W001 4500000  |  price BONA-W001 onrequest' };
-      return { cmd: 'price', id, amount: p.amount, currency: p.currency, onRequest: false };
+      const p = parsePriceHint(rest, { command: true });
+      // setPrice changes neither the category nor the rent period, so a figure with a rent or sale word or
+      // a period is refused (it would be published as the listing's own: a sale's price, a yearly rent).
+      if (!p || p.period || p.rent || p.sale) return { cmd: 'error', message: 'usage: price BONA-W001 4500000  |  price BONA-W001 onrequest' };
+      // A currency only when the owner wrote one: setPrice keeps the listing's own otherwise.
+      // `oneGroup`: "450,000" with no currency; setPrice refuses it on a euro or rial listing (a decimal comma there).
+      return { cmd: 'price', id, amount: p.amount, currency: p.explicitCurrency ? p.currency : null, ...(p.oneGroup && !p.explicitCurrency ? { oneGroup: true } : {}), onRequest: false };
     }
     case 'brochure':
     case 'pdf': {

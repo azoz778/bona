@@ -464,6 +464,15 @@ describe('buildPrompt', () => {
     assert.ok(p.includes('the category is: rent'));
   });
 
+  it('a rent caption with no period leaves the period to the PDF, a year if it prints none', () => {
+    const p = buildPrompt({ extraction, sheets, caption: { text: '#rent', category: 'rent', period: null } });
+    assert.ok(p.includes('the category is: rent (for the period the PDF prints; a year if it prints none)'));
+    assert.ok(buildPrompt({ extraction, sheets, caption: { text: 'rent per month', category: 'rent', period: 'month' } }).includes('the category is: rent (per month)'));
+    assert.ok(buildPrompt({ extraction, sheets, caption: { text: '#sale', category: 'buy', period: null } }).includes('the category is: buy. Use it.'));
+    // a caption price with no currency of its own
+    assert.ok(buildPrompt({ extraction, sheets, caption: { text: '4.5m', price: { amount: 4500000, currency: null } } }).includes('explicitly: 4500000 (in the currency the PDF prices in)'));
+  });
+
   it('states the TAQEEM rule and offers the room vocabulary', () => {
     const p = buildPrompt({ extraction, sheets, caption: {} });
     assert.match(p, /TAQEEM/);
