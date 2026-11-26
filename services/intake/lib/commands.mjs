@@ -19,17 +19,13 @@ const CATEGORY_HINTS = [
   [/(للبيع)/, 'buy'],
 ];
 
-// For a caption with no price: main's hints, plus a spaced "/" ("#rent /year", which \b before "/" misses)
-// only when it ends the caption, an "only" at most after it: "/ month to month" (on one line or two), "/ month
-// notice", "/ month free", "Sa / Mo" say something else. A caption whose hints name both periods names
-// neither (parseCaption).
-const SPACED_SLASH = (unit) => new RegExp(String.raw`(?:^|\s)\/[ \t]*(?:${unit})(?:[ \t]+only)?\s*$`, 'i');
+// For a caption with no price: main's hints, unchanged. (A spaced "/ month" is not read, as main does not
+// read it: three review rounds found it naming installments, notice or a lease option.) A caption naming
+// both periods names neither (parseCaption).
 const PERIOD_HINTS = [
   [/\b(per|\/)\s*(year|yr|annum)\b/i, 'year'],
-  [SPACED_SLASH('year|yr|annum'), 'year'],
   [/(سنوي|سنويا|سنوياً|\/ ?سنة|في السنة)/, 'year'],
   [/\b(per|\/)\s*(month|mo)\b/i, 'month'],
-  [SPACED_SLASH('month'), 'month'],
   [/(شهري|شهريا|شهرياً|\/ ?شهر|في الشهر)/, 'month'],
 ];
 
@@ -248,8 +244,14 @@ export function parsePriceHint(caption, { command = false } = {}) {
  * happens. `#nobrochure` (`#nopdf`) is the flag that changes anything — it is how to publish
  * a listing with no downloadable document at all. Both together: `#nobrochure` wins.
  */
-// A figure spelled out ("أربعة آلاف", "four thousand"): its period is its own, as a written figure's.
-const SPELLED_FIGURE_RE = /(?<![A-Za-z])(?:thousands?|millions?)(?![A-Za-z])|(?:ألف|آلاف|الاف|ألاف|مليون|ملايين)/i;
+// A figure spelled out ("أربعة آلاف", "twelve hundred"), or a currency named, in a caption that set no
+// price: the period is that figure's, as a written figure's is.
+const SPELLED_FIGURE_RE = /(?<![A-Za-z])(?:hundreds?|thousands?|millions?)(?![A-Za-z])|(?:مئة|مائة|مية|مئات|ألف|آلاف|الاف|ألاف|مليون|ملايين)/i;
+// Every word of either period, for "names both" (a wider net than the period readers: "annual", "شهور").
+// (CURRENCY_TOKEN_RE is global, so stateful under .test(): a copy without the flag.)
+const CURRENCY_NAMED_RE = new RegExp(CURRENCY_TOKEN_RE.source, 'i');
+const ANY_MONTH_RE = /(?<![A-Za-z])(?:months?|monthly|mo)(?![A-Za-z])|(?:شهر|شهور|أشهر|اشهر)/i;
+const ANY_YEAR_RE = /(?<![A-Za-z])(?:years?|yearly|yr|annum|annual|annually|p\.\s?a\.?)(?![A-Za-z])|(?:سنة|سنوات|سنين|سنوي|عام|سنوياً)/i;
 
 export function parseCaption(caption) {
   const text = String(caption || '').trim();
@@ -260,8 +262,9 @@ export function parseCaption(caption) {
     if (re.test(text)) { category = value; break; }
   }
   const hinted = new Set(PERIOD_HINTS.filter(([re]) => re.test(text)).map(([, value]) => value));
-  // One period hinted, and the caption names no other ("Rent yearly, payable / month" names both: neither).
-  let period = hinted.size === 1 && !(MONTH_WORD_RE.test(text) && YEAR_WORD_RE.test(text)) ? [...hinted][0] : null;
+  // One period hinted, and the caption names no other ("Rent yearly, payable per month", "annual rent,
+  // installments per month" name both: neither).
+  let period = hinted.size === 1 && !(ANY_MONTH_RE.test(text) && ANY_YEAR_RE.test(text)) ? [...hinted][0] : null;
   let price = parsePriceHint(text);
   // The price reader and the category reader must agree on a rent ("#rent_monthly AED 5,000", "Lease
   // AED 2,000", "Rent45,000" are one to the first only), and a sale word must have made a sale category
@@ -275,7 +278,7 @@ export function parseCaption(caption) {
   // A caption with a figure that is no caption price ("Rent $3,000 per month": a dollar with no country)
   // sets no period either: its period belongs to that figure, and on the brochure's own it would turn a
   // yearly rent into a monthly one.
-  else if (/[\p{Nd}\p{No}]/u.test(text) || SPELLED_FIGURE_RE.test(text)) period = null;
+  else if (/[\p{Nd}\p{No}]/u.test(text) || SPELLED_FIGURE_RE.test(text) || CURRENCY_NAMED_RE.test(text)) period = null;
   if (category !== 'rent') period = null;
   return {
     text,
