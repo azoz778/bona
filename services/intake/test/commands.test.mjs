@@ -239,11 +239,27 @@ describe('parsePriceHint', () => {
     assert.equal(hint('#sale SAR 25m'), 'SAR 25000000');
   });
 
+  // r28 review (Codex, Claude)
+  it('round 28: a bare period noun is no billing period; every line separator ends the line', () => {
+    // "سنة فقط" on the figure's line may be a one-year lease; a noun reads only after per / a / في / "/"
+    for (const caption of ['للإيجار ٤٬٥٠٠ ريال سعودي *سنة فقط*', 'للإيجار ٤٬٥٠٠ ريال سعودي سنة', 'rent 4,500 SAR month', 'Rent SAR 45,000 year', 'إيجار 4,500 ريال سعودي شهر']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    for (const [caption, period] of [['Rent SAR 4,500 per month', 'month'], ['Rent SAR 45,000 a year', 'year'], ['للإيجار ٤٥ ألف ريال سعودي في السنة', 'year'],
+      ['للإيجار ٤٬٥٠٠ ريال سعودي / شهر', 'month'], ['للإيجار ٤٥ ألف ريال سعودي سنوياً', 'year'], ['Rent AED 60k/yr', 'year'], ['rent SAR 45,000 per annum', 'year'], ['Rent AED 5,000 monthly', 'month']]) {
+      assert.equal(parsePriceHint(caption)?.period, period, caption);
+    }
+  });
+
   // r27 review (Codex)
   it('round 27: the period stands on the figure\'s line, past no full stop, comma or colon', () => {
     for (const caption of ['للإيجار ٤٥٬٠٠٠ ريال سعودي.\n*شهر فقط*', 'Rent AED 60,000.\n*Monthly only*', 'Rent SAR 4,500\nper month', 'Rent SAR 4,500, per month',
       'Rent SAR 4,500: monthly', 'Asking 12000\nk SAR', 'للإيجار ٤٬٥٠٠ ريال سعودي\n*سنة فقط*', 'للإيجار ٤٬٥٠٠ ريال سعودي\nسنة فقط']) {
       assert.equal(parsePriceHint(caption), null, JSON.stringify(caption));
+    }
+    // every line separator is a line break
+    for (const sep of ['\r', '\u2028', '\u2029', '\u0085', '\v', '\f']) {
+      assert.equal(parsePriceHint('للإيجار ٤٬٥٠٠ ريال سعودي' + sep + 'سنة فقط'), null, JSON.stringify(sep));
     }
     // a line break elsewhere is white space
     assert.deepEqual([parsePriceHint('#rent\nSAR 4,500 per month')?.amount, parsePriceHint('#rent\nSAR 4,500 per month')?.period], [4500, 'month']);
@@ -478,8 +494,8 @@ describe('parsePriceHint', () => {
 
   // r14 review (Claude)
   it('round 14 (Claude): the period comes from the price caption itself', () => {
-    for (const [caption, period] of [['Rent SAR 4,500 /month', 'month'], ['Rent 4,500 SAR / month', 'month'], ['rent 4,500 SAR month', 'month'],
-      ['إيجار 4,500 ريال سعودي شهر', 'month'], ['إيجار 4,500 ريال سعودي شهرياً', 'month'], ['إيجار 4,500 ريال سعودي / شهر', 'month'],
+    for (const [caption, period] of [['Rent SAR 4,500 /month', 'month'], ['Rent 4,500 SAR / month', 'month'], ['rent 4,500 SAR monthly', 'month'],
+      ['إيجار 4,500 ريال سعودي في الشهر', 'month'], ['إيجار 4,500 ريال سعودي شهرياً', 'month'], ['إيجار 4,500 ريال سعودي / شهر', 'month'],
       ['#rent SAR 60,000 yearly', 'year']]) {
       const c = parseCaption(caption);
       assert.ok(c.price, caption);

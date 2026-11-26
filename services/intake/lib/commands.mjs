@@ -57,12 +57,14 @@ const tokenRe = (body) => String.raw`(?<![A-Za-z${AR}])(?:${body})(?![A-Za-z${AR
 const CURRENCY_SYMBOL = String.raw`(?<![A-Za-z])US ?\$|\$|€`;
 const CURRENCY_WHOLE = CURRENCY_WORDS.map(([code, re]) => [code, new RegExp(String.raw`^(?:${re})$`, 'i')]);
 const CURRENCY_TOKEN_RE = new RegExp(String.raw`${CURRENCY_SYMBOL}|` + CURRENCY_WORDS.map(([, re]) => tokenRe(re)).join('|'), 'gi');
-// A period right after the figure (its currency already taken out), on its line, past only spaces, a "per",
-// "a", "في" or "/" and WhatsApp's bold or italic marks ("SAR 4,500 per month", "*AED 5,000* per month"):
-// not past a bracket, a full stop, a comma, a colon or a line break ("(سنة فقط)", "…ريال سعودي.\n*شهر فقط*"
-// may be the lease's or the payments'). One pass, no nested choices: linear time.
-const PERIOD_TOKENS = String.raw`month|monthly|mo|شهر|الشهر|شهري|شهريا|شهرية|year|years|yearly|yr|annum|annually|سنة|السنة|سنوي|سنويا|سنوية`;
-const PERIOD_LEAD_RE = new RegExp(String.raw`^[ /*_]*(?:(?:per|a|في) +|/ *)?(${PERIOD_TOKENS})(?![A-Za-z${AR}])`, 'i');
+// A period right after the figure (its currency already taken out), on its line, past only spaces and
+// WhatsApp's bold or italic marks: an adverb on its own ("monthly", "سنوياً") or a noun after "per", "a",
+// "في" or "/" ("per month", "a year", "في السنة", "/ شهر"). A bare noun ("سنة فقط", "4,500 SAR month") may be
+// the lease's length, and nothing past a bracket, a full stop, a comma, a colon or a line break ("(سنة
+// فقط)", "…ريال سعودي.\n*شهر فقط*") is the figure's. One pass, no nested choices: linear time.
+const PERIOD_NOUNS = String.raw`month|mo|شهر|الشهر|year|years|yr|annum|سنة|السنة`;
+const PERIOD_ADVERBS = String.raw`monthly|شهري|شهريا|شهرية|yearly|annually|سنوي|سنويا|سنوية`;
+const PERIOD_LEAD_RE = new RegExp(String.raw`^[ /*_]*(?:(?:(?:per|a|في) +|/ *)(${PERIOD_NOUNS})|(${PERIOD_ADVERBS}))(?![A-Za-z${AR}])`, 'i');
 // A figure glued to a mark or a sign ("4.500.000" read from its end, "-450,000"), or a sign before its currency
 // ("-SAR 50,000", "-US dollars 450,000", "-ر.س 450,000"): no price. Built from every currency token above.
 const SIGN_BEFORE_RE = new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$|(?:^|[^A-Za-z${AR}0-9])[+\-−–] ?(?:${CURRENCY_TOKEN_RE.source}) ?$`, 'i');
@@ -121,8 +123,10 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // The flags come out of the RAW caption, as parseCaption reads them: a tag only the cleaning below makes a
   // flag ("#inter" + a direction mark + "national", "#ｉｎｔｅｒｎａｔｉｏｎａｌ") is a word, so no price.
   const unflagged = westernise(fold(raw.replace(FLAG_TAG_RE, ' '))).replace(INVISIBLE_RE, '');
-  // White space is one space, but a line break stays one: the period must stand on the figure's line.
-  const text = unflagged.replace(/#/g, ' ').replace(/[^\S\n]+/g, ' ').replace(/ *\n\s*/g, '\n').trim();
+  // White space is one space, but a line break stays one (any of them: CR, LS, PS, NEL, VT, FF), so the
+  // period must stand on the figure's line.
+  const text = unflagged.replace(/#/g, ' ').replace(/\r\n?|[\u2028\u2029\u0085\v\f]/g, '\n')
+    .replace(/[^\S\n]+/g, ' ').replace(/ *\n\s*/g, '\n').trim();
   // A hashtag holding a digit ("#1stPayment", "#250000", "#2BR", "#sale١٢٣٤٥") may label or be the figure:
   // no price. Read before the flags come out, on the whole caption.
   if (/#[^\s#]*[0-9]/.test(westernise(folded).replace(INVISIBLE_RE, ''))) return null;
@@ -154,7 +158,7 @@ export function parsePriceHint(caption, { command = false } = {}) {
   const tail = after.replace(CURRENCY_TOKEN_RE, ' ');
   const lead = PERIOD_LEAD_RE.exec(tail);
   if (PERIOD_WORD_RE.test(before) || PERIOD_WORD_RE.test(lead ? tail.slice(lead[0].length) : tail)) return null;
-  const period = lead ? (MONTH_WORD_RE.test(lead[1]) ? 'month' : 'year') : null;
+  const period = lead ? (MONTH_WORD_RE.test(lead[1] ?? lead[2]) ? 'month' : 'year') : null;
   // A rent caption must say its period: "Rent SAR 45,000" may be a year's or a month's (the price command
   // keeps the listing's own period).
   if (rent && !period && !command) return null;
