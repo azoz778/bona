@@ -246,7 +246,7 @@ export function parsePriceHint(caption, { command = false } = {}) {
  */
 // A figure spelled out ("أربعة آلاف", "twelve hundred"), or a currency named, in a caption that set no
 // price: the period is that figure's, as a written figure's is.
-const SPELLED_FIGURE_RE = /(?<![A-Za-z])(?:hundreds?|thousands?|millions?)(?![A-Za-z])|(?:مئة|مائة|مية|مئات|ألف|آلاف|الاف|ألاف|مليون|ملايين)/i;
+const SPELLED_FIGURE_RE = /(?<![A-Za-z])(?:hundreds?|thousands?|millions?)(?![A-Za-z])|(?:مئة|مائة|مية|مئات|ألف|الف|آلاف|الاف|ألاف|مليون|ملايين)/i;
 // Every word of either period, for "names both" (a wider net than the period readers: "annual", "شهور").
 // (CURRENCY_TOKEN_RE is global, so stateful under .test(): a copy without the flag.)
 const CURRENCY_NAMED_RE = new RegExp(CURRENCY_TOKEN_RE.source, 'i');
