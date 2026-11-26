@@ -124,7 +124,6 @@ describe('parsePriceHint', () => {
       ['#rent SAR 85k per year', 'SAR 85000'],
       ['Rent AED 2,000 per month', 'AED 2000'],
       ['Asking ４．５m SAR', 'SAR 4500000'],
-      ['Asking 12000\nk SAR', 'SAR 12000000'],
       ['Price 1.2 million US dollars', 'USD 1200000'],
     ]) {
       assert.equal(hint(caption), want, caption);
@@ -238,6 +237,18 @@ describe('parsePriceHint', () => {
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال سعودي').price, { amount: 190000, currency: 'SAR' });
     assert.deepEqual(parseCaption('السعر ١٩٠٬٠٠٠ ريال عماني').price, { amount: 190000, currency: 'OMR' });
     assert.equal(hint('#sale SAR 25m'), 'SAR 25000000');
+  });
+
+  // r27 review (Codex)
+  it('round 27: the period stands on the figure\'s line, past no full stop, comma or colon', () => {
+    for (const caption of ['للإيجار ٤٥٬٠٠٠ ريال سعودي.\n*شهر فقط*', 'Rent AED 60,000.\n*Monthly only*', 'Rent SAR 4,500\nper month', 'Rent SAR 4,500, per month',
+      'Rent SAR 4,500: monthly', 'Asking 12000\nk SAR', 'للإيجار ٤٬٥٠٠ ريال سعودي\n*سنة فقط*', 'للإيجار ٤٬٥٠٠ ريال سعودي\nسنة فقط']) {
+      assert.equal(parsePriceHint(caption), null, JSON.stringify(caption));
+    }
+    // a line break elsewhere is white space
+    assert.deepEqual([parsePriceHint('#rent\nSAR 4,500 per month')?.amount, parsePriceHint('#rent\nSAR 4,500 per month')?.period], [4500, 'month']);
+    assert.equal(hint('Price:\nSAR 4.5m'), 'SAR 4500000');
+    assert.equal(parsePriceHint('Rent *SAR 4,500* per month')?.period, 'month');
   });
 
   // r26 review (Codex)

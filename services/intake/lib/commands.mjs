@@ -57,11 +57,12 @@ const tokenRe = (body) => String.raw`(?<![A-Za-z${AR}])(?:${body})(?![A-Za-z${AR
 const CURRENCY_SYMBOL = String.raw`(?<![A-Za-z])US ?\$|\$|€`;
 const CURRENCY_WHOLE = CURRENCY_WORDS.map(([code, re]) => [code, new RegExp(String.raw`^(?:${re})$`, 'i')]);
 const CURRENCY_TOKEN_RE = new RegExp(String.raw`${CURRENCY_SYMBOL}|` + CURRENCY_WORDS.map(([, re]) => tokenRe(re)).join('|'), 'gi');
-// A period right after the figure (its currency already taken out), past a "per", "a", "في" or "/" and
-// WhatsApp's bold or italic marks ("SAR 4,500 per month", "*AED 5,000* per month"); not past a bracket
-// ("(سنة فقط)" may be the lease's). One pass, no nested choices: linear time.
+// A period right after the figure (its currency already taken out), on its line, past only spaces, a "per",
+// "a", "في" or "/" and WhatsApp's bold or italic marks ("SAR 4,500 per month", "*AED 5,000* per month"):
+// not past a bracket, a full stop, a comma, a colon or a line break ("(سنة فقط)", "…ريال سعودي.\n*شهر فقط*"
+// may be the lease's or the payments'). One pass, no nested choices: linear time.
 const PERIOD_TOKENS = String.raw`month|monthly|mo|شهر|الشهر|شهري|شهريا|شهرية|year|years|yearly|yr|annum|annually|سنة|السنة|سنوي|سنويا|سنوية`;
-const PERIOD_LEAD_RE = new RegExp(String.raw`^[\s/:,.*_]*(?:(?:per|a|في)\s+|/\s*)?(${PERIOD_TOKENS})(?![A-Za-z${AR}])`, 'i');
+const PERIOD_LEAD_RE = new RegExp(String.raw`^[ /*_]*(?:(?:per|a|في) +|/ *)?(${PERIOD_TOKENS})(?![A-Za-z${AR}])`, 'i');
 // A figure glued to a mark or a sign ("4.500.000" read from its end, "-450,000"), or a sign before its currency
 // ("-SAR 50,000", "-US dollars 450,000", "-ر.س 450,000"): no price. Built from every currency token above.
 const SIGN_BEFORE_RE = new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$|(?:^|[^A-Za-z${AR}0-9])[+\-−–] ?(?:${CURRENCY_TOKEN_RE.source}) ?$`, 'i');
@@ -120,7 +121,8 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // The flags come out of the RAW caption, as parseCaption reads them: a tag only the cleaning below makes a
   // flag ("#inter" + a direction mark + "national", "#ｉｎｔｅｒｎａｔｉｏｎａｌ") is a word, so no price.
   const unflagged = westernise(fold(raw.replace(FLAG_TAG_RE, ' '))).replace(INVISIBLE_RE, '');
-  const text = unflagged.replace(/#/g, ' ').replace(/\s+/g, ' ').trim();
+  // White space is one space, but a line break stays one: the period must stand on the figure's line.
+  const text = unflagged.replace(/#/g, ' ').replace(/[^\S\n]+/g, ' ').replace(/ *\n\s*/g, '\n').trim();
   // A hashtag holding a digit ("#1stPayment", "#250000", "#2BR", "#sale١٢٣٤٥") may label or be the figure:
   // no price. Read before the flags come out, on the whole caption.
   if (/#[^\s#]*[0-9]/.test(westernise(folded).replace(INVISIBLE_RE, ''))) return null;
