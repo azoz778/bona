@@ -65,6 +65,9 @@ const CURRENCY_TOKEN_RE = new RegExp(String.raw`${CURRENCY_SYMBOL}|` + CURRENCY_
 const PERIOD_NOUNS = String.raw`month|mo|شهر|الشهر|year|years|yr|annum|سنة|السنة`;
 const PERIOD_ADVERBS = String.raw`monthly|شهري|شهريا|شهرية|yearly|annually|سنوي|سنويا|سنوية`;
 const PERIOD_LEAD_RE = new RegExp(String.raw`^[ /*_]*(?:(?:(?:per|a|في) +|/ *)(${PERIOD_NOUNS})|(${PERIOD_ADVERBS}))(?![A-Za-z${AR}])`, 'i');
+// After the period only a closing qualifier may follow ("per month only", "سنوياً قابل للتفاوض"): another word
+// ("yearly rental only") makes the period the lease's. Words and marks never overlap: linear time.
+const PERIOD_TAIL_OK_RE = new RegExp(String.raw`^(?:[\s.,،;؛:!()*_…"'«»“”]|${tokenRe(String.raw`only|negotiable|firm|final|فقط|نهائي|قابل|للتفاوض`)})*$`, 'i');
 // A figure glued to a mark or a sign ("4.500.000" read from its end, "-450,000"), or a sign before its currency
 // ("-SAR 50,000", "-US dollars 450,000", "-ر.س 450,000"): no price. Built from every currency token above.
 const SIGN_BEFORE_RE = new RegExp(String.raw`[.٫,،٬]$|(?:^|[^A-Za-z${AR}])[+\-−–]$|(?:^|[^A-Za-z${AR}0-9])[+\-−–] ?(?:${CURRENCY_TOKEN_RE.source}) ?$`, 'i');
@@ -158,6 +161,7 @@ export function parsePriceHint(caption, { command = false } = {}) {
   const tail = after.replace(CURRENCY_TOKEN_RE, ' ');
   const lead = PERIOD_LEAD_RE.exec(tail);
   if (PERIOD_WORD_RE.test(before) || PERIOD_WORD_RE.test(lead ? tail.slice(lead[0].length) : tail)) return null;
+  if (lead && !PERIOD_TAIL_OK_RE.test(tail.slice(lead[0].length))) return null;
   const period = lead ? (MONTH_WORD_RE.test(lead[1] ?? lead[2]) ? 'month' : 'year') : null;
   // A rent caption must say its period: "Rent SAR 45,000" may be a year's or a month's (the price command
   // keeps the listing's own period).

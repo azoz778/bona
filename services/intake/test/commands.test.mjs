@@ -239,6 +239,16 @@ describe('parsePriceHint', () => {
     assert.equal(hint('#sale SAR 25m'), 'SAR 25000000');
   });
 
+  // r29 review (Codex)
+  it('round 29: after the period only a closing qualifier may follow', () => {
+    for (const caption of ['Rent: *AED 5,000* *yearly rental only*', 'Rent AED 5,000 monthly rent', 'للإيجار ٤٬٥٠٠ ريال سعودي شهرياً للإيجار', 'Rent SAR 4,500 per month for sale']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    for (const [caption, period] of [['Rent SAR 4,500 per month only', 'month'], ['للإيجار ٤٥ ألف ريال سعودي سنوياً قابل للتفاوض', 'year'], ['Rent *AED 5,000* *monthly*', 'month'], ['Rent AED 60k/yr, negotiable', 'year']]) {
+      assert.equal(parsePriceHint(caption)?.period, period, caption);
+    }
+  });
+
   // r28 review (Codex, Claude)
   it('round 28: a bare period noun is no billing period; every line separator ends the line', () => {
     // "سنة فقط" on the figure's line may be a one-year lease; a noun reads only after per / a / في / "/"
