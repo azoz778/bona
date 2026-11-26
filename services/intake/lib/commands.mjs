@@ -88,7 +88,9 @@ const MULTIPLIER_RE = new RegExp(String.raw`^ ?(?:(?<lmult>millions?|mln|mn|m|th
 // Not "~" (WhatsApp strikethrough, or "about"), "≈" or "+" ("4.5m+"): those qualify the figure; nor
 // "?" or "؟": a question ("Is rent €4,500 a month?") states no price; nor "-" or "–", which may be a minus
 // sign wherever it stands ("(- 4,500)", "AED-450,000"), nor the em dash "—" ("(— 4,500)").
-const LEFTOVER_OK_RE = /^[\s.,،;؛:!()[\]{}"'`«»“”‘’_/\\|*•·…=&]*$/;
+// FLAG_MARK: where a flag tag stood (see parsePriceHint) — no word, but no period may be read across it.
+const FLAG_MARK = '\uE000';
+const LEFTOVER_OK_RE = /^[\s.,،;؛:!()[\]{}"'`«»“”‘’_/\\|*•·…=&\uE000]*$/;
 // A period ("per year", "شهرياً") makes the figure a rent; on a caption with no rent word it is an
 // instalment or an income ("3,500 ريال شهرياً فقط", "Net SAR 450,000 per year"), not the price.
 const PERIOD_WORD_RE = new RegExp(tokenRe(String.raw`per|year|years|yearly|yr|annum|annually|month|monthly|mo|سنة|السنة|سنوي|سنويا|سنوية|شهر|الشهر|شهري|شهريا|شهرية`), 'i');
@@ -120,12 +122,16 @@ export function parsePriceHint(caption, { command = false } = {}) {
   // ("#Deposit 50,000" is a deposit).
   // A fullwidth "＃" ("＃test") is a flag parseCaption does not read: no caption price beside it.
   if (/＃/.test(String(caption || ''))) return null;
+  // A private-use character could pass for FLAG_MARK: no caption price beside one.
+  if (/[\uE000-\uF8FF]/.test(String(caption || ''))) return null;
   const raw = String(caption || '');
   const fold = (s) => s.replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
   const folded = fold(raw);
   // The flags come out of the RAW caption, as parseCaption reads them: a tag only the cleaning below makes a
   // flag ("#inter" + a direction mark + "national", "#ｉｎｔｅｒｎａｔｉｏｎａｌ") is a word, so no price.
-  const unflagged = westernise(fold(raw.replace(FLAG_TAG_RE, ' '))).replace(INVISIBLE_RE, '');
+  // Each flag leaves FLAG_MARK in its place: "yearly #rental only" keeps the flag between the period and the
+  // qualifier, so the period is no billing period there.
+  const unflagged = westernise(fold(raw.replace(FLAG_TAG_RE, ` ${FLAG_MARK} `))).replace(INVISIBLE_RE, '');
   // White space is one space, but a line break stays one (any of them: CR, LS, PS, NEL, VT, FF), so the
   // period must stand on the figure's line.
   const text = unflagged.replace(/#/g, ' ').replace(/\r\n?|[\u2028\u2029\u0085\v\f]/g, '\n')

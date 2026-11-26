@@ -239,6 +239,18 @@ describe('parsePriceHint', () => {
     assert.equal(hint('#sale SAR 25m'), 'SAR 25000000');
   });
 
+  // r30 review (Codex)
+  it('round 30: a flag keeps its place, so no period is read across it', () => {
+    for (const caption of ['Rent: *AED 5,000* *yearly #rental only*', 'Rent: AED 60,000 *monthly #rental only*', 'Rent SAR 4,500 #rent per month', 'Rent SAR 4,500 per month #rent']) {
+      assert.equal(parsePriceHint(caption), null, caption);
+    }
+    assert.equal(parsePriceHint('#rent SAR 4,500 per month')?.period, 'month');
+    assert.deepEqual(parseCaption('SAR 4.5m #sale').price, { amount: 4500000, currency: 'SAR' });
+    assert.deepEqual(parseCaption('#test SAR 4.5m').price, { amount: 4500000, currency: 'SAR' });
+    // a private-use character could pass for the flag mark
+    assert.equal(parsePriceHint('Rent SAR 4,500 \uE000 per month'), null);
+  });
+
   // r29 review (Codex)
   it('round 29: after the period only a closing qualifier may follow', () => {
     for (const caption of ['Rent: *AED 5,000* *yearly rental only*', 'Rent AED 5,000 monthly rent', 'للإيجار ٤٬٥٠٠ ريال سعودي شهرياً للإيجار', 'Rent SAR 4,500 per month for sale']) {
