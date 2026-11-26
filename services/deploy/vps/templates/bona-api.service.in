@@ -22,7 +22,8 @@ Environment=HOME=@HOME@
 # No EnvironmentFile= here, on purpose. The process loads the four ~/.secrets/*.env files itself
 # (retell, evolution-api, bona-services, bona-marketing — lib/env.mjs), and process.env wins over
 # those files. Every Environment= value below reaches process.env, which is exactly why the VPS
-# overrides work: bona-services.env is copied verbatim from the PC and still carries the PC's
+# overrides work: bona-services.env is copied from the PC (sync-secrets.sh keeps only the VPS's own
+# BONA_WA_INSTANCE / BONA_WA_INSTANCE_JID lines, 2026-11-19) and still carries the PC's
 # BONA_API_PORT=4102, BONA_DATA and BONA_REPO. Had the unit loaded that file with EnvironmentFile=,
 # systemd would let the file's values override the Environment= lines regardless of line order,
 # and the VPS would try the PC's port and paths (Claude review, 2026-09-08).

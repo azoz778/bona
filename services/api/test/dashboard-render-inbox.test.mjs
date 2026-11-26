@@ -203,7 +203,7 @@ test('a thread: client bubbles left, ours right, each labelled; media shows its 
   assert.ok(!html.includes('<b>plan</b>'), 'a file name is escaped');
   assert.match(html, /\[document: &lt;b&gt;plan&lt;\/b&gt;\.pdf\]/);
   assert.match(html, /<div class="bub in"><span class="who"><bdi>Client<\/bdi><\/span><div class="tx" dir="auto">hi &lt;img/);
-  assert.match(html, /<div class="bub out"><span class="who"><bdi>Your number<\/bdi><\/span><div class="tx" dir="auto">Welcome/);
+  assert.match(html, /<div class="bub out"><span class="who"><bdi>Bona&#39;s phone<\/bdi><\/span><div class="tx" dir="auto">Welcome/);
   assert.match(html, /<div class="bub out"><span class="who"><bdi>Sara<\/bdi><\/span><div class="tx" dir="auto">Here is the villa/);
   assert.match(html, /<bdi>Omar Old<\/bdi><\/span><div class="tx" dir="auto">Old reply/, 'a reply keeps its author after they leave');
   assert.match(html, /<div class="bub out"><span class="who"><bdi>Dana<\/bdi><\/span>/);
@@ -213,8 +213,8 @@ test('a thread: client bubbles left, ours right, each labelled; media shows its 
   assert.ok(html.indexOf('hi &lt;img') < html.indexOf('Welcome') && html.indexOf('Welcome') < html.indexOf('Here is the villa'), 'oldest first');
 
   const asStaff = thread({ me: STAFF, messages });
-  assert.match(asStaff, /<bdi>Owner&#39;s number<\/bdi>/);
-  assert.doesNotMatch(asStaff, /Your number/);
+  assert.match(asStaff, /<bdi>Bona&#39;s phone<\/bdi>/);
+  assert.doesNotMatch(asStaff, /Your number|Owner&#39;s number/);
 });
 
 test('the thread header shows the whole number, the stage, the handler and a link to the lead', () => {
@@ -267,8 +267,9 @@ test('the reply form carries send_id, seen_rev, seen_ts and the kept draft, and 
   assert.match(html, /<textarea id="r-text" name="text" maxlength="4096" dir="auto" required>my text &lt;\/textarea&gt;&lt;script&gt;x&lt;\/script&gt;<\/textarea>/);
   assert.ok(onlyOurScript(html), 'no script but our own app.js');
   assert.match(html, /<div class="err">New activity since you opened this chat/);
-  assert.match(html, /it goes from your WhatsApp/);
-  assert.match(thread({ me: STAFF }), /it goes from the owner&#39;s WhatsApp/);
+  assert.match(html, /it goes from Bona&#39;s WhatsApp number/);
+  assert.match(thread({ me: STAFF }), /it goes from Bona&#39;s WhatsApp number/);
+  assert.doesNotMatch(html, /your WhatsApp|the owner&#39;s WhatsApp/);
 });
 
 test('no reply box for a chat with no phone number, or while sending is off', () => {

@@ -1,21 +1,40 @@
 /**
  * WhatsApp note to the owner via the self-hosted Evolution API.
  *
- * IMPORTANT: this instance is the owner's *personal* WhatsApp, already paired and
- * used by another bot. We only ever send text ("message yourself") — we never set a
- * webhook and never read other people's chats here.
+ * Two numbers, kept apart since 2026-11-19 (design 2026-11-16 §11):
+ *   - the OWNER (`BONA_OWNER_JID`): where lead notes and his login codes go, the owner account
+ *     seeded on every start, the one login code that may pass the Sending switch;
+ *   - the INSTANCE (`BONA_WA_INSTANCE`, its own number `BONA_WA_INSTANCE_JID`): what every read
+ *     and send goes through. Bona's own WhatsApp Business since the move; before it, the
+ *     owner's personal WhatsApp, when the two numbers were one.
+ * `BONA_WA_INSTANCE_JID` unset or blank means "the owner's number", exactly as before the
+ * split: removing the line is the rollback. We only ever send text here; we never set a
+ * webhook, a websocket or a rabbitmq consumer on the instance.
  *
  * Failure is non-fatal: a lead is already on disk before this is attempted.
  */
 
 export const DEFAULT_OWNER_JID = '966593296933@s.whatsapp.net';
 
+/** A phone jid (`966…@s.whatsapp.net`, a device suffix allowed) or bare digits: the only usable own number. */
+export const PHONE_JID_RE = /^\d{8,15}(?::\d+)?(?:@s\.whatsapp\.net)?$/;
+
 export function waConfig(env = {}) {
+  const ownerJid = env.BONA_OWNER_JID ?? DEFAULT_OWNER_JID;
+  const raw = String(env.BONA_WA_INSTANCE_JID ?? '').trim();
+  // A value that is not a phone jid (a lid, a group, a name) would make the poller read the
+  // instance's own chat as a client's, or skip a client's: it counts as unset (the owner's
+  // number, as before the split) and says so as "invalid" on /health and at start-up.
+  const ownJid = PHONE_JID_RE.test(raw) ? raw : '';
   return {
     baseUrl: String(env.EVOLUTION_API_URL ?? '').replace(/\/+$/, ''),
     apiKey: env.EVOLUTION_API_KEY ?? '',
     instance: env.BONA_WA_INSTANCE ?? 'abdulaziz-personal',
-    ownerJid: env.BONA_OWNER_JID ?? DEFAULT_OWNER_JID,
+    ownerJid,
+    /** The instance's own number: the chat the poller never reads, the sender a sent record's alt names. */
+    instanceJid: ownJid || ownerJid,
+    /** Where that number came from, for /health and the start-up line (never the digits). */
+    ownNumberFrom: ownJid ? 'instance' : raw ? 'invalid' : 'owner',
     groupJid: env.BONA_WA_GROUP_JID ?? null,
     enabled: String(env.BONA_WA_NOTIFY ?? '1') !== '0',
   };

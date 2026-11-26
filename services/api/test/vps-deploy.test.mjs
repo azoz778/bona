@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
@@ -164,8 +164,14 @@ function runShimmed(script, args = [], scenario = {}) {
   // SHIM_PRESEED_START (test-side only): pretend an `enable --now bona-api` already went over ssh,
   // so a SHIM_SSH_DOWN_AFTER_START scenario is down from the very first call.
   // SHIM_STALE_WAL (test-side only): the PC still has a bona.db-wal from before the cutover.
-  const { SHIM_PRESEED_START, SHIM_STALE_WAL, ...env } = scenario;
+  // PC_WA (test-side only): the PC bona-api twin's WhatsApp drop-in (services/README.md, "The PC
+  // bona-api twin since the WhatsApp move"); see pcWa() below. Default 'dropin': in place and good.
+  // PC_LOCK (test-side only): 'locked' = the twin locked by the cutover runbook's own B5a command;
+  // 'unlocked' = the same, then the one-command unlock (rm LOCKED); see lockTwin() below.
+  const { SHIM_PRESEED_START, SHIM_STALE_WAL, PC_WA = 'dropin', PC_LOCK, ...rest } = scenario;
   if (SHIM_STALE_WAL) writeFileSync(path.join(home, 'bona-data', 'bona.db-wal'), 'stale');
+  if (PC_LOCK) lockTwin(home, PC_LOCK);
+  const env = { ...pcWa(home, PC_WA), ...rest };
   writeFileSync(log, SHIM_PRESEED_START ? 'ssh -o BatchMode=yes -o ConnectTimeout=20 fake-vps sudo -n systemctl enable --now bona-api\n' : '');
   const r = bash([path.join(VPS, script), ...args], {
     env: {
@@ -182,6 +188,30 @@ function runShimmed(script, args = [], scenario = {}) {
   });
   const lines = readFileSync(log, 'utf8').split('\n').filter(Boolean);
   return { status: r.status, out: r.stdout + r.stderr, lines, home };
+}
+// pcWa(home, kind) → lays out the PC's ~/.secrets as the WhatsApp move left it (bona-services.env
+// keeps the owner's personal instance for bona-intake) plus the twin's drop-in in the shape `kind`
+// names, and returns the systemctl shim's answer to `show bona-api -p EnvironmentFiles`.
+const PC_WA_LINES = 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n';
+function pcWa(home, kind) {
+  const secrets = path.join(home, '.secrets');
+  mkdirSync(secrets, { recursive: true });
+  writeFileSync(path.join(secrets, 'bona-services.env'), 'X=1\nBONA_WA_INSTANCE=abdulaziz-personal\n', { mode: 0o600 });
+  const shared = `${path.join(secrets, 'bona-services.env')} (ignore_errors=yes)`;
+  const marketing = `${path.join(secrets, 'bona-marketing.env')} (ignore_errors=yes)`;
+  const wa = path.join(secrets, 'bona-api-pc-wa.env');
+  const listed = `${wa} (ignore_errors=no)`;
+  const file = {
+    dropin: PC_WA_LINES, early: PC_WA_LINES, 'no-file': null, none: null,
+    'no-jid': 'BONA_WA_INSTANCE=bona\n', 'blank-jid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=\n',
+    personal: 'BONA_WA_INSTANCE=abdulaziz-personal\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n',
+    'quoted-export': 'export BONA_WA_INSTANCE="bona"\nexport BONA_WA_INSTANCE_JID=\'966576267694@s.whatsapp.net\'\n',
+    'show-fails': PC_WA_LINES,
+  }[kind];
+  assert.ok(file !== undefined, `unknown PC_WA kind ${kind}`);
+  if (file !== null) writeFileSync(wa, file, { mode: 0o600 });
+  const order = kind === 'none' ? [shared, marketing] : kind === 'early' ? [listed, shared, marketing] : [shared, marketing, listed];
+  return { SHIM_PC_ENVFILES: order.join('|'), ...(kind === 'show-fails' ? { SHIM_SHOW_FAIL: '1' } : {}) };
 }
 const REMOTE = '^ssh -o BatchMode=yes -o ConnectTimeout=20 fake-vps ';
 // On the VPS the units are SYSTEM units driven with `sudo -n systemctl` (lib.sh VPS_SYSTEMCTL);
@@ -204,6 +234,7 @@ const CALL = {
   pcNodeSqlite: /^node -e require\("node:sqlite"\)$/,
   pcDisable: /^systemctl --user disable bona-api cloudflared-bona$/,
   pcStart: /^systemctl --user enable --now bona-api cloudflared-bona$/,
+  pcWaShow: /^systemctl --user show bona-api -p EnvironmentFiles --value$/,
   publicHealth: /^curl .*https:\/\/public-health\.invalid\/health$/,
   // rollback.sh --copy-back: VPS → a temp dir under the PC's bona-data
   scpBack: (f) => new RegExp(`^scp -q -p fake-vps:bona-data\\/${f.replace(/\./g, '\\.')} \\S+\\/bona-data\\/\\.copy-back\\.[^/]+\\/$`),
@@ -319,9 +350,189 @@ test('cutover.sh: ssh dies after the VPS API was started — fail closed, PC uni
 test('rollback.sh: stops the VPS units and verifies them inactive, only then starts the PC units', () => {
   const r = runShimmed('rollback.sh');
   assert.equal(r.status, 0, r.out);
-  assertOrdered(r.lines, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
+  // The twin's WhatsApp drop-in is checked first, before anything is stopped anywhere.
+  assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
   assert.ok(!r.lines.some((l) => /^scp /.test(l)), `plain rollback copies nothing\n${r.lines.join('\n')}`);
+  assert.ok(!r.out.includes('966576267694'), `no env value is printed\n${r.out}`);
   noRemoteUserManager(r);
+});
+
+// ---- the PC twin must not come back on the owner's personal WhatsApp (A2Z go-live item 7, 2026-11-19)
+// The PC's bona-services.env keeps BONA_WA_INSTANCE=abdulaziz-personal for bona-intake; without the
+// drop-in, `enable --now bona-api` would poll and send from the owner's personal number again while
+// the site sends every client to Bona's own number, which nothing on the PC would read.
+const refusedUntouched = (r, why) => {
+  assert.notEqual(r.status, 0, `rollback must refuse: ${why}\n${r.out}`);
+  assert.ok(r.lines.some((l) => CALL.pcWaShow.test(l)), `the drop-in must have been looked up\n${r.lines.join('\n')}`);
+  assert.ok(!r.lines.some((l) => /^(ssh|scp) /.test(l)), `${why}: nothing may be stopped or copied on the VPS\n${r.lines.join('\n')}`);
+  assert.ok(!r.lines.some((l) => /^systemctl --user (stop|enable|disable)/.test(l)), `${why}: no PC unit touched\n${r.lines.join('\n')}`);
+  // The refusal says what to do instead: the drop-in, the reload, and the explicit way out.
+  for (const s of ['bona-api.service.d/wa-own-number.conf', 'EnvironmentFile=%h/.secrets/bona-api-pc-wa.env', 'BONA_WA_INSTANCE_JID=', 'systemctl --user daemon-reload', '--personal-instance', 'The PC bona-api twin since the WhatsApp move']) {
+    assert.ok(r.out.includes(s), `${why}: the refusal should mention ${s}\n${r.out}`);
+  }
+};
+
+for (const [kind, why] of [
+  ['none', 'no drop-in'],
+  ['no-file', 'the drop-in names an env file that is not there'],
+  ['no-jid', 'the env file has no BONA_WA_INSTANCE_JID'],
+  ['blank-jid', 'the env file leaves BONA_WA_INSTANCE_JID empty'],
+  ['personal', "the env file names the owner's personal instance"],
+  ['early', 'the env file is loaded before bona-services.env, so it does not win'],
+  ['show-fails', 'systemctl --user show failed'],
+]) {
+  test(`rollback.sh: PC twin WhatsApp guard refuses before anything is stopped (${why})`, () => {
+    refusedUntouched(runShimmed('rollback.sh', [], { PC_WA: kind }), why);
+  });
+}
+
+test('rollback.sh --copy-back: no drop-in — refused before the VPS is stopped or the PC API touched', () => {
+  const r = runShimmed('rollback.sh', ['--copy-back'], { PC_WA: 'none' });
+  refusedUntouched(r, 'no drop-in, --copy-back');
+  assert.ok(!r.lines.some((l) => /^systemctl --user is-active/.test(l)), r.lines.join('\n'));
+});
+
+test('rollback.sh: the drop-in env file may use export and quotes (as lib/env.mjs and systemd read it)', () => {
+  const r = runShimmed('rollback.sh', [], { PC_WA: 'quoted-export' });
+  assert.equal(r.status, 0, r.out);
+  assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.pcStart);
+});
+
+test('rollback.sh --personal-instance: no drop-in needed, a loud warning, then the usual fail-closed order', () => {
+  for (const args of [['--personal-instance'], ['--copy-back', '--personal-instance'], ['--personal-instance', '--copy-back']]) {
+    const r = runShimmed('rollback.sh', args, { PC_WA: 'none', SHIM_REMOTE_MISSING: 'bona.db-wal bona.db-shm' });
+    assert.equal(r.status, 0, `${args}: ${r.out}`);
+    // Looked up all the same, first: the route it asks for must be the one the unit will take.
+    assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
+    assert.match(r.out, /personal WhatsApp/);
+    assert.match(r.out, /item 7/);
+    if (args.includes('--copy-back')) assert.ok(r.lines.some((l) => CALL.scpBack('bona.db').test(l)), `${args}: --copy-back still copies`);
+  }
+});
+
+// Codex review r1: after R1 + R2 the site and the VPS are back on the owner's number, but a drop-in
+// still in place would start the twin on Bona's instance — reading and sending from a number the
+// site no longer gives out. So --personal-instance needs the drop-in gone, checked before anything
+// is stopped anywhere.
+for (const [kind, why] of [
+  ['dropin', 'the Bona drop-in is still active'],
+  ['quoted-export', 'the Bona drop-in is still active (export and quotes)'],
+  ['personal', 'a drop-in env file is still loaded, whatever it names'],
+  ['show-fails', 'systemctl --user show failed, so the route cannot be checked'],
+]) {
+  test(`rollback.sh --personal-instance: refused before anything is stopped (${why})`, () => {
+    for (const args of [['--personal-instance'], ['--copy-back', '--personal-instance']]) {
+      const r = runShimmed('rollback.sh', args, { PC_WA: kind });
+      assert.notEqual(r.status, 0, `${args}: must refuse: ${why}\n${r.out}`);
+      assert.ok(r.lines.some((l) => CALL.pcWaShow.test(l)), `${args}: the route must have been looked up\n${r.lines.join('\n')}`);
+      assert.ok(!r.lines.some((l) => /^(ssh|scp) /.test(l)), `${args}: nothing may be stopped or copied on the VPS\n${r.lines.join('\n')}`);
+      assert.ok(!r.lines.some((l) => /^systemctl --user (stop|enable|disable|is-active)/.test(l)), `${args}: no PC unit touched\n${r.lines.join('\n')}`);
+      assert.match(r.out, /Nothing was stopped, copied or started/);
+      if (kind !== 'show-fails') {
+        for (const s of ['bona-api.service.d/wa-own-number.conf', 'systemctl --user daemon-reload', '--personal-instance']) {
+          assert.ok(r.out.includes(s), `${args}: the refusal should mention ${s}\n${r.out}`);
+        }
+      }
+      assert.ok(!r.out.includes('966576267694'), `${args}: no env value is printed\n${r.out}`);
+    }
+  });
+}
+
+// ---- the PC twin is LOCKED at the switch (owner decision 2026-11-19, "Lock the PC backup")
+// The lock is made exactly as the cutover runbook makes it: its B5a command, read from the plan's
+// Appendix B (a verbatim copy of the runbook) and run in the fake HOME. systemd's side of it (the
+// drop-in's AssertPathExists refuses a reboot or a manual start) cannot run here; what can: the
+// drop-in names the very file the command creates, and install.sh and rollback.sh refuse before
+// they write, stop or start anything, saying why. After the one-command unlock (rm LOCKED) they make
+// exactly the calls they make on a PC that was never locked.
+const REPO_ROOT = path.resolve(HERE, '../../..');
+const PLAN = path.join(REPO_ROOT, 'docs/superpowers/plans/2026-11-19-wa-own-number.md');
+const LOCK_REL = '.config/systemd/user/bona-api.service.d/LOCKED';
+function lockCommand() {
+  const plan = readFileSync(PLAN, 'utf8');
+  const appendixB = plan.slice(plan.indexOf('## Appendix B: Cutover runbook'));
+  const cmds = appendixB.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('d=~/.config/systemd/user/bona-api.service.d;'));
+  assert.equal(cmds.length, 1, 'runbook B5a has exactly one lock command');
+  return cmds[0];
+}
+// lockTwin(home, 'locked' | 'unlocked') → the runbook's lock command in that HOME (systemctl is the
+// shim, logged apart from the script's calls); 'unlocked' then runs the unlock, rm LOCKED.
+function lockTwin(home, kind) {
+  const r = spawnSync('bash', ['-c', lockCommand()], { encoding: 'utf8', env: { PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: path.join(home, 'lock.log') } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(existsSync(path.join(home, LOCK_REL)), 'the lock command creates LOCKED');
+  if (kind === 'unlocked') rmSync(path.join(home, LOCK_REL));
+  else assert.equal(kind, 'locked');
+}
+const runInstall = (args, scenario = {}) => runShimmed('../install.sh', args, { BONA_REPO_DIR: REPO_ROOT, TMPDIR: tmpdir(), ...scenario });
+const lockedUntouched = (r, why) => {
+  assert.notEqual(r.status, 0, `must refuse: ${why}\n${r.out}`);
+  assert.deepEqual(r.lines, [], `${why}: not one call (no systemctl, ssh, scp, node, cloudflared, curl)\n${r.lines.join('\n')}`);
+  for (const f of ['.config/systemd/user/bona-api.service', '.config/systemd/user/cloudflared-bona.service', '.cloudflared/bona.yml', '.secrets/bona-marketing.env']) {
+    assert.ok(!existsSync(path.join(r.home, f)), `${why}: ${f} must not be written`);
+  }
+  // It says why, what the fall-back is, and how to unlock.
+  for (const s of [`The PC bona-api twin is LOCKED (${path.join(r.home, LOCK_REL)})`, 'sudo systemctl restart bona-api', 'cutover runbook R1', `rm ${path.join(r.home, LOCK_REL)}`, 'Nothing was written, stopped, copied or started']) {
+    assert.ok(r.out.includes(s), `${why}: the refusal should say ${s}\n${r.out}`);
+  }
+};
+
+test('the runbook B5a lock: a drop-in whose AssertPathExists names the LOCKED file it creates, then daemon-reload', () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
+  lockTwin(home, 'locked');
+  const dropin = readFileSync(path.join(home, '.config/systemd/user/bona-api.service.d/locked.conf'), 'utf8');
+  assert.match(dropin, /^\[Unit\]$/m);
+  // %h is the home of the user manager's user: the same file the scripts check under $HOME.
+  assert.deepEqual(dropin.split('\n').filter((l) => /^Assert|^Condition/.test(l)), [`AssertPathExists=!%h/${LOCK_REL}`]);
+  assert.match(readFileSync(path.join(home, LOCK_REL), 'utf8'), /Unlock only with the owner: rm this file/);
+  assert.deepEqual(readFileSync(path.join(home, 'lock.log'), 'utf8').split('\n').filter(Boolean), ['systemctl --user daemon-reload']);
+});
+
+test('install.sh: locked — refused before it writes or starts anything (with and without --restart), saying why', () => {
+  for (const args of [[], ['--restart'], ['--no-dns'], ['--restart', '--no-dns']]) {
+    lockedUntouched(runInstall(args, { PC_LOCK: 'locked' }), `install.sh ${args.join(' ') || '(no flags)'}`);
+  }
+});
+
+test('install.sh --uninstall still runs while locked: stopping the units is always allowed', () => {
+  const r = runInstall(['--uninstall'], { PC_LOCK: 'locked' });
+  assert.equal(r.status, 0, r.out);
+  assert.ok(r.lines.some((l) => /^systemctl --user disable --now bona-api\.service$/.test(l)), r.lines.join('\n'));
+  assert.ok(!r.lines.some((l) => /^systemctl --user (start|restart|enable )/.test(l)), r.lines.join('\n'));
+});
+
+test('rollback.sh: locked — refused before anything is stopped, copied or started (every flag), saying why', () => {
+  for (const args of [[], ['--copy-back'], ['--personal-instance'], ['--copy-back', '--personal-instance']]) {
+    lockedUntouched(runShimmed('rollback.sh', args, { PC_LOCK: 'locked' }), `rollback.sh ${args.join(' ') || '(no flags)'}`);
+    lockedUntouched(runShimmed('rollback.sh', args, { PC_LOCK: 'locked', PC_WA: 'none' }), `rollback.sh ${args.join(' ') || '(no flags)'}, no WhatsApp drop-in`);
+  }
+});
+
+test('unlocked (rm LOCKED): install.sh and rollback.sh make exactly the calls of a PC that was never locked', () => {
+  for (const args of [[], ['--restart']]) {
+    const never = runInstall(args);
+    const unlocked = runInstall(args, { PC_LOCK: 'unlocked' });
+    assert.ok(never.lines.some((l) => /^node /.test(l)), `past the lock the install goes on to its own checks\n${never.lines.join('\n')}`);
+    assert.deepEqual(unlocked.lines, never.lines, `install.sh ${args.join(' ')}`);
+    assert.equal(unlocked.status, never.status);
+  }
+  for (const [args, scenario] of [[[], {}], [['--personal-instance'], { PC_WA: 'none' }], [[], { PC_WA: 'none' }]]) {
+    const never = runShimmed('rollback.sh', args, scenario);
+    const unlocked = runShimmed('rollback.sh', args, { ...scenario, PC_LOCK: 'unlocked' });
+    assert.deepEqual(unlocked.lines, never.lines, `rollback.sh ${args.join(' ')} ${JSON.stringify(scenario)}`);
+    assert.equal(unlocked.status, never.status, unlocked.out);
+  }
+  // and the plain one is the usual successful fail-closed rollback
+  const r = runShimmed('rollback.sh', [], { PC_LOCK: 'unlocked' });
+  assert.equal(r.status, 0, r.out);
+  assertOrdered(r.lines, CALL.pcWaShow, CALL.vpsStopAll, CALL.vpsVerifyInactive, CALL.pcStart, CALL.publicHealth);
+});
+
+test('rollback.sh: an unknown argument is a usage error and touches nothing', () => {
+  const r = runShimmed('rollback.sh', ['--personal']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.out, /usage: rollback\.sh \[--copy-back\] \[--personal-instance\]/);
+  assert.ok(!r.lines.some((l) => /^(ssh|scp|systemctl) /.test(l)), r.lines.join('\n'));
 });
 
 // ---- --copy-back: the VPS's newer data replaces the PC's, all of it or none of it (Codex review)
@@ -478,6 +689,95 @@ test('sync-secrets.sh chmods the four named secret files on the VPS, not *.env',
   assert.ok(chmod.includes('~/.cloudflared/9022fbec-de4f-44b9-805e-8fff285d6263.json'), chmod);
   assert.ok(!chmod.includes('*.env'), `must not chmod a glob: ${chmod}`);
   assert.ok(lines.some((l) => /^scp -q -p .*\/\.secrets\/retell\.env .* fake-vps:\.secrets\/$/.test(l)), lines.join('\n'));
+});
+
+// ---------------------------------------------------------------- sync-secrets keeps the VPS's WhatsApp lines (2026-11-19)
+const keepRun = (pc, vps) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'bona-keep-'));
+  writeFileSync(path.join(dir, 'pc'), pc);
+  writeFileSync(path.join(dir, 'vps'), vps);
+  const r = bash(['-c', '. ./lib.sh; keep_vps_keys "$1" "$2" "$3"', 'keep', path.join(dir, 'pc'), path.join(dir, 'vps'), path.join(dir, 'out')], { env: { HOME: dir } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout + r.stderr, '', 'prints nothing');
+  return readFileSync(path.join(dir, 'out'), 'utf8');
+};
+
+test('keep_vps_keys: the VPS line wins in place, other PC lines keep their order, a key only the VPS has is appended', () => {
+  const pc = 'A=1\nBONA_WA_INSTANCE=abdulaziz-personal\nBONA_OWNER_JID=owner\n# BONA_WA_INSTANCE=commented\nZ=9\n';
+  const vps = 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n';
+  assert.equal(keepRun(pc, vps), 'A=1\nBONA_WA_INSTANCE=bona\nBONA_OWNER_JID=owner\n# BONA_WA_INSTANCE=commented\nZ=9\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n');
+});
+
+test('keep_vps_keys: nothing on the VPS means the PC file as it is; a key the VPS lacks keeps the PC line; export is understood', () => {
+  const pc = 'A=1\nexport BONA_WA_INSTANCE=abdulaziz-personal\n';
+  assert.equal(keepRun(pc, ''), pc);
+  assert.equal(keepRun(pc, 'BONA_WA_INSTANCE_JID=x@s.whatsapp.net\n'), `${pc}BONA_WA_INSTANCE_JID=x@s.whatsapp.net\n`);
+  assert.equal(keepRun(pc, 'export BONA_WA_INSTANCE=bona\n'), 'A=1\nexport BONA_WA_INSTANCE=bona\n');
+});
+
+test('vps_keep_grep: the VPS lines are found with or without spaces before the =, and nothing else is', () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-keepgrep-'));
+  mkdirSync(path.join(home, '.secrets'));
+  writeFileSync(path.join(home, '.secrets', 'bona-services.env'),
+    'A=1\nBONA_WA_INSTANCE = bona\nexport BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\nBONA_WA_INSTANCE_X=no\n# BONA_WA_INSTANCE=commented\n');
+  const r = bash(['-c', '. ./lib.sh; VPS_KEEP_FILE=bona-services.env; eval "$(vps_keep_grep)"'], { env: { HOME: home } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'BONA_WA_INSTANCE = bona\nexport BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n');
+});
+
+test('keep_vps_keys: a key the PC writes twice comes out once, as the VPS line; other keys are never touched', () => {
+  const pc = 'BONA_WA_INSTANCE=abdulaziz-personal\nBONA_WA_INSTANCE_X=keep\nBONA_WA_INSTANCE=again\n';
+  assert.equal(keepRun(pc, 'BONA_WA_INSTANCE=bona\nOTHER=vps-only\n'), 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_X=keep\n');
+});
+
+function syncHome() {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-home-'));
+  mkdirSync(path.join(home, '.secrets'), { recursive: true });
+  mkdirSync(path.join(home, '.cloudflared'), { recursive: true });
+  for (const f of ['retell.env', 'evolution-api.env', 'bona-marketing.env']) writeFileSync(path.join(home, '.secrets', f), 'X=1\n');
+  writeFileSync(path.join(home, '.secrets', 'bona-services.env'), 'X=1\nBONA_WA_INSTANCE=abdulaziz-personal\n');
+  writeFileSync(path.join(home, '.cloudflared', '9022fbec-de4f-44b9-805e-8fff285d6263.json'), '{}');
+  const log = path.join(home, 'shim.log');
+  writeFileSync(log, '');
+  const capture = path.join(home, 'captured');
+  mkdirSync(capture);
+  return { home, log, capture };
+}
+
+test('sync-secrets.sh copies bona-services.env with the VPS\'s own WhatsApp lines, reads them before any copy, prints no value, leaves no temp file', () => {
+  const { home, log, capture } = syncHome();
+  const r = bash([path.join(VPS, 'sync-secrets.sh')], { env: {
+    PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_SSH: 'fake-vps', SHIM_SCP_CAPTURE: capture,
+    SHIM_VPS_KEEP_LINES: 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net',
+  } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(readFileSync(path.join(capture, 'bona-services.env'), 'utf8'), 'X=1\nBONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n');
+  assert.equal(readFileSync(path.join(capture, 'retell.env'), 'utf8'), 'X=1\n', 'the other files go verbatim');
+  assert.equal(readFileSync(path.join(home, '.secrets', 'bona-services.env'), 'utf8'), 'X=1\nBONA_WA_INSTANCE=abdulaziz-personal\n', 'the PC file is left as it was');
+  const lines = readFileSync(log, 'utf8').split('\n').filter(Boolean);
+  const readAt = lines.findIndex((l) => /^ssh fake-vps .*grep -E .*BONA_WA_INSTANCE\|BONA_WA_INSTANCE_JID/.test(l));
+  const firstScp = lines.findIndex((l) => /^scp /.test(l));
+  assert.ok(readAt >= 0 && readAt < firstScp, lines.join('\n'));
+  assert.doesNotMatch(r.stdout + r.stderr, /abdulaziz-personal|576267694|=bona/);
+  assert.deepEqual(readdirSync(path.join(home, '.secrets')).filter((f) => f.startsWith('.')), [], 'no temp file left behind');
+});
+
+test('sync-secrets.sh copies nothing when the VPS lines cannot be read', () => {
+  const { home, log } = syncHome();
+  const r = bash([path.join(VPS, 'sync-secrets.sh')], { env: {
+    PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_SSH: 'fake-vps', SHIM_VPS_KEEP_FAIL: '1',
+  } });
+  assert.notEqual(r.status, 0);
+  assert.ok(!readFileSync(log, 'utf8').split('\n').some((l) => /^scp /.test(l)), 'no scp after a failed read');
+  assert.deepEqual(readdirSync(path.join(home, '.secrets')).filter((f) => f.startsWith('.')), []);
+});
+
+test('sync-secrets.sh --dry-run names the kept keys and contacts nothing', () => {
+  const { home, log } = syncHome();
+  const r = bash([path.join(VPS, 'sync-secrets.sh'), '--dry-run'], { env: { PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_SSH: 'fake-vps' } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /BONA_WA_INSTANCE BONA_WA_INSTANCE_JID/);
+  assert.equal(readFileSync(log, 'utf8'), '');
 });
 
 // deploy.sh runs ON the VPS, so its systemctl calls go through `sudo -n` (system units); the sudo

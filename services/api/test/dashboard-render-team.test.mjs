@@ -132,3 +132,12 @@ test('a red banner at the top of the Team page while Retell is out of credit, wi
     assert.doesNotMatch(teamPage({ me: OWNER, users: [OWNER], fundsOut: fine }), /Retell credit/, String(fine));
   }
 });
+
+test("the Team page names Bona's WhatsApp number as the sender, never \"your number\" (2026-11-19 move)", () => {
+  for (const [sendingEnabled, repliesEnabled] of [[true, true], [false, false]]) {
+    const html = teamPage({ me: OWNER, users: [OWNER], sendingEnabled, repliesEnabled });
+    assert.doesNotMatch(html, /your number|from your WhatsApp|Sending from your/i);
+    assert.match(html, /<h2[^>]*>Sending from Bona&#39;s WhatsApp<\/h2>|<h2[^>]*>Sending from Bona's WhatsApp<\/h2>/);
+    assert.match(html, /from Bona(&#39;|')s WhatsApp number/);
+  }
+});

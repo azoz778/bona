@@ -93,7 +93,6 @@ export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir
     // --whatsapp-only`. No fallback to the site's agent: the web prompt (cards, markers, the
     // recording sentence) must never answer a WhatsApp client. Missing → Dana is not configured.
     waChatAgentId: env.BONA_RETELL_WA_CHAT_AGENT_ID ?? ids.waChatAgentId ?? null,
-    waNumber: env.BONA_WHATSAPP ?? '966593296933',
     maxBodyBytes: Number(env.BONA_MAX_BODY_BYTES ?? 16 * 1024),
     chatRatePerMin: Number(env.BONA_RATE_CHAT ?? 30),
     tokenRatePerMin: Number(env.BONA_RATE_TOKEN ?? 6),

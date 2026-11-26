@@ -14,10 +14,10 @@
  * number, because that page exists to talk to that one person. Names sit in `<bdi>`, so
  * an Arabic name cannot reorder the words around it.
  *
- * Who wrote a bubble: the client, a team member by name, Dana, or the owner's own phone,
- * which the owner reads as "Your number" and everyone else as "Owner's number". What he
- * types on that phone and what Lisa sends for him look the same to the API, so the
- * label never claims more than "it came from that number".
+ * Who wrote a bubble: the client, a team member by name, Dana, or the WhatsApp instance's own
+ * phone (Bona's since 2026-11-19), which everyone reads as "Bona's phone". What is typed on
+ * that phone and what is sent through it otherwise look the same to the API, so the label
+ * never claims more than "it came from that number".
  */
 import {
   esc, maskPhone, fullPhone, agoSince, dateTime, layout, knownError, messageFor, stageName, postButton,
@@ -227,7 +227,7 @@ export function unsurePage({ me, rows, candidates = [], ok = null, error = null,
     : `<p class="muted">${cands.length ? 'No chats that mention Bona to decide.' : 'Nothing to decide.'}</p>`;
   const toCheck = cands.length
     ? `<h2 style="margin-top:22px">Real-estate chats to check</h2>
-<p class="sub">Chats on your number that talk about property but carry nothing that says Bona: a TK client, someone you know, or a new Bona client. Nothing they wrote is kept, only the number, the name WhatsApp shows and the property words, until 30 days after the last such message. <b>Move to Bona inbox</b> makes it a Bona chat and copies in its last 30 days; <b>Not a client</b> takes it off this list, and it is not listed again for a year.</p>
+<p class="sub">Chats on Bona's WhatsApp number that talk about property but carry nothing that says Bona: a TK client, someone you know, or a new Bona client. Nothing they wrote is kept, only the number, the name WhatsApp shows and the property words, until 30 days after the last such message. <b>Move to Bona inbox</b> makes it a Bona chat and copies in its last 30 days; <b>Not a client</b> takes it off this list, and it is not listed again for a year.</p>
 <div class="card cp">${cands.map((c) => candidateRow(c, now)).join('')}</div>`
     : '';
   const body = `${flash(ok, error)}
@@ -257,10 +257,10 @@ function failReason(code) {
   return http ? `WhatsApp refused it (HTTP ${http[1]})` : 'something went wrong';
 }
 
-function senderLabel(kind, userId, { owner, names }) {
+function senderLabel(kind, userId, { names }) {
   if (kind === 'client') return 'Client';
   if (kind === 'dana') return 'Dana';
-  if (kind === 'owner_number') return owner ? 'Your number' : "Owner's number";
+  if (kind === 'owner_number') return "Bona's phone";
   // A reply keeps its author's name after they leave the team, so the lookup covers
   // every user, not only the active ones.
   if (kind === 'staff') return names.get(userId) ?? 'Team';
@@ -315,7 +315,7 @@ export function threadPage({
   const names = new Map(people.map((u) => [u.user_id, u.name]));
   const msgs = Array.isArray(messages) ? messages : [];
   const shown = new Set(msgs.map((m) => m.key_id));
-  const who = { owner, names };
+  const who = { names };
   const left = Number.isInteger(hidden) && hidden > 0 ? hidden : 0;
   // With older messages left out, a gap or an unconfirmed reply older than the first one
   // drawn sits among them: drawn at the top of the thread, it would read as coming after them.
@@ -392,7 +392,7 @@ export function threadPage({
   <input type="hidden" name="send_id" value="${esc(sendId)}">
   <input type="hidden" name="seen_rev" value="${esc(seenRev)}">
   <input type="hidden" name="seen_ts" value="${esc(seenTs)}">
-  <label for="r-text">${esc(owner ? 'Reply — it goes from your WhatsApp' : "Reply — it goes from the owner's WhatsApp")}</label>
+  <label for="r-text">${esc("Reply — it goes from Bona's WhatsApp number")}</label>
   <textarea id="r-text" name="text" maxlength="${esc(MAX_TEXT_LEN)}" dir="auto" required>${esc(draft)}</textarea>
   <div><button type="submit">Send</button></div>
 </form>`;

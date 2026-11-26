@@ -235,7 +235,7 @@ export const ui = {
   // Contact
   contactTitle: s('Contact', 'تواصل معنا'),
   contactMetaTitle: s('Contact Bona, Jeddah', 'تواصل مع بونا، جدة'),
-  contactMetaDesc: s('Reach Bona on WhatsApp or by phone, or visit us in Al Rawdah, Jeddah. Private enquiries answered personally.', 'تواصل مع بونا عبر واتساب أو الهاتف، أو زرنا في حي الروضة بجدة. نردّ على الاستفسارات الخاصة شخصياً.'),
+  contactMetaDesc: s('Reach Bona on WhatsApp or by phone, or visit us in Al Rawdah, Jeddah. Every private enquiry is followed up personally.', 'تواصل مع بونا عبر واتساب أو الهاتف، أو زرنا في حي الروضة بجدة. ونتابع كل استفسار خاص بأنفسنا.'),
   contactIntro: s('Write to us the way you would write to a friend who happens to know every good house in Jeddah.', 'راسلنا كما تراسل صديقاً يعرف كل بيت جيد في جدة.'),
   phone: s('Phone', 'الهاتف'),
   email: s('Email', 'البريد الإلكتروني'),

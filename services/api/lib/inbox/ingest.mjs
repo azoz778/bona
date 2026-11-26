@@ -11,10 +11,11 @@
  *     the row came to be `in`. Checked here, not left to callers: the poller screens its
  *     records, but a per-chat read (join history, catch-up, refresh) goes straight to a lead.
  *     The row is checked, and so is every number and lid the record names, sent or received
- *     (a lid-only chat first shows whose it is there) — except the owner's own number as a
+ *     (a lid-only chat first shows whose it is there) — except the instance's own number as a
  *     sent record's alt, which names the sender, not the chat. That number is the instance's
- *     own (`ownerPhone`), not read from the owner's account, so it is still known while his
- *     row is deactivated or demoted. Such a record stores nothing.
+ *     own (`ownerPhone`: `BONA_WA_INSTANCE_JID`, the owner's number while that is unset), not
+ *     read from the owner's account, so it is still known while his row is deactivated or
+ *     demoted. Such a record stores nothing.
  *     A received one may teach a row that holds no number yet that number, when it then
  *     excludes the row by itself; nothing else is learned from it, so a client's chat never
  *     excludes itself. Ingest never moves a chat out: the never-list add (P2-7) and the
@@ -96,7 +97,8 @@ function namedBy(rec) {
  * True when a number or lid the record names is excluded. Each is checked as the row would
  * be if it held that identifier, so whatever decides exclusion for a row (`isExcluded`)
  * decides for the record too. On a record we sent, the owner's own number as the alt is left
- * out: lib/evolution.mjs folds `key.senderPn` into `jidAlt`, and there it names the sender.
+ * out: there it names the sender, not the chat (lib/evolution.mjs no longer takes a sent
+ * record's `key.senderPn` as the alt; this still covers an alt that is our number anyway).
  */
 function recordNamesExcluded(lead, rec, isExcluded, ownerPhone) {
   const senderAlt = rec.fromMe && ownerPhone && jidsOf({ jid: rec.jidAlt }).phone === ownerPhone;
@@ -127,7 +129,7 @@ function sameChat(lead, rec) {
  * @param {() => string|null} [o.ownerUserId] the env owner's `users.user_id`: the handler of a
  *        chat his own phone answers first
  * @param {string|(() => string|null)|null} [o.ownerPhone] the instance's own number (digits,
- *        from `BONA_OWNER_JID`): a sent record's alt that is this number names the sender, not
+ *        from `BONA_WA_INSTANCE_JID`, else `BONA_OWNER_JID`): a sent record's alt that is this number names the sender, not
  *        the chat. Left out, it is read from the `ownerUserId` account, which a deactivated or
  *        demoted owner row no longer yields
  * @param {((lead: object) => boolean)|null} [o.isExcludedLead] true for a chat that is never a
@@ -168,9 +170,9 @@ export function createIngest({
 
   /**
    * What the lead may learn from a record it received: its empty lid / phone jid / phone. Not
-   * from one we sent: lib/evolution.mjs folds `key.senderPn` into the same `jidAlt`, and on an
-   * outbound record that can be our own number — the same caution as the poller's team
-   * pairing. Only from a record of the row's own chat (`sameChat`). Never a value another
+   * from one we sent: on an outbound record the alt can be our own number (lib/evolution.mjs
+   * leaves out a sent record's `key.senderPn`, which always is) — the same caution as the
+   * poller's team pairing. Only from a record of the row's own chat (`sameChat`). Never a value another
    * lead already holds: `phone_e164` is unique, and two leads on one jid would make every
    * later lookup by that jid a coin toss. A phone jid and its number name one person, so
    * when another lead holds either — a form lead's phone alone, say — neither is learned:

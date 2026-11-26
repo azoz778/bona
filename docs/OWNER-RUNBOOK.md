@@ -22,7 +22,7 @@ node scripts/instagram-post.mjs post-image --image-url <url> --caption-file mark
 ```
 Bio text, highlights, 9 launch posts and a 30-day calendar are in `marketing/`.
 
-## 3. WhatsApp Business profile (+966 59 329 6933)
+## 3. WhatsApp Business profile (+966 57 626 7694, Bona's own number on the Fold)
 Profile text, greeting and away messages are in `marketing/social-bios.md`. Every "Private enquiry" on the site opens a chat to this number with the property reference pre-filled.
 
 ## 4. Analytics, pixels and ad accounts — the checklists
@@ -75,6 +75,7 @@ Every page now carries a "Concierge" pill (bottom corner) with two tabs: **Chat*
 bash ~/bona/services/deploy/install.sh
 ```
 That creates the tunnel `bona`, points `bona-api.azoz.uk` at it, installs and starts the user services `cloudflared-bona` + `bona-api`, and prints the health check. Until then the pill shows a calm "Dana is resting — reach us on WhatsApp" card, and Dana (if reached) answers from the knowledge base only.
+- **Since 2026-09-08 the backend runs on the VPS**, not this PC, and since the WhatsApp move the PC copy is **locked**: `install.sh` and `rollback.sh` refuse and say why. Do not use the PC as the fall-back: undoing the WhatsApp move is the two VPS env lines back plus `ssh hermes-vps sudo systemctl restart bona-api` (cutover runbook R1). Unlocking the PC copy is your decision alone (`services/README.md` §6, "The PC `bona-api` twin since the WhatsApp move").
 - Costs: Retell bills your balance per call-minute (ElevenLabs voice + LLM) and per chat message; check the Retell dashboard weekly. Leads Dana captures land in `~/bona-data/leads.jsonl` and are WhatsApp'd to your number.
 - Ops: `systemctl --user status bona-api cloudflared-bona`, logs `journalctl --user -u bona-api -n 50`. Full contract and runbook: `services/README.md`. Persona text: `services/api/retell/prompt.md` (edit → `node services/api/retell/provision.mjs` to push — prompt edits reach Retell **only** through provisioning; it is idempotent).
 - PDPL: Dana now opens every **call** with the disclosure "This is Dana, Bona's AI concierge. This call is recorded to handle your enquiry." / "معك دانة، المساعدة الذكية لبونا. هذه المكالمة مسجّلة لمتابعة طلبك." After pulling this change, run `node ~/bona/services/api/retell/provision.mjs` once, then `systemctl --user restart bona-api`. The chat panel keeps its own greeting plus the "conversations are stored" line.
@@ -91,7 +92,7 @@ Rules baked in: only PDFs *you* send are processed; prices are taken only if pri
 
 ## 9. Private dashboard — https://bona-api.azoz.uk/dashboard
 Runs inside `bona-api` on this PC; nothing personal is on the public site.
-- **Login**: open the URL → *Send code* → a 6-digit code arrives on your WhatsApp (+966 59 329 6933) within seconds → type it → you stay signed in for 30 days on that device (`BONA_DASH_COOKIE_DAYS`). Codes expire after 10 minutes, 5 wrong tries burn a code, 3 codes per 10 minutes per IP. *Logout* is in the nav.
+- **Login**: open the URL → *Send code* → a 6-digit code arrives on your WhatsApp (+966 59 329 6933), sent from Bona's number (+966 57 626 7694), within seconds (it also shows on Bona's Fold phone, which sends it: whoever can read the Fold's WhatsApp can sign in as you, so keep the Fold locked and to yourself) → type it → you stay signed in for 30 days on that device (`BONA_DASH_COOKIE_DAYS`). Codes expire after 10 minutes, 5 wrong tries burn a code, 3 codes per 10 minutes per IP. *Logout* is in the nav.
 - **Overview** — the last 14 days: sessions, WhatsApp clicks, leads, viewings; **sources → leads** with first-touch and last-touch side by side; match quality (Ref code / phone / keyword / time-window / concierge / form); cost per lead per campaign once spend is entered.
 - **Leads** — the pipeline board by stage (new → contacted → qualified → viewing → offer → won / lost) with age and your response time; a lead's page is its whole journey (pages seen, clicks, messages, calls, stage changes, notes) with a stage form and a deal value.
 - **Listings** — per-listing funnel (views → gallery / tour / brochure → WhatsApp clicks → leads) and the REGA flags (§10).

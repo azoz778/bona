@@ -1405,3 +1405,17 @@ test('countDanaTests counts the chats in the Bona inbox under a Dana test, and n
   s.updateLead('LEAD-T1', { dana_off: 1 });
   assert.equal(inbox.countDanaTests(), 0, 'a test on a chat where Dana is off is no test');
 });
+
+test('countSentSince can leave two jids out: the owner\'s and the instance\'s own', () => {
+  const { s, inbox, at } = harness();
+  at(NOW);
+  inbox.insertOutbox(out({ send_id: 'SND-a', jid: '966500000002@s.whatsapp.net', status: 'accepted' }));
+  inbox.insertOutbox({ send_id: 'SND-own', jid: OWNER_JID, sender_kind: 'code', status: 'accepted' });
+  inbox.insertOutbox({ send_id: 'SND-self', jid: '966576267694@s.whatsapp.net', sender_kind: 'code', status: 'accepted' });
+  assert.equal(inbox.countSentSince(NOW - DAY), 3);
+  assert.equal(inbox.countSentSince(NOW - DAY, { excludeJids: [OWNER_JID, '966576267694@s.whatsapp.net'] }), 1);
+  assert.equal(inbox.countSentSince(NOW - DAY, { excludeJids: [OWNER_JID, OWNER_JID] }), 2, 'a repeated jid is one jid');
+  assert.equal(inbox.countSentSince(NOW - DAY, { excludeJid: OWNER_JID }), 2, 'the one-jid form still works');
+  assert.throws(() => inbox.countSentSince(NOW - DAY, { excludeJids: ['a', 'b', 'c'] }), TypeError);
+  s.close();
+});

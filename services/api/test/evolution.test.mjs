@@ -149,6 +149,27 @@ test('an @lid chat keeps both jids and survives a null pushName', () => {
   assert.equal(rec.pushName, null);
 });
 
+test("key.senderPn names the chat's alt only on a record we received: on one we sent it is our own number", () => {
+  // Codex review r1 (2026-11-19). A message typed on the instance's own phone (the Fold, or the
+  // owner's phone before the split) into a client's chat, with no remoteJidAlt: `senderPn` is
+  // the SENDER's number, i.e. the instance's own, and says nothing about the chat. Taken as the
+  // alt, the poller read the client's chat as the instance's chat with itself and skipped it.
+  const CLIENT_LID = '272516946294519@lid';
+  for (const own of ['966576267694@s.whatsapp.net', '966593296933@s.whatsapp.net']) {
+    for (const remoteJid of [CLIENT_LID, '966500000000@s.whatsapp.net']) {
+      const sent = normaliseRecord(textRecord({ key: { id: 'OUT1', fromMe: true, remoteJid, senderPn: own }, pushName: 'Bona' }));
+      assert.equal(sent.jid, remoteJid);
+      assert.equal(sent.jidAlt, null, `${remoteJid}: our own number is not the chat's alt`);
+    }
+  }
+  // remoteJidAlt is the chat's own alt, whoever sent the record.
+  const sentAlt = normaliseRecord(textRecord({ key: { id: 'OUT2', fromMe: true, remoteJid: CLIENT_LID, remoteJidAlt: '966500000000@s.whatsapp.net', senderPn: '966576267694@s.whatsapp.net' } }));
+  assert.equal(sentAlt.jidAlt, '966500000000@s.whatsapp.net');
+  // On a record we received in a 1:1 chat the sender is the client: senderPn is the chat's number.
+  const received = normaliseRecord(textRecord({ key: { id: 'IN1', fromMe: false, remoteJid: CLIENT_LID, senderPn: '966500000000@s.whatsapp.net' } }));
+  assert.equal(received.jidAlt, '966500000000@s.whatsapp.net');
+});
+
 test('the text is read from conversation, extendedTextMessage, a caption or an ephemeral wrapper', () => {
   assert.equal(textOf({ message: { conversation: 'plain' } }), 'plain');
   assert.equal(textOf({ message: { extendedTextMessage: { text: 'extended' } } }), 'extended');

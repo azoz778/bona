@@ -43,6 +43,11 @@ CLOUDFLARED_VERSION=2026.8.3
 CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e
 
 SECRET_FILES="retell.env evolution-api.env bona-services.env bona-marketing.env"
+# bona-services.env is not copied verbatim (2026-11-19): the PC copy keeps the owner's personal
+# WhatsApp instance for bona-intake, while the VPS reads Bona's own. For these keys the VPS's
+# own line wins; a verbatim copy would silently undo the move (A2Z go-live item 7).
+VPS_KEEP_FILE="bona-services.env"
+VPS_KEEP_KEYS="BONA_WA_INSTANCE BONA_WA_INSTANCE_JID"
 DATA_FILES="bona.db bona.db-wal bona.db-shm leads.jsonl chats.jsonl calls.jsonl"
 UNITS="bona-api.service cloudflared-bona.service bona-repo-sync.service bona-repo-sync.timer"
 # Stop order on the VPS: the tunnel connector first (no more public traffic), then the API, then the timer.
@@ -65,6 +70,165 @@ ok()   { printf '\033[1;32m ok \033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarn\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mfail\033[0m %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
+
+# The remote command that prints the VPS's own VPS_KEEP_KEYS lines of VPS_KEEP_FILE: nothing
+# when the file is missing or has none, a non-zero status when grep itself fails. Spaces before
+# the `=` count, as the API's env parser (services/api/lib/env.mjs) accepts them.
+vps_keep_grep() {
+  local alt; alt=$(printf '%s' "$VPS_KEEP_KEYS" | tr ' ' '|')
+  printf '%s' "f=~/.secrets/$VPS_KEEP_FILE; [ -e \"\$f\" ] || exit 0; grep -E '^[[:space:]]*(export[[:space:]]+)?($alt)[[:space:]]*=' \"\$f\"; [ \$? -le 1 ]"
+}
+
+# keep_vps_keys PC_FILE VPS_LINES OUT: OUT is PC_FILE, except that a VPS_KEEP_KEYS line the VPS
+# has (VPS_LINES) stands in place of the PC's line for that key, or is appended when the PC has
+# none; a kept key the VPS lacks keeps the PC's line. Prints nothing.
+# (FILENAME == vpsfile, not NR == FNR: with an empty VPS_LINES the classic idiom would read the
+# PC's lines as the VPS's.)
+keep_vps_keys() {
+  awk -v keys="$VPS_KEEP_KEYS" -v vpsfile="$2" '
+    function key(line,  k) { k = line; sub(/^[ \t]*(export[ \t]+)?/, "", k); if (k !~ /=/) return ""; sub(/[ \t]*=.*/, "", k); return k }
+    BEGIN { n = split(keys, list, " "); for (i = 1; i <= n; i++) want[list[i]] = 1 }
+    FILENAME == vpsfile { k = key($0); if (k in want) vps[k] = $0; next }
+    { k = key($0)
+      if ((k in want) && (k in vps)) { if (!(k in done)) { print vps[k]; done[k] = 1 }; next }
+      print }
+    END { for (i = 1; i <= n; i++) { k = list[i]; if ((k in vps) && !(k in done)) print vps[k] } }
+  ' "$2" "$1" > "$3"
+}
+
+# ---- The PC bona-api twin's WhatsApp drop-in (A2Z go-live item 7, 2026-11-19) -------------------
+# The PC's bona-services.env keeps the owner's personal instance for bona-intake, so the twin that
+# rollback.sh starts must load a later env file that names Bona's own instance and number
+# (services/README.md, "The PC bona-api twin since the WhatsApp move"). A later EnvironmentFile=
+# wins in systemd, and the process env wins over the files lib/env.mjs loads itself.
+PC_WA_ENV="$SECRETS_DIR/bona-api-pc-wa.env"
+PC_WA_DROPIN="$HOME_DIR/.config/systemd/user/bona-api.service.d/wa-own-number.conf"
+PC_PERSONAL_INSTANCE=abdulaziz-personal   # lib/wa.mjs: the instance when BONA_WA_INSTANCE is unset
+
+# ---- The PC bona-api twin's lock (owner decision 2026-11-19, "Lock the PC backup") --------------
+# At the WhatsApp cutover (runbook B5a) the twin gets the drop-in bona-api.service.d/locked.conf,
+# `AssertPathExists=!%h/.config/systemd/user/bona-api.service.d/LOCKED`, and that LOCKED file beside
+# it. While the file exists systemd refuses every start of the unit (a reboot, `systemctl --user
+# start`, any script, an older checkout's included), and install.sh and rollback.sh refuse before
+# they write, stop or start anything. After the switch the fall-back is the VPS env (runbook R1),
+# not this PC. Unlock only with the owner: rm the file (the drop-in alone changes nothing).
+PC_TWIN_LOCK="$HOME_DIR/.config/systemd/user/bona-api.service.d/LOCKED"
+
+# pc_twin_lock_check → returns when the twin is not locked; when it is, says why and dies.
+pc_twin_lock_check() {
+  [ -e "$PC_TWIN_LOCK" ] || return 0
+  cat >&2 <<HELP
+The PC bona-api twin is LOCKED ($PC_TWIN_LOCK).
+Since the WhatsApp move it must not start, from this script or any other way: its env reads the
+owner's personal WhatsApp (A2Z go-live item 7). The fall-back is the VPS, not this PC: the two env
+lines back, then \`ssh $BONA_VPS_SSH sudo systemctl restart bona-api\` (cutover runbook R1).
+Unlock only together with the owner: rm $PC_TWIN_LOCK
+HELP
+  die "refused: the PC bona-api twin is locked. Nothing was written, stopped, copied or started."
+}
+
+# env_value FILE KEY → prints KEY's value as lib/env.mjs parseEnvText reads it (the last KEY= line,
+# `export ` stripped, one pair of quotes stripped); nothing when the file or the key is not there.
+# For comparisons in this script only: never echo what it returns.
+env_value() {
+  [ -r "$1" ] || return 0
+  awk -v k="$2" -v q="'" '
+    { line = $0; sub(/\r$/, "", line); gsub(/^[ \t]+|[ \t]+$/, "", line)
+      if (line == "" || substr(line, 1, 1) == "#") next
+      if (substr(line, 1, 7) == "export ") { line = substr(line, 8); sub(/^[ \t]+/, "", line) }
+      eq = index(line, "="); if (eq <= 1) next
+      key = substr(line, 1, eq - 1); sub(/[ \t]+$/, "", key); if (key != k) next
+      v = substr(line, eq + 1); gsub(/^[ \t]+|[ \t]+$/, "", v)
+      f = substr(v, 1, 1); l = substr(v, length(v), 1)
+      if (length(v) > 1 && f == l && (f == "\"" || f == q)) v = substr(v, 2, length(v) - 2)
+      val = v; found = 1 }
+    END { if (found) print val }' "$1"
+}
+
+# pc_wa_files → PC_WA_FILES = the PC bona-api unit's EnvironmentFiles, one path per line, in the
+# order systemd reads them. 1 when systemctl cannot say, with the reason in PC_WA_WHY.
+pc_wa_files() {
+  PC_WA_FILES=
+  if ! PC_WA_FILES=$(systemctl --user show bona-api -p EnvironmentFiles --value 2>/dev/null); then
+    PC_WA_WHY="systemctl --user show bona-api failed"; return 1
+  fi
+  PC_WA_FILES=$(printf '%s\n' "$PC_WA_FILES" | sed 's/ (ignore_errors=[a-z]*)$//')
+}
+
+# pc_wa_dropin_ok → 0 when the PC bona-api unit loads $PC_WA_ENV after bona-services.env and that
+# file sets BONA_WA_INSTANCE (not the owner's personal instance) and BONA_WA_INSTANCE_JID, both
+# non-empty. Otherwise 1, with the reason in PC_WA_WHY (paths only, never a value).
+pc_wa_dropin_ok() {
+  local files wa_at shared_at inst jid
+  PC_WA_WHY=
+  pc_wa_files || return 1
+  files=$PC_WA_FILES
+  wa_at=$(printf '%s\n' "$files" | grep -nxF "$PC_WA_ENV" | tail -n 1 | cut -d: -f1 || true)
+  if [ -z "$wa_at" ]; then PC_WA_WHY="the PC bona-api unit does not load $PC_WA_ENV (no drop-in)"; return 1; fi
+  shared_at=$(printf '%s\n' "$files" | grep -nxF "$SECRETS_DIR/bona-services.env" | tail -n 1 | cut -d: -f1 || true)
+  if [ -n "$shared_at" ] && [ "$wa_at" -lt "$shared_at" ]; then
+    PC_WA_WHY="$PC_WA_ENV is loaded before $SECRETS_DIR/bona-services.env, so it does not win"; return 1
+  fi
+  if [ ! -f "$PC_WA_ENV" ]; then PC_WA_WHY="$PC_WA_ENV is missing"; return 1; fi
+  inst=$(env_value "$PC_WA_ENV" BONA_WA_INSTANCE)
+  jid=$(env_value "$PC_WA_ENV" BONA_WA_INSTANCE_JID)
+  if [ -z "$inst" ] || [ -z "$jid" ]; then
+    PC_WA_WHY="$PC_WA_ENV does not set both BONA_WA_INSTANCE and BONA_WA_INSTANCE_JID"; return 1
+  fi
+  if [ "$inst" = "$PC_PERSONAL_INSTANCE" ]; then
+    PC_WA_WHY="$PC_WA_ENV names the owner's personal instance"; return 1
+  fi
+}
+
+# pc_wa_dropin_help → stderr: how to give the twin its drop-in (as in services/README.md).
+pc_wa_dropin_help() {
+  cat >&2 <<HELP
+The PC bona-api twin would poll and send from the owner's personal WhatsApp ($PC_PERSONAL_INSTANCE)
+while the site sends clients to Bona's own number, which nothing on the PC would read (A2Z go-live
+item 7). See services/README.md, "The PC bona-api twin since the WhatsApp move". Give it a drop-in:
+
+  # $PC_WA_DROPIN
+  [Service]
+  EnvironmentFile=%h/.secrets/bona-api-pc-wa.env
+
+  # $PC_WA_ENV (mode 0600)
+  BONA_WA_INSTANCE=bona
+  BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net
+
+then \`systemctl --user daemon-reload\` and run this again. Only when the VPS env and the site are
+back on the personal number (runbook R1 + R2): run it with --personal-instance
+HELP
+}
+
+# pc_wa_preflight PERSONAL → the PC bona-api twin's WhatsApp route, checked before the caller stops,
+# copies or starts anything (A2Z go-live item 7); dies with the reason (paths only, never a value).
+#   PERSONAL=0  the unit must load the Bona drop-in (pc_wa_dropin_ok).
+#   PERSONAL=1  (--personal-instance) the unit must NOT load $PC_WA_ENV: after R1 + R2 the twin would
+#               otherwise still poll and send through Bona's instance while the site and the VPS are
+#               back on the owner's number (Codex review r1, 2026-11-19).
+pc_wa_preflight() {
+  PC_WA_WHY=
+  if [ "$1" != 1 ]; then
+    pc_wa_dropin_ok && return 0
+    pc_wa_dropin_help
+    die "refused: $PC_WA_WHY. Nothing was stopped, copied or started."
+  fi
+  pc_wa_files || die "refused: $PC_WA_WHY, so the route --personal-instance asks for cannot be checked. Nothing was stopped, copied or started."
+  if printf '%s\n' "$PC_WA_FILES" | grep -qxF "$PC_WA_ENV"; then
+    cat >&2 <<HELP
+--personal-instance: the PC bona-api unit still loads $PC_WA_ENV, so it would poll and
+send through Bona's own instance while the site and the VPS are back on the owner's personal number.
+Take the drop-in away first (services/README.md, "The PC bona-api twin since the WhatsApp move"):
+
+  rm $PC_WA_DROPIN
+  systemctl --user daemon-reload
+
+then run this again with --personal-instance.
+HELP
+    die "refused: the Bona drop-in is still active. Nothing was stopped, copied or started."
+  fi
+  warn "--personal-instance: the PC bona-api will poll and send from the owner's personal WhatsApp ($PC_PERSONAL_INSTANCE). A2Z go-live item 7 is undone; the site must be back on that number too (runbook R1 + R2)."
+}
 
 # render TEMPLATE  → stdout, with every @PLACEHOLDER@ substituted; refuses to leave one behind.
 # Bash parameter substitution, not sed: a `|` or `&` in a value would break or corrupt a sed

@@ -397,3 +397,16 @@ test('concierge wiring calls the handoff notifier after commit, including enrich
   assert.equal(called.length,2);assert.equal(called[1].budget,'6 million');assert.equal(called[1].no_match,true);assert.equal(h.sent.length,1);
  }finally{h.cleanup();}
 });
+
+test("the tool notes offer the site's WhatsApp number (src/data/site.json)", async () => {
+  const site = JSON.parse(fs.readFileSync(new URL('../../../src/data/site.json', import.meta.url), 'utf8'));
+  const h = harness();
+  const empty = JSON.parse(await h.tools.run('search_properties', { call: { call_id: 'c1' }, args: { district: 'Atlantis' } }));
+  assert.ok(empty.note.includes(`WhatsApp ${site.whatsapp.display}`), empty.note);
+  const saved = JSON.parse(await h.tools.run('create_lead', {
+    chat: { chat_id: 'chat_9', retell_llm_dynamic_variables: { locale: 'en' } },
+    args: { phone: '+966500000000', name: 'Sara', interest: 'villa' },
+  }));
+  assert.ok(saved.note.includes(`WhatsApp ${site.whatsapp.display}`), saved.note);
+  h.cleanup();
+});

@@ -323,8 +323,9 @@ never logged. `process.env` always wins over a file.
 | `BONA_WA_NOTIFY` | `1` | `0` stops the WhatsApp lead note and team members' replies from the dashboard inbox; login codes still go |
 | `BONA_WA_POLL` | `1` | the in-process WhatsApp poller defaults to ON inside the process (`lib/config.mjs`); opt out with `BONA_WA_POLL=0` in `bona-services.env`. No unit sets it — an `Environment=` line would override the file (§10) |
 | `BONA_WA_POLL_MS` | `20000` | poll interval; each tick reads the last 2 minutes of `chat/findMessages`. 20 s since Phase 2 of the team inbox (it was 45 s); the VPS sets it in `bona-services.env`, and a value there wins over this default |
-| `BONA_WA_INSTANCE` | `abdulaziz-personal` | the Evolution instance the poller reads and the note is sent from |
-| `BONA_OWNER_JID` | `966593296933@s.whatsapp.net` | where the notes go, and the one chat the poller never reads |
+| `BONA_WA_INSTANCE` | `abdulaziz-personal` | the Evolution instance every read and send uses (poller, backfill, notes, codes, replies, Dana). On the VPS `bona` (Bona's own WhatsApp) since the 2026-11-19 move; the PC file keeps `abdulaziz-personal` for bona-intake |
+| `BONA_WA_INSTANCE_JID` | unset | that instance's own number (`966576267694@s.whatsapp.net` on the VPS): the chat the poller never reads, the number a sent record's alt may name, outside the shared send budget. Unset or blank = `BONA_OWNER_JID`, the state before the move: removing the line is the rollback. Never defaulted by `provision.mjs`; a value that is not a phone jid is logged at start-up (`wa.instance_jid_invalid`, no value) |
+| `BONA_OWNER_JID` | `966593296933@s.whatsapp.net` | the owner: where lead notes and his login codes go (sent from the instance), the owner account seeded on every start, the one login code that may pass the Sending switch |
 | `BONA_FANOUT_MS` | `20000` | fan-out worker interval (Meta CAPI, GA4 MP, Snap CAPI) |
 | `BONA_DB_FILE` | `${BONA_DATA}/bona.db` | the SQLite lead store (0600); set only to move it |
 | `BONA_DASH_COOKIE_DAYS` | `30` | how long a dashboard login lasts (the `bona_dash` cookie and its row in `auth_sessions`) |
@@ -440,12 +441,50 @@ cannot apply the hardening directives (`ProtectSystem`, `PrivateTmp`, …) — i
 | is the repo-sync timer ticking | `ssh hermes-vps sudo systemctl list-timers bona-repo-sync.timer` |
 | check readiness / what is missing | `ssh hermes-vps bash /opt/bona/services/deploy/vps/install-vps.sh --check` |
 | copy changed secrets from the PC | `bash services/deploy/vps/sync-secrets.sh` (on the PC) |
-| bring it back to the PC | `bash services/deploy/vps/rollback.sh [--copy-back]` (on the PC) |
+| undo the WhatsApp move | on the VPS only: the two `BONA_WA_INSTANCE*` env lines back, then `ssh hermes-vps sudo systemctl restart bona-api` (cutover runbook R1, minutes); the PC twin stays locked (below) |
+| bring it back to the PC | `bash services/deploy/vps/rollback.sh [--copy-back]` (on the PC): refuses while the PC twin is locked, and until it has its WhatsApp drop-in (below); unlock only with the owner |
 
 `install.sh` in this directory is the **PC/WSL** installer and is kept only for rollback; its units
 are disabled on the PC. `bona-intake` (WhatsApp PDF → listing) still runs on the PC — it needs the
 owner's Claude login — and never talks to the API. Scripts: the header comment of each script in
 `services/deploy/vps/`; the move itself: `docs/superpowers/specs/2026-09-08-bona-api-vps-move-design.md`.
+
+**The PC `bona-api` twin since the WhatsApp move (2026-11-19).** The user unit is disabled but its
+preset is `enabled`, and the PC's `~/.secrets/bona-services.env` keeps
+`BONA_WA_INSTANCE=abdulaziz-personal` for bona-intake. Started as it is, the twin would poll the
+owner's personal WhatsApp again and undo A2Z go-live item 7.
+
+*Locked at the switch* (owner decision 2026-11-19, "Lock the PC backup"; cutover runbook B5a). The
+unit gets the drop-in `~/.config/systemd/user/bona-api.service.d/locked.conf` with
+`AssertPathExists=!%h/.config/systemd/user/bona-api.service.d/LOCKED`, and that `LOCKED` file
+beside it. While the file exists systemd refuses every start of the unit (a reboot, a manual
+`systemctl --user start`, an older checkout's script), and `install.sh` and `rollback.sh` refuse
+before they write, stop or start anything, saying why (lib.sh `pc_twin_lock_check`;
+`install.sh --uninstall` still runs). After the switch the fall-back is the VPS env alone (table
+above), not this PC. Unlock only with the owner, one command (the drop-in left behind changes
+nothing): `rm ~/.config/systemd/user/bona-api.service.d/LOCKED`.
+
+Once unlocked, never start it by hand. `rollback.sh`
+starts it, and refuses before it stops anything on the VPS unless the unit loads a drop-in whose env
+file is read after the shared one and names Bona's own instance and number (lib.sh
+`pc_wa_dropin_ok`; a later `EnvironmentFile=` wins, and the process env wins over the files it loads
+itself, `lib/env.mjs`). The refusal prints the steps; they are:
+
+    # ~/.config/systemd/user/bona-api.service.d/wa-own-number.conf
+    [Service]
+    EnvironmentFile=%h/.secrets/bona-api-pc-wa.env
+    # ~/.secrets/bona-api-pc-wa.env (0600): BONA_WA_INSTANCE=bona and BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net
+    # then: systemctl --user daemon-reload
+
+`rollback.sh --personal-instance` starts the twin on the personal number instead, with a warning:
+only once the VPS env and the site are back on that number (cutover runbook R1 + R2). It refuses,
+before it stops anything, while the unit still loads `bona-api-pc-wa.env`: the twin would otherwise
+poll and send through Bona's instance after all. It prints the two commands that take the drop-in
+away (`rm` the `.conf` above, then `systemctl --user daemon-reload`).
+
+`sync-secrets.sh` keeps the VPS's own `BONA_WA_INSTANCE` / `BONA_WA_INSTANCE_JID` (lib.sh
+`VPS_KEEP_KEYS`), and copies nothing when it cannot read them; run it only from a checkout that has
+that guard.
 
 ### Legacy / rollback only: the PC installer
 
@@ -539,7 +578,7 @@ Data files under `~/bona-data` (owner-only, mode 0600):
 | `leads.jsonl` | the append-only raw log: one line per **new** lead, same `id` as the store's `lead_id`. Imported into `bona.db` once at startup (`import.legacy` in the log; a rerun is a no-op) |
 | `calls.jsonl`, `chats.jsonl` | Retell webhook events and transcripts, one line per finished conversation |
 
-- **Dana down, site shows the WhatsApp fallback** → `ssh hermes-vps sudo systemctl status bona-api cloudflared-bona`; `ssh hermes-vps sudo journalctl -u bona-api -n 50`. Uptime Kuma #25 (`api.bona-real-estate.com/health`, keyword `"retell":"ok"`) pages Telegram after ~3 minutes. If the VPS itself is gone: `bash services/deploy/vps/rollback.sh` on the PC restores the previous setup in about a minute.
+- **Dana down, site shows the WhatsApp fallback** → `ssh hermes-vps sudo systemctl status bona-api cloudflared-bona`; `ssh hermes-vps sudo journalctl -u bona-api -n 50`. Uptime Kuma #25 (`api.bona-real-estate.com/health`, keyword `"retell":"ok"`) pages Telegram after ~3 minutes. If the VPS itself is gone: the PC twin is locked since the WhatsApp move, so `bash services/deploy/vps/rollback.sh` on the PC refuses; only with the owner, unlock it and give it its WhatsApp drop-in, and the script then restores the previous setup in about a minute (§6, "The PC `bona-api` twin since the WhatsApp move"; it says what is missing until then). Undoing the WhatsApp move itself is the VPS env alone (cutover runbook R1).
 - **Inventory stale after an intake publish** → `ssh hermes-vps sudo systemctl list-timers bona-repo-sync.timer` and `ssh hermes-vps sudo journalctl -u bona-repo-sync -n 5`; the API re-reads `listings.json` within 30 s of the pull.
 - **A client asks for a WhatsApp conversation to be deleted** (the privacy page offers it) →
   the owner's *Not a client* on the chat deletes what this service stored of it — messages,
@@ -590,11 +629,13 @@ lte: <now> } }` — both bounds, because 2.3.7 ignores the filter without them �
 `readWindow`: pages of 100, newest first, up to 5, and a window whose `total` is larger than
 that is split in halves by time instead (below); deduplicated on `key.id` (`wa_seen`,
 pruned after 7 days).
-Groups, status broadcasts and your own chat are skipped; an `…@lid` chat takes its phone
-from `key.remoteJidAlt` and stores both jids. Evolution is **never** given a webhook: the
-instance is your personal WhatsApp, and nothing consumes its events (checked 2026-09-27: no
-webhook, websocket or queue; Lisa reads on demand and sends only on your request, through
-the same API).
+Groups, status broadcasts and the instance's own chat (`BONA_WA_INSTANCE_JID`, else
+`BONA_OWNER_JID`) are skipped; an `…@lid` chat takes its phone
+from `key.remoteJidAlt` and stores both jids. Evolution is **never** given a webhook: until the
+2026-11-19 move the instance was your personal WhatsApp, which another agent also uses, and
+nothing consumes its events (checked 2026-09-27: no webhook, websocket or queue; Lisa reads on
+demand and sends only on your request, through the same API). Bona's own instance (`bona`) is
+created with none either.
 
 *Matched-only storage* (your decision). An incoming message is kept, as a new lead or on the
 lead it belongs to, only when one of these claims it, in order — the first hit wins (Phase 2
@@ -673,6 +714,7 @@ untouched, so an Evolution outage loses nothing and shows up only as growing lag
 | `unmatched` | messages discarded since the store was created (it lives in the cursor row, so it survives restarts) |
 | `matched` | messages kept since this process started |
 | `running` | whether the interval is on |
+| `ownNumber` | `"instance"` when `BONA_WA_INSTANCE_JID` is set, `"owner"` when it falls back to `BONA_OWNER_JID`; never the digits |
 
 `ok` never depends on any of it: a poller that is behind is a gap in attribution, not a
 site that stopped answering.
@@ -722,7 +764,7 @@ is CORS-enabled, so no other origin can read a byte of it.
 **Login (team accounts, since 2026-09).** `GET /dashboard/login` asks for a WhatsApp number.
 `POST /dashboard/login/code` — if the number belongs to an active member of the team
 (`users`, managed on the owner-only **Team** page), six digits go to that member's WhatsApp
-from the owner's number (the owner's own code goes to his own chat). Any other number gets
+from the instance's number (`BONA_WA_INSTANCE`; Bona's own WhatsApp since 2026-11-19, the owner's own code going to his personal chat). Any other number gets
 the same answer, the same `bona_dash_try` cookie (`Path=/dashboard/login`) and a decoy
 challenge no code opens, and all member-only work (the audit row, the send) runs only after
 the answer is written, so the login says nothing about who is on the team. A challenge
@@ -735,6 +777,15 @@ in `lib/wa-send.mjs` (Sending switch on the Team page — only the owner's own c
 20/min, 500/day, 6/min per recipient). Known limit: anyone who knows a member's number can
 spend that member's code budget and block *new* logins for up to a day; existing sessions
 keep working.
+Known exposure since the move to Bona's own number (2026-11-19; the route is the owner's decision,
+design §11): every code, the owner's own included, is a message *sent from* the Bona account, so it
+also shows in that account's chat with the member on the Fold (WhatsApp Business) and on every
+device linked to it (the owner's warm-up companion, Evolution). Whoever can read the Fold's
+WhatsApp can type the owner's number at `/dashboard/login`, read his code there and get an owner
+session (Team page, Sending switch, Dana). Before then only his own phone and Evolution showed it.
+So the Fold stays screen-locked with WhatsApp's notification text hidden on the lock screen, is
+not a shared staff phone, and no bot or viewer gets screen access to WhatsApp Business on it
+(cutover runbook A2; the owner confirms).
 Sessions carry the member; deactivating someone deletes their sessions and codes at once, and
 every admin write re-checks the person after the body is read. Every stage change and note
 records who made it, and `audit_log` records logins, team changes and switches (ids only —
@@ -797,7 +848,7 @@ rail's stage numbers too), response times — stay as they are for everyone.
 | `POST /v1/admin/leads/:id/note` | `{note}` → a `note` touchpoint and an appended line on the lead |
 | `POST /v1/admin/spend` | `{day, platform, campaign_id, campaign_name, spend_sar, clicks?, impressions?}`, upserted on `(day, platform, campaign_id)` |
 | `GET /dashboard/inbox` | the Bona chats, unread first, then newest: name, masked number, last message, stage, handler, *Needs a human*. The owner also gets the **Unsure** tab (`?tab=unsure`; 403 for staff) and *Add chat by phone number* |
-| `GET /dashboard/inbox/:leadId` | one chat, refreshed from Evolution first and then marked read: bubbles labelled client / team member / Dana / the owner's number, gaps, sends still open, the reply box and the handler picker; the number in full in the header. 404 unless it is an `in` chat (a `wa_jid` or `wa_lid`) and its number is not excluded |
+| `GET /dashboard/inbox/:leadId` | one chat, refreshed from Evolution first and then marked read: bubbles labelled client / team member / Dana / Bona's phone (typed on the instance's phone), gaps, sends still open, the reply box and the handler picker; the number in full in the header. 404 unless it is an `in` chat (a `wa_jid` or `wa_lid`) and its number is not excluded |
 | `POST /v1/admin/inbox/:leadId/reply` | any member: one reply through the shared gate; its answers, form and JSON, are under *Reply answers* ([Inbox](#inbox)), and none puts message text in a URL |
 | `POST /v1/admin/inbox/:leadId/handler` | any member: hand the chat to an active member, or to nobody |
 | `POST /v1/admin/inbox/:leadId/move` · `…/out` | owner: *Move to Bona inbox* (pulls 30 days) · *Not a client* (`out`, transcript purged now) |
@@ -827,7 +878,8 @@ attacked, the answer is a rate rule or a Cloudflare Access policy in front of
 #### Inbox
 
 Since 2026-09, `GET /dashboard/inbox` is where the team reads and answers the Bona chats on
-the owner's number (design §4, 2026-09-27; routes in the table above). A *chat* is a lead
+the instance's number (the owner's until 2026-11-19, Bona's own since; design §4, 2026-09-27;
+routes in the table above). A *chat* is a lead
 with a `wa_jid` or a `wa_lid`. Whether it belongs is **stored** in `leads.inbox_state`
 (`in`, `unsure`, `out`) and never re-derived, so a guess cannot slip in later through the
 `phone` rule:
@@ -985,14 +1037,14 @@ Bona enquiry (the first-message snippet stays with the lead), and the copies thi
 does not reach: Evolution's own database — "the WhatsApp gateway server that Bona runs for
 this number", which keeps every message with no time limit — and the phones.
 
-*Replies* go out from the owner's number (`BONA_WA_INSTANCE`) and only into `in` chats.
+*Replies* go out from the instance's number (`BONA_WA_INSTANCE`; Bona's own WhatsApp since 2026-11-19) and only into `in` chats.
 `POST /v1/admin/inbox/:leadId/reply` sends to the lead's **phone** jid (`…@s.whatsapp.net`);
 a chat known only by its `@lid` is refused (`lid_only`) and answered from the phone, because
 `lid` digits are not a phone number. Every reply passes the gate the login codes pass
 (`lib/wa-send.mjs`): the Sending switch, `BONA_WA_NOTIFY` not `0` (§4; a login code does
 not need it), 20 a minute overall, 6 a minute per recipient, 30 a minute per person, and
-500 a day — counted from `wa_outbox` over a rolling 24 h (messages to the owner's own chat
-do not count), so a restart does not reset it. The form
+500 a day — counted from `wa_outbox` over a rolling 24 h (messages to the owner's chat and
+to the instance's own number do not count), so a restart does not reset it. The form
 carries a random `send_id`, and its outbox row is written before the HTTP call, so a double
 submit gets the first answer back, never a second message. A reply is `accepted` only when
 Evolution answers with a `key.id`. A timeout, a network error other than a refused
@@ -1097,7 +1149,7 @@ dismissed one a year after it was dismissed (`candidatesExpired`, `dismissalsExp
 
 #### Dana on WhatsApp (Phase 4)
 
-When a client writes in a Bona inbox chat and nobody on the team has answered for 24 hours, Dana answers on WhatsApp from the owner's number, through the same sender as a team member's reply. She ships **off**: `settings.dana_enabled` is `'0'` until an owner turns her on from the Team page ("Dana on WhatsApp"). Before that, an owner can let her **test on one chat** from that chat's page ("Let Dana test on this chat"); anyone on the team can turn her **off for one chat** ("Turn Dana off for this chat"). Off for a chat also ends a test on it. While she is off, the Team page says how many chats are under test.
+When a client writes in a Bona inbox chat and nobody on the team has answered for 24 hours, Dana answers on WhatsApp from the instance's number (Bona's own since 2026-11-19), through the same sender as a team member's reply. She ships **off**: `settings.dana_enabled` is `'0'` until an owner turns her on from the Team page ("Dana on WhatsApp"). Before that, an owner can let her **test on one chat** from that chat's page ("Let Dana test on this chat"); anyone on the team can turn her **off for one chat** ("Turn Dana off for this chat"). Off for a chat also ends a test on it. While she is off, the Team page says how many chats are under test.
 
 She is a separate Retell LLM and chat agent (`retell/provision.mjs --whatsapp-only`; ids `waLlmId` / `waChatAgentId` in `retell/ids.json`, or `BONA_RETELL_WA_CHAT_AGENT_ID`) on the site's knowledge base, with `search_properties`, `search_units` and `request_human`. Without an agent id `/health` shows `dana.configured: false` and nothing is sent. She is never built on the Retell mock: with `BONA_RETELL_MOCK=1` she is not configured and start-up logs one `dana.mock_off` warning. On shutdown she is given up to 4 s to finish what is in flight.
 

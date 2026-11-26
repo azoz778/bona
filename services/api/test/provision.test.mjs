@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   knowledgeBasePayload, knowledgeBaseFreshness, toolsPayload, llmPayload, voiceAgentPayload,
-  chatAgentPayload, redactPayload, provision, PROMPT_FILE, PREFERRED_MODEL, FALLBACK_MODEL,
+  chatAgentPayload, redactPayload, provision, ensureEnvFile, PROMPT_FILE, PREFERRED_MODEL, FALLBACK_MODEL,
   BEGIN_MESSAGE, KB_NAME, VOICE_AGENT_NAME, CHAT_AGENT_NAME,
   WA_PROMPT_FILE, WA_LLM_NAME, WA_CHAT_AGENT_NAME, WA_SESSION_MS, whatsappToolsPayload, whatsappLlmPayload, whatsappChatAgentPayload,
 } from '../retell/provision.mjs';
@@ -24,6 +24,8 @@ const NEW_SITE = 'https://bona-real-estate.com';
 const urlSources = (site) => knowledgeBasePayload({ siteUrl: site }).knowledge_base_urls
   .map((url, i) => ({ type: 'url', source_id: `src_${i}`, url }));
 const prompt = fs.readFileSync(PROMPT_FILE, 'utf8');
+const site = JSON.parse(fs.readFileSync(new URL('../../../src/data/site.json', import.meta.url), 'utf8'));
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function tempHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-prov-'));
@@ -132,7 +134,13 @@ test('the persona states the rules the owner cannot have broken', () => {
   assert.match(prompt, /TAQEEM/);
   assert.match(prompt, /Never invent a property/i);
   assert.match(prompt, /1100313556/, 'the FAL licence number');
-  assert.match(prompt, /\+966 59 329 6933/);
+  // Dana hands over on the site's WhatsApp number (src/data/site.json) and quotes no other.
+  assert.match(prompt, new RegExp(`hand over: WhatsApp \\*\\*${esc(site.whatsapp.display)}\\*\\*`));
+  assert.match(prompt, new RegExp(`offer WhatsApp \\*\\*${esc(site.whatsapp.display)}\\*\\*`));
+  // Calls moved to Bona's own number too (owner 2026-11-26): one line names it for both, and says who answers calls.
+  assert.equal(site.phone.display, site.whatsapp.display);
+  assert.match(prompt, new RegExp(`- WhatsApp and phone: \\*\\*${esc(site.whatsapp.display)}\\*\\* \\(phone calls to it are answered by Bona’s AI phone assistant\\)\\.`));
+  for (const [n] of prompt.matchAll(/\+966 \d{2} \d{3} \d{4}/g)) assert.ok([site.whatsapp.display, site.phone.display].includes(n), `unknown number in prompt.md: ${n}`);
   assert.match(prompt, /Sunday–Thursday, 10:00–19:00/);
   assert.match(prompt, /AI concierge/i);
   assert.match(prompt, /\{\{locale\}\}/);
@@ -870,6 +878,19 @@ test('--dry-run --rebuild-kb shows her LLM moving to the new base too', async ()
     const wa = text.slice(text.indexOf('— WhatsApp'));
     assert.match(wa, /<new_knowledge_base_id>/);
     assert.doesNotMatch(text, new RegExp(TOKEN));
+  } finally {
+    cleanup();
+  }
+});
+
+test('ensureEnvFile never writes BONA_WA_INSTANCE_JID: its absence is the rollback state', () => {
+  const { home, cleanup } = tempHome();
+  try {
+    const first = ensureEnvFile({ home, env: {} });
+    assert.ok(!first.keys.includes('BONA_WA_INSTANCE_JID'));
+    const again = ensureEnvFile({ home, env: {} });
+    assert.ok(!(again.added ?? []).includes('BONA_WA_INSTANCE_JID'));
+    assert.doesNotMatch(fs.readFileSync(first.file, 'utf8'), /^BONA_WA_INSTANCE_JID=/m);
   } finally {
     cleanup();
   }

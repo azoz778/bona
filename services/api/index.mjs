@@ -210,8 +210,11 @@ export function createApp(options = {}) {
   // BONA_OWNER_JID — which also hands him every session that predates accounts, so his
   // live login survives the deploy; everyone else is added on the Team page.
   const team = options.team ?? createTeam(db, { log });
+  // The owner (BONA_OWNER_JID) and the instance's own number (BONA_WA_INSTANCE_JID) are two
+  // numbers since 2026-11-19 (design 2026-11-16 §11); unset, the second is the first.
+  const wa = waConfig(cfg.env ?? {});
   try {
-    team.ensureOwner({ phone: bareJid(waConfig(cfg.env ?? {}).ownerJid), name: cfg.env?.BONA_OWNER_NAME ?? 'Abdulaziz' });
+    team.ensureOwner({ phone: bareJid(wa.ownerJid), name: cfg.env?.BONA_OWNER_NAME ?? 'Abdulaziz' });
   } catch (err) {
     // A malformed BONA_OWNER_JID must not take the public site (chat, enquiries, Retell
     // tools) down with it. The dashboard stays usable for any account already stored,
@@ -239,12 +242,18 @@ export function createApp(options = {}) {
   const interrupted = sender.recoverInterrupted?.() ?? 0;
   if (interrupted) log({ level: 'warn', evt: 'wa.send.interrupted', count: interrupted });
   const sendCode = options.sendCode ?? ((o) => sender.sendTo({ ...o, kind: 'code' }));
-  // The instance's own number (digits, from BONA_OWNER_JID): a sent record whose alt is
-  // this number names its sender, not the chat — known even while the owner's account is
-  // deactivated or demoted.
-  const ownerDigits = bareJid(waConfig(cfg.env ?? {}).ownerJid);
-  // A message typed on the owner's own phone makes him the chat's handler when it has
-  // none. Looked up on every call, so a change on the Team page is seen at once.
+  // The owner (BONA_OWNER_JID): a message typed on the instance's phone makes him the chat's
+  // handler when it has none. Looked up on every call, so a change on the Team page is seen at once.
+  const ownerDigits = bareJid(wa.ownerJid);
+  // The instance's own number (digits, from BONA_WA_INSTANCE_JID; unset = the owner's, as
+  // before the split): a sent record whose alt is this number names its sender, not the
+  // chat — known even while the owner's account is deactivated or demoted.
+  const selfDigits = bareJid(wa.instanceJid);
+  // Not a phone jid (lib/wa.mjs PHONE_JID_RE): waConfig fell back to the owner's number; say it out loud.
+  if (wa.ownNumberFrom === 'invalid') {
+    // Never the value: only that it is not a phone jid.
+    log({ level: 'error', evt: 'wa.instance_jid_invalid' });
+  }
   const ownerUserId = () => {
     const owner = ownerDigits ? team.getUserByPhone(ownerDigits) : null;
     return owner && owner.active && owner.role === 'owner' ? owner.user_id : null;
@@ -268,7 +277,7 @@ export function createApp(options = {}) {
     isExcludedLead: excludedLead, now: clock, log,
   });
   const given = options.ingest ?? createIngest({
-    db, inbox: inboxStore, ownerUserId, ownerPhone: ownerDigits || null, isExcludedLead: excludedLead, log, now: clock,
+    db, inbox: inboxStore, ownerUserId, ownerPhone: selfDigits || null, isExcludedLead: excludedLead, log, now: clock,
   });
   // The backfill and the poller take the one-record function. A test may hand in either
   // shape, as createPoller allows; any other fails here, not on every record the poller reads.
@@ -900,7 +909,7 @@ export function createApp(options = {}) {
       return sendRaw(res, 200, JSON.stringify(await tools.run(toolName, body)));
     } catch (err) {
       log({ level: 'error', evt: 'tool.failed', tool: toolName, error: String(err?.message ?? err) });
-      return sendRaw(res, 200, JSON.stringify(JSON.stringify({ error: 'tool_failed', note: 'Tell the visitor you cannot check that right now and offer WhatsApp +966 59 329 6933.' })));
+      return sendRaw(res, 200, JSON.stringify(JSON.stringify({ error: 'tool_failed', note: 'Tell the visitor you cannot check that right now and offer WhatsApp +966 57 626 7694.' })));
     }
   }
 

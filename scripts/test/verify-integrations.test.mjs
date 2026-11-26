@@ -231,3 +231,14 @@ test('a served TikTok Pixel does not prove event receipt', () => {
   assert.equal(result.status, 'pending-owner');
   assert.match(result.detail, /event receipt and reporting still require verification/);
 });
+
+test('Evolution: the board says whether an instance is set, never its name (the board is the public /dashboard/)', async () => {
+  const at = (status) => async () => ({ status, ok: status < 400, text: '', json: { version: '2.3.7' } });
+  const env = { EVOLUTION_API_URL: 'https://wa.example.test', EVOLUTION_API_KEY: 'k', BONA_WA_INSTANCE: 'abdulaziz-personal' };
+  const live = await checkEvolution({ env, probe: at(200) });
+  assert.equal(live.status, 'live');
+  assert.doesNotMatch(live.detail, /abdulaziz-personal/);
+  assert.match(live.detail, /instance set$/);
+  assert.match((await checkEvolution({ env: { ...env, BONA_WA_INSTANCE: ' ' }, probe: at(200) })).detail, /instance \(unset\)$/);
+  assert.match((await checkEvolution({ env: { ...env, BONA_WA_INSTANCE: undefined }, probe: at(200) })).detail, /instance \(unset\)$/);
+});

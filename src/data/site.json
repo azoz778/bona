@@ -17,13 +17,13 @@
   "url": "https://bona-real-estate.com",
   "futureDomain": "bona-real-estate.com",
   "whatsapp": {
-    "e164": "+966593296933",
-    "display": "+966 59 329 6933",
-    "wa": "966593296933"
+    "e164": "+966576267694",
+    "display": "+966 57 626 7694",
+    "wa": "966576267694"
   },
   "phone": {
-    "e164": "+966593296933",
-    "display": "+966 59 329 6933"
+    "e164": "+966576267694",
+    "display": "+966 57 626 7694"
   },
   "email": "info@bona-real-estate.com",
   "instagram": {
@@ -113,7 +113,8 @@
       "en": "Abdulaziz Zaidan",
       "ar": "عبدالعزيز زيدان"
     },
-    "fal": "1100313556"
+    "fal": "1100313556",
+    "phone": "+966593296933"
   },
   "indexNowKey": "b0na7c3f9e2d4a1b8f6e5c4d3b2a1908"
 }

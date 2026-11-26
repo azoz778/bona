@@ -24,3 +24,6 @@ ops/*
 # Design working files (mockups, proposals, preview renders, screenshots).
 .design/
 sketches/
+
+# Local scratch for test temp dirs and logs (2026-11-19 WhatsApp move); never committed.
+.scratch/

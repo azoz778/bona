@@ -1,8 +1,8 @@
 /**
  * Evolution API 2.3.7 (Baileys) — the READ half, for the WhatsApp poller and the Bona inbox.
  *
- * IMPORTANT: the instance this talks to (`abdulaziz-personal`) is the owner's
- * *personal* WhatsApp and is already consumed by another agent. This module only ever
+ * IMPORTANT: the instance this talks to (`BONA_WA_INSTANCE`: Bona's own WhatsApp since
+ * 2026-11-19; before that the owner's personal one, which another agent also uses). This module only ever
  * calls `POST /chat/findMessages/{instance}`. It never sets a webhook, a websocket or
  * a rabbitmq consumer — doing so would steal the other agent's events — and it never
  * sends: what the API service sends goes through `lib/wa-send.mjs` (login codes and,
@@ -339,6 +339,12 @@ export function isNoise(record) {
  * (D16) — all four from `fileNameOf`, `noise` is `isNoise`. A document's name is chosen by its sender
  * and is often a person's name or a phone number, so `media` and `fileName` are never
  * logged — the same care as `text`, `pushName` and the jids.
+ *
+ * `jidAlt` is the CHAT's other address: `remoteJidAlt`, else `key.senderPn` on a record we
+ * received (in a 1:1 chat its sender is the client). Never `senderPn` on a record we sent:
+ * there it is the instance's own number whatever the chat, and as the alt it made a reply
+ * typed on the instance's phone read as the instance's chat with itself (Codex review r1,
+ * 2026-11-19).
  * @typedef {{ id: string|null, jid: string|null, jidAlt: string|null, fromMe: boolean,
  *             ts: number|null, text: string, pushName: string|null,
  *             contextInfo: object|null, messageType: string|null,
@@ -348,7 +354,7 @@ export function isNoise(record) {
 export function normaliseRecord(record) {
   const key = record?.key ?? {};
   const jid = typeof key.remoteJid === 'string' ? key.remoteJid : null;
-  const alt = key.remoteJidAlt ?? record?.remoteJidAlt ?? key.senderPn ?? null;
+  const alt = key.remoteJidAlt ?? record?.remoteJidAlt ?? (key.fromMe === true ? null : key.senderPn) ?? null;
   const { name: fileName, truncated: fileNameTruncated, tk: fileNameTk, bona: fileNameBona } = fileNameOf(record);
   return {
     id: typeof key.id === 'string' && key.id ? key.id : null,

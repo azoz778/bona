@@ -27,6 +27,9 @@
 #   --restart     restart both units even if they were already running
 #   --uninstall   stop and disable both units (leaves the tunnel and DNS alone)
 #
+# Refused, before anything is written or started, while the PC bona-api twin is locked (since
+# the WhatsApp cutover, runbook B5a; vps/lib.sh pc_twin_lock_check). --uninstall still runs.
+#
 set -euo pipefail
 
 REPO="${BONA_REPO_DIR:-$HOME/bona}"
@@ -56,7 +59,7 @@ for arg in "$@"; do
     --no-dns) DO_DNS=0 ;;
     --restart) DO_RESTART=1 ;;
     --uninstall) DO_UNINSTALL=1 ;;
-    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
 done
@@ -81,6 +84,12 @@ if [ "$DO_UNINSTALL" = 1 ]; then
   ok "units stopped. The tunnel \"$TUNNEL\" and its DNS record were left in place."
   exit 0
 fi
+
+# ---------------------------------------------------------------- 0. the lock
+# Since the WhatsApp cutover the twin must not start (A2Z go-live item 7): the same check as
+# vps/rollback.sh. In a subshell, because lib.sh's names (NODE_BIN, say/ok/die, …) are not this
+# script's.
+( . "$(dirname "${BASH_SOURCE[0]}")/vps/lib.sh" && pc_twin_lock_check ) || exit 1
 
 # ---------------------------------------------------------------- 1. checks
 say "Checking prerequisites"

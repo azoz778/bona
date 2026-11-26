@@ -243,3 +243,130 @@ test('the Changes section flags the chats kept only to be checked, in both langu
   assert.match(ar, /مدةً أقصاها سنة/);
   assert.ok(policy.updated >= '2026-09-29', 'the version date is the newest change');
 });
+
+// ---- Bona's own WhatsApp number and the AI phone line (2026-11-19, design 2026-11-16 §8/§11) ----
+// CANDIDATE text: the owner OKs the EN and AR wording before the branch is merged.
+
+test('the AI phone assistant section: who answers, the recording, where the voice goes, how long audio is kept, how to have it deleted', () => {
+  const s = section('ai-phone-line');
+  assert.ok(s, 'the WhatsApp number is public and callable, and calls to it reach the AI line (design §8)');
+  const ids = policy.sections.map((x) => x.id);
+  assert.equal(ids.indexOf('ai-phone-line'), ids.indexOf('ai-concierge') + 1);
+  const en = body(s, 'en');
+  const ar = body(s, 'ar');
+  for (const text of [en, ar]) assert.ok(text.includes(site.whatsapp.display), 'the number it answers');
+  assert.match(en, /an AI system, not a person/);
+  assert.match(en, /the call is recorded/);
+  assert.match(en, /sent to OpenAI/);
+  assert.match(en, /outside Saudi Arabia/);
+  assert.match(en, /up to 90 days/);
+  assert.match(en, /no audio recording is kept/);
+  assert.match(en, /never asks for ID numbers, bank or payment details/);
+  // Phone calls only: a WhatsApp call to the same number never reaches the AI line.
+  assert.ok(en.includes(`Phone calls to Bona’s number, ${site.whatsapp.display} (not WhatsApp calls), are answered at any hour`), en);
+  assert.match(en, /WhatsApp calls to that number do not reach the assistant; please write to us on WhatsApp instead\./);
+  assert.ok(ar.includes(`المكالمات الهاتفية الواردة إلى رقم بونا ${site.whatsapp.display} (لا مكالمات واتساب)`), ar);
+  assert.match(ar, /ولا تصل مكالمات واتساب إلى هذا الرقم إلى المساعدة، فراسلنا كتابةً عبر واتساب بدلاً من ذلك\./);
+  assert.match(ar, /الذكاء الاصطناعي/);
+  assert.match(ar, /مسجّلة/);
+  assert.match(ar, /OpenAI/);
+  assert.match(ar, /خارج المملكة/);
+  assert.match(ar, /تسعون يوماً/);
+  // Phase 1 makes no enquiry from a call (~/bona-line catalogue.py refuses create_lead; POST /v1/calls
+  // does not exist yet): the transcript and details stay with the local call record, and the text
+  // says where they are rather than pointing at the enquiry store.
+  assert.ok(en.includes('The transcript and your details are kept with the call record on Bona’s own systems until you ask us to delete them.'), en);
+  assert.ok(ar.includes('أما النص المكتوب وبياناتك فتُحفظ مع سجل المكالمة على أنظمة بونا الخاصة إلى أن تطلب منا حذفها.'), ar);
+  for (const gone of ['kept as an enquiry, like any other', 'the enquiry it produced']) assert.ok(!en.includes(gone), `en still says: ${gone}`);
+  for (const gone of ['بوصفها استفساراً كأي استفسار آخر', 'الاستفسار الناتج عنها']) assert.ok(!ar.includes(gone), `ar still says: ${gone}`);
+  assert.match(en, /To have a call recording, its transcript or your details deleted, message us on WhatsApp/);
+  assert.match(ar, /ولطلب حذف تسجيل مكالمة أو نصها أو بياناتك، راسلنا على واتساب/);
+  assert.match(ar, /فلا يُحتفظ بأي تسجيل صوتي/);
+  // Declining keeps no audio, but the transcript and the details stay (~/bona-line call_record.py
+  // finish_audio deletes only the raw tracks and the WAV): the same paragraph says so.
+  const declineEn = s.body.en.find((p) => p.includes('do not want to be recorded'));
+  const declineAr = s.body.ar.find((p) => p.includes('لا ترغب في تسجيل المكالمة'));
+  assert.ok(declineEn && declineAr, 'the decline sentence in both languages');
+  assert.match(declineEn, /no audio recording is kept; it notes your details for a callback and ends the call\. The written transcript of that call and the details you give are still kept, as described below\./);
+  assert.match(declineAr, /فلا يُحتفظ بأي تسجيل صوتي لها، وتدوّن المساعدة بياناتك ليُعاوَد الاتصال بك ثم تُنهي المكالمة\. لكن النص المكتوب لتلك المكالمة والبيانات التي تذكرها يظلّان محفوظَين كما هو موضّح أدناه\./);
+  assert.match(body(section('sharing'), 'en'), /OpenAI for the AI phone assistant/);
+  assert.match(body(section('sharing'), 'ar'), /OpenAI للمساعدة الهاتفية/);
+  // Its pointers lead to real headings, the same ones in both languages.
+  const heads = (locale) => new Map(policy.sections.map((x) => [x.heading[locale], x.id]));
+  const to = (text, re, locale) => [...text.matchAll(re)].map((m) => heads(locale).get(m[1]));
+  const enTo = to(en, /“([^”]+)”\)?\s+below/g, 'en');
+  const arTo = to(ar, /«([^»]+)»\)?\s+أدناه/g, 'ar');
+  assert.ok(enTo.length > 0 && enTo.every(Boolean), `en pointers: ${enTo}`);
+  assert.deepEqual([...new Set(arTo)].sort(), [...new Set(enTo)].sort());
+});
+
+test('the business-partner sentence (owner OK 2026-11-26) sits with the WhatsApp conversations and the call records', () => {
+  const en = 'A business partner of the owner of Bona who also uses his AI tools can access them as well.';
+  const ar = 'ويمكن كذلك لشريك أعمال لمالك بونا يستخدم أدوات الذكاء الاصطناعي نفسها الوصول';
+  for (const id of ['whatsapp-conversations', 'ai-phone-line']) assert.ok(body(section(id), 'en').includes(en), `${id} en`);
+  // Arabic: "them" is the conversations (plural, إليها) in one section, the recording and the transcript (dual, إليهما) in the other.
+  assert.ok(body(section('whatsapp-conversations'), 'ar').includes(`تسجيل الدخول. ${ar} إليها.`));
+  assert.ok(body(section('ai-phone-line'), 'ar').includes(`وقراءة النص. ${ar} إليهما.`));
+  // The dated change line says so too, until its 30 days are up (on or after 2026-12-26).
+  if (new Date().toISOString().slice(0, 10) >= '2026-12-26') return;
+  const changes = section('changes');
+  assert.ok(changes.body.en.some((p) => /^26 November 2026:.*business partner of the owner of Bona/.test(p)));
+  assert.ok(changes.body.ar.some((p) => /^26 نوفمبر 2026:.*شريك أعمال لمالك بونا/.test(p)));
+});
+
+test('a deletion or data request is sent on WhatsApp, never by phone (a call reaches the AI line, 2026-11-26)', () => {
+  const en = policy.sections.flatMap((x) => x.body.en).join(' ') + ' ' + policy.contact.en;
+  const ar = policy.sections.flatMap((x) => x.body.ar).join(' ') + ' ' + policy.contact.ar;
+  assert.doesNotMatch(en, /call us/i);
+  assert.doesNotMatch(ar, /اتصل بنا/);
+  assert.ok(body(section('whatsapp-conversations'), 'en').includes(`from our phones, message us on WhatsApp at ${site.whatsapp.display}`));
+  assert.ok(body(section('whatsapp-conversations'), 'ar').includes(`من هواتفنا، راسلنا على واتساب على الرقم ${site.whatsapp.display}`));
+  const page = fs.readFileSync(new URL('../../src/components/pages/PrivacyPage.astro', import.meta.url), 'utf8');
+  assert.doesNotMatch(page, /tel:/, 'the privacy page offers WhatsApp for questions about your data, not a call');
+});
+
+test("dashboard replies are said to come from the site's WhatsApp number", () => {
+  const s = section('whatsapp-conversations');
+  assert.ok(body(s, 'en').includes(`come from Bona’s WhatsApp number, ${site.whatsapp.display}`));
+  assert.ok(body(s, 'ar').includes(`من رقم واتساب بونا ${site.whatsapp.display}`));
+});
+
+test('every number the policy writes out is site.whatsapp or site.phone, and the version date moved with the new number', () => {
+  // The dated "Changes" lines may name the number that was replaced; nothing else may.
+  const all = JSON.stringify({ ...policy, sections: policy.sections.filter((x) => x.id !== 'changes') });
+  const digits = (x) => String(x).replace(/\D/g, '');
+  for (const m of all.matchAll(/\+966 5\d \d{3} \d{4}/g)) assert.ok([site.whatsapp.display, site.phone.display].includes(m[0]), m[0]);
+  for (const m of JSON.stringify(section('changes')).matchAll(/\+966 5\d \d{3} \d{4}/g)) assert.ok([site.whatsapp.display, '+966 59 329 6933'].includes(m[0]), m[0]);
+  assert.ok(policy.updated >= '2026-11-26', 'the version date moves with the new number');
+  assert.equal(digits(site.whatsapp.e164), digits(site.phone.e164), 'calls moved to Bona\'s own number too (owner 2026-11-26)');
+});
+
+// The dated line comes out once its 30 days are up (on or after 2026-12-26), and this test with it.
+test('the Changes section flags the new WhatsApp number and the AI phone assistant, in both languages (30 days)', () => {
+  if (new Date().toISOString().slice(0, 10) >= '2026-12-26') return;
+  const changes = section('changes');
+  const en = changes.body.en.find((p) => /^26 November 2026:/.test(p));
+  const ar = changes.body.ar.find((p) => /^26 نوفمبر 2026:/.test(p));
+  assert.ok(en && ar, 'a dated line in each language');
+  for (const text of [en, ar]) {
+    assert.ok(text.includes(site.whatsapp.display), 'the new number');
+    assert.ok(text.includes('+966 59 329 6933'), 'the number it replaces');
+  }
+  assert.match(en, /“The AI phone assistant”/);
+  assert.match(ar, /«المساعدة الهاتفية بالذكاء الاصطناعي»/);
+  assert.ok(en.includes(`phone calls to ${site.whatsapp.display} (not WhatsApp calls) are answered by an AI assistant`), en);
+  assert.ok(ar.includes(`المكالمات الهاتفية إلى الرقم ${site.whatsapp.display} (لا مكالمات واتساب)`), ar);
+});
+
+test('no English line says "calls to" the WhatsApp number without saying phone calls or WhatsApp calls', () => {
+  const faq = read('../../src/data/faq.json');
+  const texts = [...policy.sections.flatMap((x) => x.body.en), ...faq.items.flatMap((x) => x.a.en)];
+  const target = `(?:that number|this number|Bona’s number|${site.whatsapp.display.replace(/[+]/g, '\\+')})`;
+  for (const text of texts) {
+    // Every "calls to" says which kind: phone calls reach the AI line, WhatsApp calls do not. A
+    // sentence that opens with "Calls to …" has no word before it: that fails too.
+    for (const m of text.matchAll(new RegExp(`(?:(\\S+)\\s+)?calls to ${target}`, 'gi'))) {
+      assert.match(m[1] ?? '', /^(phone|WhatsApp)$/i, `"${m[0]}" must say phone calls or WhatsApp calls: ${text}`);
+    }
+  }
+});
