@@ -57,7 +57,7 @@ The PC copy of `~/.secrets/bona-services.env` stays as it is (`abdulaziz-persona
 | Lead notes (`wa.mjs:41-58`) | to `BONA_OWNER_JID` via `BONA_WA_INSTANCE` | same; the instance is now `bona` |
 | Sender switch bypass (`wa-send.mjs:216-219`) | owner's own login code | owner's own login code (unchanged) |
 | Sender shared-budget exemption (`wa-send.mjs:122-124,226-235`) | {owner} | {owner, Bona number} |
-| `/health` `poller.ownNumber` (new, additive) | `"owner"` | `"instance"` |
+| `/health` `poller.ownNumber` (new, additive) | `"owner"` | `"instance"` (`"invalid"` if the JID is not a phone JID: treated as unset) |
 
 Proof that unset changes nothing: Tasks 1-4 add tests and do not modify any existing assertion; the full existing suite must stay green.
 
@@ -1558,12 +1558,20 @@ Conventions kept from the files: curly quotes ’ “ ” in English, «» in Ar
 >   the Bona number after every call, because the AI line has no Phase 2 upload yet.
 > - The REGA advertiser line on property posts keeps the number on the REGA ad licences (`site.advertiser.phone`
 >   = +966 59 329 6933), so the 31 approved property reviews stay valid and match REGA. When the owner updates the
->   REGA records, that one field changes and every property review is drafted and approved again
->   (test/social-catalogue-advertiser.test.mjs fails until then, on purpose).
+>   REGA records, one PR changes that field AND declares the change in marketing/daily/advertiser-change.json
+>   (the new advertiser fingerprint, printed by test/social-catalogue-advertiser.test.mjs; the file's header has
+>   the steps); after the deploy every property review is drafted and approved again from the live catalogue.
+>   Until then the daily property posts stop on their own; an undeclared advertiser change fails the test.
 > - Data and deletion requests go by WhatsApp only (the privacy page has no call button); partner sentence added.
 > - Dana stays ON (B1 skipped): chats added in B9a/B10 can get a Dana reply.
 > - Brochures are printed by `services/intake/brochure_pdf.py` (rebrand_pdf.py was removed in #72); it reads
 >   `site.json` phone and WhatsApp, so a re-render prints the new number on both.
+> - The Evolution instance is `bona2`, not `bona`: WhatsApp logged out the first linked device (`bona`, 401) at
+>   05:19 on 26 Nov, seconds after a profile name/photo update sent through Evolution. Never change the WhatsApp
+>   profile through Evolution (set it on the Fold). `bona2` was linked at 05:26 (`BONA_WA_INSTANCE=bona2`), and
+>   `bona` was deleted on 26 Nov after an Evolution restart. Read `bona` as `bona2` in the lines below.
+> - `/health` `poller.ownNumber` has a third value, `"invalid"`: `BONA_WA_INSTANCE_JID` is set but is not a phone
+>   JID, so bona-api treats it as unset (the owner's number) and logs `wa.instance_jid_invalid` at start-up.
 
 Branch: `feat/wa-own-number` in `/home/azoz778/bona-wt/wa-own-number`, on top of `origin/main`
 `ed94e60` (NOT pushed; `git log --oneline origin/main..feat/wa-own-number` lists the commits). Plan:
@@ -1578,8 +1586,8 @@ What the branch does (so the steps below make sense):
 - `BONA_OWNER_JID` stays the owner's personal number: lead notes and his login codes still go to
   his personal phone (now SENT FROM the Bona number), the owner account seed, the Sending-switch
   bypass for his own login code.
-- `/health` → `poller.ownNumber` = `"instance"` (set) or `"owner"` (fallback); never digits. The
-  same field is in the `wa.poll.init` start-up log line.
+- `/health` → `poller.ownNumber` = `"instance"` (set), `"owner"` (fallback) or `"invalid"` (set but not a
+  phone JID, so treated as unset); never digits. The same field is in the `wa.poll.init` start-up log line.
 - `sync-secrets.sh` keeps the VPS's own `BONA_WA_INSTANCE` / `BONA_WA_INSTANCE_JID` lines and copies
   nothing when it cannot read them.
 - Site: `site.json` `whatsapp` and (since 26 Nov) `phone` → +966 57 626 7694, all hand
@@ -1803,12 +1811,14 @@ B11. Owner by hand, same day: the FB Page / IG WhatsApp button and any click-to-
 C1. Dana back on when the owner is ready (suggested: after 3 quiet days on the new number), and
     each test stopped in B1 re-armed only if he still wants it: that chat's page → "Let Dana test
     on this chat" (ids in the A2Z checklist row 7).
-C2. Brochures: they print `site.json` `whatsapp` (rebrand_pdf.py `load_brand`). The 21 published
-    ones keep the old number until a re-render; re-render only at cutover and only when the owner
-    decides, together with REGA O1. New intake brochures follow site.json once ~/bona is pulled to
-    the merged main (bona-intake runs from ~/bona); daily social posts follow it from the first run
-    after the merge (Appendix D point 2: the WhatsApp number next to FAL differs from REGA's record
-    until Phase 3).
+C2. Brochures (26 Nov): `services/intake/brochure_pdf.py` prints `site.json` phone and WhatsApp. The 21
+    published brochures keep the old number (and its wa.me link) until re-rendered; after B7 nothing reads
+    that number, so re-render them (intake `brochure <id>`), coordinated with the session that owns the
+    intake. New intake brochures follow site.json once ~/bona is pulled to the merged main. Daily property
+    posts: the WhatsApp number in captions is the new one; the REGA advertiser line keeps
+    site.advertiser.phone (the REGA-registered number) until the owner updates REGA (Phase 3).
+    Done 26 Nov ~13:05: the 18 that still had the old number were re-rendered through the intake's
+    brochure path (commits `intake: rebuild brochure <id>`, 2beb5d0..22aec9b); the other 3 already had it.
 C3. Chats still open on the personal number: the owner finishes them by hand from his phone;
     a dashboard reply to such a lead now comes from the Bona number.
 C4. Hermes memory (~/.hermes/memories/MEMORY.md lines about the dashboard code and Bona's
@@ -1884,7 +1894,7 @@ R4. If WhatsApp bans the new number: R1 + R2 the same day (the site, brochures a
 Only what is his to decide or to do; everything else above has a default.
 
 1. **OK the privacy notice and FAQ text (Appendix A, EN and AR)** before the merge. With it, one yes/no: Tarek's full access through Lisa (approvals 2026-11-17) reaches the Evolution gateway and the PC call files, while Bona's notice says only "the owner of Bona and authorised members of the Bona team" read conversations and recordings. Add the optional partner sentence (A2Z's notice v1.1 already says the same for A2Z), or leave it out?
-2. **Adverts beside the FAL licence before REGA is updated.** From the first social run after the merge (the publishers check out `origin/main` before every run), and in new intake brochures once `~/bona` is pulled, the WhatsApp number printed next to FAL 1100313556 is +966 57 626 7694, while the REGA ad licences still list 059 329 6933 (`site.phone` and the advertiser block stay on it, so the 31 reviews stay valid). O1 (lawyer OK) already says the REGA line switches too. Default: go ahead, and he updates the REGA records when convenient (Phase 3). The alternative, holding cards and brochures on the old number until then, needs a small code change.
+2. **Adverts beside the FAL licence before REGA is updated.** From the first social run after the merge (the publishers check out `origin/main` before every run), and in new intake brochures once `~/bona` is pulled, the WhatsApp number printed next to FAL 1100313556 is +966 57 626 7694, while the REGA ad licences still list 059 329 6933 (the advertiser block, `site.advertiser.phone`, stays on it, so the 31 reviews stay valid; `site.phone` moved to the new number too, owner decision 26 Nov). O1 (lawyer OK) already says the REGA line switches too. Default: go ahead, and he updates the REGA records when convenient (Phase 3). The alternative, holding cards and brochures on the old number until then, needs a small code change.
 3. **His hands at cutover (no decision):** the ~3 warm-up days on a linked device, one message from his personal WhatsApp to the Bona number, Dana off on the Team page before the switch (and back on later), the Ads Manager check and the FB/IG WhatsApp button, merging the PR.
 4. **WhatsApp calls to the Bona number.** The AI line answers phone calls only; the FAQ and the notice now say so and ask callers on WhatsApp to write instead. Default: leave WhatsApp calls ringing (runbook B2 creates the instance with `"rejectCall":false`), so a call he or the team picks up by hand still works. The alternative, `"rejectCall":true` with a `"msgCall"` text (Evolution declines every WhatsApp call and sends that text), also blocks the calls he would take himself.
 

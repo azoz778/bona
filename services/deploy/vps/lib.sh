@@ -157,7 +157,9 @@ pc_wa_files() {
 
 # pc_wa_dropin_ok → 0 when the PC bona-api unit loads $PC_WA_ENV after bona-services.env and that
 # file sets BONA_WA_INSTANCE (not the owner's personal instance) and BONA_WA_INSTANCE_JID, both
-# non-empty. Otherwise 1, with the reason in PC_WA_WHY (paths only, never a value).
+# non-empty, the JID a phone JID by lib/wa.mjs PHONE_JID_RE (bona-api treats any other value as
+# unset and falls back to the owner's number, "invalid" on /health). Otherwise 1, with the reason
+# in PC_WA_WHY (paths only, never a value).
 pc_wa_dropin_ok() {
   local files wa_at shared_at inst jid
   PC_WA_WHY=
@@ -178,6 +180,10 @@ pc_wa_dropin_ok() {
   if [ "$inst" = "$PC_PERSONAL_INSTANCE" ]; then
     PC_WA_WHY="$PC_WA_ENV names the owner's personal instance"; return 1
   fi
+  # Same test as PHONE_JID_RE in services/api/lib/wa.mjs: digits[:device][@s.whatsapp.net].
+  if ! printf '%s' "$jid" | grep -Eqx '[0-9]{8,15}(:[0-9]+)?(@s\.whatsapp\.net)?'; then
+    PC_WA_WHY="$PC_WA_ENV sets BONA_WA_INSTANCE_JID to something that is not a phone JID (digits@s.whatsapp.net)"; return 1
+  fi
 }
 
 # pc_wa_dropin_help → stderr: how to give the twin its drop-in (as in services/README.md).
@@ -192,7 +198,7 @@ item 7). See services/README.md, "The PC bona-api twin since the WhatsApp move".
   EnvironmentFile=%h/.secrets/bona-api-pc-wa.env
 
   # $PC_WA_ENV (mode 0600)
-  BONA_WA_INSTANCE=bona
+  BONA_WA_INSTANCE=bona2
   BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net
 
 then \`systemctl --user daemon-reload\` and run this again. Only when the VPS env and the site are

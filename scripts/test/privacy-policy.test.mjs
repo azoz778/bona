@@ -277,6 +277,12 @@ test('the AI phone assistant section: who answers, the recording, where the voic
   // says where they are rather than pointing at the enquiry store.
   assert.ok(en.includes('The transcript and your details are kept with the call record on Bona’s own systems until you ask us to delete them.'), en);
   assert.ok(ar.includes('أما النص المكتوب وبياناتك فتُحفظ مع سجل المكالمة على أنظمة بونا الخاصة إلى أن تطلب منا حذفها.'), ar);
+  // The call alert (~/bona-line call_alert.py, 2026-11-26): every call's number and details also go to the
+  // owner's WhatsApp from the Bona number, and a deletion request for a call covers that note too.
+  assert.ok(en.includes('until you ask us to delete them. After each call, Bona’s WhatsApp number also sends the owner of Bona a short WhatsApp note about it, with the number you called from and the details you gave'), en);
+  assert.match(en, /deleting a call deletes that note too\./);
+  assert.ok(ar.includes('إلى أن تطلب منا حذفها. وبعد كل مكالمة، يُرسل رقم واتساب بونا إلى مالك بونا ملاحظة قصيرة عنها عبر واتساب، فيها الرقم الذي اتصلت منه والبيانات التي ذكرتها'), ar);
+  assert.match(ar, /وعند حذف مكالمة تُحذف هذه الملاحظة أيضاً\./);
   for (const gone of ['kept as an enquiry, like any other', 'the enquiry it produced']) assert.ok(!en.includes(gone), `en still says: ${gone}`);
   for (const gone of ['بوصفها استفساراً كأي استفسار آخر', 'الاستفسار الناتج عنها']) assert.ok(!ar.includes(gone), `ar still says: ${gone}`);
   assert.match(en, /To have a call recording, its transcript or your details deleted, message us on WhatsApp/);
