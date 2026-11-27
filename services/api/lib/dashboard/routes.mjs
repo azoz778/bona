@@ -30,6 +30,7 @@
  * Phone numbers are masked everywhere a list is rendered and whole only on the one
  * page (and the one JSON route) that exists to show a single person's record.
  */
+import { getSystemErrorMap } from 'node:util';
 import { enquiryNotifications } from '../enquiry-receipt.mjs';
 import { tasksForLead, openTasks, countOpenTasks, addTask, updateTask } from '../lead-tasks.mjs';
 import { STAGES, tokenHash } from '../db.mjs';
@@ -96,11 +97,22 @@ export const MAX_NOTE = 2000;
 export const GO_LIVE_SWITCHES = ['own_inbox', 'owner_as_client', 'calendar_booking', 'owner_notes', 'email_replies', 'owner_mail_copy', 'dana_brain'];
 /** The built-in error classes a hook failure may be named by: their names are never data. */
 const ERROR_CLASSES = new Set(['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'EvalError', 'URIError', 'AggregateError', 'AbortError', 'TimeoutError']);
-/** A system code in its fixed shape: SQLite's, Node's, or a POSIX errno name (letters only after the E). */
-const SYSTEM_CODE = /^(?:SQLITE_[A-Z_]{1,40}|ERR_[A-Z0-9_]{1,60}|E[A-Z]{2,20})$/;
-/** What a failed hook is logged as: a system code, else a built-in class name, else `Error`. */
+/**
+ * The system codes a hook failure may be named by, as a list, never a pattern: a code shaped
+ * like one (`ERR_966…`, `ESARA`) can carry anything. The errno names are Node's own table
+ * (libuv's, `ECONNRESET`, `EAI_AGAIN`, …); SQLite's primary result codes; and the Node codes
+ * these seams can meet, `ERR_SQLITE_ERROR` (node:sqlite) first.
+ */
+const SYSTEM_CODES = new Set([
+  ...[...getSystemErrorMap().values()].map(([name]) => name),
+  ...['ERROR', 'INTERNAL', 'PERM', 'ABORT', 'BUSY', 'LOCKED', 'NOMEM', 'READONLY', 'INTERRUPT', 'IOERR', 'CORRUPT', 'NOTFOUND', 'FULL',
+    'CANTOPEN', 'PROTOCOL', 'EMPTY', 'SCHEMA', 'TOOBIG', 'CONSTRAINT', 'MISMATCH', 'MISUSE', 'NOLFS', 'AUTH', 'FORMAT', 'RANGE', 'NOTADB']
+    .map((c) => `SQLITE_${c}`),
+  'ERR_SQLITE_ERROR', 'ERR_INVALID_STATE', 'ERR_INVALID_ARG_TYPE', 'ERR_INVALID_ARG_VALUE', 'ERR_OUT_OF_RANGE', 'ABORT_ERR',
+]);
+/** What a failed hook is logged as: a known system code, else a built-in class name, else `Error`. */
 const errorLabel = (err) => {
-  if (typeof err?.code === 'string' && SYSTEM_CODE.test(err.code)) return err.code;
+  if (typeof err?.code === 'string' && SYSTEM_CODES.has(err.code)) return err.code;
   return typeof err?.name === 'string' && ERROR_CLASSES.has(err.name) ? err.name : 'Error';
 };
 /** After an owner's join, Dana answers the waiting message only when it is this recent (U5). */
@@ -224,9 +236,13 @@ export function readBody(req, maxBytes, { drainTo = 0 } = {}) {
  * write, and one that throws or rejects is logged as `dash.hook_failed` while the action goes
  * through as it would without it. onLeadLeaving is the one gate (DESIGN §8.4: the purge marks
  * first, then deletes; like the store's onPurge): it must be synchronous, since it only writes
- * rows and never calls the network, and when it throws the chat is NOT taken out: the request
- * fails (500) with its transcript kept. Every failure is logged by hook name, target id and a
- * known class or system code only, never with the error's words.
+ * rows and never calls the network, and it runs inside the transaction of the step that takes
+ * the chat out. When it throws, or returns a promise, nothing of that step is kept: the chat
+ * stays in with its transcript, a new colleague or never-list number is not added, no audit
+ * row is written, the hook's own row writes go back, and the request fails (500); the owner can
+ * simply try again. That holds because `team`, `inbox` and `audit` are built on this same `db`
+ * (index.mjs). Every failure is logged by hook name, target id and a known class or system
+ * code only, never with the error's words.
  */
 export function createDashboardRoutes({
   db, cfg = {}, inventory = null, fanout = null, app = null,
@@ -256,8 +272,8 @@ export function createDashboardRoutes({
   /**
    * A hook's failure, by name and target id only: its message could carry a calendar id or a
    * name, and so could a `code` or `name` it set itself. Only a built-in error class or a
-   * system code in its fixed shape (`SQLITE_BUSY`, `ERR_…`, `ECONNRESET`) is named; anything
-   * else is `Error`.
+   * system code on the list (`SQLITE_BUSY`, `ERR_SQLITE_ERROR`, `ECONNRESET`) is named;
+   * anything else is `Error`.
    */
   const hookFailed = (hook, target, err) => log({
     level: 'warn', evt: 'dash.hook_failed', hook, target: target ?? null, error: errorLabel(err),
@@ -280,19 +296,31 @@ export function createDashboardRoutes({
   }
   /**
    * The chat is about to leave the inbox and lose its transcript: the viewing seam marks the
-   * lead's bookings first (DESIGN §8.4, T10). Unlike the other hooks this one gates: a throw
-   * is logged by name and rethrown in fixed words (the 500's `dash.failed` line never carries
-   * the hook's own), so the purge after it does not run without the mark. A rejection of a
-   * hook that broke the synchronous contract is only logged: it cannot be waited for here.
+   * lead's bookings first (DESIGN §8.4, T10). Unlike the other hooks this one gates, and it
+   * runs inside the transaction of the step it guards (`inboxOut`, `addPerson`, the never
+   * list's add): a throw is logged by name and rethrown in fixed words (the 500's `dash.failed`
+   * line never carries the hook's own), so the purge after it does not run and every row the
+   * step wrote so far, the hook's own marks included, goes back.
+   *
+   * A hook that returns a promise broke the synchronous contract. Its work cannot be waited
+   * for here, so nothing says it has marked anything: it is refused like a throw (logged as a
+   * TypeError), and how it settles later is dropped, never an unhandled rejection.
    */
   function beforeLeadLeaves(leadId) {
     const fn = hooks?.onLeadLeaving;
     if (typeof fn !== 'function') return;
+    let failure = null;
     try {
       const out = fn.call(hooks, leadId);
-      if (out && typeof out.then === 'function') out.then(null, (err) => hookFailed('onLeadLeaving', leadId, err));
+      if (out !== null && (typeof out === 'object' || typeof out === 'function') && typeof out.then === 'function') {
+        failure = new TypeError('onLeadLeaving returned a promise');
+        out.then(null, () => {});
+      }
     } catch (err) {
-      hookFailed('onLeadLeaving', leadId, err);
+      failure ??= err;
+    }
+    if (failure) {
+      hookFailed('onLeadLeaving', leadId, failure);
       throw new Error('onLeadLeaving failed; the chat stays in the inbox');
     }
   }
@@ -981,6 +1009,11 @@ export function createDashboardRoutes({
    * goes now, not at the next daily upkeep, and it leaves the owner's list of real-estate
    * chats to check (D17). Audited by lead id only. Built without the inbox (older tests,
    * tools), there is nothing stored to take out.
+   *
+   * Its caller runs it in the same transaction as the write that made the number excluded,
+   * so the two are one step: when the viewing seam refuses, the new account or never-list row
+   * goes back with the rest, and the owner's retry is a clean first try (no `duplicate_phone`,
+   * no excluded chat left for the daily sweep to purge without its marks).
    */
   function leaveInboxFor(digits, me) {
     if (!inbox || !digits) return;
@@ -988,7 +1021,7 @@ export function createDashboardRoutes({
     const lead = db.getLeadByPhone(digits) ?? db.getLeadByJid(`${digits}@s.whatsapp.net`);
     if (!lead || lead.inbox_state === 'out') return;
     // Before the purge, so the viewing seam still finds what it must cancel (DESIGN §8.4, T10);
-    // when it throws, the chat stays in and the request fails.
+    // when it throws, the whole step goes back and the request fails.
     beforeLeadLeaves(lead.lead_id);
     inbox.leaveInbox(lead.lead_id);
     audit?.record({ userId: me.user_id, action: 'inbox_out', target: lead.lead_id });
@@ -996,11 +1029,11 @@ export function createDashboardRoutes({
 
   function addPerson(ctx) {
     const { fields, me } = ctx;
-    return teamWrite(ctx, () => {
+    return teamWrite(ctx, () => db.transaction(() => {
       const u = team.addUser({ name: asText(fields.name), phone: asText(fields.phone), role: fields.role === 'owner' ? 'owner' : 'staff' });
       audit?.record({ userId: me.user_id, action: 'team_add', target: u.user_id, meta: { role: u.role } });
       leaveInboxFor(u.phone_e164, me);
-    }, 'added');
+    }), 'added');
   }
 
   /**
@@ -1045,11 +1078,11 @@ export function createDashboardRoutes({
         audit?.record({ userId: me.user_id, action: 'never_remove' });
       }, 'never_removed');
     }
-    return teamWrite(ctx, () => {
+    return teamWrite(ctx, () => db.transaction(() => {
       const row = team.addNever({ phone: asText(fields.phone), note: asText(fields.note), by: me.user_id });
       audit?.record({ userId: me.user_id, action: 'never_add' });
       leaveInboxFor(row.phone_e164, me);
-    }, 'never_added');
+    }), 'never_added');
   }
 
   /**
@@ -1079,8 +1112,10 @@ export function createDashboardRoutes({
       audit?.record({ userId: me.user_id, action: 'setting', target: key, meta: { value } });
       if (after !== before) changed = [key, after];
     }, 'setting');
-    // Once per real change, after the row and its audit are written: a repeat of the same
-    // value, or a refused one, tells nobody.
+    // Once per real change, after the row is saved and its audit recorded: a repeat of the
+    // same value, or a refused one, tells nobody. (The audit is best-effort here as for every
+    // audited action: lib/audit.mjs logs a failed insert as `audit.failed` and never undoes
+    // the owner's write, so a saved change is still a change the hook must hear.)
     if (changed) callHook('onSettingChanged', changed[0], onSettingChanged, undefined, changed);
     return answered;
   }
@@ -1519,11 +1554,15 @@ export function createDashboardRoutes({
     if (!lead) return answer(res, { form, back: '/dashboard/inbox?error=not_a_chat', status: 404, payload: { error: 'not_found' } });
     // Not a client (design §4.1): out now, the transcript gone now, and it never comes
     // back on its own — only the owner's Move or Add brings it in again. The viewing seam
-    // hears first, while the lead is still as it was (DESIGN §8.4, T10); when it throws, the
-    // chat stays in and the request fails, rather than lose its calendar marks.
-    beforeLeadLeaves(leadId);
-    const purged = inbox.leaveInbox(leadId);
-    audit?.record({ userId: me.user_id, action: 'inbox_out', target: leadId });
+    // hears first, while the lead is still as it was (DESIGN §8.4, T10), in one transaction
+    // with the purge: when either fails, the chat stays in with its transcript, the marks go
+    // back with it, and the request fails, rather than lose one half of the pair.
+    const purged = db.transaction(() => {
+      beforeLeadLeaves(leadId);
+      const counts = inbox.leaveInbox(leadId);
+      audit?.record({ userId: me.user_id, action: 'inbox_out', target: leadId });
+      return counts;
+    });
     log({ evt: 'dash.inbox_out', leadId, messages: purged.messages });
     const back = lead.inbox_state === 'in' ? '/dashboard/inbox?ok=out' : '/dashboard/inbox?tab=unsure&ok=out';
     return answer(res, { form, back, status: 200, payload: { ok: true, purged } });

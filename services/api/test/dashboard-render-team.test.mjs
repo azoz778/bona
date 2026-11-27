@@ -176,9 +176,10 @@ test('every go-live switch has its own button, off by default, offering the oppo
   const off = teamPage({ me: OWNER, users: [OWNER] });
   assert.match(off, /<h2[^>]*>Go-live switches<\/h2>/);
   // owner_notes and owner_mail_copy ship on, so "turning it on" alone would not cover them; and a
-  // switch changed early is stored, so it takes effect when its part merges (repo-sync restarts).
-  assert.ok(off.includes(esc('Leave each one as it ships until the go-live step that names it: a switch changed early takes effect as soon as its part is merged, and until then turning it on or off changes nothing.')));
-  assert.doesNotMatch(off, /once its part is deployed/);
+  // switch changed early is stored, so it acts once the code for its part runs. A merge alone is not
+  // that: repo-sync pulls, and bona-api runs new code only from its next restart (Codex r2).
+  assert.ok(off.includes(esc('These belong to the move to full automation. Each one shows the setting saved for it, and does nothing until its part of the automation is running; one changed early starts acting by itself at that point. Leave each one as it ships until the go-live step that names it.')));
+  assert.doesNotMatch(off, /once its part is deployed|as soon as its part is merged/);
   for (const [key, heading, offLabel, onLabel] of SWITCH_ROWS) {
     assert.ok(off.includes(`>${heading}</h3>`), `${key} heading`);
     assert.match(off, new RegExp(`name="${key}" value="1"`), `${key} offers on`);
@@ -209,22 +210,23 @@ test('the go-live switch copy says what each one does in either state, and names
   const off = teamPage({ me: OWNER, users: [OWNER] });
   const on = teamPage({ me: OWNER, users: [OWNER], switches: Object.fromEntries(SWITCH_ROWS.map(([key]) => [key, true])) });
   for (const line of [
-    'Off. A chat joins the Bona inbox only as before: by its Ref code, an ad or a listing number, or by your Move or Add.',
-    'Off. Your own chat with Bona’s number is never treated as a client’s.',
-    'Off. The AI assistant passes viewing requests to the team.',
-    'Off. Those notes are dropped, not kept for later.',
-    'Off. Clients’ email is sorted by its headers and listed for you; no AI reads it.',
-    'Off. Platform mail stays in Bona’s mailbox only.',
-    'Off. Only the chats the AI assistant fully serves use Bona’s AI service (OpenAI); every other chat still uses the Retell agent. Turn this on only once the privacy page names OpenAI.',
+    'When off, a chat joins the Bona inbox only as before: by its Ref code, an ad or a listing number, or by your Move or Add.',
+    'When off, your own chat with Bona’s number is never treated as a client’s.',
+    'When off, the AI assistant passes viewing requests to the team.',
+    'When off, those notes are dropped, not kept for later.',
+    'When off, clients’ email is sorted by its headers and listed for you; no AI reads it.',
+    'When off, platform mail stays in Bona’s mailbox only.',
+    'When off, only the chats the AI assistant fully serves use Bona’s AI service (OpenAI); every other chat still uses the Retell agent. Turn this on only once the privacy page names OpenAI.',
   ]) assert.ok(off.includes(esc(line)), line);
   for (const line of [
-    'joins the Bona inbox (the AI assistant answers it while it is on), except the team’s chats and the never list.',
+    'When on, every one-to-one chat on Bona’s WhatsApp number joins the Bona inbox (the AI assistant answers it while it is on), except the team’s chats and the never list.',
     'It works only while Bona’s own number is linked and checked.',
     'stays on until you turn it off.',
-    'once Google Calendar is set up.',
-    'reach your WhatsApp from Bona’s number while Sending is on.',
+    'When on, the AI assistant can offer free times from Bona’s viewing calendar and book a viewing in the chats it fully serves, once Google Calendar is set up.',
+    'When on, notes about new enquiries, hand-overs and bookings, and the daily summary, reach your WhatsApp from Bona’s number while Sending is on.',
     'but only once the sender address has been checked.',
     'is copied to your Gmail.',
+    'When on, every WhatsApp chat the AI assistant answers uses Bona’s AI service (OpenAI).',
     'do not turn this off to stop the assistant: use “Turn the AI assistant off” above.',
   ]) assert.ok(on.includes(esc(line)), line);
   for (const html of [on, off]) {
@@ -232,6 +234,25 @@ test('the go-live switch copy says what each one does in either state, and names
     assert.doesNotMatch(section, /Dana|دانة/, 'no client-facing name');
     assert.doesNotMatch(section, /\+?966\s?5\d|@gmail|@example/, 'no number, no address');
   }
+});
+
+test('each go-live row says what is saved, and words its effect as a condition: no row claims an effect is live (Codex r2)', () => {
+  const off = teamPage({ me: OWNER, users: [OWNER] });
+  const on = teamPage({ me: OWNER, users: [OWNER], switches: Object.fromEntries(SWITCH_ROWS.map(([key]) => [key, true])) });
+  const rows = (html) => html.slice(html.indexOf('Go-live switches'), html.indexOf('<h2 style="margin-top:28px">Ops</h2>'))
+    .match(/<h3[^>]*>[^<]*<\/h3>\n<p class="sub">.*?<\/p>/g) ?? [];
+  for (const [html, saved, when] of [[off, 'Saved: off.', 'When off, '], [on, 'Saved: on.', 'When on, ']]) {
+    const found = rows(html);
+    assert.equal(found.length, SWITCH_ROWS.length, 'one paragraph per switch');
+    for (const row of found) {
+      assert.ok(row.includes(`<p class="sub"><b>${saved}</b> ${esc(when)}`), row);
+      assert.doesNotMatch(row, /<p class="sub">(?:On|Off)\. /, 'never a bare "On." or "Off." as if it were live');
+    }
+  }
+  // A mix reads per row: the two that ship on say so, the rest say off.
+  const shipped = teamPage({ me: OWNER, users: [OWNER], switches: { owner_notes: true, owner_mail_copy: true } });
+  const mixed = rows(shipped);
+  assert.deepEqual(mixed.map((r) => r.includes('<b>Saved: on.</b>')), SWITCH_ROWS.map(([key]) => key === 'owner_notes' || key === 'owner_mail_copy'));
 });
 
 test('the AI-service banner: "the AI service has not answered" with the time in Riyadh, above the Retell one; none while it is fine', () => {
@@ -287,4 +308,19 @@ test('an ops() value that cannot be shown is a dash, never a thrown page: a cycl
   assert.doesNotMatch(html, /secret source/, 'a function is never printed as its source');
   assert.match(html, /<td>plain<\/td><td>3<\/td>/);
   assert.doesNotThrow(() => teamPage({ me: OWNER, users: [OWNER], ops: { loop } }));
+});
+
+test('an ops() result that throws while it is read is still no thrown page: a getter is a dash, a proxy that cannot list its keys is the placeholder', () => {
+  let html;
+  const getter = { get count() { throw new Error('unavailable 966500000000'); }, plain: 3 };
+  assert.doesNotThrow(() => { html = opsPanel(getter); });
+  assert.match(html, /<td>count<\/td><td>—<\/td>/);
+  assert.match(html, /<td>plain<\/td><td>3<\/td>/);
+  assert.doesNotMatch(html, /unavailable|966500000000/);
+  const proxy = new Proxy({}, { ownKeys() { throw new Error('no keys'); } });
+  assert.doesNotThrow(() => { html = opsPanel(proxy); });
+  assert.match(html, /No counts yet\./);
+  assert.doesNotThrow(() => teamPage({ me: OWNER, users: [OWNER], ops: getter }));
+  // A nested value whose toJSON throws is a dash too.
+  assert.match(opsPanel({ odd: { toJSON() { throw new Error('no'); } } }), /<td>odd<\/td><td>—<\/td>/);
 });
