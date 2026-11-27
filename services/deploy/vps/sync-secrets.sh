@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Run ON THE PC. Copies the four ~/.secrets/*.env files and the tunnel credentials JSON to the VPS,
 # mode 0600, without ever printing their contents. Re-run any time a secret changes on the PC.
-# Two guards, both read from the VPS before anything is copied; when a read fails, nothing is copied:
+# Two guards, both read from the VPS before anything is copied; when a read fails, or its answer does not
+# look like what the read prints (lib.sh vps_reads_check: a banner on stdout, two reads that disagree),
+# nothing is copied:
 # - Kept keys (lib.sh vps_keep_keys): in bona-services.env and bona-marketing.env the VPS's own line
 #   wins for the keys that are set on the VPS on purpose (its WhatsApp instance and number since
 #   2026-11-19, its poll interval, the dashboard push keys, the TikTok keys).
@@ -45,13 +47,18 @@ trap 'rm -rf "$work"' EXIT
 ssh "$BONA_VPS_SSH" 'install -d -m 700 ~/.secrets ~/.cloudflared'
 # The VPS's key names (names only) for the missing-key guard, and its own kept-key lines (values) into
 # 0600 files under $work: never echoed, never logged.
-ssh "$BONA_VPS_SSH" "$(vps_key_names_cmd)" > "$work/vps-names" || die "could not read the key names on the VPS; nothing copied"
+# Each remote command is built before its ssh: a `die` inside "$(…)" only leaves that subshell (Claude r1).
+names_cmd=$(vps_key_names_cmd) || exit 1
+ssh "$BONA_VPS_SSH" "$names_cmd" > "$work/vps-names" || die "could not read the key names on the VPS; nothing copied"
 for f in $VPS_KEEP_FILES; do
-  ssh "$BONA_VPS_SSH" "$(vps_keep_grep "$f")" > "$work/keep.$f" || die "could not read the VPS's own $f lines; nothing copied"
+  keep_cmd=$(vps_keep_grep "$f") || exit 1
+  ssh "$BONA_VPS_SSH" "$keep_cmd" > "$work/keep.$f" || die "could not read the VPS's own $f lines; nothing copied"
 done
+# A zero ssh exit is not enough: the answers must look like what the commands print (Codex r1).
+vps_reads_check "$work" || die "the VPS's answers do not look like its files (does ssh $BONA_VPS_SSH print anything of its own?); nothing copied"
 
 say "Keys on the VPS that the PC lacks"
-lost=$(vps_only_keys "$work/vps-names")
+lost=$(vps_only_keys "$work/vps-names") || die "could not compare the key names; nothing copied"
 if [ -n "$lost" ]; then
   {
     echo "The VPS has these keys and the PC copies do not, so this copy would delete them on the VPS (file, key):"

@@ -86,23 +86,41 @@ vps_keep_keys() {
   esac
 }
 
-# vps_keep_grep FILE → the remote command that prints the VPS's own kept-key lines of FILE: nothing
-# when the file is missing or has none, a non-zero status when grep itself fails. Spaces before
-# the `=` count, as the API's env parser (services/api/lib/env.mjs) accepts them.
-vps_keep_grep() {
+# ---- How the shell reads a key line, on both machines (in step with lib/env.mjs parseEnvText) ---------
+# A key line: optional blanks, optional `export ` (one space, then any blanks: the API strips exactly
+# "export " and then trims, so `export<TAB>KEY=` is no key there and none here), a name, optional blanks,
+# `=`. Comments and lines without a valid name before the first `=` are no keys. A UTF-8 BOM at the start
+# of a line is dropped first, as the API's trim() drops it (an editor may write one on line 1). GNU sed
+# reads \xHH; LC_ALL=C makes the BOM three plain bytes. One pattern for both sides (fix round 1, Codex r1).
+KEY_LINE_ERE='^[[:space:]]*(export [[:space:]]*)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*='
+BOM_SED='\xEF\xBB\xBF'
+
+# keep_line_ere FILE → the ERE of a line that sets one of FILE's kept keys; status 1 when FILE keeps none.
+keep_line_ere() {
   local alt; alt=$(vps_keep_keys "$1" | tr ' ' '|')
-  [ -n "$alt" ] || die "vps_keep_grep: $1 has no kept keys"
-  printf '%s' "f=~/.secrets/$1; [ -e \"\$f\" ] || exit 0; grep -E '^[[:space:]]*(export[[:space:]]+)?($alt)[[:space:]]*=' \"\$f\"; [ \$? -le 1 ]"
+  [ -n "$alt" ] || return 1
+  printf '%s' "^[[:space:]]*(export [[:space:]]*)?($alt)[[:space:]]*="
+}
+
+# vps_keep_grep FILE → the remote command that prints the VPS's own kept-key lines of FILE (a leading BOM
+# dropped): nothing when the file is missing or has none, a non-zero status when sed fails. It dies when
+# FILE keeps no key, and it runs inside "$(…)", where die only leaves the subshell: the caller stops on
+# its status (`cmd=$(vps_keep_grep "$f") || exit 1`; Claude r1).
+vps_keep_grep() {
+  local ere; ere=$(keep_line_ere "$1") || die "vps_keep_grep: $1 has no kept keys"
+  printf '%s' "f=~/.secrets/$1; [ -e \"\$f\" ] || exit 0; LC_ALL=C sed -nE 's/^$BOM_SED//; /$ere/p' \"\$f\""
 }
 
 # keep_vps_keys PC_FILE VPS_LINES OUT KEYS: OUT is PC_FILE, except that a line for one of KEYS
 # (space-separated) the VPS has (VPS_LINES) stands in place of the PC's line for that key, or is
 # appended when the PC has none; a kept key the VPS lacks keeps the PC's line. Prints nothing.
 # (FILENAME == vpsfile, not NR == FNR: with an empty VPS_LINES the classic idiom would read the
-# PC's lines as the VPS's.)
+# PC's lines as the VPS's.) A key is read as KEY_LINE_ERE reads it: a leading BOM dropped, `export `
+# with a space. length(bom) is 3 bytes in mawk and 1 character in gawk under UTF-8: both skip the BOM.
 keep_vps_keys() {
-  awk -v keys="$4" -v vpsfile="$2" '
-    function key(line,  k) { k = line; sub(/^[ \t]*(export[ \t]+)?/, "", k); if (k !~ /=/) return ""; sub(/[ \t]*=.*/, "", k); return k }
+  awk -v keys="$4" -v vpsfile="$2" -v bom="$(printf '\357\273\277')" '
+    function key(line,  k) { k = line; if (index(k, bom) == 1) k = substr(k, length(bom) + 1)
+      sub(/^[ \t]*(export [ \t]*)?/, "", k); if (k !~ /=/) return ""; sub(/[ \t]*=.*/, "", k); return k }
     BEGIN { n = split(keys, list, " "); for (i = 1; i <= n; i++) want[list[i]] = 1 }
     FILENAME == vpsfile { k = key($0); if (k in want) vps[k] = $0; next }
     { k = key($0)
@@ -113,37 +131,72 @@ keep_vps_keys() {
 }
 
 # ---- The missing-key guard (PR-INFRA, 2026-11-27) ------------------------------------------------
-# A key line: optional `export `, a name, optional spaces, `=` (lib/env.mjs parseEnvText reads the same
-# names; comments and lines without a valid name before the `=` are no keys). One pattern for both sides.
-KEY_LINE_ERE='^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*='
-
 # env_key_names FILE → the key names FILE sets, one per line (repeats as they come); never a value.
 env_key_names() {
   [ -r "$1" ] || return 0
-  sed -nE "s/$KEY_LINE_ERE.*/\\2/p" "$1"
+  LC_ALL=C sed -nE "s/^$BOM_SED//; s/$KEY_LINE_ERE.*/\\2/p" "$1"
 }
 
 # vps_key_names_cmd → the remote command that prints "FILE KEY" for every key line of every
 # SECRET_FILES file on the VPS (never a value); nothing for a file that is not there, a non-zero
-# status when sed fails.
+# status when ~/.secrets cannot be entered (sync-secrets.sh has just made it) or sed fails.
 vps_key_names_cmd() {
-  local f cmd='cd ~/.secrets 2>/dev/null || exit 0'
+  local f cmd='cd ~/.secrets || exit 1'
   for f in $SECRET_FILES; do
-    cmd="$cmd; if [ -e $f ]; then sed -nE 's/$KEY_LINE_ERE.*/$f \\2/p' $f || exit 1; fi"
+    cmd="$cmd; if [ -e $f ]; then LC_ALL=C sed -nE 's/^$BOM_SED//; s/$KEY_LINE_ERE.*/$f \\2/p' $f || exit 1; fi"
   done
   printf '%s' "$cmd"
 }
 
 # vps_only_keys NAMES → "FILE KEY" for every key NAMES (vps_key_names_cmd's output) lists that the
 # PC copy of FILE does not set and that is not a kept key of FILE: the keys a copy would delete on
-# the VPS. Names only, sorted per file.
+# the VPS. Names only, sorted per file. Status 1 when a read fails: never "no keys" (Codex r1).
 vps_only_keys() {
-  local f k have
+  local f k have pc vps
   for f in $SECRET_FILES; do
-    have=" $(env_key_names "$SECRETS_DIR/$f" | tr '\n' ' ') $(vps_keep_keys "$f") "
-    for k in $(awk -v f="$f" '$1 == f && $2 ~ /^[A-Za-z_][A-Za-z0-9_]*$/ { print $2 }' "$1" | sort -u); do
+    pc=$(env_key_names "$SECRETS_DIR/$f") || return 1
+    have=" ${pc//$'\n'/ } $(vps_keep_keys "$f") "
+    vps=$(awk -v f="$f" '$1 == f && $2 ~ /^[A-Za-z_][A-Za-z0-9_]*$/ { print $2 }' "$1") || return 1
+    for k in $(printf '%s\n' "$vps" | sort -u); do
       case "$have" in *" $k "*) ;; *) printf '%s %s\n' "$f" "$k" ;; esac
     done
+  done
+}
+
+# lines_not_matching ERE FILE → how many lines of FILE do not match ERE (bytes, C locale); status 1
+# when FILE cannot be read.
+lines_not_matching() {
+  local n s=0
+  n=$(LC_ALL=C grep -aEvc -- "$1" "$2") || s=$?
+  [ "$s" -le 1 ] || return 1
+  printf '%s' "${n:-0}"
+}
+
+# vps_reads_check DIR → 0 when sync-secrets.sh's two VPS reads in DIR look like what the commands above
+# print: every line of DIR/vps-names is "FILE KEY" for a SECRET_FILES file, every line of DIR/keep.FILE
+# sets a kept key of FILE, and the kept keys vps-names lists for FILE are exactly the ones keep.FILE sets.
+# Otherwise 1, with the reason on stderr (counts and key names, never a line). A zero ssh exit alone
+# proves nothing: a banner or a profile script on stdout, or a file that changed between the two reads,
+# would let the guard pass and the PC's values replace the VPS's own (Codex r1).
+vps_reads_check() {
+  local dir=$1 f ere bad listed got files
+  files=$(printf '%s' "$SECRET_FILES" | sed 's/\./\\./g; s/ /|/g')
+  bad=$(lines_not_matching "^($files) [A-Za-z_][A-Za-z0-9_]*\$" "$dir/vps-names") || return 1
+  if [ "$bad" != 0 ]; then warn "the key-name read from the VPS has $bad line(s) that are not \"FILE KEY\""; return 1; fi
+  for f in $VPS_KEEP_FILES; do
+    ere=$(keep_line_ere "$f") || { warn "$f has no kept keys"; return 1; }
+    bad=$(lines_not_matching "$ere" "$dir/keep.$f") || return 1
+    if [ "$bad" != 0 ]; then warn "the read of the VPS's own $f lines has $bad line(s) that set no kept key of $f"; return 1; fi
+    listed=$(awk -v f="$f" -v keys="$(vps_keep_keys "$f")" '
+      BEGIN { n = split(keys, l, " "); for (i = 1; i <= n; i++) w[l[i]] = 1 }
+      $1 == f && ($2 in w) { print $2 }' "$dir/vps-names") || return 1
+    got=$(env_key_names "$dir/keep.$f") || return 1
+    listed=$(printf '%s\n' "$listed" | sort -u)
+    got=$(printf '%s\n' "$got" | sort -u)
+    if [ "$listed" != "$got" ]; then
+      warn "the two reads of the VPS's $f disagree on its kept keys (names: ${listed//$'\n'/ }; lines: ${got//$'\n'/ })"
+      return 1
+    fi
   done
 }
 

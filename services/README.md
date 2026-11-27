@@ -487,12 +487,21 @@ in `bona-services.env` `BONA_WA_INSTANCE` / `BONA_WA_INSTANCE_JID`, `BONA_WA_POL
 `BONA_VAPID_PUBLIC` / `BONA_VAPID_PRIVATE`; in `bona-marketing.env` the three `TIKTOK_*` keys. Any other key a
 VPS file has and the PC copy lacks stops the copy before anything is sent, with the key names (never a value):
 add it to the PC file, or run `sync-secrets.sh --force` to drop it on the VPS. It copies nothing when it cannot
-read the VPS; run it only from a checkout that has these guards (PR-INFRA, 2026-11-27).
+read the VPS, or when the answers do not look like the VPS files (a banner or a profile script on stdout, two reads
+that disagree); it reads a key line as `lib/env.mjs` does (a leading UTF-8 BOM dropped, `export ` with a space). Run
+it only from a checkout that has these guards (PR-INFRA, 2026-11-27).
 
 `deploy.sh` snapshots `~/bona-data/bona.db` after the tests and before the restart (`db-snapshot.mjs`:
-VACUUM INTO, 0600, integrity-checked, `~/bona-data/release-backups/bona-deploy-<UTC time>.db`, newest 5 kept);
-a failed snapshot leaves the running service as it is. A copy by hand, never pruned:
+VACUUM INTO, 0600, integrity-checked, `~/bona-data/release-backups/bona-deploy-<UTC time>.db`, newest 5 kept,
+never the one just made; a file without Bona's schema, such as a zero-byte one, is refused); a failed snapshot
+leaves the running service as it is. A copy by hand, never pruned:
 `ssh hermes-vps '~/.local/opt/node-v24.19.0-linux-x64/bin/node /opt/bona/services/deploy/vps/db-snapshot.mjs --label pre-v8'`.
+
+To restore a snapshot (the last resort, owner OK; on the VPS): stop bona-api (`sudo -n systemctl stop bona-api`),
+check that nothing else has the database open (`ls -l /proc/[0-9]*/fd 2>/dev/null | grep -F bona-data/bona.db`
+prints nothing), move `~/bona-data/bona.db-wal` and `~/bona-data/bona.db-shm` aside (SQLite replays a WAL left
+beside the restored file onto it, so the restore would quietly not restore), copy the snapshot to
+`~/bona-data/bona.db`, `chmod 600` it, then start bona-api (`sudo -n systemctl start bona-api`).
 
 ### Legacy / rollback only: the PC installer
 
