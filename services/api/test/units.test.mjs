@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { createUnits, money } from '../lib/units.mjs';
+import { liveSummary, unitSummary } from '../lib/units-summary.mjs';
 
 const FIXTURE = {
   listingId: 'BONA-W014',
@@ -133,5 +134,54 @@ describe('units', () => {
     assert.equal(money(708164, 'en'), 'SAR 708,164');
     assert.equal(money(708164, 'ar'), '708,164 ر.س');
     assert.equal(money(null), null);
+  });
+});
+
+// lib/units-summary.mjs: the copy of the site's per-bedroom summary that search_units publishes (DESIGN §4.5).
+// These run everywhere, the VPS included, where the parity test against src/lib is skipped (NO_SRC_LIB).
+describe('units-summary (the published per-bedroom "from" rows)', () => {
+  const NOW = new Date('2026-11-27T09:00:00Z');
+  const AVAILABLE = { id: 'BONA-W014', status: 'available' };
+  const PENTHOUSE = {
+    ref: 'B07-31', building: 'B07', unit: '31', floor: { en: 'Roof', ar: 'السطح' }, floorIndex: 7,
+    facing: { en: 'West', ar: 'غربية' }, beds: 2, baths: 3, maidRoom: true, class: 'Penthouse',
+    type: { en: 'Penthouse', ar: 'بنتهاوس' }, areaSqm: 210.5, roofSqm: 80, feature: { en: 'Sea', ar: 'بحر' },
+    price: { cash: 2100000, half: 2145000, year: 2310000, twoYear: 2415000 },
+  };
+
+  it('gives one row per bedroom count, penthouses apart, with the lowest cash price and the area range', () => {
+    const s = unitSummary({ ...FIXTURE, units: [...FIXTURE.units, PENTHOUSE] });
+    assert.deepEqual(s.rows, [
+      { key: '1', label: { en: '1 bedroom', ar: 'غرفة نوم واحدة' }, count: 1, areaMin: 55.45, areaMax: 55.45, cashFrom: 708164 },
+      { key: '3', label: { en: '3 bedrooms', ar: '3 غرف نوم' }, count: 1, areaMin: 123.49, areaMax: 123.49, cashFrom: 1359547 },
+      { key: 'penthouse', label: { en: 'Penthouse, 2 bedrooms', ar: 'بنتهاوس، غرفتا نوم' }, count: 1, areaMin: 210.5, areaMax: 210.5, cashFrom: 2100000 },
+    ]);
+    assert.equal(s.count, 3, 'the unit with no cash price is not counted');
+    assert.equal(s.delivery, '2028-06');
+    assert.equal(s.updated, '2026-09-02');
+  });
+
+  it('publishes nothing for a listing that is not available, or a sheet dated in the future or impossible', () => {
+    assert.ok(liveSummary(FIXTURE, AVAILABLE, NOW), 'a current sheet on an available listing is published');
+    assert.equal(liveSummary(FIXTURE, { ...AVAILABLE, status: 'sold' }, NOW), null);
+    assert.equal(liveSummary(FIXTURE, null, NOW), null, 'no listing, nothing published');
+    assert.equal(liveSummary(null, AVAILABLE, NOW), null);
+    assert.equal(liveSummary({ ...FIXTURE, updated: '2026-12-30' }, AVAILABLE, NOW), null, 'a future sheet date');
+    assert.equal(liveSummary({ ...FIXTURE, updated: '2026-02-30' }, AVAILABLE, NOW), null, 'an impossible sheet date');
+    assert.ok(liveSummary({ ...FIXTURE, updated: '2025-01-01' }, AVAILABLE, NOW), 'an old sheet still shows (owner decision 2026-10-02)');
+  });
+
+  it('drops an impossible delivery date instead of rolling it over', () => {
+    assert.equal(unitSummary({ ...FIXTURE, delivery: '2028-13' }).delivery, null);
+    assert.equal(unitSummary({ ...FIXTURE, delivery: '2028-02-30' }).delivery, null);
+    assert.equal(unitSummary({ ...FIXTURE, delivery: '2028-02-29' }).delivery, '2028-02-29');
+  });
+
+  it('summarises the record units.mjs serves (priced units only) exactly like the raw sheet', () => {
+    withFile(FIXTURE, (file) => {
+      const served = createUnits({ file }).forListing('BONA-W014');
+      assert.deepEqual(liveSummary(served, AVAILABLE, NOW), liveSummary(FIXTURE, AVAILABLE, NOW));
+      assert.equal(createUnits({ file }).forListing('BONA-005'), null);
+    });
   });
 });
