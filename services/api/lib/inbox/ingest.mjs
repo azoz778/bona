@@ -87,7 +87,9 @@
  *   - a human message seen for the first time also ends a hold that waits for a person
  *     (`dana_hold_reason` with no `dana_hold_until`), when it was written after the hold: newer
  *     than every other message of the chat and every assistant send (store.mjs clearHumanHold),
- *     so an old reply a refresh finds only now leaves it; a timed hold runs to its end;
+ *     so an old reply a refresh finds only now leaves it; a timed hold runs to its end. So does
+ *     WhatsApp's copy of a dashboard reply, matched by its key to the staff row, though the
+ *     sender stored the reply on its 2xx before the copy came (the same freshness bound);
  *   - a brochure the assistant sent (a Dana row with media_kind 'document') is found by its id,
  *     by its caption (a document record's text, matched to such rows only, never to a staff or
  *     text send with the same words, and a text record never to a brochure), or by the fallback:
@@ -451,15 +453,22 @@ export function createIngest({
         log({ evt: 'inbox.outbox.resolved', leadId: current.lead_id, sendId: match.row.send_id, via: match.via });
       }
 
+      // A hold that waits for a person ends with one written after it (store.mjs
+      // clearHumanHold: an older reply a refresh finds now leaves it, and a record with no
+      // time of its own says nothing of when it was written); a timed hold runs to its end.
+      // A human message seen for the first time asks; so does WhatsApp's copy of a dashboard
+      // reply, matched by its key to the staff row, though it is already stored: wa-send.mjs
+      // `reply` stores it on the 2xx, before the poller reads the copy, and does not end the
+      // hold itself (Claude T07 r3). Asked again on every read of it, which the freshness
+      // bound keeps safe: an old reply read after a newer hold leaves that hold.
+      const dashboardCopy = !inserted && senderKind === 'staff' && match?.via === 'key';
+      if ((inserted || dashboardCopy) && HUMAN_SENDERS.has(senderKind)
+          && current.dana_hold_reason && current.dana_hold_until == null) {
+        inbox.clearHumanHold?.(current.lead_id, { ts: Number.isFinite(rec.ts) ? rec.ts : NaN, keyId: rec.id });
+      }
       if (inserted && HUMAN_SENDERS.has(senderKind)) {
         inbox.noteHumanOutbound(current.lead_id, ts);
         if (current.needs_human) inbox.setNeedsHuman(current.lead_id, 0);
-        // A hold that waits for a person ends with one written after it (store.mjs
-        // clearHumanHold: an older reply a refresh finds now leaves it, and a record with no
-        // time of its own says nothing of when it was written); a timed hold runs to its end.
-        if (current.dana_hold_reason && current.dana_hold_until == null) {
-          inbox.clearHumanHold?.(current.lead_id, { ts: Number.isFinite(rec.ts) ? rec.ts : NaN, keyId: rec.id });
-        }
         if (!current.handler_user_id) {
           const handler = senderKind === 'staff' ? senderUserId : ownerUserId();
           if (handler) inbox.setHandler(current.lead_id, handler);

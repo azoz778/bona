@@ -1371,3 +1371,70 @@ test("the poller's match and wa-send's 2xx, in either order at the real callers:
     }
   }
 });
+
+test("a dashboard reply ends an until-human hold when the poller reads WhatsApp's copy after the 2xx stored it; an old reply read again after a newer hold leaves it (Claude T07 r3)", async () => {
+  const MIN = 60_000;
+  const hold = (h, id) => [h.lead(id).dana_hold_reason, h.lead(id).dana_hold_until];
+  /** The client wrote, the assistant's two sends to it failed, and it held the chat until a person writes. */
+  const holdAfter = (h, leadId, jid, { clientId, clientAt, failedAt, tag }) => {
+    h.at(clientAt + 2000);
+    const inbound = leadId === T_LEAD ? rec({ id: clientId, jid, jidAlt: null, ts: clientAt }) : rec({ id: clientId, ts: clientAt });
+    assert.equal(h.ingest(h.lead(leadId), inbound).senderKind, 'client');
+    for (const [i, at] of [[1, failedAt - 30_000], [2, failedAt]]) {
+      h.at(at - 5000);
+      h.inbox.insertOutbox({ send_id: `SND-${tag}${i}`, lead_id: leadId, jid, text: 'From the assistant', sender_kind: 'dana' });
+      h.at(at);
+      h.inbox.updateOutbox(`SND-${tag}${i}`, { status: 'failed', error: 'evolution_500' });
+    }
+    h.s.updateLead(leadId, { dana_hold_reason: 'send_failed', dana_hold_until: null, needs_human: 1 });
+  };
+  const CHATS = {
+    // A client's chat: WhatsApp files the copy under the chat's lid.
+    client: { leadId: LEAD_ID, jid: PHONE_JID, echo: (over) => rec({ fromMe: true, jid: LID, jidAlt: PHONE_JID, ...over }) },
+    // The owner's test chat: the Fold's own texts are dropped there, so the dashboard is the only person who can end a hold.
+    test_chat: { leadId: T_LEAD, jid: T_OWNER_JID, echo: (over) => toOwner(over) },
+  };
+  for (const [label, c] of Object.entries(CHATS)) {
+    const h = testChat();
+    holdAfter(h, c.leadId, c.jid, { clientId: 'C-1', clientAt: NOW - 6 * MIN, failedAt: NOW - 5 * MIN, tag: 'f' });
+    h.at(NOW);
+    // The real sender: the 2xx comes back first and stores the reply under WhatsApp's key (wa-send.mjs `reply`).
+    const sender = senderFor(h, { key: 'WA-STAFF-H1', answerAt: NOW + 2000 });
+    const sent = await sender.reply({ sendId: 'sid_staff_hold_000001', leadId: c.leadId, userId: h.staff.user_id, text: REPLY, seenRev: h.inbox.revision(c.leadId) });
+    assert.equal(sent.ok, true, `${label}: ${JSON.stringify(sent)}`);
+    assert.equal(h.inbox.messageByKey('WA-STAFF-H1')?.sender_kind, 'staff', label);
+    assert.deepEqual(hold(h, c.leadId), ['send_failed', null], `${label}: the hold waits for the copy`);
+    // The poller reads WhatsApp's copy: already stored, matched by its key to the staff row. The hold is over.
+    h.at(NOW + 5000);
+    assert.deepEqual(h.ingest(h.lead(c.leadId), c.echo({ id: 'WA-STAFF-H1', text: REPLY, ts: NOW + 1000 })), { stored: true, inserted: false, senderKind: 'staff' }, label);
+    assert.deepEqual(hold(h, c.leadId), [null, null], `${label}: a dashboard reply ends the hold`);
+    assert.deepEqual([h.lead(c.leadId).needs_human, h.lead(c.leadId).last_human_out_ts], [0, NOW], label);
+
+    // Later the client writes again, the assistant's sends fail again, and it holds the chat once more.
+    holdAfter(h, c.leadId, c.jid, { clientId: 'C-2', clientAt: NOW + 10 * MIN, failedAt: NOW + 11 * MIN, tag: 'g' });
+    // A thread refresh reads the OLD dashboard reply again: it is no answer to the newer hold.
+    h.at(NOW + 15 * MIN);
+    assert.equal(h.ingest(h.lead(c.leadId), c.echo({ id: 'WA-STAFF-H1', text: REPLY, ts: NOW + 1000 })).inserted, false, label);
+    assert.deepEqual(hold(h, c.leadId), ['send_failed', null], `${label}: an old reply read again leaves a newer hold`);
+    // A new dashboard reply, 2xx first again, and its copy: the hold is over.
+    const again = senderFor(h, { key: 'WA-STAFF-H2', answerAt: NOW + 15 * MIN + 2000 });
+    const sent2 = await again.reply({ sendId: 'sid_staff_hold_000002', leadId: c.leadId, userId: h.staff.user_id, text: TYPED, seenRev: h.inbox.revision(c.leadId) });
+    assert.equal(sent2.ok, true, `${label}: ${JSON.stringify(sent2)}`);
+    h.at(NOW + 16 * MIN);
+    h.ingest(h.lead(c.leadId), c.echo({ id: 'WA-STAFF-H2', text: TYPED, ts: NOW + 15 * MIN + 1000 }));
+    assert.deepEqual(hold(h, c.leadId), [null, null], `${label}: the new reply ends it`);
+    assert.equal(h.inbox.messagesFor(c.leadId).some((m) => m.sender_kind === 'owner_number'), false, label);
+    assert.deepEqual(h.alerts, [], label);
+    assertCleanT(h.logs);
+    h.s.close();
+  }
+
+  // Only a staff row matched by its key: the owner's phone read again (a refresh) is not a new answer.
+  const own = testChat({ client: { dana_hold_reason: 'loop', dana_hold_until: null } });
+  own.ingest(own.lead(LEAD_ID), rec({ id: 'O-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED, ts: NOW + 1000 }));
+  assert.deepEqual(hold(own, LEAD_ID), [null, null]);
+  own.s.updateLead(LEAD_ID, { dana_hold_reason: 'loop' });
+  own.ingest(own.lead(LEAD_ID), rec({ id: 'O-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED, ts: NOW + 1000 }));
+  assert.deepEqual(hold(own, LEAD_ID), ['loop', null]);
+  own.s.close();
+});
