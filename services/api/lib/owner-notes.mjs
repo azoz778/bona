@@ -318,6 +318,11 @@ function createLedgerNotes({
   };
   const answer = (r) => (r.inserted && r.status === 'queued' ? { queued: true }
     : { queued: false, reason: r.inserted ? 'dropped' : 'duplicate' });
+  /** The note's lead was purged since the row was read: a record with its own key (onPurge), or gone. */
+  const purgedNote = (noteId) => {
+    const r = prep('SELECT dedupe_key FROM owner_notes WHERE note_id = ?').get(String(noteId));
+    return !r || r.dedupe_key === `purged:${noteId}`;
+  };
 
   /* ---------------- the timer ---------------- */
 
@@ -640,6 +645,19 @@ function createLedgerNotes({
     const forms = [];
     db.transaction(() => {
       for (const m of members) {
+        // Purged while the send was out (onPurge): `m` is the copy from before the purge, so it
+        // must not be written back. The record only settles: its send stays counted, nothing of
+        // the lead or its form returns, no receipt is written, and it never goes again.
+        if (purgedNote(m.note_id)) {
+          let status = 'dropped';
+          if (outcome === 'sent') status = m.note_id === carrier.note_id ? 'sent' : 'merged';
+          else if (outcome === 'uncertain') status = 'uncertain';
+          else if (outcome === 'failed' && Number(m.meta.tries) >= 1) status = 'failed';
+          prep("UPDATE owner_notes SET status = ?, send_id = ?, updated = ? WHERE note_id = ? AND substr(dedupe_key, 1, 7) = 'purged:'")
+            .run(status, sendId, t2, m.note_id);
+          texts.delete(m.note_id);
+          continue;
+        }
         const meta = { ...m.meta };
         let status;
         let sid = null;
@@ -790,7 +808,7 @@ function createLedgerNotes({
       tick().then(() => false, () => false),
       new Promise((resolve) => { wait = setTimeout(() => resolve(true), formWaitMs); wait.unref?.(); }),
     ]).finally(() => clearTimeout(wait));
-    if (timedOut && inflight.has(r.noteId)) {
+    if (timedOut && inflight.has(r.noteId) && !purgedNote(r.noteId)) {
       setReceipt(ev, 'uncertain');
       say({ evt: 'lead.wa_error', id, error: 'owner notification unconfirmed' });
     }
@@ -917,7 +935,8 @@ function createLedgerNotes({
    * network. A row that carries one of TODAY's sends stays as a record with nothing of the lead
    * (no lead id, a dedupe key of its own note id, no meta), as purgeLead keeps the day's outbox
    * rows: the day's 40 and the 25 s gap count it still, so a purge never hands a send back. Such
-   * records go at the next purge once their day is over.
+   * records go at the next purge once their day is over. A send still out when the purge lands
+   * only settles its record when it answers (sendBatch): never queued again, nothing written back.
    */
   function onPurge(leadId) {
     if (!db) return;

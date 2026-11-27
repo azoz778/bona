@@ -14,7 +14,7 @@ import { createSender } from '../lib/wa-send.mjs';
 import { leadNote } from '../lib/leads.mjs';
 import { recoverPendingNotifications } from '../lib/enquiry-receipt.mjs';
 import {
-  createOwnerNotes, FORM_NOTIFY_WAIT_MS, MIN_GAP_MS, MERGE_WINDOW_MS, MAX_PER_DAY, MAX_NOTE_CHARS, HEADERS, ALERT_CODES,
+  createOwnerNotes, FORM_NOTIFY_WAIT_MS, MIN_GAP_MS, MERGE_WINDOW_MS, MAX_PER_DAY, MAX_NOTE_CHARS, RETRY_AFTER_MS, HEADERS, ALERT_CODES,
 } from '../lib/owner-notes.mjs';
 
 const NOW = 1_795_935_600_000; // Sun 29 Nov 2026 10:00 Riyadh (07:00 UTC)
@@ -939,6 +939,74 @@ test('purge: the onPurge subscription deletes the lead\'s rows, inside the purge
   const left = db.db.prepare('SELECT lead_id FROM owner_notes').all().map((r) => r.lead_id);
   assert.deepEqual(left, ['LEAD-P2']);
   db.close();
+});
+
+test('a purge while the send is out: whatever WhatsApp answers (ok, unsure, held, a first failure) the record keeps nothing of the lead, nothing goes again, the receipt is not touched, and the send still counts for the day', async () => {
+  const cases = [
+    [{ ok: true }, 'sent'],
+    [{ ok: false, error: 'timeout', uncertain: true }, 'uncertain'],
+    [{ ok: false, error: 'rate_limited' }, 'dropped'],
+    [{ ok: false, error: 'evolution-not-configured' }, 'dropped'],
+  ];
+  for (const [reply, status] of cases) {
+    const label = JSON.stringify(reply);
+    let release = null;
+    const calls = [];
+    const h = harness({
+      sendNote: (text) => {
+        calls.push(text);
+        return calls.length === 1 ? new Promise((resolve) => { release = resolve; }) : { ok: true };
+      },
+    });
+    const lead = addLead(h, { name: 'Sara Example', channel: 'form', match_method: 'form' });
+    receiptFor(h, 'ev-inflight-00001', lead.lead_id);
+    const request = h.notes.leadEvent(lead, { why: 'form', created: true, eventId: 'ev-inflight-00001' });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls.length, 1, `${label}: the send is out`);
+    const [out] = h.rows();
+    h.notes.onPurge(lead.lead_id);
+    release(reply);
+    await request;
+    const rows = h.rows();
+    assert.deepEqual(rows.map((r) => [r.note_id, r.lead_id, r.dedupe_key, r.meta, r.status]),
+      [[out.note_id, null, `purged:${out.note_id}`, {}, status]], label);
+    assert.ok(rows[0].send_id, `${label}: the record carries its send`);
+    const raw = JSON.stringify(h.db.db.prepare('SELECT * FROM owner_notes').all());
+    assert.ok(!raw.includes(lead.lead_id) && !raw.includes('ev-inflight'), `${label}: nothing of the lead or its form comes back`);
+    assert.equal(h.receipt('ev-inflight-00001'), 'pending', `${label}: a purged note's event is not written`);
+    assert.equal(h.logs.some((e) => String(e.evt).startsWith('lead.')), false, `${label}: no form line for a purged note`);
+    // Past the hold and the retry time: nothing goes again.
+    const later = NOW + RETRY_AFTER_MS + MIN_GAP_MS;
+    h.at(later);
+    await h.notes.tick();
+    assert.equal(calls.length, 1, `${label}: nothing re-sent`);
+    // The day's 40 still counts it: 39 more go, the next one is held.
+    await alertsEvery25s(h, MAX_PER_DAY - 1, later, `F${status[0]}`);
+    assert.equal(calls.length, MAX_PER_DAY, label);
+    h.at(later + MAX_PER_DAY * MIN_GAP_MS);
+    h.notes.alert('breaker');
+    await h.notes.tick();
+    assert.equal(calls.length, MAX_PER_DAY, `${label}: the purge did not hand back a send`);
+    assert.deepEqual(overRows(h).map((r) => [r.kind, r.meta.alert]), [['alert', 'breaker']], label);
+  }
+});
+
+test('a purge while the form request still waits: the request does not mark the purged note\'s receipt either', async () => {
+  let release = null;
+  const h = harness({ sendNote: () => new Promise((resolve) => { release = resolve; }), extra: { formWaitMs: 30 } });
+  const lead = addLead(h, { channel: 'form', match_method: 'form' });
+  receiptFor(h, 'ev-waiting-00001', lead.lead_id);
+  const request = h.notes.leadEvent(lead, { why: 'form', created: true, eventId: 'ev-waiting-00001' });
+  await new Promise((resolve) => setImmediate(resolve));
+  h.notes.onPurge(lead.lead_id);
+  await request;
+  assert.equal(h.receipt('ev-waiting-00001'), 'pending');
+  assert.equal(h.logs.some((e) => e.evt === 'lead.wa_error'), false);
+  release({ ok: true });
+  await h.notes.tick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.receipt('ev-waiting-00001'), 'pending');
+  assert.equal(h.rows()[0].status, 'sent');
 });
 
 test('health: enabled follows owner_notes; ok is false once a queued note is 15 min overdue; booleans only', async () => {
