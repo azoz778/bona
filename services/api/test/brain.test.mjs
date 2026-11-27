@@ -489,6 +489,65 @@ test('a failure mid-turn restarts the whole turn on the backup model (tools agai
   assert.equal(h.calls[2].body.messages.some((m) => m.role === 'tool'), false, 'the backup starts from the client turn');
 });
 
+test('the caps are per turn (DESIGN-brain §2.4): the backup gets only what the main model left of the 4 + 1 calls and 6 tools', async () => {
+  const two = (q) => toolCalls(['search_properties', { query: `${q}1` }], ['search_properties', { query: `${q}2` }]);
+  // Main: 6 tools over 3 rounds, then a 503. The backup has 0 tools and 1 answer call left: it must answer.
+  const h = harness({ script: [two('a'), two('b'), two('c'), http(503, {}), reply('From the backup.')] });
+  const r = await h.brain.turn(turnArgs());
+  assert.equal(r.ok, true);
+  assert.equal(r.backup, true);
+  assert.equal(h.calls.length, 5);
+  assert.equal(h.calls[4].body.model, 'gpt-6.1-terra');
+  assert.equal(h.calls[4].body.tool_choice, 'none', 'no tool left and the last answer call: the backup must answer');
+  assert.equal(h.ran.length, 6, 'no tool ran on the backup');
+  // The same, but the backup still asks for tools: it cannot answer, so the turn hands over (no further call).
+  const stuck = harness({ script: [two('a'), two('b'), two('c'), http(503, {}), toolCalls(['search_properties', {}]), reply('never')] });
+  assert.deepEqual(await stuck.brain.turn(turnArgs()), { ok: false, code: 'bad_response' });
+  assert.equal(stuck.calls.length, 5, 'never a fifth answer call in the turn');
+  assert.equal(stuck.ran.length, 6);
+  // Main used all 4 answer calls: no backup at all (there is nothing left to give it).
+  const spent = harness({ script: [two('a'), two('b'), two('c'), toolCalls(['search_properties', {}]), reply('never')] });
+  assert.deepEqual(await spent.brain.turn(turnArgs()), { ok: false, code: 'bad_response' });
+  assert.equal(spent.calls.length, 4);
+  // Main used the one repair call (its answer was unreadable): the backup's guard hit has no repair left.
+  const repaired = harness({ script: [reply('It is SAR 7,000,000.'), { status: 200, json: '<html>oops' }, reply('It is SAR 7,000,000.'), reply('never')] });
+  assert.deepEqual(await repaired.brain.turn(turnArgs()), { ok: false, code: 'guard' });
+  assert.equal(repaired.calls.length, 3, 'one repair call in the whole turn');
+  assert.equal(repaired.calls[2].body.model, 'gpt-6.1-terra');
+  // A failed request (a 503) never answered, so it does not use up an answer call: 3 tool rounds, a 503, then 1 left.
+  const early = harness({ script: [http(503, {}), two('a'), two('b'), two('c'), reply('Done.')] });
+  const e = await early.brain.turn(turnArgs());
+  assert.equal(e.ok, true);
+  assert.deepEqual(early.calls.map((c) => c.body.tool_choice), ['auto', 'auto', 'auto', 'auto', 'none'], 'the backup has the whole allowance after a main model that never answered');
+});
+
+test('request_human is never dropped by the 6-tool cap (it only notes the hand-over and costs nothing)', async () => {
+  const seven = [...Array.from({ length: 7 }, (_, i) => ['search_properties', { query: `q${i}` }]), ['request_human', { reason: 'person' }]];
+  const h = harness({
+    script: [toolCalls(...seven), reply('The team will reply shortly.')],
+    runTool: async (name) => { h.ran.push({ name }); return name === 'request_human' ? '{"ok":true}' : '{"count":0,"results":[]}'; },
+  });
+  const r = await h.brain.turn(turnArgs());
+  assert.equal(r.ok, true);
+  assert.deepEqual(h.ran.map((x) => x.name), [...Array(6).fill('search_properties'), 'request_human'], '6 searches and the hand-over ran');
+  assert.deepEqual(r.toolCalls.map((c) => [c.name, c.ok]), [...Array(6).fill(['search_properties', true]), ['search_properties', false], ['request_human', true]]);
+  assert.equal(JSON.parse(r.toolCalls[6].result).error, 'tool_limit');
+  assert.equal(answerFrom(r, { inventory, siteUrl: SITE, language: 'en' }).handover, true, 'dana-wa sees the hand-over');
+});
+
+test('a cut-off answer (finish_reason length) is bad_response: it goes to the backup and is never sent as an answer', async () => {
+  const cut = { status: 200, json: { choices: [{ message: { role: 'assistant', content: 'The villa in Obhur is' }, finish_reason: 'length' }], usage: USAGE } };
+  const h = harness({ script: [cut, reply('From the backup.')] });
+  const r = await h.brain.turn(turnArgs());
+  assert.equal(r.ok, true);
+  assert.equal(r.backup, true);
+  assert.equal(r.messages.at(-1).content, 'From the backup.');
+  const quiet = harness({ backupMode: 'handover', script: [cut] });
+  assert.deepEqual(await quiet.brain.turn(turnArgs()), { ok: false, code: 'bad_response' });
+  const repair = harness({ backupMode: 'handover', script: [reply('It is SAR 7,000,000.'), { ...cut, json: { ...cut.json, choices: [{ message: { content: 'A team member will' }, finish_reason: 'length' }] } }] });
+  assert.deepEqual(await repair.brain.turn(turnArgs()), { ok: false, code: 'bad_response' }, 'a cut-off repair is not an answer either');
+});
+
 test('no answer in 15 s is timeout (backup if time remains); the turn never passes its deadline', async () => {
   const h = harness({ now: Date.now, limits: { callMs: 40, turnMs: 400, backupMinMs: 50 }, script: ['hang', reply('Backup.')] });
   const r = await h.brain.turn(turnArgs());
@@ -624,8 +683,8 @@ test('the runaway stops: $20 a day and $300 a month by default → budget with n
   assert.deepEqual(await month.brain.turn(turnArgs()), { ok: false, code: 'budget' });
   assert.deepEqual(month.alerts, [{ code: 'brain_spend', meta: { stop: 'month' } }]);
   const shared = harness({ env: { BONA_BRAIN_MONTH_STOP_USD: '50' } });
-  shared.team.setSetting('brain_usd_month', '2026-11:49990000');
-  assert.equal((await shared.brain.turn(turnArgs())).ok, true, 'under $50');
+  shared.team.setSetting('brain_usd_month', '2026-11:49900000');
+  assert.equal((await shared.brain.turn(turnArgs())).ok, true, 'under $50, also after this turn\'s call');
   shared.team.setSetting('brain_usd_month', '2026-11:50000000');
   assert.deepEqual(await shared.brain.turn(turnArgs()), { ok: false, code: 'budget' }, 'the shared-key stop is $50');
   const old = harness();
@@ -636,9 +695,67 @@ test('the runaway stops: $20 a day and $300 a month by default → budget with n
 
 test('without a team the money still counts in memory and the stops still hold', async () => {
   const h = harness({ teamless: true, env: { BONA_BRAIN_DAY_STOP_USD: '0.03' } });
-  assert.equal((await h.brain.turn(turnArgs())).ok, true);
-  assert.equal((await h.brain.turn(turnArgs())).ok, true);
+  assert.equal((await h.brain.turn(turnArgs())).ok, true, '$0.0192 of $0.03');
+  assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'budget' }, 'this call crossed the stop: the turn stops at once');
+  assert.equal(h.calls.length, 2);
   assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'budget' });
+  assert.equal(h.calls.length, 2, 'over the stop: no call');
+});
+
+test('the runaway stops are checked before every paid request and after every response: crossing one mid-turn stops the turn at once, with the stop alert in that turn', async () => {
+  const stopAlerts = (h) => h.alerts.filter((a) => a.code === 'brain_spend' && a.meta.stop);
+  // A tool round takes the day from $19.99 past $20: no second round.
+  const round = harness({ script: [toolCalls(['search_properties', { query: 'villa' }]), reply('never')] });
+  round.team.setSetting('brain_usd_day', '2026-11-26:19990000');
+  assert.deepEqual(await round.brain.turn(turnArgs()), { ok: false, code: 'budget' });
+  assert.equal(round.calls.length, 1, 'no paid request after the crossing one');
+  assert.equal(round.ran.length, 0, 'no tool runs for a turn that already stopped');
+  assert.deepEqual(stopAlerts(round), [{ code: 'brain_spend', meta: { stop: 'day' } }], 'the alert is sent in this turn, not the next one');
+  // The answer itself crossed it: never sent as a success (the caller takes the holding/outage path).
+  const answer = harness({ script: [reply('Hello.')] });
+  answer.team.setSetting('brain_usd_day', '2026-11-26:19990000');
+  assert.deepEqual(await answer.brain.turn(turnArgs()), { ok: false, code: 'budget' });
+  assert.deepEqual(stopAlerts(answer), [{ code: 'brain_spend', meta: { stop: 'day' } }]);
+  // Another turn spent past the month stop while this one was on its tools: the next round is never sent.
+  let tools;
+  tools = harness({
+    script: [toolCalls(['search_properties', { query: 'villa' }]), reply('never')],
+    runTool: async () => { tools.team.setSetting('brain_usd_month', '2026-11:300000000'); return '{"count":0,"results":[]}'; },
+  });
+  assert.deepEqual(await tools.brain.turn(turnArgs()), { ok: false, code: 'budget' });
+  assert.equal(tools.calls.length, 1);
+  assert.deepEqual(stopAlerts(tools), [{ code: 'brain_spend', meta: { stop: 'month' } }]);
+  // Crossed while the main model failed: no backup request.
+  let backup;
+  backup = harness({ script: [() => { backup.team.setSetting('brain_usd_day', '2026-11-26:20000000'); return http(503, {}); }, reply('never')] });
+  assert.deepEqual(await backup.brain.turn(turnArgs()), { ok: false, code: 'budget' });
+  assert.equal(backup.calls.length, 1, 'no backup request over the stop');
+  // Crossed by the draft the guard refused: no repair request.
+  const repair = harness({ script: [reply('It is SAR 7,000,000.'), reply('never')] });
+  repair.team.setSetting('brain_usd_day', '2026-11-26:19990000');
+  assert.deepEqual(await repair.brain.turn(turnArgs()), { ok: false, code: 'budget' });
+  assert.equal(repair.calls.length, 1, 'no repair request over the stop');
+  // A classification is one paid request too ($0.0044 on the classifier model).
+  const mail = harness({ promptDir: promptDirWithClassifier(), script: [reply('{"class":"client","wants":"x"}')] });
+  mail.team.setSetting('brain_usd_day', '2026-11-26:19998000');
+  assert.deepEqual(await mail.brain.classify({ fromName: 'Sara Example', fromDomain: 'example.com', subject: 'Villa', text: 'Hello' }), { error: 'budget' });
+  assert.deepEqual(stopAlerts(mail), [{ code: 'brain_spend', meta: { stop: 'day' } }]);
+  // One alert per day, however many turns hit the stop.
+  await round.brain.turn(turnArgs());
+  assert.equal(stopAlerts(round).length, 1);
+});
+
+test('health().ok is false while a runaway stop is reached (health sends no alert), and true again the next day', async () => {
+  const h = harness();
+  assert.equal(h.brain.health().ok, true);
+  h.team.setSetting('brain_usd_day', '2026-11-26:20000000');
+  assert.equal(h.brain.health().ok, false, 'the day stop is reached');
+  assert.deepEqual(h.alerts, [], 'health never alerts');
+  h.now = Date.parse('2026-11-27T00:00:01+03:00');
+  assert.equal(h.brain.health().ok, true, 'a new Riyadh day');
+  h.team.setSetting('brain_usd_month', '2026-11:300000000');
+  assert.equal(h.brain.health().ok, false, 'the month stop is reached');
+  assert.deepEqual(h.alerts, []);
 });
 
 /* ---------------- the reply guard in the turn (PLAN T25 test 7) ---------------- */
@@ -653,19 +770,27 @@ test('a draft with an amount no tool returned: one repair call placed after the 
   assert.equal(h.calls.length, 3);
   const repair = h.calls[2].body;
   assert.deepEqual(repair.messages.at(-1), { role: 'system', content: REPAIR_NOTE });
-  assert.equal(repair.messages.at(-2).role, 'tool', 'the note follows a tool message, never a plain assistant text turn');
+  assert.deepEqual(repair.messages.at(-2), h.calls[1].body.messages.at(-1), 'the note follows the last tool message itself, never a plain assistant text turn');
+  assert.equal(repair.messages.at(-2).role, 'tool');
+  assert.deepEqual(repair.messages.slice(0, -1), h.calls[1].body.messages, 'the same request, then the note');
   assert.equal(repair.tool_choice, 'none');
   assert.equal(h.calls[2].raw.includes('7,000,000'), false, 'the rejected draft is never sent back');
   assert.deepEqual(h.logs.filter((e) => e.evt === 'brain.guard'), [{ evt: 'brain.guard', leadId: LEAD, kind: 'amount' }]);
 });
 
-test('without tools the repair note follows the code-made context, never the draft; a second hit is guard', async () => {
+test('without tools the repair note follows the client turn itself (the code-made context moves before it), never the draft; a second hit is guard', async () => {
   const h = harness({ script: [reply('It is SAR 7,000,000.'), reply('A team member will confirm the price.')] });
   const r = await h.brain.turn(turnArgs());
   assert.equal(r.ok, true);
+  const first = h.calls[0].body.messages;
   const repair = h.calls[1].body.messages;
-  assert.equal(repair.at(-1).content, REPAIR_NOTE);
-  assert.notEqual(repair.at(-2).role, 'assistant');
+  assert.deepEqual(repair.at(-1), { role: 'system', content: REPAIR_NOTE });
+  assert.deepEqual(repair.at(-2), first.at(-2), 'the exact predecessor is the last user message (the client turn)');
+  assert.equal(repair.at(-2).role, 'user');
+  assert.deepEqual(repair.at(-3), first.at(-1), 'the code-made context note is kept, just before the client turn');
+  assert.match(repair.at(-3).content, /^Context from Bona's system/);
+  assert.deepEqual(repair.slice(0, -3), first.slice(0, -2), 'everything before is the same request');
+  assert.equal(repair.length, first.length + 1);
   assert.equal(repair.filter((m) => m.role === 'assistant' && m.content && !m.tool_calls).length, 0);
   const twice = harness({ script: [reply('Maybe 2 million?'), reply('Fine, 2 million.'), reply('never')] });
   assert.deepEqual(await twice.brain.turn(turnArgs()), { ok: false, code: 'guard' });

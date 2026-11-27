@@ -239,7 +239,21 @@ export function unitRefs(text) {
 const propertySlugs = (text) => [...String(text ?? '').matchAll(URL_RE)]
   .flatMap((u) => [...u[0].matchAll(PROPERTY_PATH_RE)].map((m) => m[1].toLowerCase()));
 
-/** Every string and number inside a tool result (a JSON string, sometimes encoded twice, or plain text). */
+/** The words of a JSON key: "cashFrom" → cash, from; "price_two_year" → price, two, year. */
+const keyWords = (k) => String(k).replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+/** A key that names a price as the tools write them: price, price_cash, cashFrom, rent, monthly_rent, prices, amount, from. */
+const PRICE_WORDS = new Set(['price', 'prices', 'cash', 'rent', 'rents', 'rental', 'amount', 'amounts', 'from']);
+/** A key that names a measure or a count, never money: area_sqm, areaMin, count, beds, baths, floor, roof_sqm. */
+const MEASURE_WORDS = new Set(['area', 'sqm', 'sqft', 'size', 'count', 'beds', 'bedrooms', 'baths', 'bathrooms', 'floor', 'floors', 'roof', 'rooms']);
+const isPriceKey = (k) => keyWords(k).some((w) => PRICE_WORDS.has(w));
+const isMeasureKey = (k) => keyWords(k).some((w) => MEASURE_WORDS.has(w));
+
+/**
+ * Every string inside a tool result (a JSON string, sometimes encoded twice, or plain text), and every number
+ * that sits in a price field: its own key names a price ("price_cash", "cashFrom", "rent"), or it sits under
+ * one ("price": { "cash", "twoYear" }) and its own key names no measure. An area, a count, beds or baths
+ * (`area_sqm: 1250`) is never an amount a reply may quote.
+ */
 function leaves(result) {
   let v = result;
   for (let i = 0; i < 2 && typeof v === 'string'; i += 1) {
@@ -247,21 +261,27 @@ function leaves(result) {
   }
   const strings = [];
   const numbers = [];
-  const walk = (x, depth) => {
+  const walk = (x, depth, key, underPrice) => {
     if (depth > 20) return;
     if (typeof x === 'string') strings.push(x);
-    else if (typeof x === 'number' && Number.isFinite(x) && x > 0) numbers.push(x);
-    else if (Array.isArray(x)) for (const y of x) walk(y, depth + 1);
-    else if (x && typeof x === 'object') for (const y of Object.values(x)) walk(y, depth + 1);
+    else if (typeof x === 'number') {
+      const priced = key !== null && (isPriceKey(key) || (underPrice && !isMeasureKey(key)));
+      if (priced && Number.isFinite(x) && x > 0) numbers.push(x);
+    } else if (Array.isArray(x)) for (const y of x) walk(y, depth + 1, key, underPrice);
+    else if (x && typeof x === 'object') {
+      const priced = key !== null && isPriceKey(key);
+      for (const [k, y] of Object.entries(x)) walk(y, depth + 1, k, underPrice || priced);
+    }
   };
-  walk(v, 0);
+  walk(v, 0, null, false);
   return { strings, numbers };
 }
 
 /**
  * What a reply may quote: amounts, unit refs and property slugs. `amounts` holds keys: `sar:<SAR value>` for
  * every allowed amount, `<CUR>:<figure>` for one written with a currency, and `raw:<figure>` for every figure.
- * A figure with no currency (a JSON number too) counts as SAR, as `findAmounts` reads it.
+ * A figure with no currency counts as SAR, as `findAmounts` reads it; a JSON number counts only in a price
+ * field (`leaves`).
  */
 export function allowedFrom({ toolResults = [], earlierReplies = [] } = {}) {
   const amounts = new Set();

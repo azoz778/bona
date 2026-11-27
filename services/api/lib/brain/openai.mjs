@@ -10,7 +10,8 @@
  * Completions with tools, this file moves to POST /v1/responses and the turn() contract stays.]
  *
  * The response: the text, the function calls (each with its arguments parsed: a JSON object or
- * the whole response is `bad_response`), a refusal flag, and the usage token counts.
+ * the whole response is `bad_response`), a refusal flag, and the usage token counts. A response
+ * cut off at the token cap (`finish_reason: 'length'`) is `bad_response` (the backup model's case).
  */
 import { createHash } from 'node:crypto';
 
@@ -71,6 +72,8 @@ export function parseCompletion(json) {
   const choice = json && typeof json === 'object' && Array.isArray(json.choices) ? json.choices[0] : null;
   const msg = choice?.message;
   if (!msg || typeof msg !== 'object') return BAD;
+  // Cut off at max_completion_tokens: half an answer (or half a tool call) is never an answer.
+  if (choice.finish_reason === 'length') return BAD;
   const refusal = (typeof msg.refusal === 'string' && msg.refusal.trim() !== '') || choice.finish_reason === 'content_filter';
   const toolCalls = [];
   for (const c of Array.isArray(msg.tool_calls) ? msg.tool_calls : []) {

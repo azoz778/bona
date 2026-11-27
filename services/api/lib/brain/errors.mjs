@@ -8,10 +8,10 @@
  *   rate          another 429: a rate limit (one short retry, else the backup model)
  *   down          5xx or a network error (the backup model; the breaker counts it)
  *   timeout       no answer in time (the backup model)
- *   bad_response  an unparsable body, a bad tool call, no text, too many rounds, another 4xx
+ *   bad_response  an unparsable body, a bad tool call, no text, a cut-off answer, too many rounds, another 4xx
  *   refusal       the model refused (never retried on another model)
  *   guard         the reply guard failed again after its one repair call
- *   budget        a runaway stop (day or month) is reached
+ *   budget        a runaway stop (day or month) is reached, at a turn's start or by any of its requests
  *   off           no brain: no key, no prompt, an unknown host, a route not offered
  */
 

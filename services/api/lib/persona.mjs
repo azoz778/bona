@@ -96,7 +96,10 @@ export function outageLine({ language, at }) {
   return inOfficeHours(at) ? HANDOVER[lang(language)] : OUTAGE_OUT_OF_HOURS[lang(language)];
 }
 
-/** `{{identity}}` of prompts/assistant.md (DESIGN-brain §6.2); `{{channel}}` is filled by the prompt builder. */
+/**
+ * `{{identity}}` of prompts/assistant.md (DESIGN-brain §6.2); `{{channel}}` is filled by the prompt builder.
+ * It also answers "what is your name?", so no prompt line names (or denies) a name and "keep Dana" stays one line.
+ */
 export function identity(opts) {
   const name = nameOf(opts);
   const who = name
@@ -105,8 +108,11 @@ export function identity(opts) {
   const naming = name
     ? `Your name is ${name.en} (${name.ar}); never give yourself another one.`
     : 'You have no personal name; never give yourself one, never call yourself Dana or دانة.';
+  const asked = name
+    ? `If asked your name: you are ${name.en} (${name.ar}), Bona's AI assistant.`
+    : "If asked your name: you have none; you are Bona's AI assistant.";
   return `${who}, answering clients of Bona Real Estate (بونا), a private real-estate boutique in Jeddah, on {{channel}}. ${naming} `
-    + 'If asked whether you are a person: you are an AI assistant, and the Bona team can read this chat and step in.';
+    + `If asked whether you are a person: you are an AI assistant, and the Bona team can read this chat and step in. ${asked}`;
 }
 
 /** The code-built first line of every email reply (DESIGN-brain §6.3; T22). */

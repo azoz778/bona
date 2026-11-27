@@ -54,6 +54,30 @@ test('an amount from this turn\'s tool results passes, in any currency spelling 
   assert.equal(checkReply('B08-19 is 2,950,000 riyals cash.', { toolResults: [units] }).ok, true, 'a JSON number in a tool result counts');
 });
 
+test('only a price field of a tool result authorises a JSON number: an area, a count, beds or baths never does', () => {
+  // A home on request: its area (1,250 m²) must not let an invented "SAR 1,250 per month" through.
+  const onRequest = JSON.stringify({ count: 1, results: [{ id: 'BONA-901', price_en: 'Price on request', price_ar: 'السعر عند الطلب', beds: 5, baths: 6, area_sqm: 1250 }] });
+  for (const text of ['SAR 1,250 per month', 'Rent is 1,250 riyals.', 'It is SAR 5 a night.', 'It is SAR 6.']) {
+    assert.deepEqual(checkReply(text, { toolResults: [onRequest] }).hits, [{ kind: 'amount' }], text);
+  }
+  // The published units cut: only cashFrom is a price; count, areaMin and areaMax are not.
+  const cut = JSON.stringify({ count: 12, summary: { rows: [{ label: { en: '2 bedrooms', ar: 'غرفتا نوم' }, count: 12, areaMin: 120, areaMax: 180, cashFrom: 995_000 }], delivery: '2028-06', updated: '2026-11-01' } });
+  assert.deepEqual(checkReply('2 bedrooms from SAR 995,000.', { toolResults: [cut] }), { ok: true, hits: [] });
+  for (const text of ['SAR 180 a month', 'SAR 12 deposit', 'SAR 120']) assert.deepEqual(checkReply(text, { toolResults: [cut] }).hits, [{ kind: 'amount' }], text);
+  // Price fields as the tools name them pass: price, price_cash, cashFrom, rent, a nested price object, an array of prices.
+  for (const [result, text] of [
+    [{ results: [{ price_cash: 2_950_000 }] }, 'SAR 2,950,000'],
+    [{ price: 2_950_000 }, '2,950,000 riyals'],
+    [{ rent: 85_000 }, 'Rent SR 85,000 a year'],
+    [{ monthly_rent: 7_000 }, 'SAR 7,000 a month'],
+    [{ price: { cash: 2_950_000, twoYear: 3_100_000 } }, 'SAR 3,100,000 over two years'],
+    [{ prices: [995_000, 1_200_000] }, 'from SAR 1,200,000'],
+    [{ availability: { from: 995_000 } }, 'from SAR 995,000'],
+  ]) assert.deepEqual(checkReply(text, { toolResults: [JSON.stringify(result)] }), { ok: true, hits: [] }, text);
+  assert.deepEqual(checkReply('SAR 2,950,000', { toolResults: [JSON.stringify({ count: 2_950_000 })] }).hits, [{ kind: 'amount' }], 'a count is never a price');
+  assert.deepEqual(checkReply('SAR 2,950,000', { toolResults: [JSON.stringify(2_950_000)] }).hits, [{ kind: 'amount' }], 'a bare number has no price field');
+});
+
 test("a client's own figure is never allowed back (it is not in any tool result)", () => {
   // "ممكن 2 مليون؟" from the client; the reply echoes it.
   assert.deepEqual(checkReply('تمام، 2 مليون', { toolResults: [villa] }).hits, [{ kind: 'amount' }]);

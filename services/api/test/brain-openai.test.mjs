@@ -48,7 +48,7 @@ test('the request: store:false, no temperature or top_p, effort low, 1,200 compl
   assert.equal('safety_identifier' in none, false);
 });
 
-test('parseCompletion: text, function calls, refusals and usage; anything else is bad_response', () => {
+test('parseCompletion: text, function calls, refusals and usage; anything else (a cut-off answer, finish_reason length, too) is bad_response', () => {
   const usage = { prompt_tokens: 9000, prompt_tokens_details: { cached_tokens: 8000 }, completion_tokens: 300, completion_tokens_details: { reasoning_tokens: 120 } };
   const text = parseCompletion({ choices: [{ message: { role: 'assistant', content: ' Hello ' }, finish_reason: 'stop' }], usage });
   assert.deepEqual(text, { ok: true, text: 'Hello', toolCalls: [], refusal: false, finish: 'stop', usage: { in: 9000, cached: 8000, out: 300, reasoning: 120 }, raw: { role: 'assistant', content: ' Hello ' } });
@@ -59,6 +59,8 @@ test('parseCompletion: text, function calls, refusals and usage; anything else i
   assert.equal(parseCompletion({ choices: [{ message: { content: null, refusal: 'I cannot help with that.' } }] }).refusal, true);
   assert.equal(parseCompletion({ choices: [{ message: { content: '' }, finish_reason: 'content_filter' }] }).refusal, true);
   for (const bad of [null, {}, { choices: [] }, { choices: [{}] }, 'text',
+    { choices: [{ message: { role: 'assistant', content: 'The villa is in Obhur and it has' }, finish_reason: 'length' }], usage },
+    { choices: [{ message: { role: 'assistant', content: '' }, finish_reason: 'length' }], usage },
     { choices: [{ message: { tool_calls: [{ id: 'c', type: 'function', function: { name: 'x', arguments: '{not json' } }] } }] },
     { choices: [{ message: { tool_calls: [{ id: 'c', type: 'function', function: { name: 'x', arguments: '[1]' } }] } }] },
     { choices: [{ message: { tool_calls: [{ type: 'function', function: { name: 'x', arguments: '{}' } }] } }] }]) {

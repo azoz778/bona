@@ -12,6 +12,7 @@ import {
   GREETING, greeting, CALENDAR_LINE, calendarLine,
 } from '../lib/persona.mjs';
 import { DISCLOSURE as TODAY_DISCLOSURE, HANDOVER as TODAY_HANDOVER } from '../lib/dana-wa.mjs';
+import { loadPrompts, systemPrompt } from '../lib/brain/prompt.mjs';
 
 const DANA = Object.freeze({ en: 'Dana', ar: 'دانة' });
 const NAME_RE = /(?<![\p{L}])(?:dana|دانة)(?![\p{L}])/iu;
@@ -102,9 +103,12 @@ test('the identity, the email first line, the website greeting and the calendar 
   assert.ok(id.includes('on {{channel}}'), 'the channel is filled by the prompt builder');
   assert.ok(id.includes('You have no personal name; never give yourself one, never call yourself Dana or دانة.'));
   assert.ok(id.includes('If asked whether you are a person: you are an AI assistant, and the Bona team can read this chat and step in.'));
+  assert.ok(id.endsWith("If asked your name: you have none; you are Bona's AI assistant."), 'the name question is answered by the identity, not by a fixed prompt line');
   const named = identity({ name: DANA });
   assert.match(named, /^You are Dana \(دانة\), Bona's AI assistant/);
   assert.doesNotMatch(named, /no personal name/);
+  assert.ok(named.endsWith("If asked your name: you are Dana (دانة), Bona's AI assistant."));
+  assert.doesNotMatch(named, /you have none/);
   assert.deepEqual(EMAIL_FIRST_LINE, { en: "This reply is from Bona's AI assistant.", ar: 'هذا الرد من مساعدة بونا بالذكاء الاصطناعي.' });
   assert.deepEqual(GREETING, { en: "Hello, I'm Bona's AI assistant.", ar: 'أهلاً، أنا مساعدة بونا الذكية.' });
   assert.equal(CALENDAR_LINE, "Booked by Bona's AI assistant on WhatsApp");
@@ -114,4 +118,15 @@ test('the identity, the email first line, the website greeting and the calendar 
   for (const s of [id, ...Object.values(EMAIL_FIRST_LINE), ...Object.values(GREETING), CALENDAR_LINE]) {
     assert.doesNotMatch(s.replace('never call yourself Dana or دانة', ''), NAME_RE, s);
   }
+});
+
+test('"keep Dana" is one line for the prompt too: the real assistant.md rendered with a name never says "you have none"; nameless says it once', () => {
+  const { assistant } = loadPrompts();
+  const nameless = systemPrompt({ template: assistant, route: 'wa', siteFacts: 'F', identity: identity() });
+  assert.equal(nameless.split('If asked your name:').length - 1, 1, 'one answer to the name question');
+  assert.ok(nameless.includes("If asked your name: you have none; you are Bona's AI assistant."));
+  const named = systemPrompt({ template: assistant, route: 'wa', siteFacts: 'F', identity: identity({ name: DANA }) });
+  assert.doesNotMatch(named, /you have none|no personal name/, 'no nameless sentence left in the named render');
+  assert.ok(named.includes("If asked your name: you are Dana (دانة), Bona's AI assistant."));
+  assert.equal(named.split('If asked your name:').length - 1, 1);
 });

@@ -26,14 +26,17 @@
  *              guarded=1; T12); their amounts are allowed again. Email and web hand in none.
  *
  * The loop (§3.4): rounds 1-3 `tool_choice:'auto'`, round 4 `'none'`; at most 6 tools (the rest
- * answer `tool_limit`); a tool not offered on the route answers `tool_not_offered` and never
- * runs; a thrown or slow tool (10 s) answers the WhatsApp `tool_failed` note; 15 s per model
- * call, 40 s per turn. The reply guard checks the final text; one repair call (the draft is
- * dropped, the note follows the last user/tool message), then `guard`. A `rate`, `down`,
- * `timeout` or `bad_response` restarts the whole turn on the backup model when at least 12 s
- * remain and BONA_BRAIN_BACKUP_MODE is `answer`; a refusal is never retried elsewhere. The call
- * and tool caps hold per attempt: the backup restart (§3.4) gets its own 4 + 1 calls and 6 tools,
- * inside the same 40 s turn and the same $ stops (tools only read, so running them again is safe).
+ * answer `tool_limit`; request_human is never refused by the cap: it only notes the hand-over);
+ * a tool not offered on the route answers `tool_not_offered` and never runs; a thrown or slow
+ * tool (10 s) answers the WhatsApp `tool_failed` note; 15 s per model call, 40 s per turn. The
+ * reply guard checks the final text; one repair call (the draft is dropped, the note follows the
+ * last user/tool message), then `guard`. A response cut off at the token cap is `bad_response`.
+ * A `rate`, `down`, `timeout` or `bad_response` restarts the whole turn on the backup model when
+ * at least 12 s remain and BONA_BRAIN_BACKUP_MODE is `answer`; a refusal is never retried
+ * elsewhere. The caps are per turn (§2.4): the backup restart gets only what the main model left
+ * of the 4 answer calls, the 1 repair call and the 6 tools, inside the same 40 s (tools only
+ * read, so running them again is safe). A request that got no answer (an HTTP error, a network
+ * error, a timeout) uses up no call; one with no answer call left starts no backup.
  *
  * State (§4.1): quota/auth → `out` for 10 min (no call; the next turn after that tries; the free
  * GET /v1/models probe clears `auth` early), with the restart-safe `brain_out` marker and one
@@ -49,7 +52,11 @@
  * Money (§2.4): every response's usage × lib/brain/prices.mjs → the restart-safe markers
  * `brain_usd_day` (`YYYY-MM-DD:<micro-USD>`) and `brain_usd_month` (`YYYY-MM:<micro-USD>`),
  * Riyadh time; `brain_spend` alerts at 80% and 100% of BONA_BRAIN_MONTH_ALERT_USD
- * (`brain_month_alerted`); the runaway stops (BONA_BRAIN_DAY_STOP_USD / _MONTH_STOP_USD) → `budget`.
+ * (`brain_month_alerted`); the runaway stops (BONA_BRAIN_DAY_STOP_USD / _MONTH_STOP_USD) → `budget`,
+ * checked before every paid request (each round, the backup, the repair, a classification) and
+ * after every response: the request that crosses a stop ends its turn at once with `budget` (also
+ * when it carried the answer) and the stop alert goes out in that turn, once per day or month.
+ * `health().ok` is false while a stop is reached.
  *
  * Alerts go to the injected `alert(code, meta)` (T14 wires it to the owner notes and web push);
  * meta holds codes and levels only. The journal has no text and no digits from a client:
@@ -85,6 +92,8 @@ export const LIMITS = Object.freeze({
 const TOOL_FAILED = JSON.stringify({ error: 'tool_failed', note: 'say you cannot check that right now; a person can help' });
 const TOOL_NOT_OFFERED = JSON.stringify({ error: 'tool_not_offered' });
 const TOOL_LIMIT = JSON.stringify({ error: 'tool_limit', note: 'answer with what you already have' });
+/** The hand-over tool: it only notes the hand-over (tools.mjs), so the 6-tool cap never refuses it. */
+const HANDOVER_TOOL = 'request_human';
 const SOURCES = Object.freeze({ wa: 'bona-whatsapp', mail: 'bona-email', web: 'bona-web' });
 const TEAM_PREFIX = '[Bona team member] ';
 const CONTEXT_ROWS = 10;
@@ -312,22 +321,31 @@ export function createBrain(deps = {}) {
       store('brain_month_alerted', `${cur.month}:${level}`);
     }
   }
-  /** 'day' | 'month' when a runaway stop is reached (one alert per day or month), else null. */
-  function overBudget() {
+  /** 'day' | 'month' when a runaway stop is reached, else null. No alert (health() reads it too). */
+  function stopReached() {
     const cur = readSpend(now());
     const which = cur.dayMicro >= usd.dayStop * 1e6 ? 'day' : cur.monthMicro >= usd.monthStop * 1e6 ? 'month' : null;
-    if (which) {
-      const period = which === 'day' ? cur.day : cur.month;
-      if (state.stopAlerted[which] !== period) {
-        state.stopAlerted[which] = period;
-        tell('brain_spend', { stop: which });
-      }
+    return which ? { which, period: which === 'day' ? cur.day : cur.month } : null;
+  }
+  /** 'day' | 'month' when a runaway stop is reached (one alert per day or month), else null. */
+  function overBudget() {
+    const stop = stopReached();
+    if (!stop) return null;
+    if (state.stopAlerted[stop.which] !== stop.period) {
+      state.stopAlerted[stop.which] = stop.period;
+      tell('brain_spend', { stop: stop.which });
     }
-    return which;
+    return stop.which;
   }
 
   /* ---------------- one model call ---------------- */
+  /**
+   * One paid request. A runaway stop is checked before it is sent and again after its response is
+   * counted: a request that crosses a stop answers `budget` (its alert goes out now), so the turn
+   * stops at once and never sends the next round, the backup or the repair.
+   */
   async function call(model, ctx, messages, toolChoice, acc, { retried = false, noRetry = false } = {}) {
+    if (overBudget()) return fail('budget');
     const left = ctx.deadline - now();
     if (left <= 0) return fail('timeout');
     const body = requestBody({ model, messages, tools: ctx.tools, toolChoice, cacheKey: ctx.cacheKey, safetyId: ctx.safetyId, responseFormat: ctx.responseFormat });
@@ -363,6 +381,7 @@ export function createBrain(deps = {}) {
     if (thrown) out = fail(codeFromThrown(thrown));
     else if (!res.ok) out = fail(codeFromHttp(res.status, json));
     else out = json ? parseCompletion(json) : fail('bad_response');
+    if (overBudget()) out = fail('budget');
     say({ evt: 'brain.call', route: ctx.route, model, ms: now() - started, code: out.ok ? null : out.code, inTok: usage.in, cachedTok: usage.cached, outTok: usage.out, reasoningTok: usage.reasoning });
     if (!out.ok && out.code === 'rate') {
       noteRate(model);
@@ -405,46 +424,68 @@ export function createBrain(deps = {}) {
       clearTimeout(timer);
     }
   }
-  /** Answers every tool call of one response; returns the answers and how many tools have run this attempt. */
-  async function runTools(calls, ctx, alreadyRun) {
-    let n = alreadyRun;
+  /**
+   * Answers every tool call of one response, taking each tool from the turn's allowance (`ctx.allow.tools`,
+   * shared with the backup restart). request_human is never refused by the cap and takes nothing from it.
+   */
+  async function runTools(calls, ctx) {
     const jobs = calls.map((c) => {
       if (!ctx.offered.has(c.name)) {
         say({ evt: 'brain.bad_tool', name: TOOL_NAME_RE.test(c.name) ? c.name : 'unknown' });
         return { id: c.id, name: c.name, args: {}, result: TOOL_NOT_OFFERED, ok: false, ran: false };
       }
       const args = cleanArgs(c.name, c.args);
-      if (n >= limits.tools) return { id: c.id, name: c.name, args, result: TOOL_LIMIT, ok: false, ran: false };
-      n += 1;
+      if (c.name !== HANDOVER_TOOL) {
+        if (ctx.allow.tools <= 0) return { id: c.id, name: c.name, args, result: TOOL_LIMIT, ok: false, ran: false };
+        ctx.allow.tools -= 1;
+      }
       return runOne(c.name, args, ctx).then((r) => ({ id: c.id, name: c.name, args, result: r.result, ok: r.ok, ran: true }));
     });
-    return { done: await Promise.all(jobs), ran: n };
+    return Promise.all(jobs);
   }
 
   /* ---------------- one attempt on one model ---------------- */
+  /**
+   * A request the provider answered (`ok`, or `bad_response`: a 200 we cannot use, another 4xx) uses up a call;
+   * one that got no answer (rate, down, timeout, quota, auth, budget, or never sent) does not.
+   */
+  const answered = (res) => res.ok || res.code === 'bad_response';
+
+  /**
+   * The repair request (§5.4): the same messages, then the note right after the last user or tool
+   * message. With tool rounds that is the last tool message; without, it is the client turn, so the
+   * code-made context note (the only message after it) moves just before the client turn.
+   */
+  function repairMessages(messages) {
+    const last = messages.at(-1);
+    const base = last?.role === 'system' && messages.at(-2)?.role === 'user' ? [...messages.slice(0, -2), last, messages.at(-2)] : messages;
+    return [...base, { role: 'system', content: REPAIR_NOTE }];
+  }
+
+  /** One attempt on one model, inside the turn's allowance (`ctx.allow`: answer calls, repair calls, tools). */
   async function attempt(model, ctx, acc) {
+    const { allow } = ctx;
     const messages = [...ctx.base];
     const reported = [];
     const results = [];
-    let toolsRun = 0;
     let rounds = 0;
     const passes = (text) => {
       const v = guard.checkReply(text, { toolResults: results, earlierReplies: ctx.earlier });
       for (const h of v.hits) say({ evt: 'brain.guard', leadId: ctx.logLead, kind: h.kind });
       return v.ok;
     };
-    while (rounds < limits.answerCalls) {
-      const choice = rounds === limits.answerCalls - 1 || toolsRun >= limits.tools ? 'none' : 'auto';
+    while (allow.answer > 0) {
+      // The last answer call of the turn (round 4), or no tool left: the model must answer.
+      const choice = allow.answer === 1 || allow.tools <= 0 ? 'none' : 'auto';
       const res = await call(model, ctx, messages, choice, acc);
+      if (answered(res)) allow.answer -= 1;
       rounds += 1;
       if (!res.ok) return res;
       if (res.refusal) return fail('refusal');
       if (res.toolCalls.length) {
         if (choice === 'none') return fail('bad_response');
         messages.push(assistantMessage(res));
-        const { done, ran } = await runTools(res.toolCalls, ctx, toolsRun);
-        toolsRun = ran;
-        for (const d of done) {
+        for (const d of await runTools(res.toolCalls, ctx)) {
           messages.push({ role: 'tool', tool_call_id: d.id, content: d.result });
           reported.push(d);
           if (d.ran) results.push(d.result);
@@ -453,9 +494,10 @@ export function createBrain(deps = {}) {
       }
       if (!res.text) return fail('bad_response');
       if (passes(res.text)) return { ok: true, model, rounds, text: res.text, calls: reported, repaired: false };
-      // One repair call: the draft is dropped (never sent, never stored, never sent back), and
-      // the note follows the last user or tool message (or the code-made context note).
-      const fix = await call(model, ctx, [...messages, { role: 'system', content: REPAIR_NOTE }], 'none', acc);
+      // One repair call a turn: the draft is dropped (never sent, never stored, never sent back).
+      if (allow.repair <= 0) return fail('guard');
+      const fix = await call(model, ctx, repairMessages(messages), 'none', acc);
+      if (answered(fix)) allow.repair -= 1;
       if (!fix.ok) return fix;
       if (fix.refusal) return fail('refusal');
       if (fix.toolCalls.length || !fix.text || !passes(fix.text)) return fail('guard');
@@ -472,12 +514,13 @@ export function createBrain(deps = {}) {
   /**
    * The end of the half-open trial (a turn or a classification): down/timeout open the breaker
    * for another 5 min, any answer from the provider closes it, and `undefined` (the trial threw
-   * before it learnt anything) only frees it, so the next caller tries again.
+   * before it learnt anything) or `budget` (a runaway stop ended it, maybe before any request)
+   * only frees it, so the next caller tries again.
    */
   function endTrial(code) {
     const b = state.breaker;
     b.trial = false;
-    if (code === undefined) return;
+    if (code === undefined || code === 'budget') return;
     if (code === 'down' || code === 'timeout') b.openUntil = now() + limits.breakerOpenMs;
     else { b.open = false; b.fails = []; }
   }
@@ -580,6 +623,8 @@ export function createBrain(deps = {}) {
     const ctx = {
       route, language, leadId, logLead,
       deadline: started + turnMs,
+      // The per-turn caps (§2.4), shared by the main attempt and the backup restart.
+      allow: { answer: limits.answerCalls, repair: limits.repairCalls, tools: limits.tools },
       tools: offeredTools,
       offered: new Set(offeredTools.map((t) => t.function.name)),
       cacheKey: cacheKey(route, language),
@@ -597,7 +642,8 @@ export function createBrain(deps = {}) {
     let model = startOnBackup ? models.backup : models.main;
     let backup = startOnBackup;
     let res = await attempt(model, ctx, acc);
-    if (!res.ok && BACKUP_CODES.has(res.code) && !backup && answerBackup && ctx.deadline - now() >= limits.backupMinMs) {
+    // The backup restart gets what is left of the turn: the time, the answer and repair calls, the tools.
+    if (!res.ok && BACKUP_CODES.has(res.code) && !backup && answerBackup && ctx.deadline - now() >= limits.backupMinMs && ctx.allow.answer > 0) {
       if (res.code === 'bad_response') noteBug();
       model = models.backup;
       backup = true;
@@ -696,7 +742,8 @@ export function createBrain(deps = {}) {
   function health() {
     if (!configured) return { configured: false, ok: false, backup: false };
     const t = now();
-    const ok = state.outCode === null && !state.breaker.open && state.lastProbeOk !== false && t - state.lastFailedAllAt >= limits.failedWindowMs;
+    const ok = state.outCode === null && !state.breaker.open && state.lastProbeOk !== false && t - state.lastFailedAllAt >= limits.failedWindowMs
+      && !stopReached(); // a runaway stop answers every turn `budget`; the alert went out with the turn that hit it
     return { configured: true, ok, backup: inCooldown(t) || state.lastTurnBackup };
   }
   function ops() {
