@@ -20,8 +20,10 @@
  *   - handover `ho:<lead>:<kind>:<10-min bucket>` (auto mode only): the only dedupe, so the same
  *     kind 11 min later alerts again (critic round 2 #11). Kind `brain` (an AI outage) takes an
  *     HOUR bucket and folds into that hour's `brain_out` alert, which lists the chats (the next
- *     hour's once this hour's went, and that one never goes before its hour): one note an hour
- *     however many chats wait.
+ *     hour's once this hour's went, and that one never goes before its hour, with the outage's
+ *     cause carried on): one note an hour however many chats wait. An outage alert dropped while
+ *     owner notes were off is queued again by the next hand-over or alert once they are on; with
+ *     notes off a brain hand-over opens no alert.
  *   - booking `bk:<id>` / `bk-untold:<id>`, stopped `stop:<lead>:<ts>` (auto mode only).
  *   - summary `sum:<day>` / `sumtest:<ts>` (only while owner_as_client or own_inbox is '1';
  *     lib/daily-summary.mjs).
@@ -378,6 +380,46 @@ function createLedgerNotes({
     const inserted = ins.changes === 1;
     if (inserted && status === 'queued') armNext(0);
     return { inserted, noteId: inserted ? id : null, status: inserted ? status : 'exists' };
+  }
+
+  /** An outage alert that went, or may have; a dropped one has not (it can be queued again). */
+  const BRAIN_GONE = new Set(['sent', 'merged', 'uncertain', 'failed']);
+  const brainCode = (code) => (Object.hasOwn(BRAIN_OUT, code) ? code : 'down');
+  /**
+   * The first hour, from `hour` on (at most a day ahead), whose brain_out alert has not gone: none
+   * yet, queued, or dropped while owner notes were off (never counted as gone, or each hand-over
+   * made while notes were off would push the next chat another hour). `row` is that hour's alert
+   * if there is one, `prev` the last one that went (whose cause a new one carries on).
+   */
+  function openBrainHour(hour) {
+    let alertHour = hour;
+    let prev = null;
+    let row = byKey(`al:brain_out:${alertHour}`);
+    for (let i = 0; i < 24 && row && BRAIN_GONE.has(row.status); i += 1) {
+      prev = row;
+      alertHour += 1;
+      row = byKey(`al:brain_out:${alertHour}`);
+    }
+    return { alertHour, row, prev };
+  }
+  /**
+   * Hour `alertHour`'s brain_out alert, due at `due`, with the cause `code`: a new row, or a dropped
+   * one queued again (owner notes are on). A queued one or one that went is left as it is. True when
+   * this call queued it.
+   */
+  function openBrainAlert(alertHour, due, code) {
+    if (!notesOn()) return false;
+    const t = now();
+    const id = `NOTE-${t.toString(36)}-${randomId(6)}`;
+    const meta = JSON.stringify({ alert: 'brain_out', code: brainCode(code), hour: alertHour });
+    const r = prep(`INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, send_id, meta, created, updated)
+                    VALUES (?, 'alert', NULL, ?, ?, 'queued', NULL, ?, ?, ?)
+                    ON CONFLICT(dedupe_key) DO UPDATE SET status = 'queued', due_ts = excluded.due_ts, meta = excluded.meta, updated = excluded.updated
+                    WHERE owner_notes.status = 'dropped' AND owner_notes.send_id IS NULL`)
+      .run(id, `al:brain_out:${alertHour}`, Math.trunc(due), meta, t, t);
+    if (r.changes !== 1) return false;
+    armNext(0);
+    return true;
   }
 
   // Only an answer WhatsApp took: a `pending` row is still in flight (and may yet fail). Its time is
@@ -830,17 +872,17 @@ function createLedgerNotes({
     const t = now();
     if (k === 'brain') {
       // One note an hour for an outage: the chat is listed in the first hour's brain_out alert,
-      // from this one on, that has not gone yet (sent, out, or dropped: never queued again), so
-      // it is never a hand-over of its own. A later hour's alert never goes before its hour (step).
+      // from this one on, that has not gone (openBrainHour), so it is never a hand-over of its
+      // own. A later hour's alert never goes before its hour (step), and it keeps the outage's
+      // cause: its own, or that of the last alert that went (a later alert() brings a new one).
+      // Owner notes off: only the hand-over, dropped; no hour's alert is opened or stepped past.
       const hour = Math.floor(t / HOUR_MS);
-      let alertHour = hour;
-      for (let i = 0; i < 24; i += 1) {
-        const row = byKey(`al:brain_out:${alertHour}`);
-        if (!row || row.status === 'queued') break;
-        alertHour += 1;
+      if (!notesOn()) {
+        return answer(enqueue({ kind: 'handover', leadId: l.lead_id, key: `ho:${l.lead_id}:brain:${hour}`, due: t, meta: { ...meta, alertHour: hour } }));
       }
+      const { alertHour, row, prev } = openBrainHour(hour);
       const due = alertHour === hour ? t : alertHour * HOUR_MS;
-      enqueue({ kind: 'alert', key: `al:brain_out:${alertHour}`, due, meta: { alert: 'brain_out', code: 'down', hour: alertHour } });
+      openBrainAlert(alertHour, due, row?.meta.code ?? prev?.meta.code);
       return answer(enqueue({ kind: 'handover', leadId: l.lead_id, key: `ho:${l.lead_id}:brain:${hour}`, due, meta: { ...meta, alertHour } }));
     }
     return answer(enqueue({ kind: 'handover', leadId: l.lead_id, key: `ho:${l.lead_id}:${k}:${Math.floor(t / HANDOVER_BUCKET_MS)}`, due: t, meta }));
@@ -889,17 +931,17 @@ function createLedgerNotes({
     }
     const hour = Math.floor(t / HOUR_MS);
     if (c === 'brain_out') {
-      const why = Object.hasOwn(BRAIN_OUT, m.code) ? m.code : 'down';
-      const key = `al:brain_out:${hour}`;
-      const r = enqueue({ kind: 'alert', key, due: t, meta: { alert: c, code: why, hour } });
-      if (!r.inserted) {
-        // A hand-over may have opened this hour's note without the cause; the alert brings it.
-        const row = byKey(key);
-        if (row?.status === 'queued' && row.meta.code !== why) {
-          prep("UPDATE owner_notes SET meta = ? WHERE note_id = ? AND status = 'queued'").run(JSON.stringify({ ...row.meta, code: why }), row.note_id);
-        }
+      const why = brainCode(m.code);
+      if (!notesOn()) return answer(enqueue({ kind: 'alert', key: `al:brain_out:${hour}`, due: t, meta: { alert: c, code: why, hour } }));
+      // This hour's note: new, or queued again when it was dropped while owner notes were off.
+      const { alertHour, row } = openBrainHour(hour);
+      if (alertHour === hour && openBrainAlert(hour, t, why)) return { queued: true };
+      // Not sent yet (this hour's, or once that went, the next hour's that a hand-over opened):
+      // it takes the cause, which a hand-over may have carried on from an earlier one.
+      if (row && row.meta.code !== why) {
+        prep("UPDATE owner_notes SET meta = ? WHERE note_id = ? AND status IN ('queued', 'dropped')").run(JSON.stringify({ ...row.meta, code: why }), row.note_id);
       }
-      return answer(r);
+      return { queued: false, reason: 'duplicate' };
     }
     const out = { alert: c };
     if (c === 'gcal' || c === 'mail') { if (ERROR_CODES.has(m.code)) out.code = m.code; }

@@ -868,7 +868,7 @@ test('an AI outage: 20 chats handed over with kind brain in one hour make ONE no
   h.at(Math.ceil((NOW + 1) / HOUR) * HOUR);
   await h.notes.tick();
   assert.equal(h.sent.length, 2);
-  assert.match(h.sent[1], /The AI service \(OpenAI\) is not answering/);
+  assert.match(h.sent[1], /^\*Bona — alert\*\nOpenAI credit ran out\..*Top up at platform\.openai\.com\./, 'the outage\'s cause carries on into the next hour');
   assert.match(h.sent[1], /Late Example \(WhatsApp\)/);
 });
 
@@ -894,7 +894,7 @@ test("an outage alert for the next hour never goes before its hour: a 10:59 note
     assert.equal(h.sent.length, 2, `${label}: nothing before 11:00`);
     await h.runUntil(NOW + HOUR + 5 * MIN, { tickEvery });
     assert.deepEqual(h.sentAt, [NOW, NOW + 59 * MIN, NOW + HOUR], `${label}: the next hour's alert at the hour, not earlier`);
-    assert.match(h.sent[2], /^\*Bona — alert\*\nThe AI service \(OpenAI\) is not answering/);
+    assert.match(h.sent[2], /^\*Bona — alert\*\nOpenAI credit ran out\..*Top up at platform\.openai\.com\./, `${label}: the cause carries on`);
     assert.match(h.sent[2], /\nChats waiting: 2 → /);
     assert.match(h.sent[2], /Early Example \(WhatsApp\) · Later Example \(WhatsApp\)/);
     assert.ok(!h.sent.some((s) => s.includes(HEADERS.handover)), `${label}: no hand-over of its own`);
@@ -905,6 +905,7 @@ test("an outage alert for the next hour never goes before its hour: a 10:59 note
     assert.equal(h.notes.handover(next, { kind: 'brain' }).queued, true);
     await h.runUntil(NOW + 2 * HOUR + 5 * MIN, { tickEvery });
     assert.deepEqual(h.sentAt, [NOW, NOW + 59 * MIN, NOW + HOUR, NOW + 2 * HOUR], label);
+    assert.match(h.sent[3], /^\*Bona — alert\*\nOpenAI credit ran out\./, `${label}: still the outage's cause at 12:00`);
     assert.match(h.sent[3], /\nChats waiting: 1 → /);
     assert.match(h.sent[3], /Next Example \(WhatsApp\)/);
     assert.doesNotMatch(h.sent[3], /Early Example|Later Example/);
@@ -912,7 +913,7 @@ test("an outage alert for the next hour never goes before its hour: a 10:59 note
   }
 });
 
-test("a chat handed over for an hour whose outage alert can no longer go (owner notes were off for a moment) waits for the hour after's alert, never a hand-over of its own", async () => {
+test("a chat handed over for an hour whose outage alert was dropped while owner notes were off goes in that hour's alert once notes are back on (queued again), never a hand-over of its own", async () => {
   const h = harness();
   const [early, later] = ['Early Example', 'Later Example'].map((name) => addLead(h, { name }));
   for (const l of [early, later]) h.autoIds.add(l.lead_id);
@@ -924,17 +925,120 @@ test("a chat handed over for an hour whose outage alert can no longer go (owner 
   h.team.setSetting('owner_notes', '0');
   await h.notes.tick();
   assert.equal(h.row(`al:brain_out:${hour + 1}`).status, 'dropped', 'the 11:00 alert was dropped with the switch');
+  assert.equal(h.row(`ho:${early.lead_id}:brain:${hour}`).status, 'dropped');
   h.team.setSetting('owner_notes', '1');
   h.at(NOW + 59 * MIN + 30_000);
   assert.equal(h.notes.handover(later, { kind: 'brain' }).queued, true);
-  assert.equal(h.row(`ho:${later.lead_id}:brain:${hour}`).meta.alertHour, hour + 2);
-  for (const t of [NOW + HOUR, NOW + HOUR + 30 * MIN, NOW + 2 * HOUR - 1]) { h.at(t); await h.notes.tick(); }
-  assert.equal(h.sent.length, 1, 'no hand-over of its own at 11:00');
-  h.at(NOW + 2 * HOUR);
+  assert.equal(h.row(`ho:${later.lead_id}:brain:${hour}`).meta.alertHour, hour + 1, 'a dropped alert never counts as gone');
+  assert.equal(h.row(`al:brain_out:${hour + 1}`).status, 'queued', 'the dropped 11:00 alert is queued again');
+  h.at(NOW + HOUR - 1);
+  await h.notes.tick();
+  assert.equal(h.sent.length, 1, 'nothing before 11:00');
+  h.at(NOW + HOUR);
   await h.notes.tick();
   assert.equal(h.sent.length, 2);
-  assert.match(h.sent[1], /^\*Bona — alert\*\nThe AI service \(OpenAI\) is not answering/);
+  assert.match(h.sent[1], /^\*Bona — alert\*\nOpenAI credit ran out\./);
+  assert.match(h.sent[1], /\nChats waiting: 1 → /);
   assert.match(h.sent[1], /Later Example \(WhatsApp\)/);
+  assert.doesNotMatch(h.sent[1], /Early Example/, 'a chat dropped with the switch stays dropped');
+  for (const t of [NOW + HOUR + 30 * MIN, NOW + 2 * HOUR]) { h.at(t); await h.notes.tick(); }
+  assert.equal(h.sent.length, 2, 'nothing more: no 12:00 alert, no hand-over of its own');
+  assert.ok(!h.sent.some((s) => s.includes(HEADERS.handover)));
+});
+
+test("owner notes off: a brain hand-over opens and steps past no hour's alert, so once notes are on the 12:05 outage alert goes and a 12:10 chat goes in the 13:00 alert", async () => {
+  const h = harness();
+  const hour = Math.floor(NOW / HOUR);
+  const offs = Array.from({ length: 5 }, (_, i) => addLead(h, { name: `Off ${i + 1} Example` }));
+  const next = addLead(h, { name: 'Next Example' });
+  for (const l of [...offs, next]) h.autoIds.add(l.lead_id);
+  h.team.setSetting('owner_notes', '0');
+  h.at(NOW + 10 * MIN);
+  for (const l of offs) assert.deepEqual(h.notes.handover(l, { kind: 'brain' }), { queued: false, reason: 'dropped' });
+  assert.deepEqual(h.rows().filter((r) => r.kind === 'alert'), [], 'no alert row opened while notes are off');
+  assert.deepEqual(h.rows().map((r) => [r.kind, r.status]), Array(5).fill(['handover', 'dropped']));
+  h.team.setSetting('owner_notes', '1');
+  h.at(NOW + 2 * HOUR + 5 * MIN);
+  assert.deepEqual(h.notes.alert('brain_out', { code: 'quota' }), { queued: true }, "12:05: this hour's alert");
+  await h.notes.tick();
+  assert.equal(h.sent.length, 1);
+  assert.match(h.sent[0], /^\*Bona — alert\*\nOpenAI credit ran out\./);
+  assert.doesNotMatch(h.sent[0], /Chats waiting|Off \d Example/, 'the chats dropped with the switch stay dropped');
+  h.at(NOW + 2 * HOUR + 10 * MIN);
+  assert.equal(h.notes.handover(next, { kind: 'brain' }).queued, true);
+  assert.equal(h.row(`ho:${next.lead_id}:brain:${hour + 2}`).meta.alertHour, hour + 3, '12:00 went: the 13:00 alert');
+  h.at(NOW + 3 * HOUR - 1);
+  await h.notes.tick();
+  assert.equal(h.sent.length, 1, 'nothing before 13:00');
+  h.at(NOW + 3 * HOUR);
+  await h.notes.tick();
+  assert.equal(h.sent.length, 2);
+  assert.match(h.sent[1], /^\*Bona — alert\*\nOpenAI credit ran out\./, 'the cause carries on');
+  assert.match(h.sent[1], /\nChats waiting: 1 → /);
+  assert.match(h.sent[1], /Next Example \(WhatsApp\)/);
+  assert.ok(!h.sent.some((s) => s.includes(HEADERS.handover)));
+});
+
+test("an outage alert of this hour dropped while owner notes were off is queued again once they are on: by a brain hand-over (with its own cause) or by the outage's next alert", async () => {
+  const h = harness();
+  const [first, second] = ['First Example', 'Second Example'].map((name) => addLead(h, { name }));
+  for (const l of [first, second]) h.autoIds.add(l.lead_id);
+  const hour = Math.floor(NOW / HOUR);
+  h.team.setSetting('owner_notes', '0');
+  assert.deepEqual(h.notes.alert('brain_out', { code: 'quota' }), { queued: false, reason: 'dropped' });
+  h.team.setSetting('owner_notes', '1');
+  h.at(NOW + 20 * MIN);
+  assert.equal(h.notes.handover(first, { kind: 'brain' }).queued, true);
+  assert.equal(h.row(`al:brain_out:${hour}`).status, 'queued');
+  await h.notes.tick();
+  assert.equal(h.sent.length, 1);
+  assert.match(h.sent[0], /^\*Bona — alert\*\nOpenAI credit ran out\./);
+  assert.match(h.sent[0], /First Example \(WhatsApp\)/);
+
+  h.team.setSetting('owner_notes', '0');
+  h.at(NOW + HOUR + 5 * MIN);
+  assert.deepEqual(h.notes.alert('brain_out', { code: 'auth' }), { queued: false, reason: 'dropped' });
+  h.team.setSetting('owner_notes', '1');
+  h.at(NOW + HOUR + 10 * MIN);
+  assert.deepEqual(h.notes.alert('brain_out', { code: 'auth' }), { queued: true });
+  assert.equal(h.notes.handover(second, { kind: 'brain' }).queued, true);
+  await h.notes.tick();
+  assert.equal(h.sent.length, 2);
+  assert.match(h.sent[1], /^\*Bona — alert\*\nOpenAI refused the Bona key \(auth\)\./);
+  assert.match(h.sent[1], /Second Example \(WhatsApp\)/);
+  assert.ok(!h.sent.some((s) => s.includes(HEADERS.handover)));
+});
+
+test("a later hour's outage alert keeps the outage's cause: a budget stop says so at 11:00, and a new cause after an hour's alert went is the next alert's", async () => {
+  const h = harness();
+  const [first, second] = ['First Example', 'Second Example'].map((name) => addLead(h, { name }));
+  for (const l of [first, second]) h.autoIds.add(l.lead_id);
+  const hour = Math.floor(NOW / HOUR);
+  h.notes.alert('brain_out', { code: 'budget' });
+  await h.notes.tick();
+  assert.match(h.sent[0], /^\*Bona — alert\*\nThe AI spend stop was reached\./);
+  h.at(NOW + 30 * MIN);
+  assert.equal(h.notes.handover(first, { kind: 'brain' }).queued, true);
+  assert.equal(h.row(`al:brain_out:${hour + 1}`).meta.code, 'budget', 'the 11:00 alert carries the cause on');
+  h.at(NOW + HOUR);
+  await h.notes.tick();
+  assert.equal(h.sent.length, 2);
+  assert.match(h.sent[1], /^\*Bona — alert\*\nThe AI spend stop was reached\. Clients get a holding line until the day or the month rolls over\./);
+  assert.match(h.sent[1], /First Example \(WhatsApp\)/);
+  assert.doesNotMatch(h.sent[1], /is not answering/);
+
+  // 11:20: the 11:00 alert went, so a chat opens 12:00's; the outage's cause changes at 11:40 (quota): 12:00's says so.
+  h.at(NOW + HOUR + 20 * MIN);
+  assert.equal(h.notes.handover(second, { kind: 'brain' }).queued, true);
+  h.at(NOW + HOUR + 40 * MIN);
+  assert.deepEqual(h.notes.alert('brain_out', { code: 'quota' }), { queued: false, reason: 'duplicate' }, "this hour's alert went");
+  assert.equal(h.row(`al:brain_out:${hour + 1}`).meta.code, 'budget', 'what went is kept as it went');
+  assert.equal(h.row(`al:brain_out:${hour + 2}`).meta.code, 'quota', 'the queued next-hour alert takes the new cause');
+  h.at(NOW + 2 * HOUR);
+  await h.notes.tick();
+  assert.equal(h.sent.length, 3);
+  assert.match(h.sent[2], /^\*Bona — alert\*\nOpenAI credit ran out\./);
+  assert.match(h.sent[2], /Second Example \(WhatsApp\)/);
   assert.ok(!h.sent.some((s) => s.includes(HEADERS.handover)));
 });
 
