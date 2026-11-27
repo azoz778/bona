@@ -122,6 +122,7 @@ function chatReader(pool) {
  */
 function harness({
   env = SPLIT, state = {}, history = [], ownerTest = 'fake', notes = 'fake', dismissedLookup = true, owner = false, cfg = {}, ingestFails = 0,
+  beforeIngest = null,
 } = {}) {
   const db = openDb(':memory:');
   let clock = NOW;
@@ -147,8 +148,10 @@ function harness({
   });
   const ingest = (lead, rec) => ingestor.ingest(lead, rec);
   // The poller's own ingest may fail its first `ingestFails` calls (a busy store); the backfill keeps the real one.
+  // `beforeIngest(lead, rec)` runs first on each of the poller's calls (a case that changes a switch there).
   let fails = ingestFails;
   const pollerIngest = (lead, rec) => {
+    if (beforeIngest) beforeIngest(lead, rec);
     if (fails > 0) { fails -= 1; throw new Error('store busy'); }
     return ingest(lead, rec);
   };
@@ -312,12 +315,12 @@ test('T06-1/6 a join is all or nothing: a failure writing inbox_via leaves the c
     assert.equal(h.messages(), 0, `${what}: nothing stored on the first attempt`);
     const [before] = h.leads();
     assert.equal(before.inbox_via, null, what);
-    // The own-number chat is not left `in` without its marker (a proof join's look); the owner's
-    // test lead is `in` from its creation (lib/leads.mjs OWNER_METHODS), its floor not moved yet.
-    if (!owner) {
-      assert.equal(before.inbox_state, null, `${what}: the state went back with the marker`);
-      assert.equal(before.history_from, null, `${what}: and the floor too`);
-    }
+    // Neither chat is left `in` without its marker (a proof join's look): not the own-number one,
+    // and not the owner's test lead either, which lib/leads.mjs (OWNER_METHODS) would create `in`
+    // with the ordinary 24 h floor before the join wrote its marker and his test's floor.
+    assert.equal(before.inbox_state, null, `${what}: the state went back with the marker`);
+    assert.equal(before.inbox_since, null, `${what}: and its time`);
+    assert.equal(before.history_from, null, `${what}: and the floor too`);
     h.push([rec]);
     const second = await h.tick(); // eslint-disable-line no-await-in-loop
     assert.equal(second.joined, 1, `${what}: the retry joins`);
@@ -329,6 +332,52 @@ test('T06-1/6 a join is all or nothing: a failure writing inbox_via leaves the c
     assert.equal(h.calls.wake.length, 1, `${what}: woken once`);
     h.close();
   }
+});
+
+test('T06-6 a failed first test join leaves no `in` lead behind: a second message of his in the same window joins it stamped, from his test\'s floor', async () => {
+  const T = NOW - 120_000;
+  const atIngest = [];
+  const h = harness({
+    state: { active: true }, owner: true,
+    beforeIngest: (lead, rec) => {
+      const l = h.db.getLead(lead.lead_id);
+      atIngest.push([rec.id, l.inbox_state, l.inbox_via, l.history_from]);
+    },
+  });
+  h.setClock(T);
+  h.team.setSetting('owner_as_client', '1');
+  h.setClock(NOW);
+  const realUpdate = h.db.updateLead;
+  let fails = 1;
+  h.db.updateLead = (id, patch = {}) => {
+    if (fails > 0 && patch.inbox_via !== undefined) { fails -= 1; throw new Error('store busy'); }
+    return realUpdate(id, patch);
+  };
+  const J1 = msg({ id: 'J1', jid: OWNER, pushName: 'Owner Example', ts: NOW - 60_000, text: 'Hi' });
+  const J2 = msg({ id: 'J2', jid: OWNER, pushName: 'Owner Example', ts: NOW - 50_000, text: 'is BONA-W003 still free?' });
+  h.push([J1, J2]);
+  const first = await h.tick();
+  assert.equal(fails, 0, 'the first join\'s marker write failed');
+  assert.equal(h.db.countLeads(), 1);
+  assert.equal(first.joined, 1, 'the second message joins the chat');
+  assert.deepEqual(atIngest, [['J2', 'in', 'owner_test', T]], 'never stored into a chat without its marker and his floor');
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'owner_test');
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(lead.inbox_via, 'owner_test');
+  assert.equal(lead.history_from, T, 'the floor is the moment the test went on, not 24 h back');
+  assert.deepEqual(h.rows(lead.lead_id), [['J2', 'in', 'client']]);
+  assert.equal(h.calls.leadEvent.length, 1, 'one "joined" note');
+  assert.deepEqual(h.calls.wake, [[lead.lead_id, NOW - 50_000]]);
+  // The first message is retried into the chat as it now is.
+  h.push([J1, J2]);
+  const second = await h.tick();
+  assert.equal(second.joined, 0);
+  assert.deepEqual(h.rows(lead.lead_id), [['J1', 'in', 'client'], ['J2', 'in', 'client']]);
+  assert.equal(h.lead(lead.lead_id).inbox_via, 'owner_test');
+  assert.equal(h.lead(lead.lead_id).history_from, T);
+  assert.equal(h.calls.leadEvent.length, 1, 'still one "joined" note');
+  h.close();
 });
 
 /* ---------------- 3: chats nobody is a client in ---------------- */
@@ -653,6 +702,7 @@ test('T06-7 fail closed at retry time: a record judged under the own rule or the
     const [lead] = h.leads();
     assert.equal(lead.inbox_via, null, `${what}: never stamped`);
     if (!owner) assert.equal(lead.inbox_state, 'unsure', 'today\'s rule: a "Hi" with no signal from a known lead goes to Unsure');
+    else assert.equal(lead.inbox_state, null, 'his test lead is not left `in` without its marker');
     assert.deepEqual(h.calls.wake, [], what);
     assert.deepEqual(h.calls.leadEvent, [], what);
     h.close();
@@ -685,8 +735,88 @@ test('T06-7 fail closed at retry time: the switches are read again too, so a ret
     assert.equal(leads.length, 1, what);
     assert.equal(leads[0].inbox_via, null, `${what}: never stamped`);
     if (!owner) assert.equal(leads[0].inbox_state, 'unsure', 'today\'s rule: a "Hi" with no signal from a known lead goes to Unsure');
+    else assert.equal(leads[0].inbox_state, null, 'his test lead is not left `in` without its marker');
     assert.deepEqual(h.calls.wake, [], `${what}: Dana is not woken`);
     assert.deepEqual(h.calls.leadEvent, [], what);
+    h.close();
+  }
+});
+
+test('T06-7 an identity lapse while a join reads its history holds the record: the chat is in and stamped, but nothing is stored, no wake, no "joined" note', async () => {
+  // Inbound under the own rule, and a fromMe Bona link into an Unsure chat that joined under it before.
+  for (const side of ['inbound', 'outbound']) {
+    const h = harness({ state: { ownInbox: true } });
+    if (side === 'outbound') seedLead(h, 'LEAD-uv', 42, { inbox_state: 'unsure', inbox_since: NOW - DAY, inbox_via: 'own_number' });
+    const realHistory = h.backfill.history;
+    let reads = 0;
+    h.backfill.history = async (lead, w) => {
+      reads += 1;
+      const got = await realHistory(lead, w);
+      h.state.identityLapsed = true; // the probe answered "mismatch" while the read was out
+      return got;
+    };
+    h.push([side === 'inbound'
+      ? msg({ id: 'HI1', text: 'Hi' })
+      : msg({ id: 'OUT1', jid: jidOf(42), fromMe: true, pushName: null, text: 'see BONA-W003' })]);
+    const tally = await h.tick(); // eslint-disable-line no-await-in-loop
+    assert.equal(reads, 1, `${side}: the join read its history`);
+    assert.equal(tally.joined, 1, `${side}: the join was written before the read`);
+    assert.equal(tally.held, 1, `${side}: then the record is held`);
+    assert.equal(tally.stored, 0, side);
+    assert.equal(h.messages(), 0, `${side}: nothing stored`);
+    const [lead] = h.leads();
+    assert.equal(lead.inbox_state, 'in', side);
+    assert.equal(lead.inbox_via, 'own_number', `${side}: the rollback guard's key is there for the next record`);
+    assert.deepEqual(h.calls.wake, [], `${side}: Dana is not woken`);
+    assert.deepEqual(h.calls.notify, [], `${side}: no phone alert`);
+    assert.deepEqual(h.calls.leadEvent, [], `${side}: no "joined" note`);
+    h.close();
+  }
+});
+
+test('T06-7 an identity lapse (or the test going off) while the "joined" note is out holds the joining record: not stored, no wake', async () => {
+  const cases = [
+    { what: 'own number, identity', state: { ownInbox: true }, owner: false, lapse: (st) => { st.identityLapsed = true; } },
+    { what: 'owner test, identity', state: { active: true }, owner: true, lapse: (st) => { st.identityLapsed = true; } },
+    { what: 'owner test, test off', state: { active: true }, owner: true, lapse: (st) => { st.active = false; } },
+  ];
+  for (const c of cases) {
+    const events = [];
+    let h = null;
+    const notes = {
+      ...fakeNotes({ leadEvent: [], alert: [] }),
+      leadEvent: async (lead, o) => { events.push({ leadId: lead.lead_id, ...o }); c.lapse(h.state); },
+    };
+    h = harness({ state: c.state, owner: c.owner, notes });
+    h.push([c.owner
+      ? msg({ id: 'J1', jid: OWNER, pushName: 'Owner Example', text: 'Hi' })
+      : msg({ id: 'J1', text: 'Hi' })]);
+    const tally = await h.tick(); // eslint-disable-line no-await-in-loop
+    assert.equal(tally.joined, 1, c.what);
+    assert.equal(events.length, 1, `${c.what}: the note went before the lapse`);
+    assert.equal(tally.held, 1, `${c.what}: held after it`);
+    assert.equal(h.messages(), 0, `${c.what}: nothing stored`);
+    assert.deepEqual(h.calls.wake, [], `${c.what}: Dana is not woken`);
+    assert.deepEqual(h.calls.notify, [], `${c.what}: no phone alert`);
+    h.close();
+  }
+});
+
+test('T06-7 an identity lapse while the record is being stored still keeps Dana asleep (the guard sits right before the wake)', async () => {
+  for (const owner of [false, true]) {
+    let h = null;
+    h = harness({
+      state: owner ? { active: true } : { ownInbox: true }, owner,
+      beforeIngest: () => { h.state.identityLapsed = true; },
+    });
+    h.push([owner
+      ? msg({ id: 'J1', jid: OWNER, pushName: 'Owner Example', text: 'Hi' })
+      : msg({ id: 'J1', text: 'Hi' })]);
+    await h.tick(); // eslint-disable-line no-await-in-loop
+    const what = owner ? 'owner test' : 'own number';
+    // Refusing the record itself is ingest's (PR-A2, `rule_off`); the wake is the poller's.
+    assert.deepEqual(h.calls.wake, [], `${what}: Dana is not woken`);
+    assert.deepEqual(h.calls.notify, [], `${what}: no phone alert`);
     h.close();
   }
 });
@@ -860,7 +990,7 @@ test('T06-12 with the test on, Bona\'s fromMe lines to the owner (call alerts, e
   h.close();
 });
 
-test('T06-12 his lead existing but not in (unsure, or reset by the test switch): our lines still join nothing and store nothing', async () => {
+test('T06-12 his lead existing but not in (unsure, or reset by the test switch): our lines still join nothing, store nothing and never answer him', async () => {
   for (const inboxState of ['unsure', null]) {
     const h = harness({ state: { active: true }, owner: true });
     h.db.insertLead({
@@ -869,12 +999,27 @@ test('T06-12 his lead existing but not in (unsure, or reset by the test switch):
     });
     h.push(ownerFromMe());
     const tally = await h.tick(); // eslint-disable-line no-await-in-loop
-    assert.equal(tally.joined, 0, String(inboxState));
+    const what = String(inboxState);
+    assert.equal(tally.joined, 0, what);
     assert.equal(h.lead('LEAD-own').inbox_state, inboxState);
     assert.equal(h.db.countLeads(), 1);
     assert.equal(h.messages(), 0);
+    // A call alert or a note is no reply to his test: the reply clock is left for a real one.
+    assert.equal(tally.replies, 0, `${what}: no reply counted`);
+    assert.equal(h.lead('LEAD-own').first_reply_ts, null, `${what}: first_reply_ts untouched`);
+    assert.equal(h.lead('LEAD-own').updated, NOW - DAY, `${what}: updated untouched`);
     h.close();
   }
+});
+
+test('T06-12 guard: a fromMe reply to a client\'s lead that is not in still stamps the reply clock, as today', async () => {
+  const h = harness({ state: { active: true, ownInbox: true }, owner: true });
+  seedLead(h, 'LEAD-uns', 11, { inbox_state: 'unsure', inbox_since: NOW - DAY });
+  h.push([msg({ id: 'R1', jid: jidOf(11), fromMe: true, pushName: null, ts: NOW - 60_000, text: 'we will call you' })]);
+  const tally = await h.tick();
+  assert.equal(tally.replies, 1);
+  assert.equal(h.lead('LEAD-uns').first_reply_ts, NOW - 60_000);
+  h.close();
 });
 
 /* ---------------- 13: the test join's history floor ---------------- */

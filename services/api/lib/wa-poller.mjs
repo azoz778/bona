@@ -498,6 +498,17 @@ export function createPoller({
    * test), and the identity check, asked here too (fail closed, as `testActive`), passed.
    */
   const ownRuleOn = (jids) => inboxOn && ownNumberOk() && askTest('ownRuleFor', false, jids) === true;
+  /**
+   * The rollback guard as it stands NOW (DESIGN §4.2 `rule_off`, §13): a chat that joined under
+   * the own rule is held while the identity check fails, and the owner's test chat while his test
+   * is not in force. Asked again after every `await` on the way to a store or a wake (the identity
+   * probe can answer while a history read or a note is out), not only when the record came in.
+   */
+  function ruleOff(lead) {
+    if (!lead?.inbox_via) return false;
+    if (!ownNumberOk()) return true;
+    return lead.inbox_via === 'owner_test' && !testActive();
+  }
 
   /** The owner's own chat (his personal number, or his lid), seen on this instance. */
   function isOwnerChat(jids, lead = null) {
@@ -869,7 +880,7 @@ export function createPoller({
     const match = classify({ text, contextInfo: rec.contextInfo, existing, ts, rule });
     if (!match) return null;
 
-    const { lead, created } = createOrMergeLead(db, {
+    const merge = () => createOrMergeLead(db, {
       name: rec.pushName ?? null,
       phone: jids.phone,
       waJid: jids.waJid,
@@ -888,6 +899,18 @@ export function createPoller({
       // what `first_inbound_ts` (and so every response time) is measured from.
       now: ts,
       dataDir: cfg.dataDir ?? undefined,
+    });
+    // The owner's test lead is born with no inbox state (as PR-A2's reopenOwnerTest leaves an old
+    // one): lib/leads.mjs creates an owner-started chat `in` with the ordinary 24 h floor
+    // (OWNER_METHODS), and his chat may be `in` only with its marker and his test's floor, which
+    // `join` writes in one transaction. Undone in the creation's own transaction (re-entrant), so
+    // a join that fails leaves no `in` chat a second message of his in the same window would be
+    // stored into (and wake Dana) unstamped.
+    const { lead, created } = match.method !== 'owner_test' ? merge() : db.transaction(() => {
+      const made = merge();
+      if (!made.created) return made;
+      db.updateLead(made.lead.lead_id, { inbox_state: null, inbox_since: null, history_from: null });
+      return { ...made, lead: db.getLead(made.lead.lead_id) ?? made.lead };
     });
 
     // An ad-originated lead has no session, so `createOrMergeLead` could only fall back to
@@ -931,7 +954,7 @@ export function createPoller({
   /**
    * One record into the transcript of an `in` chat, the lead read fresh (a backfill may just
    * have filled its jids). `ts` is the record's time as the tick settled it (its own, or the
-   * tick's when it carries none) — the one the alert reports.
+   * tick's when it carries none) — the one the alert reports. Returns what ingest said (or null).
    */
   async function storeRecord(leadId, rec, ts, tally) {
     const res = await ingestOne(db.getLead(leadId), rec);
@@ -940,14 +963,17 @@ export function createPoller({
     // a thread refresh had a moment before, the poller reads each record once, so this is its
     // first sight of it (a record retried after `waSeenAdd` failed fires again; the two-minute
     // mark in lib/alerts.mjs keeps that quiet at the 20 s interval). Never awaited; one that
-    // throws is a warn line, not a failed record.
-    if (res?.stored && res.senderKind === 'client' && onClientMessage) {
+    // throws is a warn line, not a failed record. Not for a chat the rollback guard holds as it
+    // stands after ingest's `await` (`ruleOff`): refusing the record is ingest's (PR-A2), the
+    // wake is the poller's.
+    if (res?.stored && res.senderKind === 'client' && onClientMessage && !ruleOff(db.getLead(leadId))) {
       try {
         onClientMessage(leadId, ts);
       } catch {
         log({ level: 'warn', evt: 'poll.alert_failed', leadId });
       }
     }
+    return res ?? null;
   }
 
   /**
@@ -1033,8 +1059,9 @@ export function createPoller({
    * 'own_number'), and an old `out` one is noted for the owner; the owner's test chat joins
    * from when his test went on (stamped 'owner_test'). Such a join tells the owner (why
    * 'joined') before the record is stored, so a store failure retried later cannot lose it. A
-   * chat stamped either way is left alone while the identity check fails (the rollback guard).
-   * The rule a record was judged under is asked again here, not trusted from its first attempt
+   * chat stamped either way is left alone while the identity check fails, and his test chat while
+   * his test is off (the rollback guard, `ruleOff`), asked when the record comes in and again
+   * after every `await` of a join (its history read, its note). The rule a record was judged under is asked again here, not trusted from its first attempt
    * (fail closed): the identity check AND the switch behind it, so a retry after the identity
    * check lapsed, or after the own rule went off (`#dana live off`), is today's rule, and the
    * owner's own message once his test is no longer in force is a colleague's (held, never stored).
@@ -1046,7 +1073,7 @@ export function createPoller({
   async function inboxAfterInbound(rec, ts, { lead: seen, method, refKnown, created = false, own: ownThen = false, ownerTest: testThen = false }, tally) {
     const lead = db.getLead(seen.lead_id);
     if (!lead) return;
-    if (lead.inbox_via && !ownNumberOk()) { tally.held += 1; return; }
+    if (ruleOff(lead)) { tally.held += 1; return; }
     // `ownRuleOn` = the identity check and `ownRuleFor` (own_inbox) as they are now; `testActive`
     // = the identity check and the test switch as they are now.
     const own = ownThen && ownRuleOn(jidsOf(rec));
@@ -1054,16 +1081,22 @@ export function createPoller({
     if (testThen && !isTest) { tally.held += 1; return; }
     const text = typeof rec.text === 'string' ? rec.text : '';
     const signal = inboundSignal({ text, hasAdMeta: hasAdEvidence(adMetaOf(rec.contextInfo)), refKnown });
-    // createOrMergeLead puts a chat the owner starts `in` by itself (lib/leads.mjs OWNER_METHODS):
-    // his test chat, created by this record and not stamped yet, is joining now.
-    const testCreated = isTest && created && method === 'owner_test' && lead.inbox_via == null;
-    let next = testCreated ? 'in' : nextInboxState(lead.inbox_state, { signal, method, own: own || isTest });
+    // The owner's test chat has no state until it joins (`handleInbound` creates it so), so his
+    // test joins it here like any undecided chat under the own rule.
+    let next = nextInboxState(lead.inbox_state, { signal, method, own: own || isTest });
     if (next === 'in' && lead.inbox_state !== 'in' && numberless(jidsOf(rec), lead)) next = null;
-    if (next === 'in' && (lead.inbox_state !== 'in' || testCreated)) {
+    if (next === 'in' && lead.inbox_state !== 'in') {
       const inboxVia = isTest ? 'owner_test' : (own ? 'own_number' : null);
       const floor = isTest ? (testSince() ?? ts) : null;
       await join(lead.lead_id, ts, 'inbound', tally, inboxVia ? { inboxVia } : {}, { inboxVia, floor });
-      if (inboxVia) await leadEventSafely(db.getLead(lead.lead_id) ?? lead, { why: 'joined', created, ts });
+      // The rollback guard again, as it is after the join's history read and again after the note
+      // (`ruleOff`): a lapse while either was out holds the record — no note after the read, no
+      // store, no wake. The chat stays `in` and stamped, so the guard holds its next records too.
+      if (ruleOff(db.getLead(lead.lead_id))) { tally.held += 1; return; }
+      if (inboxVia) {
+        await leadEventSafely(db.getLead(lead.lead_id) ?? lead, { why: 'joined', created, ts });
+        if (ruleOff(db.getLead(lead.lead_id))) { tally.held += 1; return; }
+      }
     } else if (own && lead.inbox_state === 'out') {
       oldOutLeadWrote(lead);
     } else {
@@ -1114,21 +1147,25 @@ export function createPoller({
    * phone line's call alerts ("Listings: BONA-W012"), command replies — never starts or joins
    * his chat; his test chat joins only on his own message. Once it is `in`, ingest decides what
    * of it is kept (PR-A2). And a chat that joined under the own rule or the test is left alone
-   * while the identity check fails (the rollback guard).
+   * while the identity check fails, or his test chat while his test is off (the rollback guard,
+   * `ruleOff`), asked again after a join's history read.
+   *
+   * Returns whether ingest stored the record: in the owner's own chat that alone may stamp the
+   * reply clock (the tick), since nothing else Bona sends him there is an answer to his test.
    */
   async function inboxAfterOutbound(rec, ts, tally) {
     const jids = jidsOf(rec);
     let lead = findLead(jids);
-    if (isOwnerChat(jids, lead) && lead?.inbox_state !== 'in') return;
-    if (lead?.inbox_via && !ownNumberOk()) { tally.held += 1; return; }
-    if (lead?.inbox_state === 'out') return;
+    if (isOwnerChat(jids, lead) && lead?.inbox_state !== 'in') return false;
+    if (ruleOff(lead)) { tally.held += 1; return false; }
+    if (lead?.inbox_state === 'out') return false;
     if (lead?.inbox_state !== 'in') {
-      if (OWN_NOTE_RE.test(String(rec.text ?? '').trimStart())) return;
-      if (!ownerOutboundJoins(rec)) return;
-      if (lead && !(jids.waJid || lead.phone_e164 || lead.wa_jid)) return;
+      if (OWN_NOTE_RE.test(String(rec.text ?? '').trimStart())) return false;
+      if (!ownerOutboundJoins(rec)) return false;
+      if (lead && !(jids.waJid || lead.phone_e164 || lead.wa_jid)) return false;
       let created = false;
       if (!lead) {
-        if (!jids.phone) return;
+        if (!jids.phone) return false;
         const text = typeof rec.text === 'string' ? rec.text : '';
         const fileName = typeof rec.fileName === 'string' ? rec.fileName : '';
         ({ lead, created } = createOrMergeLead(db, {
@@ -1137,8 +1174,10 @@ export function createPoller({
         }, { channel: 'whatsapp', matchMethod: 'owner_outbound', now: ts, dataDir: cfg.dataDir ?? undefined }));
       }
       await join(lead.lead_id, ts, 'owner_outbound', tally, { created });
+      if (ruleOff(db.getLead(lead.lead_id))) { tally.held += 1; return false; }
     }
-    await storeRecord(lead.lead_id, rec, ts, tally);
+    const res = await storeRecord(lead.lead_id, rec, ts, tally);
+    return res?.stored === true;
   }
 
   /**
@@ -1430,10 +1469,18 @@ export function createPoller({
             //
             // A held chat (above) is held on this side too: no lead, no join, nothing stored, the
             // mark kept. The reply clock of a lead it already has still stamps: that writes no message.
+            //
+            // Except in the owner's own chat on Bona's number (DESIGN §3.1-3.2): what Bona sends him
+            // there — the phone line's call alerts, notes, command replies — is no answer to his
+            // test, so only a record ingest stored in his `in` test chat stamps it (ingest decides
+            // what of that chat is kept, PR-A2). Before he writes, or while his chat is held,
+            // nothing does.
             const seen = findLead(jidsOf(rec));
+            const ownerSide = bonaNumber && inboxOn && isOwnerChat(jidsOf(rec), seen);
+            let stored = false;
             if (held) tally.held += 1;
-            else if (inboxOn) await inboxAfterOutbound(rec, ts, tally);
-            if (!isDanaRecordSafely(rec) && recordReply(seen, ts)) tally.replies += 1;
+            else if (inboxOn) stored = await inboxAfterOutbound(rec, ts, tally);
+            if ((!ownerSide || stored) && !isDanaRecordSafely(rec) && recordReply(seen, ts)) tally.replies += 1;
           } else if (held) {
             tally.held += 1;
           } else if (handled) {
