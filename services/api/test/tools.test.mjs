@@ -416,7 +416,8 @@ test("the tool notes offer the site's WhatsApp number (src/data/site.json)", asy
 
 // A W014-shaped sheet: two 1-bed units (the dearer one's cash price is NOT published), a 3-bed, a priceless
 // 2-bed, and two penthouses (the dearest cash price, units.mjs summary()'s price_to_en, is NOT published).
-// Every unit has instalment prices, none of which is published.
+// Every unit has instalment prices, none of which is published. Refs and amounts are made up: the public repo
+// must not carry a real unit's unpublished prices in a fixture (a test below checks them against the real sheet).
 const UNIT = (ref, beds, cls, areaSqm, [cash, half, year, twoYear]) => ({
   ref, building: ref.split('-')[0], unit: ref.split('-')[1], floor: { en: '3rd', ar: 'الدور الثالث' }, floorIndex: 3,
   facing: { en: 'South', ar: 'جنوبية' }, beds, baths: beds + 1, maidRoom: beds > 2, class: cls,
@@ -428,18 +429,18 @@ const SHEET = {
   district: { en: 'Al-Shati District', ar: 'حي الشاطئ' }, city: { en: 'Jeddah', ar: 'جدة' },
   delivery: '2028-06', currency: 'SAR', updated: '2026-09-02',
   units: [
-    UNIT('B08-22', 1, 'Standard', 55.45, [708164, 723567, 778981, 814389]),
-    UNIT('B08-23', 1, 'Standard', 60.1, [745000, 761000, 819500, 856750]),
-    UNIT('B06-12', 3, 'Standard', 123.49, [1359547, 1389117, 1495502, 1563479]),
-    UNIT('B09-11', 2, 'Premium', 90, [null, null, null, null]),
+    UNIT('B91-22', 1, 'Standard', 54.25, [701500, 716500, 771500, 806500]),
+    UNIT('B91-23', 1, 'Standard', 60.1, [745000, 761000, 819500, 856750]),
+    UNIT('B92-12', 3, 'Standard', 121.75, [1351500, 1381500, 1486500, 1554500]),
+    UNIT('B99-11', 2, 'Premium', 90, [null, null, null, null]),
     UNIT('B07-31', 2, 'Penthouse', 210.5, [2100000, 2145000, 2310000, 2415000]),
     UNIT('B07-32', 2, 'Penthouse', 230.25, [2450000, 2502000, 2695000, 2817500]),
   ],
 };
 const PUBLISHED_CUT = {
   rows: [
-    { label: { en: '1 bedroom', ar: 'غرفة نوم واحدة' }, count: 2, areaMin: 55.45, areaMax: 60.1, cashFrom: 708164 },
-    { label: { en: '3 bedrooms', ar: '3 غرف نوم' }, count: 1, areaMin: 123.49, areaMax: 123.49, cashFrom: 1359547 },
+    { label: { en: '1 bedroom', ar: 'غرفة نوم واحدة' }, count: 2, areaMin: 54.25, areaMax: 60.1, cashFrom: 701500 },
+    { label: { en: '3 bedrooms', ar: '3 غرف نوم' }, count: 1, areaMin: 121.75, areaMax: 121.75, cashFrom: 1351500 },
     { label: { en: 'Penthouse, 2 bedrooms', ar: 'بنتهاوس، غرفتا نوم' }, count: 2, areaMin: 210.5, areaMax: 230.25, cashFrom: 2100000 },
   ],
   delivery: '2028-06', updated: '2026-09-02',
@@ -447,7 +448,7 @@ const PUBLISHED_CUT = {
 const UNITS_NOW = Date.parse('2026-11-27T09:00:00Z');
 const SOURCES = ['bona-whatsapp', 'bona-email', 'bona-web', undefined, 'someone-else'];
 // What a model asking for a unit would send: a unit ref, a plan, a bed count, a budget.
-const UNIT_ARGS = { listing_id: 'BONA-W014', beds: 1, plan: 'twoYear', query: 'B08-23', max_price: 900000, limit: 20, maid_room: false };
+const UNIT_ARGS = { listing_id: 'BONA-W014', beds: 1, plan: 'twoYear', query: 'B91-23', max_price: 900000, limit: 20, maid_room: false };
 
 /** A one-listing inventory (W014, with the given status) built on a real listing so cards render. */
 function w014Inventory(status = 'available') {
@@ -476,7 +477,7 @@ function assertNoUnpublished(raw, sheet = SHEET) {
   assert.doesNotMatch(raw, /price_to/, 'no price_to / price_to_en (the highest cash price)');
   assert.doesNotMatch(raw, /price_two_year/, 'no two-year price key');
   assert.doesNotMatch(raw, /"(plan|plans|cash|half|year|twoYear|price_cash_en|price_en|price_ar|availability|total_matching)"\s*:/, 'no plan or per-unit price key');
-  assert.doesNotMatch(raw, /\bB\d{2}-\d{2}\b/, 'no unit reference (B08-19 shape)');
+  assert.doesNotMatch(raw, /\bB\d{2}-\d{2}\b/, 'no unit reference (B00-00 shape)');
   assert.doesNotMatch(raw, /\bB\d{2}-\d+\b/, 'no unit reference of any length');
   assert.doesNotMatch(raw, /results/, 'no per-unit results list');
   const published = new Set(JSON.parse(raw).summary?.rows.map((r) => r.cashFrom) ?? []);
@@ -511,7 +512,43 @@ test('search_units: every source (WhatsApp, email, website, none, unknown) gets 
     const bare = await h.ask('bona-whatsapp', {});
     assert.deepEqual(bare.result.summary, PUBLISHED_CUT);
     assertNoUnpublished(bare.raw);
+    // A blank id is no id: W014 still answers (the Retell schema: "Defaults to BONA-W014").
+    for (const blank of [{ listing_id: '' }, { listing_id: '   ' }, { listing_id: null }, { id: '' }, { listing_id: '', id: ' ' }, { listing_id: ' ', id: 'bona-w014' }]) {
+      const r = await h.ask('bona-whatsapp', blank);
+      assert.deepEqual(r.result.summary, PUBLISHED_CUT, `${JSON.stringify(blank)}: W014 is the default project`);
+      assertNoUnpublished(r.raw);
+    }
+    // The first id that is not blank decides: a blank listing_id does not hide the id given beside it.
+    assert.equal((await h.ask('bona-whatsapp', { listing_id: ' ', id: 'BONA-005' })).result.summary, null);
   } finally { h.cleanup(); }
+});
+
+test('search_units reads units.json as an array of sheets (a second project), the way the listing page does', async () => {
+  const other = { ...SHEET, listingId: 'BONA-W999', units: [UNIT('B93-14', 2, 'Standard', 88.5, [655500, 669500, 720500, 753500])] };
+  const h = unitsHarness({ sheet: [other, SHEET] });
+  try {
+    for (const source of SOURCES) {
+      const { raw, result } = await h.ask(source);
+      assert.deepEqual(result.summary, PUBLISHED_CUT, `${source}: W014's rows from the array, as the page renders them`);
+      assert.equal(result.count, 5, source);
+      assertNoUnpublished(raw, { units: [...other.units, ...SHEET.units] });
+    }
+    // The other sheet answers for its own listing only, and that listing is not in this inventory: nothing.
+    const { raw, result } = await h.ask('bona-whatsapp', { listing_id: 'BONA-W999' });
+    assert.deepEqual(result, { count: 0, summary: null, note: result.note });
+    assertNoUnpublished(raw, { units: [...other.units, ...SHEET.units] });
+  } finally { h.cleanup(); }
+});
+
+test('the search_units fixture is made up: no unit ref or price of it is on the real sheet (src/data/units.json)', () => {
+  const real = [JSON.parse(fs.readFileSync(WORKTREE_UNITS, 'utf8'))].flat().flatMap((r) => r?.units ?? []);
+  assert.ok(real.length > 0, 'the real sheet has units');
+  const refs = new Set(real.map((u) => u.ref));
+  const amounts = new Set(real.flatMap((u) => Object.values(u.price ?? {})).filter((n) => typeof n === 'number'));
+  for (const u of SHEET.units) {
+    assert.ok(!refs.has(u.ref), `${u.ref} is a real unit reference`);
+    for (const [plan, amount] of Object.entries(u.price)) assert.ok(!amounts.has(amount), `${u.ref} ${plan} ${amount} is a real price`);
+  }
 });
 
 test('search_units: the source set the full rows by default is empty (deny by default); the veto is that one set', async () => {
@@ -521,7 +558,7 @@ test('search_units: the source set the full rows by default is empty (deny by de
   const h = unitsHarness({ extra: { fullUnitRowSources: ['bona-web'] } });
   try {
     const web = (await h.ask('bona-web', { listing_id: 'BONA-W014', beds: 1 })).result;
-    assert.deepEqual(web.results.map((r) => r.ref), ['B08-22', 'B08-23'], 'the veto path: today\'s per-unit rows');
+    assert.deepEqual(web.results.map((r) => r.ref), ['B91-22', 'B91-23'], 'the veto path: today\'s per-unit rows');
     assert.ok(web.availability, 'the veto path keeps the old availability block');
     for (const source of ['bona-whatsapp', 'bona-email', undefined]) {
       const { raw, result } = await h.ask(source);
@@ -578,7 +615,8 @@ test('search_units on the real W014 sheet (src/data/units.json): nothing beyond 
   const h = harness();
   try {
     const tools = createToolHandlers({ ...h.deps, units: createUnits({ file: WORKTREE_UNITS }) });
-    const sheet = JSON.parse(fs.readFileSync(WORKTREE_UNITS, 'utf8'));
+    // One record today, an array once a second project has a sheet: every unit of every sheet is checked.
+    const sheet = { units: [JSON.parse(fs.readFileSync(WORKTREE_UNITS, 'utf8'))].flat().flatMap((r) => r?.units ?? []) };
     for (const source of SOURCES) {
       const raw = await tools.run('search_units', { chat: { chat_id: 'real', metadata: { source } }, args: UNIT_ARGS });
       const result = JSON.parse(raw);

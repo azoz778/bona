@@ -4,7 +4,8 @@
 // both on the W014 sheet and on the edge cases the site already handles. On the VPS sparse checkout it is
 // skipped (NO_SRC_LIB); anywhere else (the PC, a worktree, CI) a missing src/lib fails the import below.
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
@@ -14,7 +15,20 @@ import { createUnits, WORKTREE_UNITS } from '../lib/units.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '../../..');
 const SITE_LIB = path.join(REPO_ROOT, 'src/lib/units-summary.mjs');
-const SPARSE = existsSync(path.join(REPO_ROOT, '.git', 'info', 'sparse-checkout'));
+/** True when the checkout at `root` is sparse. A linked worktree's `.git` is a file ("gitdir: <path>") naming its
+    own git dir, and that is where `git sparse-checkout` keeps the pattern file. */
+function isSparseCheckout(root) {
+  const dotGit = path.join(root, '.git');
+  let gitDir = dotGit;
+  try {
+    if (statSync(dotGit).isFile()) {
+      const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, 'utf8'));
+      if (m) gitDir = path.resolve(root, m[1]);
+    }
+  } catch { return false; }
+  return existsSync(path.join(gitDir, 'info', 'sparse-checkout'));
+}
+const SPARSE = isSparseCheckout(REPO_ROOT);
 const NO_SRC_LIB = SPARSE && !existsSync(SITE_LIB);
 
 const W014 = JSON.parse(readFileSync(WORKTREE_UNITS, 'utf8'));
@@ -64,4 +78,40 @@ test('lib/units-summary.mjs publishes exactly what src/lib/units-summary.mjs pub
   const served = createUnits({ file: WORKTREE_UNITS }).forListing(W014.listingId);
   const live = { ...LISTING, status: 'available' };
   assert.deepEqual(api.liveSummary(served, live, NOW), site.liveSummary(W014, live, NOW));
+  // The same through the production loader once units.json is an array (a second project has a sheet).
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bona-units-array-'));
+  try {
+    const data = [{ ...W014, listingId: 'BONA-W999', units: W014.units.slice(0, 3) }, W014];
+    const file = path.join(dir, 'units.json');
+    writeFileSync(file, JSON.stringify(data));
+    const loader = createUnits({ file });
+    for (const id of [W014.listingId, 'BONA-W999']) {
+      assert.deepEqual(api.liveSummary(loader.forListing(id), { id, status: 'available' }, NOW),
+        site.liveSummary(site.recordFor(data, id), { id, status: 'available' }, NOW), `array units.json: ${id}`);
+    }
+    assert.equal(loader.forListing('BONA-005'), site.recordFor(data, 'BONA-005'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the NO_SRC_LIB check finds a sparse checkout in a plain clone and in a linked worktree (.git is a file)', () => {
+  const base = mkdtempSync(path.join(os.tmpdir(), 'bona-sparse-'));
+  try {
+    const plain = path.join(base, 'plain');
+    mkdirSync(path.join(plain, '.git', 'info'), { recursive: true });
+    assert.equal(isSparseCheckout(plain), false, 'a full clone');
+    writeFileSync(path.join(plain, '.git', 'info', 'sparse-checkout'), '/services/\n');
+    assert.equal(isSparseCheckout(plain), true, 'a sparse clone');
+    const wtGit = path.join(plain, '.git', 'worktrees', 'wt');
+    mkdirSync(path.join(wtGit, 'info'), { recursive: true });
+    for (const [name, gitdir] of [['abs', wtGit], ['rel', path.relative(path.join(base, 'rel'), wtGit)]]) {
+      const wt = path.join(base, name);
+      mkdirSync(wt, { recursive: true });
+      writeFileSync(path.join(wt, '.git'), `gitdir: ${gitdir}\n`);
+      assert.equal(isSparseCheckout(wt), false, `${name}: a full linked worktree`);
+      writeFileSync(path.join(wtGit, 'info', 'sparse-checkout'), '/services/\n');
+      assert.equal(isSparseCheckout(wt), true, `${name}: a sparse linked worktree`);
+      rmSync(path.join(wtGit, 'info', 'sparse-checkout'));
+    }
+    assert.equal(isSparseCheckout(path.join(base, 'none')), false, 'no git at all');
+  } finally { rmSync(base, { recursive: true, force: true }); }
 });

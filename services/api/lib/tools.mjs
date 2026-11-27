@@ -167,7 +167,9 @@ export function createToolHandlers({
    * per-unit prices, no payment plans: those are not published (DESIGN §4.5). The model's filters are ignored.
    */
   async function search_units(args, ctx) {
-    const listingId = String(args.listing_id ?? args.id ?? args.property ?? 'BONA-W014').trim().toUpperCase();
+    // The first id that is not blank; none (missing, null, '' or spaces) means W014, as the tool schema says.
+    const listingId = [args.listing_id, args.id, args.property]
+      .map((v) => (v == null ? '' : String(v).trim().toUpperCase())).find(Boolean) || 'BONA-W014';
     const source = ctx.source ?? ctx.attr?.source ?? null;
     if (units && fullUnitRowSources.includes(source)) return unitRows(args, ctx, listingId);
 

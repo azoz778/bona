@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { createUnits, money } from '../lib/units.mjs';
+import { createUnits, money, WORKTREE_UNITS } from '../lib/units.mjs';
 import { liveSummary, unitSummary } from '../lib/units-summary.mjs';
 
+// Refs and amounts are made up: the public repo must not carry a real unit's unpublished prices in a fixture
+// (the last test checks them against the real sheet).
 const FIXTURE = {
   listingId: 'BONA-W014',
   project: { en: 'Darco Prime Waterfront', ar: 'داركو برايم' },
@@ -16,20 +18,20 @@ const FIXTURE = {
   updated: '2026-09-02',
   units: [
     {
-      ref: 'B08-22', building: 'B08', unit: '22',
+      ref: 'B91-22', building: 'B91', unit: '22',
       floor: { en: '3rd', ar: 'الدور الثالث' }, floorIndex: 3,
       facing: { en: 'South', ar: 'جنوبية' }, beds: 1, baths: 2, maidRoom: false,
-      class: 'Standard', type: { en: 'Apartment', ar: 'شقة' }, areaSqm: 55.45, roofSqm: 0,
+      class: 'Standard', type: { en: 'Apartment', ar: 'شقة' }, areaSqm: 54.25, roofSqm: 0,
       feature: { en: 'Main garden', ar: 'حديقة رئيسية' },
-      price: { cash: 708164, half: 723567, year: 778981, twoYear: 814389 },
+      price: { cash: 701500, half: 716500, year: 771500, twoYear: 806500 },
     },
     {
-      ref: 'B06-2', building: 'B06', unit: '2',
+      ref: 'B92-2', building: 'B92', unit: '2',
       floor: { en: 'Ground', ar: 'الدور الارضي' }, floorIndex: 0,
       facing: { en: 'South', ar: 'جنوبية' }, beds: 3, baths: 4, maidRoom: true,
-      class: 'Standard', type: { en: 'Apartment', ar: 'شقة' }, areaSqm: 123.49, roofSqm: 0,
+      class: 'Standard', type: { en: 'Apartment', ar: 'شقة' }, areaSqm: 121.75, roofSqm: 0,
       feature: { en: 'Street', ar: 'شارع' },
-      price: { cash: 1359547, half: 1389117, year: 1495502, twoYear: 1563479 },
+      price: { cash: 1351500, half: 1381500, year: 1486500, twoYear: 1554500 },
     },
     {
       // no cash price — must never be published or counted
@@ -66,8 +68,8 @@ describe('units', () => {
       const { units, total } = u.search({ listingId: 'BONA-W014', beds: 3 });
       assert.equal(total, 1);
       const row = u.toRow(units[0], 'cash');
-      assert.equal(row.ref, 'B06-2');
-      assert.equal(row.price_en, 'SAR 1,359,547');
+      assert.equal(row.ref, 'B92-2');
+      assert.equal(row.price_en, 'SAR 1,351,500');
       assert.equal(row.maid_room, true);
       assert.equal(u.search({ listingId: 'BONA-W014', maxPrice: 800000 }).total, 1);
     });
@@ -79,8 +81,8 @@ describe('units', () => {
       const { units } = u.search({ listingId: 'BONA-W014', beds: 1, plan: 'twoYear' });
       const row = u.toRow(units[0], 'twoYear');
       assert.equal(row.plan, 'twoYear');
-      assert.equal(row.price_en, 'SAR 814,389');
-      assert.equal(row.price_cash_en, 'SAR 708,164', 'cash stays visible for comparison');
+      assert.equal(row.price_en, 'SAR 806,500');
+      assert.equal(row.price_cash_en, 'SAR 701,500', 'cash stays visible for comparison');
     });
   });
 
@@ -90,7 +92,7 @@ describe('units', () => {
       assert.equal(u.search({ listingId: 'BONA-W014', floor: '3rd' }).total, 1);
       assert.equal(u.search({ listingId: 'BONA-W014', floor: 'الدور الثالث' }).total, 1);
       assert.equal(u.search({ listingId: 'BONA-W014', facing: 'South' }).total, 2);
-      assert.equal(u.search({ listingId: 'BONA-W014', building: 'b08' }).total, 1, 'building match is case-insensitive');
+      assert.equal(u.search({ listingId: 'BONA-W014', building: 'b91' }).total, 1, 'building match is case-insensitive');
     });
   });
 
@@ -108,8 +110,8 @@ describe('units', () => {
       const s = u.summary('BONA-W014');
       assert.deepEqual(s.beds_available, [1, 3]);
       assert.equal(s.by_beds[1].count, 1);
-      assert.equal(s.by_beds[3].from_en, 'SAR 1,359,547');
-      assert.equal(s.price_from_en, 'SAR 708,164');
+      assert.equal(s.by_beds[3].from_en, 'SAR 1,351,500');
+      assert.equal(s.price_from_en, 'SAR 701,500');
       assert.equal(s.delivery, '2028-06');
       assert.equal(s.updated, '2026-09-02', 'the sheet date, so staleness is visible');
     });
@@ -119,7 +121,7 @@ describe('units', () => {
     withFile(FIXTURE, (file) => {
       const u = createUnits({ file });
       const { units } = u.search({ listingId: 'BONA-W014', limit: 50 });
-      assert.deepEqual(units.map((x) => x.ref), ['B08-22', 'B06-2']);
+      assert.deepEqual(units.map((x) => x.ref), ['B91-22', 'B92-2']);
       assert.equal(u.search({ listingId: 'BONA-W014', limit: 1 }).units.length, 1);
     });
   });
@@ -131,8 +133,8 @@ describe('units', () => {
   });
 
   it('formats money the same way in both locales, Western digits', () => {
-    assert.equal(money(708164, 'en'), 'SAR 708,164');
-    assert.equal(money(708164, 'ar'), '708,164 ر.س');
+    assert.equal(money(701500, 'en'), 'SAR 701,500');
+    assert.equal(money(701500, 'ar'), '701,500 ر.س');
     assert.equal(money(null), null);
   });
 });
@@ -152,8 +154,8 @@ describe('units-summary (the published per-bedroom "from" rows)', () => {
   it('gives one row per bedroom count, penthouses apart, with the lowest cash price and the area range', () => {
     const s = unitSummary({ ...FIXTURE, units: [...FIXTURE.units, PENTHOUSE] });
     assert.deepEqual(s.rows, [
-      { key: '1', label: { en: '1 bedroom', ar: 'غرفة نوم واحدة' }, count: 1, areaMin: 55.45, areaMax: 55.45, cashFrom: 708164 },
-      { key: '3', label: { en: '3 bedrooms', ar: '3 غرف نوم' }, count: 1, areaMin: 123.49, areaMax: 123.49, cashFrom: 1359547 },
+      { key: '1', label: { en: '1 bedroom', ar: 'غرفة نوم واحدة' }, count: 1, areaMin: 54.25, areaMax: 54.25, cashFrom: 701500 },
+      { key: '3', label: { en: '3 bedrooms', ar: '3 غرف نوم' }, count: 1, areaMin: 121.75, areaMax: 121.75, cashFrom: 1351500 },
       { key: 'penthouse', label: { en: 'Penthouse, 2 bedrooms', ar: 'بنتهاوس، غرفتا نوم' }, count: 1, areaMin: 210.5, areaMax: 210.5, cashFrom: 2100000 },
     ]);
     assert.equal(s.count, 3, 'the unit with no cash price is not counted');
@@ -183,5 +185,37 @@ describe('units-summary (the published per-bedroom "from" rows)', () => {
       assert.deepEqual(liveSummary(served, AVAILABLE, NOW), liveSummary(FIXTURE, AVAILABLE, NOW));
       assert.equal(createUnits({ file }).forListing('BONA-005'), null);
     });
+  });
+
+  it('reads units.json as an array of sheets, one per project, like the listing page (src/lib recordFor)', () => {
+    const other = { ...FIXTURE, listingId: 'BONA-W999', updated: '2026-10-01', units: [{ ...FIXTURE.units[1], ref: 'B93-14' }] };
+    withFile([other, FIXTURE], (file) => {
+      const u = createUnits({ file });
+      const w014 = u.forListing('BONA-W014');
+      assert.equal(w014?.listingId, 'BONA-W014', 'the second record of the array');
+      assert.deepEqual(w014.units.map((x) => x.ref), ['B91-22', 'B92-2'], 'priced units only');
+      assert.deepEqual(liveSummary(w014, AVAILABLE, NOW), liveSummary(FIXTURE, AVAILABLE, NOW));
+      assert.equal(u.forListing('BONA-W999')?.updated, '2026-10-01', 'each project its own sheet');
+      assert.equal(u.forListing('BONA-005'), null);
+      assert.equal(u.forListing(''), null);
+      // The veto path reads the same records.
+      assert.equal(u.summary('BONA-W014').available, 2);
+      assert.equal(u.summary('BONA-W999').available, 1);
+      assert.equal(u.summary('BONA-005'), null);
+      assert.equal(u.search({ listingId: 'BONA-W014' }).total, 2);
+      assert.deepEqual(u.search({ listingId: 'BONA-W999' }).units.map((x) => x.ref), ['B93-14']);
+      assert.equal(u.search({ listingId: 'BONA-005' }).total, 0);
+    });
+  });
+
+  it('the fixture is made up: no unit ref or price of it is on the real sheet (src/data/units.json)', () => {
+    const real = [JSON.parse(fs.readFileSync(WORKTREE_UNITS, 'utf8'))].flat().flatMap((r) => r?.units ?? []);
+    assert.ok(real.length > 0, 'the real sheet has units');
+    const refs = new Set(real.map((x) => x.ref));
+    const amounts = new Set(real.flatMap((x) => Object.values(x.price ?? {})).filter((n) => typeof n === 'number'));
+    for (const x of [...FIXTURE.units, PENTHOUSE]) {
+      assert.ok(!refs.has(x.ref), `${x.ref} is a real unit reference`);
+      for (const [plan, amount] of Object.entries(x.price)) assert.ok(!amounts.has(amount), `${x.ref} ${plan} ${amount} is a real price`);
+    }
   });
 });

@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { recordFor } from './units-summary.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const WORKTREE_UNITS = path.resolve(HERE, '../../../src/data/units.json');
@@ -59,10 +60,14 @@ export function createUnits({ file = WORKTREE_UNITS, now = Date.now } = {}) {
   let statedAt = 0;
   let mtime = 0;
 
+  /** Every sheet in the file, each with its priced units only. units.json is one record today and an array once
+      a second project has a sheet: the two shapes the listing page reads (src/lib/units-summary.mjs recordFor). */
   function read() {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-    const units = (raw.units || []).filter((u) => typeof u?.price?.cash === 'number');
-    return { ...raw, units };
+    const records = (Array.isArray(raw) ? raw : [raw])
+      .filter((r) => r && typeof r === 'object' && !Array.isArray(r))
+      .map((r) => ({ ...r, units: (Array.isArray(r.units) ? r.units : []).filter((u) => typeof u?.price?.cash === 'number') }));
+    return { records };
   }
 
   function load() {
@@ -82,18 +87,22 @@ export function createUnits({ file = WORKTREE_UNITS, now = Date.now } = {}) {
       doc = read();
       mtime = fs.statSync(file).mtimeMs;
     } catch {
-      doc = doc ?? { units: [] };
+      doc = doc ?? { records: [] };
     }
     loadedAt = t;
     statedAt = t;
     return doc;
   }
 
-  /** Every unit belonging to a listing id (BONA-W014). */
+  /** The sheet of one listing id, or with no id the first sheet (the veto path's old "the one sheet"). */
+  function sheet(listingId = null) {
+    const { records } = load();
+    return listingId ? recordFor(records, listingId) : records[0] ?? null;
+  }
+
+  /** The sheet of a listing id (BONA-W014), priced units only; null for no id or a listing without one. */
   function forListing(listingId) {
-    const d = load();
-    if (!listingId || d.listingId !== listingId) return null;
-    return d;
+    return listingId ? sheet(listingId) : null;
   }
 
   /**
@@ -106,9 +115,8 @@ export function createUnits({ file = WORKTREE_UNITS, now = Date.now } = {}) {
     maidRoom = null, minPrice = null, maxPrice = null, plan = 'cash',
     minArea = null, maxArea = null, query = null, limit = 8,
   } = {}) {
-    const d = load();
-    if (!d.units?.length) return { doc: null, units: [], total: 0 };
-    if (listingId && d.listingId !== listingId) return { doc: null, units: [], total: 0 };
+    const d = sheet(listingId);
+    if (!d?.units?.length) return { doc: null, units: [], total: 0 };
 
     const p = PLANS.includes(plan) ? plan : 'cash';
     const q = query ? normalise(query) : null;
@@ -181,9 +189,8 @@ export function createUnits({ file = WORKTREE_UNITS, now = Date.now } = {}) {
 
   /** Availability headline incl. price_to_en, which the site never shows: the veto path only. */
   function summary(listingId = null) {
-    const d = load();
-    if (!d.units?.length) return null;
-    if (listingId && d.listingId !== listingId) return null;
+    const d = sheet(listingId);
+    if (!d?.units?.length) return null;
     const cash = d.units.map((u) => u.price.cash);
     const areas = d.units.map((u) => u.areaSqm).filter((a) => typeof a === 'number');
     const beds = [...new Set(d.units.map((u) => u.beds).filter((b) => typeof b === 'number'))].sort();
