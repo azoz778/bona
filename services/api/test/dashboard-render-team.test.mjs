@@ -175,7 +175,10 @@ const SWITCH_ROWS = [
 test('every go-live switch has its own button, off by default, offering the opposite value', () => {
   const off = teamPage({ me: OWNER, users: [OWNER] });
   assert.match(off, /<h2[^>]*>Go-live switches<\/h2>/);
-  assert.match(off, /Each one has an effect only once its part is deployed; until then turning it on changes nothing\./);
+  // owner_notes and owner_mail_copy ship on, so "turning it on" alone would not cover them; and a
+  // switch changed early is stored, so it takes effect when its part merges (repo-sync restarts).
+  assert.ok(off.includes(esc('Leave each one as it ships until the go-live step that names it: a switch changed early takes effect as soon as its part is merged, and until then turning it on or off changes nothing.')));
+  assert.doesNotMatch(off, /once its part is deployed/);
   for (const [key, heading, offLabel, onLabel] of SWITCH_ROWS) {
     assert.ok(off.includes(`>${heading}</h3>`), `${key} heading`);
     assert.match(off, new RegExp(`name="${key}" value="1"`), `${key} offers on`);
@@ -206,7 +209,7 @@ test('the go-live switch copy says what each one does in either state, and names
   const off = teamPage({ me: OWNER, users: [OWNER] });
   const on = teamPage({ me: OWNER, users: [OWNER], switches: Object.fromEntries(SWITCH_ROWS.map(([key]) => [key, true])) });
   for (const line of [
-    'Off. A chat joins the Bona inbox only as before: by its Ref code, or by your Move or Add.',
+    'Off. A chat joins the Bona inbox only as before: by its Ref code, an ad or a listing number, or by your Move or Add.',
     'Off. Your own chat with Bona’s number is never treated as a client’s.',
     'Off. The AI assistant passes viewing requests to the team.',
     'Off. Those notes are dropped, not kept for later.',
@@ -215,6 +218,7 @@ test('the go-live switch copy says what each one does in either state, and names
     'Off. Only the chats the AI assistant fully serves use Bona’s AI service (OpenAI); every other chat still uses the Retell agent. Turn this on only once the privacy page names OpenAI.',
   ]) assert.ok(off.includes(esc(line)), line);
   for (const line of [
+    'joins the Bona inbox (the AI assistant answers it while it is on), except the team’s chats and the never list.',
     'It works only while Bona’s own number is linked and checked.',
     'stays on until you turn it off.',
     'once Google Calendar is set up.',
@@ -230,30 +234,30 @@ test('the go-live switch copy says what each one does in either state, and names
   }
 });
 
-test('the AI-service banner: "the AI service is not answering" with the time in Riyadh, above the Retell one; none while it is fine', () => {
+test('the AI-service banner: "the AI service has not answered" with the time in Riyadh, above the Retell one; none while it is fine', () => {
   const at = Date.UTC(2026, 9, 3, 9, 30);
   const html = teamPage({ me: OWNER, users: [OWNER], brainOut: at, ok: 'setting' });
-  const banner = /<div class="err">The AI service is not answering since 2026-10-03 12:30 Riyadh time\. Until it is back, clients get a line saying the team will reply\.<\/div>/;
+  const banner = /<div class="err">The AI service has not answered since 2026-10-03 12:30 Riyadh time\. Until it is back, clients get a line saying the team will reply\.<\/div>/;
   assert.match(html, banner);
-  assert.ok(html.indexOf('The AI service is not answering') < html.indexOf('<h2>People</h2>'), 'at the top');
-  assert.ok(html.indexOf('The AI service is not answering') < html.indexOf('class="ok"'), 'above the flash too');
+  assert.ok(html.indexOf('The AI service has not answered') < html.indexOf('<h2>People</h2>'), 'at the top');
+  assert.ok(html.indexOf('The AI service has not answered') < html.indexOf('class="ok"'), 'above the flash too');
   assert.doesNotMatch(html, /Retell credit/, 'the Retell banner is its own: only while Retell is out');
   assert.doesNotMatch(html.slice(0, html.indexOf('<h2>People</h2>')), /Dana/, 'nameless');
   for (const fine of [null, undefined, 0, NaN, '1790', 'x']) {
-    assert.doesNotMatch(teamPage({ me: OWNER, users: [OWNER], brainOut: fine }), /AI service is not answering/, String(fine));
+    assert.doesNotMatch(teamPage({ me: OWNER, users: [OWNER], brainOut: fine }), /AI service has not answered/, String(fine));
   }
   // Both out: both banners, the AI service first; the Retell words are today's (the website chat stays on Retell until T28).
   const both = teamPage({ me: OWNER, users: [OWNER], brainOut: at, fundsOut: at });
   assert.match(both, banner);
   assert.match(both, /<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time\. Top up Retell and she resumes by herself; until then clients get the hand-over line\.<\/div>/);
-  assert.ok(both.indexOf('The AI service is not answering') < both.indexOf('Retell credit ran out'));
+  assert.ok(both.indexOf('The AI service has not answered') < both.indexOf('Retell credit ran out'));
 });
 
 test('fundsBanner keeps its one-argument form for the inbox list: the Retell banner only, byte for byte', () => {
   const at = Date.UTC(2026, 9, 3, 9, 30);
   assert.equal(fundsBanner(at), '<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time. Top up Retell and she resumes by herself; until then clients get the hand-over line.</div>');
   assert.equal(fundsBanner(null), '');
-  assert.equal(fundsBanner(null, { brainOut: at }), '<div class="err">The AI service is not answering since 2026-10-03 12:30 Riyadh time. Until it is back, clients get a line saying the team will reply.</div>');
+  assert.equal(fundsBanner(null, { brainOut: at }), '<div class="err">The AI service has not answered since 2026-10-03 12:30 Riyadh time. Until it is back, clients get a line saying the team will reply.</div>');
   assert.equal(fundsBanner(null, {}), '');
 });
 
@@ -270,4 +274,17 @@ test('the Ops panel renders an injected ops() result: a placeholder while it is 
   assert.match(html, /<td>brain<\/td><td>\{&quot;turns&quot;:3\}<\/td>/);
   assert.match(html, /<td>none<\/td><td>—<\/td>/);
   assert.equal(opsPanel({}), opsPanel(undefined), 'the stub and nothing at all render the same');
+});
+
+test('an ops() value that cannot be shown is a dash, never a thrown page: a cycle, a BigInt, a function', () => {
+  const loop = { a: 1 };
+  loop.self = loop;
+  let html;
+  assert.doesNotThrow(() => { html = opsPanel({ loop, big: { n: 10n }, fn: () => 'secret source', plain: 3 }); });
+  assert.match(html, /<td>loop<\/td><td>—<\/td>/);
+  assert.match(html, /<td>big<\/td><td>—<\/td>/);
+  assert.match(html, /<td>fn<\/td><td>—<\/td>/);
+  assert.doesNotMatch(html, /secret source/, 'a function is never printed as its source');
+  assert.match(html, /<td>plain<\/td><td>3<\/td>/);
+  assert.doesNotThrow(() => teamPage({ me: OWNER, users: [OWNER], ops: { loop } }));
 });

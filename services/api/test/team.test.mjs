@@ -549,6 +549,20 @@ test('brainOutSince reads the brain_out marker as a ms instant, or null while th
   s.close();
 });
 
+test('brainOutSince is null for a stored value no clock can show: past a safe integer, or past the last date a Date holds', () => {
+  const { s, team } = teamHarness();
+  // Each fits the write pattern (16 digits at most), so only the read can refuse it; a banner
+  // "not answering since — Riyadh time" would otherwise claim an outage from junk.
+  for (const junk of ['9999999999999999', '9007199254740993', '8640000000000000', '8639999999999999']) {
+    team.setSetting('brain_out', junk);
+    assert.equal(team.brainOutSince(), null, junk);
+  }
+  const late = Date.UTC(9999, 11, 31, 20, 59);
+  team.setSetting('brain_out', String(late));
+  assert.equal(team.brainOutSince(), late, 'a far but real date is still an instant');
+  s.close();
+});
+
 test('owner_summary_day takes \'\' or a YYYY-MM-DD day only', () => {
   const { s, team } = teamHarness();
   assert.equal(SETTINGS_DEFAULTS.owner_summary_day, '');

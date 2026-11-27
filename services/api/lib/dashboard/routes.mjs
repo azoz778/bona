@@ -94,6 +94,15 @@ export const MAX_NOTE = 2000;
  * each is read only by the module its own task builds.
  */
 export const GO_LIVE_SWITCHES = ['own_inbox', 'owner_as_client', 'calendar_booking', 'owner_notes', 'email_replies', 'owner_mail_copy', 'dana_brain'];
+/** The built-in error classes a hook failure may be named by: their names are never data. */
+const ERROR_CLASSES = new Set(['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'EvalError', 'URIError', 'AggregateError', 'AbortError', 'TimeoutError']);
+/** A system code in its fixed shape: SQLite's, Node's, or a POSIX errno name (letters only after the E). */
+const SYSTEM_CODE = /^(?:SQLITE_[A-Z_]{1,40}|ERR_[A-Z0-9_]{1,60}|E[A-Z]{2,20})$/;
+/** What a failed hook is logged as: a system code, else a built-in class name, else `Error`. */
+const errorLabel = (err) => {
+  if (typeof err?.code === 'string' && SYSTEM_CODE.test(err.code)) return err.code;
+  return typeof err?.name === 'string' && ERROR_CLASSES.has(err.name) ? err.name : 'Error';
+};
 /** After an owner's join, Dana answers the waiting message only when it is this recent (U5). */
 export const MOVE_ANSWER_WINDOW_MS = 6 * 3_600_000;
 /**
@@ -206,13 +215,18 @@ export function readBody(req, maxBytes, { drainTo = 0 } = {}) {
  * @param {(key: string, value: string) => unknown} [o.onSettingChanged]  told once per real change of a Team-page switch,
  *   after it is saved (2026-11-27 DESIGN §3.2: the test switch's lifecycle). index.mjs wires it (T05); default a no-op
  * @param {{ onTaskChange?: (task: object, patch: { status: string, dueTs: number|undefined }) => unknown,
- *   onLeadLeaving?: (leadId: string) => unknown }} [o.hooks]  the viewing seam (DESIGN §8.4): a task the owner changed,
- *   and a chat about to leave the inbox (Not a client, a new colleague's or never-list number). Defaults are no-ops
+ *   onLeadLeaving?: (leadId: string) => void }} [o.hooks]  the viewing seam (DESIGN §8.4): a task the owner changed,
+ *   and a chat about to leave the inbox (Not a client, a new colleague's or never-list number). Defaults are no-ops.
+ *   Each is called on `hooks` itself, so a module's methods keep their `this`
  * @param {() => object} [o.ops]                         the Team page's Ops panel counts (DESIGN §5.4); T14 wires the real one
  *
- * A hook never decides the owner's action: it runs after (or, for a lead leaving, just before)
- * the write, and a hook that throws or rejects is logged as `dash.hook_failed` by name and
- * target id, never with its error's words, while the action goes through as it would without it.
+ * onSettingChanged, onTaskChange and ops never decide the owner's action: they run after the
+ * write, and one that throws or rejects is logged as `dash.hook_failed` while the action goes
+ * through as it would without it. onLeadLeaving is the one gate (DESIGN §8.4: the purge marks
+ * first, then deletes; like the store's onPurge): it must be synchronous, since it only writes
+ * rows and never calls the network, and when it throws the chat is NOT taken out: the request
+ * fails (500) with its transcript kept. Every failure is logged by hook name, target id and a
+ * known class or system code only, never with the error's words.
  */
 export function createDashboardRoutes({
   db, cfg = {}, inventory = null, fanout = null, app = null,
@@ -239,25 +253,47 @@ export function createDashboardRoutes({
 
   /* -------------------- seams for the modules other tasks build -------------------- */
 
-  /** A hook's failure, by name and target id only: its message could carry a calendar id or a name. */
+  /**
+   * A hook's failure, by name and target id only: its message could carry a calendar id or a
+   * name, and so could a `code` or `name` it set itself. Only a built-in error class or a
+   * system code in its fixed shape (`SQLITE_BUSY`, `ERR_…`, `ECONNRESET`) is named; anything
+   * else is `Error`.
+   */
   const hookFailed = (hook, target, err) => log({
-    level: 'warn', evt: 'dash.hook_failed', hook, target: target ?? null,
-    error: typeof err?.code === 'string' ? err.code : (err?.name ?? 'Error'),
+    level: 'warn', evt: 'dash.hook_failed', hook, target: target ?? null, error: errorLabel(err),
   });
   /**
    * Run one injected hook, sync or async, without letting it decide the owner's action: a
-   * throw or a rejection is logged and swallowed. Returns what the hook returned, or
-   * undefined when it threw.
+   * throw or a rejection is logged and swallowed. `self` is the object the hook came from,
+   * so a method keeps its `this`. Returns what the hook returned, or undefined when it threw.
    */
-  function callHook(hook, target, fn, ...args) {
+  function callHook(hook, target, fn, self, args) {
     if (typeof fn !== 'function') return undefined;
     try {
-      const out = fn(...args);
+      const out = fn.apply(self, args);
       if (out && typeof out.then === 'function') out.then(null, (err) => hookFailed(hook, target, err));
       return out;
     } catch (err) {
       hookFailed(hook, target, err);
       return undefined;
+    }
+  }
+  /**
+   * The chat is about to leave the inbox and lose its transcript: the viewing seam marks the
+   * lead's bookings first (DESIGN §8.4, T10). Unlike the other hooks this one gates: a throw
+   * is logged by name and rethrown in fixed words (the 500's `dash.failed` line never carries
+   * the hook's own), so the purge after it does not run without the mark. A rejection of a
+   * hook that broke the synchronous contract is only logged: it cannot be waited for here.
+   */
+  function beforeLeadLeaves(leadId) {
+    const fn = hooks?.onLeadLeaving;
+    if (typeof fn !== 'function') return;
+    try {
+      const out = fn.call(hooks, leadId);
+      if (out && typeof out.then === 'function') out.then(null, (err) => hookFailed('onLeadLeaving', leadId, err));
+    } catch (err) {
+      hookFailed('onLeadLeaving', leadId, err);
+      throw new Error('onLeadLeaving failed; the chat stays in the inbox');
     }
   }
 
@@ -716,7 +752,7 @@ export function createDashboardRoutes({
 
   /** The Ops panel's counts; a failing `ops()` is logged and the page opens with the placeholder. */
   function opsCounts() {
-    const out = callHook('ops', null, ops);
+    const out = callHook('ops', null, ops, undefined, []);
     return out && typeof out === 'object' && typeof out.then !== 'function' ? out : {};
   }
 
@@ -830,7 +866,7 @@ export function createDashboardRoutes({
       audit?.record({userId:me.user_id,action:'lead_task',target:leadId,meta:{taskId:task.task_id,kind:task.kind,status:task.status}});
       // A changed task (not a new one) goes to the viewing seam: a cancelled booked viewing
       // cancels its calendar event there (DESIGN §8.4, T10). Its failure never fails the save.
-      if(fields.task_id)callHook('onTaskChange',task.task_id,hooks?.onTaskChange,task,{status:String(fields.status),dueTs});
+      if(fields.task_id)callHook('onTaskChange',task.task_id,hooks?.onTaskChange,hooks,[task,{status:String(fields.status),dueTs}]);
       return answer(res,{form,back:back+'?ok=task',status:200,payload:{ok:true,task}});
     }catch{return answer(res,{form,back:back+'?error=bad_task',status:400,payload:{error:'bad_task'}});}
   }
@@ -951,8 +987,9 @@ export function createDashboardRoutes({
     inbox.removeCandidatesFor({ phone: digits, jid: `${digits}@s.whatsapp.net` });
     const lead = db.getLeadByPhone(digits) ?? db.getLeadByJid(`${digits}@s.whatsapp.net`);
     if (!lead || lead.inbox_state === 'out') return;
-    // Before the purge, so the viewing seam still finds what it must cancel (DESIGN §8.4, T10).
-    callHook('onLeadLeaving', lead.lead_id, hooks?.onLeadLeaving, lead.lead_id);
+    // Before the purge, so the viewing seam still finds what it must cancel (DESIGN §8.4, T10);
+    // when it throws, the chat stays in and the request fails.
+    beforeLeadLeaves(lead.lead_id);
     inbox.leaveInbox(lead.lead_id);
     audit?.record({ userId: me.user_id, action: 'inbox_out', target: lead.lead_id });
   }
@@ -1044,7 +1081,7 @@ export function createDashboardRoutes({
     }, 'setting');
     // Once per real change, after the row and its audit are written: a repeat of the same
     // value, or a refused one, tells nobody.
-    if (changed) callHook('onSettingChanged', changed[0], onSettingChanged, ...changed);
+    if (changed) callHook('onSettingChanged', changed[0], onSettingChanged, undefined, changed);
     return answered;
   }
 
@@ -1482,8 +1519,9 @@ export function createDashboardRoutes({
     if (!lead) return answer(res, { form, back: '/dashboard/inbox?error=not_a_chat', status: 404, payload: { error: 'not_found' } });
     // Not a client (design §4.1): out now, the transcript gone now, and it never comes
     // back on its own — only the owner's Move or Add brings it in again. The viewing seam
-    // hears first, while the lead is still as it was (DESIGN §8.4, T10).
-    callHook('onLeadLeaving', leadId, hooks?.onLeadLeaving, leadId);
+    // hears first, while the lead is still as it was (DESIGN §8.4, T10); when it throws, the
+    // chat stays in and the request fails, rather than lose its calendar marks.
+    beforeLeadLeaves(leadId);
     const purged = inbox.leaveInbox(leadId);
     audit?.record({ userId: me.user_id, action: 'inbox_out', target: leadId });
     log({ evt: 'dash.inbox_out', leadId, messages: purged.messages });

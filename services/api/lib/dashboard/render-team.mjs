@@ -43,7 +43,7 @@ const isInstant = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
  */
 export function fundsBanner(fundsOut, { brainOut = null } = {}) {
   const brain = isInstant(brainOut)
-    ? `<div class="err">The AI service is not answering since ${esc(riyadh(brainOut))}. Until it is back, clients get a line saying the team will reply.</div>`
+    ? `<div class="err">The AI service has not answered since ${esc(riyadh(brainOut))}. Until it is back, clients get a line saying the team will reply.</div>`
     : '';
   const retell = isInstant(fundsOut)
     ? `<div class="err">Dana can’t answer: Retell credit ran out at ${esc(riyadh(fundsOut))}. Top up Retell and she resumes by herself; until then clients get the hand-over line.</div>`
@@ -54,11 +54,23 @@ export function fundsBanner(fundsOut, { brainOut = null } = {}) {
 /**
  * The Ops panel (DESIGN §5.4): counts for the owner only, from an injected `ops()`. Until
  * T14 wires the real one it is a stub that returns `{}`, and the panel says so. Every key
- * and value is escaped; a nested value is shown as its JSON.
+ * and value is escaped; a nested value is shown as its JSON. A value that cannot be shown (a
+ * cycle, a BigInt inside an object, a function) is a dash, so the counts never break the page.
  */
+const json = (v) => {
+  try {
+    return JSON.stringify(v) ?? '—';
+  } catch {
+    return '—';
+  }
+};
+const shown = (v) => {
+  if (v === null || v === undefined || typeof v === 'function' || typeof v === 'symbol') return '—';
+  return typeof v === 'object' ? json(v) : String(v);
+};
+
 export function opsPanel(ops) {
   const entries = ops && typeof ops === 'object' && !Array.isArray(ops) ? Object.entries(ops) : [];
-  const shown = (v) => (v === null || v === undefined ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v));
   const rows = entries.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(shown(v))}</td></tr>`);
   return `<h2 style="margin-top:28px">Ops</h2>
 <p class="sub">Counts for you only: answers, hand-overs, notes and bookings. Never a client’s words.</p>
@@ -68,14 +80,15 @@ ${rows.length ? scrollTable('<th>What</th><th>Count</th>', rows, '') : '<p class
 /**
  * The go-live switches, in the order the go-live runs them. Each: the setting key, its
  * heading, what it does while on and while off, and the button for each state. The copy
- * says what is true in either state: a switch whose part is not deployed yet changes
- * nothing, which the section's first line says once for all of them.
+ * says what is true in either state once its part is merged; until then a switch changes
+ * nothing either way, and a value changed early is stored and takes effect at that merge
+ * (repo-sync restarts bona-api), which the section's first line says once for all of them.
  */
 const GO_LIVE = [
   {
     key: 'own_inbox', title: 'Every chat on Bona’s number',
-    on: 'On. Every one-to-one chat on Bona’s WhatsApp number joins the Bona inbox and the AI assistant answers it, except the team’s chats and the never list. It works only while Bona’s own number is linked and checked.',
-    off: 'Off. A chat joins the Bona inbox only as before: by its Ref code, or by your Move or Add. Turning this off stops new chats joining; chats that joined while it was on stay served.',
+    on: 'On. Every one-to-one chat on Bona’s WhatsApp number joins the Bona inbox (the AI assistant answers it while it is on), except the team’s chats and the never list. It works only while Bona’s own number is linked and checked.',
+    off: 'Off. A chat joins the Bona inbox only as before: by its Ref code, an ad or a listing number, or by your Move or Add. Turning this off stops new chats joining; chats that joined while it was on stay served.',
     turnOn: 'Turn on for every chat', turnOff: 'Turn off for new chats',
   },
   {
@@ -204,7 +217,7 @@ ${post('/v1/admin/settings', repliesOn ? 'Turn replies off' : 'Turn replies on',
 ${post('/v1/admin/settings', danaOn ? 'Turn the AI assistant off' : 'Turn the AI assistant on', { dana_enabled: danaOn ? '0' : '1' })}
 
 <h2 style="margin-top:28px">Go-live switches</h2>
-<p class="sub">These belong to the move to full automation. Each one has an effect only once its part is deployed; until then turning it on changes nothing.</p>
+<p class="sub">These belong to the move to full automation. Leave each one as it ships until the go-live step that names it: a switch changed early takes effect as soon as its part is merged, and until then turning it on or off changes nothing.</p>
 ${goLive}
 
 ${opsPanel(ops)}`;

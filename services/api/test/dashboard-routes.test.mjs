@@ -902,7 +902,7 @@ const OWNER_PHONE = '966593296933';
 const STAFF_PHONE = '966500000001';
 
 /**
- * `extra` goes into createDashboardRoutes as well: an object, or a function of `{ db, team }`
+ * `extra` goes into createDashboardRoutes as well: an object, or a function of `{ db, team, audit }`
  * for the options that need the store (an inbox built on it, say).
  */
 async function withTeamRoutes(fn, extra = {}) {
@@ -918,7 +918,7 @@ async function withTeamRoutes(fn, extra = {}) {
     inventory, team, audit,
     sendCode: async ({ jid, text }) => { sent.push({ jid, text }); return { ok: true }; },
     log: (o) => logs.push(o),
-    ...(typeof extra === 'function' ? extra({ db, team }) : extra),
+    ...(typeof extra === 'function' ? extra({ db, team, audit }) : extra),
   });
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -1547,6 +1547,35 @@ test('onSettingChanged gets (key, value) once per real change, never for a repea
   }, { onSettingChanged: (key, value) => { calls.push([key, value]); } });
 });
 
+test('onSettingChanged runs only after the row and its audit are written, and never for a write that threw', async () => {
+  const seen = [];
+  await withTeamRoutes(async ({ team, postForm, login, owner }) => {
+    const cookie = await login(OWNER_PHONE);
+    const res = await postForm('/v1/admin/settings', { _dash: '1', owner_as_client: '1' }, { cookie });
+    assert.equal(res.headers.get('location'), '/dashboard/team?ok=setting');
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].stored, '1', 'the setting was already saved when the hook ran');
+    assert.deepEqual(seen[0].audited, [owner.user_id, 'setting', 'owner_as_client', { value: '1' }], 'and its audit row was already written');
+    // A write that throws (the disk, say) is no change: the hook hears nothing.
+    const real = team.setSetting;
+    team.setSetting = () => { throw new Error('disk I/O error'); };
+    try {
+      const failed = await postForm('/v1/admin/settings', { _dash: '1', owner_as_client: '0' }, { cookie });
+      assert.equal(failed.status, 500);
+    } finally {
+      team.setSetting = real;
+    }
+    await settle();
+    assert.equal(seen.length, 1, 'a write that threw tells nobody');
+    assert.equal(team.getSetting('owner_as_client'), '1');
+  }, ({ team, audit }) => ({
+    onSettingChanged: (key) => {
+      const row = audit.recent(1)[0];
+      seen.push({ stored: team.getSetting(key), audited: [row.user_id, row.action, row.target, row.meta] });
+    },
+  }));
+});
+
 test('a failing onSettingChanged is logged, never a 500: the setting is saved and the owner sees "Saved"', async () => {
   let n = 0;
   await withTeamRoutes(async ({ team, postForm, login, logs }) => {
@@ -1564,17 +1593,72 @@ test('a failing onSettingChanged is logged, never a 500: the setting is saved an
   }, { onSettingChanged: () => { n += 1; if (n === 1) throw new Error('boom'); return Promise.reject(new Error('boom')); } });
 });
 
+test('dash.hook_failed names the error by a known class or a system code only: a code or name holding words is logged as Error', async () => {
+  const thrown = [
+    Object.assign(new Error('x'), { code: 'cal-0123abc for 966500000000' }),
+    Object.assign(new Error('x'), { name: 'Sara Ahmed' }),
+    Object.assign(new Error('x'), { code: 'E966500000000' }),
+    Object.assign(new Error('x'), { code: 'SQLITE_BUSY' }),
+    Object.assign(new Error('x'), { code: 'ECONNRESET' }),
+    new TypeError('x'),
+    'a bare string 966500000000',
+  ];
+  let i = 0;
+  await withTeamRoutes(async ({ postForm, login, logs }) => {
+    const cookie = await login(OWNER_PHONE);
+    for (let k = 0; k < thrown.length; k += 1) {
+      const res = await postForm('/v1/admin/settings', { _dash: '1', owner_as_client: k % 2 ? '0' : '1' }, { cookie });
+      assert.equal(res.headers.get('location'), '/dashboard/team?ok=setting');
+    }
+    const failed = logs.filter((l) => l.evt === 'dash.hook_failed');
+    assert.deepEqual(failed.map((l) => l.error), ['Error', 'Error', 'Error', 'SQLITE_BUSY', 'ECONNRESET', 'TypeError', 'Error']);
+    assert.doesNotMatch(JSON.stringify(logs), /966500000000|Sara|cal-0123abc|bare string/);
+  }, { onSettingChanged: () => { throw thrown[i++]; } });
+});
+
+test('a hook is called on the object it came from, so a method-style module keeps its `this`', async () => {
+  const viewing = {
+    seen: [],
+    onTaskChange(task) { this.seen.push(['task', task.task_id]); },
+    onLeadLeaving(leadId) { this.seen.push(['leaving', leadId]); },
+  };
+  await withTeamRoutes(async ({ db, postForm, login, logs }) => {
+    const leadId = seedLead(db, { phone: '966500000079', inboxState: 'in' });
+    const task = addTask(db, { leadId, kind: 'viewing', source: 'owner', details: { note: 'x' }, dueTs: Date.UTC(2026, 11, 1, 13, 30), now: Date.UTC(2026, 10, 27) });
+    const cookie = await login(OWNER_PHONE);
+    await postForm(`/v1/admin/leads/${leadId}/task`, { _dash: '1', task_id: task.task_id, status: 'cancelled' }, { cookie });
+    assert.equal((await postForm(`/v1/admin/inbox/${leadId}/out`, { _dash: '1' }, { cookie })).status, 303);
+    assert.deepEqual(viewing.seen, [['task', task.task_id], ['leaving', leadId]]);
+    assert.equal(logs.filter((l) => l.evt === 'dash.hook_failed').length, 0);
+  }, ({ db }) => ({ inbox: createInboxStore(db), hooks: viewing }));
+});
+
 test('the Team page shows the AI-service banner while brain_out is set, and renders the injected ops()', async () => {
   const at = Date.UTC(2026, 9, 3, 9, 30);
   await withTeamRoutes(async ({ team, get, login }) => {
     const cookie = await login(OWNER_PHONE);
     let html = await (await get('/dashboard/team', { cookie })).text();
-    assert.doesNotMatch(html, /AI service is not answering/);
+    assert.doesNotMatch(html, /AI service has not answered/);
     assert.match(html, /<td>answers_24h<\/td><td>7<\/td>/);
     team.setSetting('brain_out', String(at));
     html = await (await get('/dashboard/team', { cookie })).text();
-    assert.match(html, /The AI service is not answering since 2026-10-03 12:30 Riyadh time\./);
+    assert.match(html, /The AI service has not answered since 2026-10-03 12:30 Riyadh time\./);
+    // Junk that fits the 16-digit write pattern is no outage: no banner "since —".
+    team.setSetting('brain_out', '9999999999999999');
+    html = await (await get('/dashboard/team', { cookie })).text();
+    assert.doesNotMatch(html, /AI service has not answered/);
   }, { ops: () => ({ answers_24h: 7 }) });
+});
+
+test('an ops() result that cannot be shown (a cycle) still opens the Team page', async () => {
+  const loop = { turns: 1 };
+  loop.self = loop;
+  await withTeamRoutes(async ({ get, login }) => {
+    const cookie = await login(OWNER_PHONE);
+    const res = await get('/dashboard/team', { cookie });
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /<td>loop<\/td><td>—<\/td>/);
+  }, { ops: () => ({ loop }) });
 });
 
 test('without an ops() the Team page shows the placeholder; a throwing ops() is logged and the page still opens', async () => {
@@ -1622,24 +1706,56 @@ test('hooks.onTaskChange(task, patch) runs after an owner changes a task; adding
   }, { hooks: { onTaskChange: (task, patch) => { calls.push([task, patch]); if (calls.length === 2) throw new Error('calendar down'); } } });
 });
 
-test('hooks.onLeadLeaving(leadId) runs before "Not a client" takes the chat out; a failing hook never stops it', async () => {
+/** One client message in a chat's transcript, so a test can tell whether the purge has run yet. */
+const seedMessage = (inbox, leadId, key) => inbox.upsertMessage({
+  key_id: key, lead_id: leadId, jid: null, direction: 'in', sender_kind: 'client', text: 'hello', ts: Date.UTC(2026, 10, 27, 9),
+});
+
+test('hooks.onLeadLeaving(leadId) runs before "Not a client" takes the chat out, while its transcript is still there', async () => {
   const seen = [];
+  let inbox;
   await withTeamRoutes(async ({ db, postForm, login, logs }) => {
     const leadId = seedLead(db, { phone: '966500000072', inboxState: 'in' });
+    seedMessage(inbox, leadId, 'K-72');
     const cookie = await login(OWNER_PHONE);
     const res = await postForm(`/v1/admin/inbox/${leadId}/out`, { _dash: '1' }, { cookie });
     assert.equal(res.status, 303);
-    assert.deepEqual(seen, [[leadId, 'in']], 'called once, while the lead is still in');
+    assert.deepEqual(seen, [[leadId, 'in', 1]], 'called once, while the lead is still in and before its transcript goes');
     assert.equal(db.getLead(leadId).inbox_state, 'out');
-    const other = seedLead(db, { id: 'LEAD-20260908-aaaa0002', phone: '966500000073', inboxState: 'in' });
-    const res2 = await postForm(`/v1/admin/inbox/${other}/out`, { _dash: '1' }, { cookie });
-    assert.equal(res2.status, 303);
-    assert.equal(db.getLead(other).inbox_state, 'out', 'out all the same');
-    assert.ok(logs.some((l) => l.evt === 'dash.hook_failed' && l.hook === 'onLeadLeaving'));
-  }, ({ db }) => ({
-    inbox: createInboxStore(db),
-    hooks: { onLeadLeaving: (id) => { seen.push([id, db.getLead(id).inbox_state]); if (seen.length === 2) throw new Error('calendar down'); } },
-  }));
+    assert.equal(inbox.countMessages(leadId), 0);
+    assert.equal(logs.filter((l) => l.evt === 'dash.hook_failed').length, 0);
+  }, ({ db }) => {
+    inbox = createInboxStore(db);
+    return { inbox, hooks: { onLeadLeaving: (id) => { seen.push([id, db.getLead(id).inbox_state, inbox.countMessages(id)]); } } };
+  });
+});
+
+test('a throwing onLeadLeaving stops the purge (DESIGN §8.4: marks first, then deletes): the chat and its transcript stay, logged by name only', async () => {
+  let inbox;
+  await withTeamRoutes(async ({ db, audit, postForm, login, logs }) => {
+    const leadId = seedLead(db, { phone: '966500000073', inboxState: 'in' });
+    seedMessage(inbox, leadId, 'K-73');
+    const cookie = await login(OWNER_PHONE);
+    const auditBefore = audit.recent(500).length;
+    const res = await postForm(`/v1/admin/inbox/${leadId}/out`, { _dash: '1' }, { cookie });
+    assert.equal(res.status, 500);
+    assert.equal(db.getLead(leadId).inbox_state, 'in', 'still in: nothing was purged without the mark');
+    assert.equal(inbox.countMessages(leadId), 1, 'the transcript is still there');
+    assert.equal(audit.recent(500).length, auditBefore, 'no inbox_out was audited');
+    // The same for a number that becomes a never-list one: the chat is not taken out without the mark.
+    const cousin = seedLead(db, { id: 'LEAD-20260908-aaaa0004', phone: '966500000077', inboxState: 'in' });
+    seedMessage(inbox, cousin, 'K-77');
+    const never = await postForm('/v1/admin/never', { _dash: '1', phone: '0500000077' }, { cookie });
+    assert.equal(never.status, 500);
+    assert.equal(db.getLead(cousin).inbox_state, 'in');
+    assert.equal(inbox.countMessages(cousin), 1);
+    const failed = logs.filter((l) => l.evt === 'dash.hook_failed');
+    assert.deepEqual(failed.map((l) => [l.hook, l.target, l.error]), [['onLeadLeaving', leadId, 'Error'], ['onLeadLeaving', cousin, 'Error']]);
+    assert.doesNotMatch(JSON.stringify(logs), /cal-secret|966500000073@/, 'neither the hook_failed line nor the 500 line carries the error\'s words');
+  }, ({ db }) => {
+    inbox = createInboxStore(db);
+    return { inbox, hooks: { onLeadLeaving: () => { throw new Error('cal-secret 966500000073@example.com'); } } };
+  });
 });
 
 test('hooks.onLeadLeaving(leadId) runs when a new colleague or never-list number takes a chat out of the inbox', async () => {

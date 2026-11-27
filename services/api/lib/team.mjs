@@ -46,6 +46,12 @@ export const SETTINGS_DEFAULTS = {
  * alert about it. Neither is a switch: the Team page's form cannot post them.
  */
 const INSTANT = /^(?:|\d{1,16})$/;
+/**
+ * The latest instant a reader takes from a stored INSTANT: the last date a Date can hold
+ * (8.64e15 ms), less a day so a time-zone shift still renders. Sixteen digits can say more,
+ * and a value past it is junk, not an outage.
+ */
+const MAX_INSTANT_MS = 8.64e15 - 86_400_000;
 /** A calendar month and day, shape only (`2026-02-31` passes; the code writing it uses a real clock). */
 const MONTH = String.raw`\d{4}-(?:0[1-9]|1[0-2])`;
 const DAY = String.raw`${MONTH}-(?:0[1-9]|[12]\d|3[01])`;
@@ -300,10 +306,15 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
   const emailRepliesEnabled = () => isOn('email_replies');
   const ownerMailCopyEnabled = () => isOn('owner_mail_copy');
   const danaBrainEnabled = () => isOn('dana_brain');
-  /** Since when the AI service has not answered (ms), or null while it is fine: the `brain_out` marker. */
+  /**
+   * Since when the AI service has not answered (ms), or null while it is fine: the `brain_out`
+   * marker. A value that is not a safe whole number a clock can show reads as null, so the
+   * Team page never claims an outage "since —" from junk.
+   */
   function brainOutSince() {
     const v = getSetting('brain_out');
-    return typeof v === 'string' && /^\d{1,16}$/.test(v) && Number(v) > 0 ? Number(v) : null;
+    const n = Number(v);
+    return typeof v === 'string' && /^\d{1,16}$/.test(v) && Number.isSafeInteger(n) && n > 0 && n <= MAX_INSTANT_MS ? n : null;
   }
 
   return {
