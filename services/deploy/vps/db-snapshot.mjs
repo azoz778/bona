@@ -17,6 +17,9 @@
 // leads table: a zero-byte file, say) is refused: a copy of it is no backup. The copy is made 0600 under a
 // temporary name of its own run, opened again for PRAGMA integrity_check, and only when that says ok
 // published under its final name with a hard link, which fails rather than replace a copy already there.
+// A run holds its label's lock (release-backups/.bona-<label>.lock: its pid) from before the copy until after the
+// prune, so two runs of one label never prune each other's copy; while the lock's run is alive another run of that
+// label is refused, a lock whose run is gone (killed) is taken over.
 // Nothing from the database is printed except its schema version. Exit 0 = ok, 1 = failed (no file of this
 // run left), 2 = usage.
 import { randomBytes } from 'node:crypto';
@@ -54,8 +57,64 @@ export function publishNew(from, to) {
   fs.unlinkSync(from);
 }
 
+/** True while a process with this pid exists (EPERM: it exists, it is someone else's). */
+function running(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === 'EPERM';
+  }
+}
+
+function readOrNull(file) {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
 /**
- * Copy `db` into `outDir`, check it, then prune that label down to `keep` (when given).
+ * Take the lock of `label` in `outDir` (Codex r2 P2: two runs of one label, each pruning all copies but its own,
+ * would delete each other's). The lock file is written whole under a name of this run's own and then hard-linked
+ * into place, so it is never seen half written; the link fails while another run's lock is there. That lock is
+ * taken over only when its pid no longer runs (a run that was killed). Returns the release function, which removes
+ * the lock only while it is still this run's.
+ */
+export function takeLock(outDir, label) {
+  const lock = path.join(outDir, `.bona-${label}.lock`);
+  const mine = `${process.pid} ${randomBytes(6).toString('hex')}\n`;
+  const tmp = `${lock}.${process.pid}.${randomBytes(6).toString('hex')}`;
+  fs.writeFileSync(tmp, mine, { mode: 0o600, flag: 'wx' });
+  try {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        fs.linkSync(tmp, lock);
+        break;
+      } catch (err) {
+        if (err?.code !== 'EEXIST' || attempt >= 3) throw err;
+      }
+      const held = readOrNull(lock);
+      if (held === null) continue; // released in between: try again
+      const pid = Number.parseInt(held, 10);
+      if (running(pid)) {
+        throw new Error(`another db-snapshot of --label ${label} is running (pid ${pid}); if it is not, remove ${lock}`);
+      }
+      fs.rmSync(lock, { force: true }); // its run is gone: a stale lock
+    }
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+  return () => {
+    if (readOrNull(lock) === mine) fs.rmSync(lock, { force: true });
+  };
+}
+
+/**
+ * Copy `db` into `outDir`, check it, then prune that label down to `keep` (when given), under the label's lock.
  * @returns {{ file: string, bytes: number, userVersion: number, pruned: string[] }}
  */
 export function snapshotDb({ db, outDir, label = 'manual', keep = 0, now = new Date() }) {
@@ -64,6 +123,15 @@ export function snapshotDb({ db, outDir, label = 'manual', keep = 0, now = new D
   if (!fs.existsSync(db)) throw new Error(`no database at ${db}`);
 
   fs.mkdirSync(outDir, { recursive: true, mode: 0o700 });
+  const release = takeLock(outDir, label);
+  try {
+    return snapshotLocked({ db, outDir, label, keep, now });
+  } finally {
+    release();
+  }
+}
+
+function snapshotLocked({ db, outDir, label, keep, now }) {
   const name = `bona-${label}-${stamp(now)}.db`;
   const file = path.join(outDir, name);
   // This run's own temporary name: two runs in the same second never share (or delete) one.

@@ -752,7 +752,8 @@ test('sync-secrets.sh chmods the four named secret files on the VPS, not *.env',
   writeFileSync(path.join(home, '.cloudflared', '9022fbec-de4f-44b9-805e-8fff285d6263.json'), '{}');
   const log = path.join(home, 'shim.log');
   writeFileSync(log, '');
-  const r = bash([path.join(VPS, 'sync-secrets.sh')], { env: { PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_SSH: 'fake-vps' } });
+  // a VPS whose ~/.secrets is still empty (a fresh one): it says so in its answers, so the copy goes ahead
+  const r = bash([path.join(VPS, 'sync-secrets.sh')], { env: { PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_SSH: 'fake-vps', SHIM_VPS_HOME: fakeVpsSecrets({}) } });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = readFileSync(log, 'utf8').split('\n').filter(Boolean);
   const chmod = lines.find((l) => /^ssh fake-vps chmod 600 /.test(l));
@@ -794,7 +795,7 @@ test('vps_keep_grep: the VPS lines are found with or without spaces before the =
     'A=1\nBONA_WA_INSTANCE = bona\nexport BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\nBONA_WA_INSTANCE_X=no\n# BONA_WA_INSTANCE=commented\n');
   const r = bash(['-c', '. ./lib.sh; eval "$(vps_keep_grep bona-services.env)"'], { env: { HOME: home } });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, 'BONA_WA_INSTANCE = bona\nexport BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n');
+  assert.equal(r.stdout, 'BONA_WA_INSTANCE = bona\nexport BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n= bona-services.env 2\n= end\n');
 });
 
 test('keep_vps_keys: a key the PC writes twice comes out once, as the VPS line; other keys are never touched', () => {
@@ -829,7 +830,7 @@ test('sync-secrets.sh copies bona-services.env with the VPS\'s own WhatsApp line
   assert.equal(readFileSync(path.join(capture, 'retell.env'), 'utf8'), 'X=1\n', 'the other files go verbatim');
   assert.equal(readFileSync(path.join(home, '.secrets', 'bona-services.env'), 'utf8'), 'X=1\nBONA_WA_INSTANCE=abdulaziz-personal\n', 'the PC file is left as it was');
   const lines = readFileSync(log, 'utf8').split('\n').filter(Boolean);
-  const readAt = lines.findIndex((l) => /^ssh fake-vps f=~\/\.secrets\/bona-services\.env; .*BONA_WA_INSTANCE\|BONA_WA_INSTANCE_JID/.test(l));
+  const readAt = lines.findIndex((l) => /^ssh fake-vps f=~\/\.secrets\/bona-services\.env; .*BONA_WA_INSTANCE BONA_WA_INSTANCE_JID/.test(l));
   const firstScp = lines.findIndex((l) => /^scp /.test(l));
   assert.ok(readAt >= 0 && readAt < firstScp, lines.join('\n'));
   assert.doesNotMatch(r.stdout + r.stderr, /abdulaziz-personal|576267694|=bona/);
@@ -892,14 +893,14 @@ test('lib.sh keeps the VPS lines per file: the exact VAPID, WA poll and TikTok n
   for (const [f, keys] of Object.entries(KEEP)) assert.deepEqual([...(got[f] ?? [])].sort(), [...keys].sort(), f);
 });
 
-test('vps_keep_grep FILE: each file is searched for its own kept keys only; a missing file is nothing', () => {
+test('vps_keep_grep FILE: each file is searched for its own kept keys only; a missing file is a "-" record', () => {
   const home = fakeVpsSecrets({ 'bona-marketing.env': 'META_PIXEL_ID=m\nTIKTOK_PIXEL_ID=p\nexport TIKTOK_EVENTS_ACCESS_TOKEN = t\nTIKTOK_TEST_EVENT_CODE=c\nTIKTOK_OTHER=x\nBONA_WA_INSTANCE=nope\n# TIKTOK_PIXEL_ID=commented\n' });
   const r = bash(['-c', '. ./lib.sh; eval "$(vps_keep_grep bona-marketing.env)"'], { env: { HOME: home } });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, 'TIKTOK_PIXEL_ID=p\nexport TIKTOK_EVENTS_ACCESS_TOKEN = t\nTIKTOK_TEST_EVENT_CODE=c\n');
+  assert.equal(r.stdout, 'TIKTOK_PIXEL_ID=p\nexport TIKTOK_EVENTS_ACCESS_TOKEN = t\nTIKTOK_TEST_EVENT_CODE=c\n= bona-marketing.env 3\n= end\n');
   const none = bash(['-c', '. ./lib.sh; eval "$(vps_keep_grep bona-services.env)"'], { env: { HOME: home } });
   assert.equal(none.status, 0, none.stderr);
-  assert.equal(none.stdout, '');
+  assert.equal(none.stdout, '= bona-services.env -\n= end\n', 'a missing file says so (a record, then the end marker)');
 });
 
 test('vps_key_names_cmd and env_key_names: FILE KEY per key line, never a value; comments and non-keys are skipped', () => {
@@ -907,7 +908,7 @@ test('vps_key_names_cmd and env_key_names: FILE KEY per key line, never a value;
   const home = fakeVpsSecrets({ 'retell.env': text, 'bona-marketing.env': 'G=7\n' });
   const r = bash(['-c', '. ./lib.sh; eval "$(vps_key_names_cmd)"'], { env: { HOME: home } });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, 'retell.env A\nretell.env B\nretell.env E\nretell.env F\nbona-marketing.env G\n');
+  assert.equal(r.stdout, '= evolution-api.env -\n= bona-services.env -\nretell.env A\nretell.env B\nretell.env E\nretell.env F\nbona-marketing.env G\n= retell.env 4\n= bona-marketing.env 1\n= end\n');
   // the PC side reads the same names out of the same text
   const pc = bash(['-c', '. ./lib.sh; env_key_names "$1"', 'names', path.join(home, '.secrets', 'retell.env')], { env: { HOME: home } });
   assert.equal(pc.status, 0, pc.stderr);
@@ -932,6 +933,7 @@ test('sync-secrets.sh keeps the VPS lines per file: VAPID, the poll interval, th
   assert.equal(got('retell.env'), 'X=1\n', 'a file without kept keys goes verbatim');
   assert.equal(readFileSync(path.join(ctx.home, '.secrets', 'bona-marketing.env'), 'utf8'), 'META_PIXEL_ID=pc-meta\n', 'the PC file is left as it was');
   assert.deepEqual(lostList(r.stdout + r.stderr), [], 'every VPS-only key here is a kept key');
+  assert.match(stripAnsi(r.stdout), /VPS lines kept: 5 in bona-services\.env, 3 in bona-marketing\.env/);
   assert.doesNotMatch(r.stdout + r.stderr, /vps-|pc-|966500000000|abdulaziz-personal/, 'no value is printed');
   // both kept-line reads and the key-name read happen before the first copy
   const lines = shimLines(ctx.log);
@@ -1033,52 +1035,155 @@ test('sync-secrets.sh: a VPS_KEEP_FILES file without kept keys stops the script;
 
 test('sync-secrets.sh refuses when the key-name read has a line that is not FILE KEY (a banner on stdout); the line is never printed', () => {
   const ctx = syncHome();
-  const r = syncRun([], ctx, { SHIM_VPS_KEY_NAMES: 'Welcome to fake-vps (banner-text-1)\nbona-services.env X' });
+  const r = syncRun([], ctx, { SHIM_VPS_HOME: fakeVpsSecrets({ 'bona-services.env': 'X=vps\n' }), SHIM_VPS_BANNER: 'Welcome to fake-vps (banner-text-1)', SHIM_VPS_BANNER_ON: 'names' });
   refusedNothingCopied(r, ctx, 'banner in the names');
   assert.doesNotMatch(r.stdout + r.stderr, /banner-text-1/);
 });
 
 test('sync-secrets.sh refuses when a kept-lines read brings a line that sets no kept key of that file (a banner): the PC values are not copied over the VPS ones', () => {
   const ctx = syncHome();
-  const r = syncRun([], ctx, { SHIM_VPS_KEY_NAMES: 'bona-services.env X\nbona-services.env BONA_WA_INSTANCE', SHIM_VPS_KEEP_LINES: 'Welcome to fake-vps (banner-text-2)' });
+  const r = syncRun([], ctx, { SHIM_VPS_HOME: fakeVpsSecrets({ 'bona-services.env': 'X=vps\nBONA_WA_INSTANCE=bona2\n' }), SHIM_VPS_BANNER: 'Welcome to fake-vps (banner-text-2)', SHIM_VPS_BANNER_ON: 'keep' });
   refusedNothingCopied(r, ctx, 'banner in the kept lines');
-  assert.doesNotMatch(r.stdout + r.stderr, /banner-text-2/);
+  assert.doesNotMatch(r.stdout + r.stderr, /banner-text-2|bona2/);
 });
 
 test('sync-secrets.sh refuses when the names list a kept key that the kept-lines read did not bring (the two reads disagree)', () => {
   const ctx = syncHome();
-  const r = syncRun([], ctx, { SHIM_VPS_KEY_NAMES: 'bona-services.env X\nbona-services.env BONA_WA_INSTANCE' });
+  // a whole names answer that lists BONA_WA_INSTANCE, while the file the kept-lines read sees has no such line
+  const r = syncRun([], ctx, {
+    SHIM_VPS_KEY_NAMES: '= retell.env -\n= evolution-api.env -\n= bona-marketing.env -\nbona-services.env X\nbona-services.env BONA_WA_INSTANCE\n= bona-services.env 2\n= end',
+    SHIM_VPS_HOME: fakeVpsSecrets({ 'bona-services.env': 'X=vps\n' }),
+  });
   refusedNothingCopied(r, ctx, 'kept key named, not read');
   assert.match(r.stdout + r.stderr, /disagree/);
 });
 
-// readsCheck(names, { file: keptLines }) → vps_reads_check on a work dir laid out as sync-secrets.sh writes it.
-const readsCheck = (names, keep = {}) => {
+// PR-INFRA fix round 2 (Codex r2 P1): an answer that exits 0 but is not whole. Each read ends with "= end" and gives every file
+// a record ("= FILE N", N its rows, or "= FILE -" when the file is not there), so a lost or cut answer is told apart from a VPS
+// that has no such file.
+test('sync-secrets.sh refuses answers that exit 0 but bring nothing (all three empty); a fresh VPS says it has no files, and that copies', () => {
+  const lost = syncHome();
+  refusedNothingCopied(syncRun([], lost), lost, 'empty answers'); // the ssh shim without SHIM_VPS_HOME prints nothing, exit 0
+  const fresh = syncHome();
+  const r = syncRun([], fresh, { SHIM_VPS_HOME: fakeVpsSecrets({}), SHIM_SCP_CAPTURE: fresh.capture });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(readFileSync(path.join(fresh.capture, 'bona-services.env'), 'utf8'), 'X=1\nBONA_WA_INSTANCE=abdulaziz-personal\n');
+});
+
+test('sync-secrets.sh refuses a names answer that left out the rows of one file, its record, or the end, while the kept-lines reads are whole', () => {
+  const vpsFiles = { 'retell.env': 'X=vps\nRETELL_NEW_AGENT=vps-secret-1\n', 'bona-services.env': 'X=vps\nBONA_WA_INSTANCE=bona2\n' };
+  const whole = '= evolution-api.env -\n= bona-marketing.env -\nretell.env X\nretell.env RETELL_NEW_AGENT\nbona-services.env X\nbona-services.env BONA_WA_INSTANCE\n= retell.env 2\n= bona-services.env 2\n= end';
+  // this is what the real read prints for those files, so each case below differs from a real answer only by what it lacks
+  const real = bash(['-c', '. ./lib.sh; eval "$(vps_key_names_cmd)"'], { env: { HOME: fakeVpsSecrets(vpsFiles) } });
+  assert.equal(real.status, 0, real.stderr);
+  assert.equal(real.stdout, `${whole}\n`);
+  const noRetell = whole.replace('retell.env X\nretell.env RETELL_NEW_AGENT\n', '');
+  for (const [why, names] of [
+    ['only the bona-services.env rows (the answer of the old read, without records)', 'bona-services.env X\nbona-services.env BONA_WA_INSTANCE'],
+    ['the retell.env rows left out', noRetell],
+    ['the retell.env rows and its record left out', noRetell.replace('= retell.env 2\n', '')],
+    ['cut before the end marker', whole.replace(/\n= end$/, '')],
+    ['cut in the middle', whole.slice(0, whole.indexOf('bona-services.env X'))],
+  ]) {
+    const ctx = syncHome();
+    const r = syncRun([], ctx, { SHIM_VPS_HOME: fakeVpsSecrets(vpsFiles), SHIM_VPS_KEY_NAMES: names });
+    refusedNothingCopied(r, ctx, why);
+    assert.doesNotMatch(r.stdout + r.stderr, /vps-secret|bona2/, `${why}: no value printed`);
+  }
+});
+
+// readsCheck(names, { file: keptLines }) → vps_reads_check on a work dir laid out as sync-secrets.sh writes it. A keep file not
+// given is the answer for a missing file.
+const readsCheck = (names, keep = {}, env = {}) => {
   const dir = mkdtempSync(path.join(tmpdir(), 'bona-reads-'));
   writeFileSync(path.join(dir, 'vps-names'), names);
-  for (const f of ['bona-services.env', 'bona-marketing.env']) writeFileSync(path.join(dir, `keep.${f}`), keep[f] ?? '');
-  return bash(['-c', 'set -euo pipefail; . ./lib.sh; vps_reads_check "$1"', 'check', dir], { env: { HOME: dir } });
+  for (const f of ['bona-services.env', 'bona-marketing.env']) writeFileSync(path.join(dir, `keep.${f}`), keep[f] ?? `= ${f} -\n= end\n`);
+  return bash(['-c', 'set -euo pipefail; . ./lib.sh; vps_reads_check "$1"', 'check', dir], { env: { HOME: dir, ...env } });
+};
+const READS_OK = {
+  names: '= evolution-api.env -\nretell.env A\nbona-services.env BONA_WA_INSTANCE\nbona-services.env X\nbona-marketing.env TIKTOK_PIXEL_ID\n= retell.env 1\n= bona-services.env 2\n= bona-marketing.env 1\n= end\n',
+  keep: { 'bona-services.env': 'BONA_WA_INSTANCE = bona2\n= bona-services.env 1\n= end\n', 'bona-marketing.env': 'export TIKTOK_PIXEL_ID=px\n= bona-marketing.env 1\n= end\n' },
 };
 
-test('vps_reads_check: FILE KEY lines only, kept-key lines of that file only, and both reads name the same kept keys', () => {
-  const ok = readsCheck('retell.env A\nbona-services.env BONA_WA_INSTANCE\nbona-services.env X\nbona-marketing.env TIKTOK_PIXEL_ID\n',
-    { 'bona-services.env': 'BONA_WA_INSTANCE = bona2\n', 'bona-marketing.env': 'export TIKTOK_PIXEL_ID=px\n' });
+test('vps_reads_check: rows, one record per file and the end marker; kept lines of that file only; both reads agree on the kept keys and on which files are there', () => {
+  const { names, keep } = READS_OK;
+  const ok = readsCheck(names, keep);
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
-  assert.equal(readsCheck('').status, 0, 'a VPS without the files: nothing to keep, nothing to check');
+  const none = readsCheck('= retell.env -\n= evolution-api.env -\n= bona-services.env -\n= bona-marketing.env -\n= end\n');
+  assert.equal(none.status, 0, `a VPS without the files says so: nothing to keep\n${none.stderr}`);
+  // bona-marketing.env there, but without a kept key: the kept-lines read says "0", not "-"
+  const noKept = readsCheck(names.replace('bona-marketing.env TIKTOK_PIXEL_ID', 'bona-marketing.env META_PIXEL_ID'), { ...keep, 'bona-marketing.env': '= bona-marketing.env 0\n= end\n' });
+  assert.equal(noKept.status, 0, noKept.stderr);
+  const svc = (text) => ({ ...keep, 'bona-services.env': text });
   const bad = [
-    ['a banner in the names', 'Welcome banner\nretell.env A\n', {}],
-    ['a file that is not a secret file', 'other.env A\n', {}],
-    ['more than a name', 'retell.env A=1\n', {}],
-    ['a banner in the kept lines', 'bona-services.env BONA_WA_INSTANCE\n', { 'bona-services.env': 'Welcome banner\nBONA_WA_INSTANCE=bona2\n' }],
-    ['a kept key of the other file', 'bona-marketing.env BONA_WA_INSTANCE\n', { 'bona-marketing.env': 'BONA_WA_INSTANCE=bona2\n' }],
-    ['a kept key named but not read', 'bona-services.env BONA_WA_INSTANCE\n', {}],
-    ['a kept key read but not named', 'bona-services.env X\n', { 'bona-services.env': 'BONA_WA_INSTANCE=bona2\n' }],
+    ['everything empty (the answers lost on the way)', '', { 'bona-services.env': '', 'bona-marketing.env': '' }],
+    ['the names empty', '', keep],
+    ['a banner in the names', `Welcome banner\n${names}`, keep],
+    ['a file that is not a secret file', `other.env A\n${names}`, keep],
+    ['more than a name', names.replace('retell.env A\n', 'retell.env A=1\n'), keep],
+    ['the rows of a file left out', names.replace('retell.env A\n', ''), keep],
+    ['the record of a file left out', names.replace('= evolution-api.env -\n', ''), keep],
+    ['two records for a file', names.replace('= end\n', '= evolution-api.env -\n= end\n'), keep],
+    ['a row after its file\'s record', names.replace('retell.env A\n', '').replace('= retell.env 1\n', '= retell.env 1\nretell.env A\n'), keep],
+    ['a count that is not a number', names.replace('= retell.env 1', '= retell.env one'), keep],
+    ['no end marker', names.replace('= end\n', ''), keep],
+    ['a line after the end marker', `${names}retell.env B\n`, keep],
+    ['a banner in the kept lines', names, svc(`Welcome banner\n${keep['bona-services.env']}`)],
+    ['a blank line in the kept lines', names, svc(`\n${keep['bona-services.env']}`)],
+    ['the kept lines without their end', names, svc('BONA_WA_INSTANCE = bona2\n= bona-services.env 1\n')],
+    ['the kept lines without their record', names, svc('BONA_WA_INSTANCE = bona2\n= end\n')],
+    ['a kept-lines count that is wrong', names, svc('BONA_WA_INSTANCE = bona2\n= bona-services.env 2\n= end\n')],
+    ['the record of the other file', names, svc('BONA_WA_INSTANCE = bona2\n= bona-marketing.env 1\n= end\n')],
+    ['the kept lines empty', names, svc('')],
+    ['a kept key of the other file', names.replace('bona-marketing.env TIKTOK_PIXEL_ID', 'bona-marketing.env BONA_WA_INSTANCE'), { ...keep, 'bona-marketing.env': 'BONA_WA_INSTANCE=bona2\n= bona-marketing.env 1\n= end\n' }],
+    ['a kept key named but not read', names, svc('= bona-services.env 0\n= end\n')],
+    ['a kept key read but not named', names.replace('bona-services.env BONA_WA_INSTANCE\n', 'bona-services.env Y\n'), keep],
+    ['a kept key read twice, named once', names, svc('BONA_WA_INSTANCE = bona2\nBONA_WA_INSTANCE=bona3\n= bona-services.env 2\n= end\n')],
+    ['the names: a file is there; the kept lines: it is not', names.replace('bona-marketing.env TIKTOK_PIXEL_ID', 'bona-marketing.env META_PIXEL_ID'), { ...keep, 'bona-marketing.env': '= bona-marketing.env -\n= end\n' }],
+    ['the names: a file is not there; the kept lines: it is', names.replace('bona-marketing.env TIKTOK_PIXEL_ID\n', '').replace('= bona-marketing.env 1', '= bona-marketing.env -'), { ...keep, 'bona-marketing.env': '= bona-marketing.env 0\n= end\n' }],
   ];
-  for (const [why, names, keep] of bad) {
-    const r = readsCheck(names, keep);
+  for (const [why, n, k] of bad) {
+    const r = readsCheck(n, k);
     assert.equal(r.status, 1, `${why}: ${r.stdout}${r.stderr}`);
-    assert.doesNotMatch(r.stdout + r.stderr, /bona2|banner|A=1/, `${why}: no line is printed`);
+    assert.doesNotMatch(r.stdout + r.stderr, /bona2|bona3|banner|A=1|px/, `${why}: no line is printed`);
   }
+});
+
+// PR-INFRA fix round 2 (Codex r2 P1): no step of the guard may turn a failing tool into "no keys" or "the answers look fine".
+const failingTool = (name) => {
+  const bin = mkdtempSync(path.join(tmpdir(), 'bona-failing-'));
+  writeFileSync(path.join(bin, name), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  return bin;
+};
+
+test('sync-secrets.sh still refuses a VPS-only key when `sort` fails on the PC, and when the two reads disagree (no failing step reads as "none")', () => {
+  const bin = failingTool('sort');
+  const run = (ctx, extra) => bash([path.join(VPS, 'sync-secrets.sh')], { env: {
+    PATH: `${bin}:${SHIMS}:${process.env.PATH}`, HOME: ctx.home, SHIM_LOG: ctx.log, BONA_VPS_SSH: 'fake-vps', ...extra,
+  } });
+  const lost = syncHome();
+  const r = run(lost, { SHIM_VPS_HOME: fakeVpsSecrets({ 'retell.env': 'X=vps\nRETELL_NEW_AGENT=vps-secret-1\n' }) });
+  refusedNothingCopied(r, lost, 'a VPS-only key, sort failing');
+  assert.deepEqual(lostList(r.stdout + r.stderr), ['retell.env RETELL_NEW_AGENT']);
+  const split = syncHome();
+  const r2 = run(split, {
+    SHIM_VPS_KEY_NAMES: '= retell.env -\n= evolution-api.env -\n= bona-marketing.env -\nbona-services.env X\nbona-services.env BONA_WA_INSTANCE\n= bona-services.env 2\n= end',
+    SHIM_VPS_HOME: fakeVpsSecrets({ 'bona-services.env': 'X=vps\n' }),
+  });
+  refusedNothingCopied(r2, split, 'the reads disagree, sort failing');
+});
+
+test('vps_only_keys and vps_reads_check: a failing awk is a failure (status 1), never "no keys" or "the answers look fine"', () => {
+  const bin = failingTool('awk');
+  const env = { PATH: `${bin}:${process.env.PATH}` };
+  const home = fakeVpsSecrets({ 'retell.env': 'X=1\n' });
+  const names = path.join(home, 'names');
+  writeFileSync(names, 'retell.env X\nretell.env RETELL_NEW_AGENT\n= retell.env 2\n= evolution-api.env -\n= bona-services.env -\n= bona-marketing.env -\n= end\n');
+  const only = bash(['-c', 'set -euo pipefail; . ./lib.sh; SECRETS_DIR=$HOME/.secrets; vps_only_keys "$1"; echo after', 'only', names], { env: { HOME: home, ...env } });
+  assert.notEqual(only.status, 0, only.stdout + only.stderr);
+  assert.doesNotMatch(only.stdout, /after/);
+  const check = readsCheck(READS_OK.names, READS_OK.keep, env);
+  assert.equal(check.status, 1, check.stdout + check.stderr);
 });
 
 test('vps_key_names_cmd: no ~/.secrets on the VPS is an error, not an empty answer', () => {
@@ -1114,7 +1219,8 @@ test('env_key_names reads the same key names as lib/env.mjs parseEnvText: a BOM,
   const home = fakeVpsSecrets({ 'retell.env': cases[0] + cases[2] });
   const vps = bash(['-c', '. ./lib.sh; eval "$(vps_key_names_cmd)"'], { env: { HOME: home } });
   assert.equal(vps.status, 0, vps.stderr);
-  assert.deepEqual(vps.stdout.split('\n').filter(Boolean).map((l) => l.replace(/^retell\.env /, '')).sort(), Object.keys(parseEnvText(cases[0] + cases[2])).sort());
+  const rows = vps.stdout.split('\n').filter((l) => l.startsWith('retell.env '));
+  assert.deepEqual(rows.map((l) => l.replace(/^retell\.env /, '')).sort(), Object.keys(parseEnvText(cases[0] + cases[2])).sort());
 });
 
 test('sync-secrets.sh reads a file that starts with a UTF-8 BOM as the API does: a line-1 VPS-only key stops the copy, a line-1 kept key is kept, a PC line-1 key counts', () => {
@@ -1145,9 +1251,80 @@ test('vps_keep_grep and keep_vps_keys read kept lines as the API does: after a B
   const home = fakeVpsSecrets({ 'bona-services.env': `${BOM}BONA_WA_INSTANCE=bona2\nexport\tBONA_WA_INSTANCE_JID=tabbed\nBONA_WA_POLL_MS=5000\n` });
   const r = bash(['-c', '. ./lib.sh; eval "$(vps_keep_grep bona-services.env)"'], { env: { HOME: home } });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, 'BONA_WA_INSTANCE=bona2\nBONA_WA_POLL_MS=5000\n', 'the BOM is dropped; the export<TAB> line is no key');
+  assert.equal(r.stdout, 'BONA_WA_INSTANCE=bona2\nBONA_WA_POLL_MS=5000\n= bona-services.env 2\n= end\n', 'the BOM is dropped; the export<TAB> line is no key');
   assert.equal(keepRun(`${BOM}BONA_WA_INSTANCE=abdulaziz-personal\nA=1\nexport\tBONA_WA_POLL_MS=pc\n`, 'BONA_WA_INSTANCE=bona2\nBONA_WA_POLL_MS=5000\n'),
     'BONA_WA_INSTANCE=bona2\nA=1\nexport\tBONA_WA_POLL_MS=pc\nBONA_WA_POLL_MS=5000\n');
+});
+
+// PR-INFRA fix round 2 (Claude r2 P3, Codex r2 P1): one parser. parseEnvText trims each line with String.prototype.trim(), so any
+// white space JavaScript knows (\v, \f, \r, the no-break space, U+2000-U+200A, U+2028/9, U+3000, the BOM, ...) may stand before a
+// name, after `export `, or between the name and its `=`. Every read in the shell (the PC names, both VPS reads, the check of the
+// answers and the merge) goes through the one awk function key() in lib.sh, so they cannot disagree with each other, and these
+// tests hold that function to the API, for every such character.
+const JS_WS = [...Array(0x110000).keys()]
+  .filter((c) => (c < 0xd800 || c > 0xdfff) && String.fromCodePoint(c).trim() === '')
+  .map((c) => String.fromCodePoint(c))
+  .filter((c) => c !== '\n'); // the line break itself
+// lines whose first character is no white space for trim(): a zero-width space, NEL, the Mongolian vowel separator, a word joiner
+const NOT_WS = ['​', '\u0085', '᠎', '⁠'];
+// keyLines(text, key) → how many lines of text set key, each line read on its own by parseEnvText
+const keyLines = (text, key) => text.split(/\r?\n/).filter((l) => Object.keys(parseEnvText(l))[0] === key).length;
+
+test('every white space trim() strips, and no other character, is read around a key name by env_key_names, vps_key_names_cmd and vps_keep_grep as parseEnvText reads it', () => {
+  assert.equal(JS_WS.length, 24, `the white space of this node: ${JS_WS.map((c) => c.codePointAt(0).toString(16)).join(' ')}`);
+  const lines = [];
+  JS_WS.forEach((c, i) => lines.push(`${c}LEAD_${i}=v`, `TRAIL_${i}${c}=v`, `export ${c}EXP_${i}=v`, `${c}${c}export ${c}${c}BOTH_${i}${c}${c}= v`));
+  NOT_WS.forEach((c, i) => lines.push(`${c}NOT_${i}=v`, `NOT_AFTER_${i}${c}=v`, `export${c}NOT_EXPORT_${i}=v`));
+  lines.push('export =1', 'export\t=2', 'export=3', 'exportGLUED=4', 'export NBSP_EXPORT=5', '#C=6', ' #COMMENT=7', 'KEY X=8', 'KEY.X=9');
+  const text = `${lines.join('\n')}\n`;
+  const want = Object.keys(parseEnvText(text)).sort();
+  assert.equal(want.length, 4 * JS_WS.length + 2, `the corpus: four keys per white space, plus export and exportGLUED\n${want.join(' ')}`);
+  const home = fakeVpsSecrets({ 'retell.env': text });
+  const pc = bash(['-c', '. ./lib.sh; env_key_names "$1"', 'names', path.join(home, '.secrets', 'retell.env')], { env: { HOME: home } });
+  assert.equal(pc.status, 0, pc.stderr);
+  assert.deepEqual([...new Set(pc.stdout.split('\n').filter(Boolean))].sort(), want, 'env_key_names');
+  const vps = bash(['-c', '. ./lib.sh; eval "$(vps_key_names_cmd)"'], { env: { HOME: home } });
+  assert.equal(vps.status, 0, vps.stderr);
+  const rows = vps.stdout.split('\n').filter((l) => l.startsWith('retell.env ')).map((l) => l.slice('retell.env '.length));
+  assert.deepEqual([...new Set(rows)].sort(), want, 'vps_key_names_cmd');
+  assert.match(vps.stdout, new RegExp(`^= retell\\.env ${rows.length}$`, 'm'), 'its record counts the rows');
+  // the kept-lines read: kept keys written with each white space, among the lines above (none of them a kept key)
+  const services = KEEP['bona-services.env'];
+  const kept = JS_WS.map((c, i) => `${c}export ${c}${services[i % services.length]}${c}=v${i}`);
+  const svc = fakeVpsSecrets({ 'bona-services.env': `${lines.join('\n')}\n${kept.join('\n')}\n` });
+  const k = bash(['-c', '. ./lib.sh; eval "$(vps_keep_grep bona-services.env)"'], { env: { HOME: svc } });
+  assert.equal(k.status, 0, k.stderr);
+  assert.equal(k.stdout, `${kept.map((l) => l.replace(/^﻿/, '')).join('\n')}\n= bona-services.env ${kept.length}\n= end\n`, 'vps_keep_grep: every kept line, a leading BOM dropped');
+});
+
+test('keep_vps_keys reads both files with the same key(): for each white space, the PC line of a kept key is replaced in place by the VPS line', () => {
+  for (const c of JS_WS) {
+    const pc = `A=1\n${c}BONA_WA_POLL_MS${c}=pc\nZ=9\n`;
+    const vps = `${c}export ${c}BONA_WA_POLL_MS = vps\n= bona-services.env 1\n= end\n`;
+    assert.equal(keepRun(pc, vps), `A=1\n${c}export ${c}BONA_WA_POLL_MS = vps\nZ=9\n`, `U+${c.codePointAt(0).toString(16)}`);
+  }
+});
+
+test('sync-secrets.sh end to end: kept lines after \\f, \\v, \\r, a no-break space, U+3000 or `export ` + U+2028 are kept (the API reads the VPS values in the copy); a VPS-only key after a no-break space stops the copy', () => {
+  const ctx = syncHome();
+  writeFileSync(path.join(ctx.home, '.secrets', 'bona-services.env'), 'X=1\n BONA_WA_INSTANCE=abdulaziz-personal\nBONA_WA_POLL_MS=pc-interval\n');
+  const vpsText = 'X=vps\n\fBONA_WA_POLL_MS=vps-interval\n\rBONA_WA_INSTANCE=bona2\n\vBONA_WA_INSTANCE_JID=966500000000@s.whatsapp.net\n BONA_VAPID_PUBLIC=vps-pub\n　export  BONA_VAPID_PRIVATE = vps-priv\n';
+  const r = syncRun([], ctx, { SHIM_VPS_HOME: fakeVpsSecrets({ 'bona-services.env': vpsText }), SHIM_SCP_CAPTURE: ctx.capture });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const text = readFileSync(path.join(ctx.capture, 'bona-services.env'), 'utf8');
+  const merged = parseEnvText(text);
+  const vps = parseEnvText(vpsText);
+  for (const key of KEEP['bona-services.env']) {
+    assert.equal(merged[key], vps[key], `${key}: the VPS value`);
+    assert.equal(keyLines(text, key), 1, `${key}: one line, the PC's replaced in place`);
+  }
+  assert.deepEqual(Object.keys(merged).sort(), ['X', ...KEEP['bona-services.env']].sort());
+  assert.equal(merged.X, '1', 'the other keys: the PC value');
+  assert.doesNotMatch(r.stdout + r.stderr, /vps-|pc-|966500000000|abdulaziz-personal/, 'no value is printed');
+  const lost = syncHome();
+  const r2 = syncRun([], lost, { SHIM_VPS_HOME: fakeVpsSecrets({ 'bona-services.env': 'X=vps\n BONA_NEW_SWITCH=vps-secret-2\n' }) });
+  refusedNothingCopied(r2, lost, 'a VPS-only key after a no-break space');
+  assert.deepEqual(lostList(r2.stdout + r2.stderr), ['bona-services.env BONA_NEW_SWITCH']);
 });
 
 // deploy.sh runs ON the VPS, so its systemctl calls go through `sudo -n` (system units); the sudo
@@ -1370,6 +1547,48 @@ test('db-snapshot.mjs --keep 5 never prunes the copy it just made, even when old
     for (const t of later.slice(1)) assert.ok(left.includes(`bona-deploy-${t}.db`), `${t} kept`);
     assert.match(r.stdout, new RegExp(`pruned bona-deploy-${later[0]}\\.db`));
   } finally { db.close(); }
+});
+
+// PR-INFRA fix round 2 (Codex r2 P2): two runs of one label must not prune each other's copy (with --keep 1 each would delete the
+// other's). A run holds its label's lock, release-backups/.bona-<label>.lock with its pid, from before the copy until after the prune;
+// another run of that label is refused while the lock's run is alive, before it copies or deletes anything.
+test('db-snapshot.mjs: refused while a live run of the same label holds the lock (nothing made, nothing pruned); a lock whose run is gone is taken over; no lock is left', () => {
+  const { dir, file, db } = liveDb();
+  try {
+    const out = path.join(dir, 'release-backups');
+    mkdirSync(out, { mode: 0o700 });
+    const older = 'bona-deploy-20261101T000000Z.db';
+    writeFileSync(path.join(out, older), 'x', { mode: 0o600 });
+    const lock = path.join(out, '.bona-deploy.lock');
+    writeFileSync(lock, `${process.pid} a-live-run\n`); // this test's own pid: a run that is still going
+    const held = snap(['--db', file, '--out', out, '--label', 'deploy', '--keep', '1']);
+    assert.equal(held.status, 1, held.stdout + held.stderr);
+    assert.match(held.stderr, /another db-snapshot of --label deploy is running/);
+    assert.deepEqual(readdirSync(out).sort(), ['.bona-deploy.lock', older], 'nothing made or pruned, the lock left to its run');
+    assert.equal(readFileSync(lock, 'utf8'), `${process.pid} a-live-run\n`);
+    const other = snap(['--db', file, '--out', out, '--label', 'pre-v8']);
+    assert.equal(other.status, 0, `another label is not held up\n${other.stdout}${other.stderr}`);
+    const gone = spawnSync(process.execPath, ['-e', '']).pid; // a run that was killed: its pid no longer runs
+    writeFileSync(lock, `${gone} a-killed-run\n`);
+    const r = snap(['--db', file, '--out', out, '--label', 'deploy', '--keep', '1']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const left = readdirSync(out);
+    assert.equal(left.filter((f) => SNAP_NAME('deploy').test(f)).length, 1, left.join('\n'));
+    assert.ok(!left.includes(older), `--keep 1 pruned the older copy\n${left.join('\n')}`);
+    assert.deepEqual(left.filter((f) => f.startsWith('.')), [], 'the lock is released, no temp file left');
+    writeFileSync(path.join(dir, 'zero.db'), '');
+    const failed = snap(['--db', path.join(dir, 'zero.db'), '--out', out, '--label', 'deploy']);
+    assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+    assert.deepEqual(readdirSync(out).filter((f) => f.startsWith('.')), [], 'a failed run releases its lock too');
+  } finally { db.close(); }
+});
+
+test('services/README.md: a deletion request also reaches the snapshots in release-backups, and a labelled copy goes once its migration is verified', () => {
+  const readme = readFileSync(path.resolve(VPS, '../../README.md'), 'utf8');
+  const at = readme.indexOf('`deploy.sh` snapshots');
+  assert.ok(at >= 0, 'the snapshot paragraph');
+  const para = readme.slice(at, readme.indexOf('\n\n', at));
+  for (const re of [/deletion request/, /release-backups/, /pre-v8/, /verified/, /privacy/]) assert.match(para, re);
 });
 
 test('services/README.md says how to restore a snapshot: stop bona-api, move bona.db-wal and bona.db-shm aside, copy, chmod 600, start', () => {

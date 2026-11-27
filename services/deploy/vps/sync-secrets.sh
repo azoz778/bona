@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Run ON THE PC. Copies the four ~/.secrets/*.env files and the tunnel credentials JSON to the VPS,
 # mode 0600, without ever printing their contents. Re-run any time a secret changes on the PC.
-# Two guards, both read from the VPS before anything is copied; when a read fails, or its answer does not
-# look like what the read prints (lib.sh vps_reads_check: a banner on stdout, two reads that disagree),
-# nothing is copied:
+# Two guards, both read from the VPS before anything is copied; when a read fails, or its answer is not whole
+# or does not look like what the read prints (lib.sh vps_reads_check: every file gets a record and every answer
+# ends with "= end", so a lost or cut answer, a banner on stdout or two reads that disagree are all caught),
+# nothing is copied. Every read of a key line is lib/env.mjs parseEnvText's, as one awk function (lib.sh KEY_AWK):
 # - Kept keys (lib.sh vps_keep_keys): in bona-services.env and bona-marketing.env the VPS's own line
 #   wins for the keys that are set on the VPS on purpose (its WhatsApp instance and number since
 #   2026-11-19, its poll interval, the dashboard push keys, the TikTok keys).
@@ -54,8 +55,8 @@ for f in $VPS_KEEP_FILES; do
   keep_cmd=$(vps_keep_grep "$f") || exit 1
   ssh "$BONA_VPS_SSH" "$keep_cmd" > "$work/keep.$f" || die "could not read the VPS's own $f lines; nothing copied"
 done
-# A zero ssh exit is not enough: the answers must look like what the commands print (Codex r1).
-vps_reads_check "$work" || die "the VPS's answers do not look like its files (does ssh $BONA_VPS_SSH print anything of its own?); nothing copied"
+# A zero ssh exit is not enough: the answers must be whole and look like what the commands print (Codex r1, r2).
+vps_reads_check "$work" || die "the VPS's answers are not whole or do not look like its files (does ssh $BONA_VPS_SSH print anything of its own?); nothing copied"
 
 say "Keys on the VPS that the PC lacks"
 lost=$(vps_only_keys "$work/vps-names") || die "could not compare the key names; nothing copied"
@@ -76,7 +77,7 @@ fi
 kept=""
 for f in $VPS_KEEP_FILES; do
   keep_vps_keys "$SECRETS_DIR/$f" "$work/keep.$f" "$work/$f" "$(vps_keep_keys "$f")"
-  kept="$kept, $(grep -c . "$work/keep.$f" || true) in $f"
+  kept="$kept, $(kept_count "$work/keep.$f" "$f") in $f"
 done
 copy=()
 for f in $SECRET_FILES; do
