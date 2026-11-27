@@ -37,7 +37,8 @@
  * never call Google (DESIGN §8.4). Google is called from slots, commitBooking, tick and reconcile.
  * A commit sends the event (the client's name and phone) only if its row is still `booked`, the
  * lead may still book and the slot is still from tomorrow by the clock then, read right before the
- * request: a purge, or Riyadh midnight, while Google answered sends nothing.
+ * request: a purge, or Riyadh midnight, while Google answered sends nothing. slots() reads the clock again
+ * once Google answered too: it offers only the days its freeBusy query covered, from tomorrow by the clock then.
  * Logs carry booking ids, lead ids and codes only: never a name, a phone, a calendar id or text.
  *
  * Each event id records the calendar it was made in (gcal calendarTag). A 404 from another calendar
@@ -302,14 +303,18 @@ export function createViewing(deps = {}) {
     if (why) return { bookable: false, reason: why };
     const hol = await gcal.holidays();
     if (!hol.ok) return { bookable: false, reason: 'calendar', code: hol.code };
-    const days = bookableDays(t, { holidays: hol.dates });
+    // The days to ask Google about, by the clock once the holidays answered (Riyadh midnight may have passed).
+    const days = bookableDays(now(), { holidays: hol.dates });
     const window = searchWindow(days);
     if (!window) return { bookable: false, reason: 'none_free', timezone: TIMEZONE, slots: [] };
     const fb = await gcal.freeBusy(window);
     if (!fb.ok) return { bookable: false, reason: 'calendar', code: fb.code };
+    // The clock again once freeBusy answered: a day that turned today meanwhile is not offered (a commit would
+    // answer too_soon). Only the days just queried are: a later day's busy time was never read.
+    const tn = now();
     // Google's busy time, plus the holds of commits whose event Google may not show yet.
-    const own = holds(t).map((r) => ({ start: r.start_ts, end: r.end_ts }));
-    const list = freeSlots({ now: t, busy: [...fb.busy, ...own], holidays: hol.dates, days });
+    const own = holds(tn).map((r) => ({ start: r.start_ts, end: r.end_ts }));
+    const list = freeSlots({ now: tn, busy: [...fb.busy, ...own], holidays: hol.dates, days });
     if (!list.length) return { bookable: false, reason: 'none_free', timezone: TIMEZONE, slots: [] };
     return { bookable: true, timezone: TIMEZONE, slots: list };
   }

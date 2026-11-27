@@ -1936,6 +1936,98 @@ test('slots: the free grid from tomorrow, minus Google busy time and the holds o
   } finally { k.db.close(); }
 });
 
+test('slots asked late on a Wednesday whose Google calls answer after Riyadh midnight: the clock is read again after them, so Thursday (today now) is never offered, and only days the freeBusy query covered are', async () => {
+  const LATE = R(2026, 12, 2, 23, 59); // Wednesday 23:59
+  const AFTER = R(2026, 12, 3, 0, 1); // Thursday 00:01
+  const fbBusy = { blocks: [] };
+  const gcal = fakeGcal({ busy: () => fbBusy.blocks });
+  const held = { holidays: false, freeBusy: false, release: null };
+  for (const op of ['holidays', 'freeBusy']) {
+    const real = gcal[op];
+    gcal[op] = async (...args) => {
+      if (held[op]) { held[op] = false; await new Promise((resolve) => { held.release = resolve; }); }
+      return real(...args);
+    };
+  }
+  const reached = async () => {
+    for (let i = 0; i < 200 && !held.release; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(held.release, 'slots reached the Google call');
+  };
+  const answer = () => { const r = held.release; held.release = null; r(); };
+  const clock = { t: LATE };
+  const h = setup({ gcal, clock });
+  try {
+    const lead = h.lead();
+    const windows = () => gcal.calls.filter((c) => c[0] === 'freeBusy').map((c) => c[1]);
+    const ids = (got) => got.slots.map((s) => s.slot_id);
+    // The control: at 23:59 on Wednesday, Thursday is tomorrow and is offered.
+    const before = await h.viewing.slots({ lead, listingId: 'BONA-W901' });
+    assert.deepEqual(ids(before), [
+      '2026-12-03T10:00+03:00', '2026-12-03T14:00+03:00', '2026-12-03T18:00+03:00',
+      '2026-12-06T10:00+03:00', '2026-12-06T14:00+03:00', '2026-12-06T18:00+03:00',
+    ]);
+
+    // freeBusy answers at 00:01 on Thursday. It was asked for Wednesday's days (Thursday 3 to Sunday 13):
+    // Thursday is dropped, the Friday and Saturday were never offered, Sunday and Monday are.
+    gcal.calls.length = 0;
+    held.freeBusy = true;
+    let p = h.viewing.slots({ lead, listingId: 'BONA-W901' });
+    await reached();
+    clock.t = AFTER;
+    answer();
+    let got = await p;
+    assert.deepEqual(windows(), [{ timeMin: '2026-12-03T00:00:00+03:00', timeMax: '2026-12-14T00:00:00+03:00' }]);
+    assert.equal(got.bookable, true);
+    assert.deepEqual(ids(got), [
+      '2026-12-06T10:00+03:00', '2026-12-06T14:00+03:00', '2026-12-06T18:00+03:00',
+      '2026-12-07T10:00+03:00', '2026-12-07T14:00+03:00', '2026-12-07T18:00+03:00',
+    ]);
+    for (const s of got.slots) assert.equal(h.viewing.validate({ lead, listingId: 'BONA-W901', slotId: s.slot_id }).ok, true, s.slot_id);
+
+    // The same, with Sunday 6 to Thursday 10 busy: only Sunday 13 is left of the days queried. Monday 14
+    // (a bookable day by Thursday's clock) was not in the query, so its busy time is unknown: never offered.
+    clock.t = LATE;
+    fbBusy.blocks = [{ start: R(2026, 12, 6, 0), end: R(2026, 12, 11, 0) }];
+    gcal.calls.length = 0;
+    held.freeBusy = true;
+    p = h.viewing.slots({ lead, listingId: 'BONA-W901' });
+    await reached();
+    clock.t = AFTER;
+    answer();
+    got = await p;
+    assert.deepEqual(windows(), [{ timeMin: '2026-12-03T00:00:00+03:00', timeMax: '2026-12-14T00:00:00+03:00' }]);
+    assert.deepEqual(ids(got), ['2026-12-13T10:00+03:00', '2026-12-13T14:00+03:00', '2026-12-13T18:00+03:00']);
+
+    // Thursday 3 the only free day queried: nothing is left once it is today.
+    clock.t = LATE;
+    fbBusy.blocks = [{ start: R(2026, 12, 6, 0), end: R(2026, 12, 14, 0) }];
+    gcal.calls.length = 0;
+    held.freeBusy = true;
+    p = h.viewing.slots({ lead, listingId: 'BONA-W901' });
+    await reached();
+    clock.t = AFTER;
+    answer();
+    assert.deepEqual(await p, { bookable: false, reason: 'none_free', timezone: 'Asia/Riyadh', slots: [] });
+
+    // The holidays answer after midnight: the days and the freeBusy window come from the clock then (Sunday 6 on).
+    clock.t = LATE;
+    fbBusy.blocks = [];
+    gcal.calls.length = 0;
+    held.holidays = true;
+    p = h.viewing.slots({ lead, listingId: 'BONA-W901' });
+    await reached();
+    clock.t = AFTER;
+    answer();
+    got = await p;
+    assert.deepEqual(windows(), [{ timeMin: '2026-12-06T00:00:00+03:00', timeMax: '2026-12-15T00:00:00+03:00' }]);
+    assert.deepEqual(ids(got), [
+      '2026-12-06T10:00+03:00', '2026-12-06T14:00+03:00', '2026-12-06T18:00+03:00',
+      '2026-12-07T10:00+03:00', '2026-12-07T14:00+03:00', '2026-12-07T18:00+03:00',
+    ]);
+    assert.deepEqual(h.rows(), [], 'slots writes no booking');
+  } finally { h.db.close(); }
+});
+
 /* ---------------- the dashboard hooks, wired the way index.mjs wires them ---------------- */
 
 const OWNER = '966500000009';
