@@ -20,8 +20,25 @@ export const ROLES = ['owner', 'staff'];
  * the Bona inbox from the day it goes live, but no reply reaches a client until the owner
  * turns replies on (design D14). `dana_enabled` ships '0' for the same reason: Dana answers
  * nobody on WhatsApp until the owner turns her on, after a test on one chat (§6, P4-3).
+ *
+ * The full-automation switches (2026-11-27 DESIGN §5.1) all ship so that a deploy changes
+ * nothing a client or the owner sees: `own_inbox` (every chat on Bona's own number joins
+ * the inbox), `owner_as_client` (the owner's test switch), `calendar_booking`,
+ * `email_replies` and `dana_brain` (legacy chats move from the Retell agent to the AI
+ * service) ship '0'; `owner_notes` and `owner_mail_copy` ship '1' because they only
+ * gate queues that do not exist until their own tasks land. The markers below them are
+ * code state, never buttons: `owner_summary_day` (the daily summary's day), `mail_cursor`
+ * and `mail_since` (the mail poller), `mail_from_ok` (the reply sender checked),
+ * `dana_month_alerted` / `brain_month_alerted` (the month alerts), `brain_out` (since when
+ * the AI service has not answered) and the restart-safe spend counters `brain_usd_day` /
+ * `brain_usd_month` (micro-USD).
  */
-export const SETTINGS_DEFAULTS = { sending_enabled: '1', inbox_replies: '0', dana_enabled: '0', retell_funds_out: '', retell_funds_alerted: '' };
+export const SETTINGS_DEFAULTS = {
+  sending_enabled: '1', inbox_replies: '0', dana_enabled: '0', retell_funds_out: '', retell_funds_alerted: '',
+  own_inbox: '0', owner_as_client: '0', calendar_booking: '0', owner_notes: '1', email_replies: '0', owner_mail_copy: '1', dana_brain: '0',
+  owner_summary_day: '', mail_cursor: '', mail_since: '', mail_from_ok: '', dana_month_alerted: '',
+  brain_out: '', brain_usd_day: '', brain_usd_month: '', brain_month_alerted: '',
+};
 /**
  * A stored instant: `''` (none) or a whole ms timestamp. The Retell funds watch
  * (lib/dana-funds.mjs, 2026-10-05 design R2) keeps two of these: `retell_funds_out`, when
@@ -29,14 +46,33 @@ export const SETTINGS_DEFAULTS = { sending_enabled: '1', inbox_replies: '0', dan
  * alert about it. Neither is a switch: the Team page's form cannot post them.
  */
 const INSTANT = /^(?:|\d{1,16})$/;
+/** A calendar month and day, shape only (`2026-02-31` passes; the code writing it uses a real clock). */
+const MONTH = String.raw`\d{4}-(?:0[1-9]|1[0-2])`;
+const DAY = String.raw`${MONTH}-(?:0[1-9]|[12]\d|3[01])`;
+/** A whole number written the one way: no sign, no leading zero, no exponent, at most 15 digits. */
+const COUNT = String.raw`(?:0|[1-9]\d{0,14})`;
+const SWITCH = Object.freeze(['0', '1']);
 /**
- * The values each setting may hold: a list, or a pattern the whole value must match. A key
- * with no entry here accepts any string.
+ * The values each setting may hold: a list, or a pattern the whole value must match. Every
+ * key has an entry (team.test.mjs checks it), so none accepts any string.
  */
 export const SETTINGS_ALLOWED = {
-  sending_enabled: ['0', '1'], inbox_replies: ['0', '1'], dana_enabled: ['0', '1'],
+  sending_enabled: SWITCH, inbox_replies: SWITCH, dana_enabled: SWITCH,
   retell_funds_out: INSTANT, retell_funds_alerted: INSTANT,
+  own_inbox: SWITCH, owner_as_client: SWITCH, calendar_booking: SWITCH, owner_notes: SWITCH,
+  email_replies: SWITCH, owner_mail_copy: SWITCH, dana_brain: SWITCH,
+  owner_summary_day: new RegExp(`^(?:|${DAY})$`),
+  // A JMAP Email state string: opaque, so any visible ASCII, but never a blank or a control.
+  mail_cursor: /^[\x21-\x7e]{0,256}$/,
+  mail_since: INSTANT, mail_from_ok: INSTANT, brain_out: INSTANT,
+  // The month alerts fire at 80% and at 100%: the month, and the level last sent.
+  dana_month_alerted: new RegExp(`^(?:|${MONTH}(?::(?:80|100))?)$`),
+  brain_month_alerted: new RegExp(`^(?:|${MONTH}(?::(?:80|100))?)$`),
+  brain_usd_day: new RegExp(`^(?:|${DAY}:${COUNT})$`),
+  brain_usd_month: new RegExp(`^(?:|${MONTH}:${COUNT})$`),
 };
+/** The owner's on/off switches: each one is '0' or '1' and nothing else, and fails closed. */
+export const SWITCH_KEYS = Object.keys(SETTINGS_ALLOWED).filter((k) => SETTINGS_ALLOWED[k] === SWITCH);
 export const MAX_NAME = 80;
 export const MAX_NEVER_NOTE = 120;
 
@@ -250,11 +286,32 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
   const repliesEnabled = () => getSetting('inbox_replies') === '1';
   /** Dana on WhatsApp: fails closed like the other two, and ships off (P4-3). */
   const danaEnabled = () => getSetting('dana_enabled') === '1';
+  /**
+   * Any switch, read the same fail-closed way: true only for a key in SWITCH_KEYS whose
+   * stored value is exactly '1'. A marker, an unknown key or corrupt data is off.
+   */
+  const isOn = (key) => SWITCH_KEYS.includes(key) && getSetting(key) === '1';
+  // The full-automation switches (DESIGN §5.1). Each is read by the module its task builds;
+  // until then nothing reads them, so flipping one changes nothing.
+  const ownInboxEnabled = () => isOn('own_inbox');
+  const ownerAsClientEnabled = () => isOn('owner_as_client');
+  const calendarBookingEnabled = () => isOn('calendar_booking');
+  const ownerNotesEnabled = () => isOn('owner_notes');
+  const emailRepliesEnabled = () => isOn('email_replies');
+  const ownerMailCopyEnabled = () => isOn('owner_mail_copy');
+  const danaBrainEnabled = () => isOn('dana_brain');
+  /** Since when the AI service has not answered (ms), or null while it is fine: the `brain_out` marker. */
+  function brainOutSince() {
+    const v = getSetting('brain_out');
+    return typeof v === 'string' && /^\d{1,16}$/.test(v) && Number(v) > 0 ? Number(v) : null;
+  }
 
   return {
     ensureOwner, getUser, getUserByPhone, listUsers, addUser, deactivateUser, reactivateUser, setRole, touchLogin,
     addNever, removeNever, listNever, isExcludedPhone,
     getSetting, setSetting, sendingEnabled, repliesEnabled, danaEnabled,
+    isOn, ownInboxEnabled, ownerAsClientEnabled, calendarBookingEnabled, ownerNotesEnabled, emailRepliesEnabled,
+    ownerMailCopyEnabled, danaBrainEnabled, brainOutSince,
   };
 }
 

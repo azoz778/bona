@@ -466,3 +466,145 @@ test('retell_funds_out / retell_funds_alerted: absent is \'\', only \'\' or a ms
   assert.deepEqual(SETTINGS_ALLOWED.dana_enabled, ['0', '1'], 'the switches keep their lists');
   s.close();
 });
+
+/* -------------------- the automation switches and markers (PLAN T04, DESIGN §5.1) -------------------- */
+
+const NEW_SWITCHES = {
+  own_inbox: ['0', 'ownInboxEnabled'],
+  owner_as_client: ['0', 'ownerAsClientEnabled'],
+  calendar_booking: ['0', 'calendarBookingEnabled'],
+  owner_notes: ['1', 'ownerNotesEnabled'],
+  email_replies: ['0', 'emailRepliesEnabled'],
+  owner_mail_copy: ['1', 'ownerMailCopyEnabled'],
+  dana_brain: ['0', 'danaBrainEnabled'],
+};
+
+test('the automation switches ship with their DESIGN §5.1 defaults, and only an exact "1" is on', () => {
+  const { s, team } = teamHarness();
+  for (const [key, [dflt, accessor]] of Object.entries(NEW_SWITCHES)) {
+    assert.equal(SETTINGS_DEFAULTS[key], dflt, `${key} default`);
+    assert.deepEqual(SETTINGS_ALLOWED[key], ['0', '1'], `${key} is a switch`);
+    assert.equal(team.getSetting(key), dflt, `${key} read before any write`);
+    assert.equal(typeof team[accessor], 'function', `${key} has an accessor`);
+    assert.equal(team[accessor](), dflt === '1', `${key} accessor follows the default`);
+    assert.equal(team.isOn(key), dflt === '1', `${key} isOn follows the default`);
+    assert.equal(team.setSetting(key, '1', { by: 'USR-1' }), '1');
+    assert.equal(team[accessor](), true);
+    assert.equal(s.db.prepare('SELECT updated_by FROM settings WHERE key = ?').get(key).updated_by, 'USR-1');
+    assert.equal(team.setSetting(key, '0'), '0');
+    assert.equal(team[accessor](), false);
+    for (const bad of ['', 'yes', 'on', 'true', '2', ' 1', '1 ']) {
+      assert.equal(codeOf(() => team.setSetting(key, bad)), 'bad_setting_value', `${key} = ${JSON.stringify(bad)}`);
+    }
+    // Old or corrupt data written past setSetting: anything but the exact '1' is off,
+    // even for the two switches that ship on.
+    for (const corrupt of ['true', 'on', ' 1', '1.0', 'yes']) {
+      s.db.prepare('INSERT OR REPLACE INTO settings (key, value, updated, updated_by) VALUES (?,?,?,NULL)').run(key, corrupt, NOW);
+      assert.equal(team[accessor](), false, `${key} = ${JSON.stringify(corrupt)} is off`);
+      assert.equal(team.isOn(key), false);
+    }
+  }
+  assert.equal(team.isOn('no_such_setting'), false, 'an unknown key is never on');
+  assert.equal(team.isOn('brain_out'), false, 'a marker is never a switch');
+  s.close();
+});
+
+test('the automation switches are independent of each other and of the three switches that exist today', () => {
+  const { s, team } = teamHarness();
+  const snapshot = () => Object.fromEntries([...Object.keys(NEW_SWITCHES), 'sending_enabled', 'inbox_replies', 'dana_enabled'].map((k) => [k, team.getSetting(k)]));
+  const before = snapshot();
+  team.setSetting('own_inbox', '1');
+  assert.deepEqual(snapshot(), { ...before, own_inbox: '1' });
+  team.setSetting('dana_brain', '1');
+  assert.deepEqual(snapshot(), { ...before, own_inbox: '1', dana_brain: '1' });
+  assert.equal(team.danaEnabled(), false, 'dana_brain does not switch Dana on');
+  s.close();
+});
+
+test('the instant markers (brain_out, mail_since, mail_from_ok) ship empty and take only \'\' or a ms timestamp', () => {
+  const { s, team } = teamHarness();
+  for (const key of ['brain_out', 'mail_since', 'mail_from_ok']) {
+    assert.equal(SETTINGS_DEFAULTS[key], '', `${key} ships empty`);
+    assert.equal(team.getSetting(key), '');
+    assert.equal(team.setSetting(key, String(NOW)), String(NOW));
+    assert.equal(team.setSetting(key, ''), '');
+    for (const bad of ['yes', '-1', '1.5', ' 1', '1e12', '12345678901234567', 'NaN', '2026-11-27']) {
+      assert.equal(codeOf(() => team.setSetting(key, bad)), 'bad_setting_value', `${key} = ${bad}`);
+    }
+  }
+  s.close();
+});
+
+test('brainOutSince reads the brain_out marker as a ms instant, or null while the AI service is fine', () => {
+  const { s, team } = teamHarness();
+  assert.equal(team.brainOutSince(), null);
+  team.setSetting('brain_out', String(NOW));
+  assert.equal(team.brainOutSince(), NOW);
+  team.setSetting('brain_out', '0');
+  assert.equal(team.brainOutSince(), null, 'zero is not an instant');
+  team.setSetting('brain_out', '');
+  assert.equal(team.brainOutSince(), null);
+  s.db.prepare("INSERT OR REPLACE INTO settings (key, value, updated, updated_by) VALUES ('brain_out','soon',?,NULL)").run(NOW);
+  assert.equal(team.brainOutSince(), null, 'corrupt data is no instant');
+  s.close();
+});
+
+test('owner_summary_day takes \'\' or a YYYY-MM-DD day only', () => {
+  const { s, team } = teamHarness();
+  assert.equal(SETTINGS_DEFAULTS.owner_summary_day, '');
+  assert.equal(team.setSetting('owner_summary_day', '2026-11-27'), '2026-11-27');
+  assert.equal(team.setSetting('owner_summary_day', ''), '');
+  for (const bad of ['2026-13-01', '2026-11-32', '2026-00-10', '26-11-27', '2026-11-27T08:00', String(NOW), '2026/11/27', ' 2026-11-27']) {
+    assert.equal(codeOf(() => team.setSetting('owner_summary_day', bad)), 'bad_setting_value', bad);
+  }
+  s.close();
+});
+
+test('brain_usd_day / brain_usd_month take only YYYY-MM-DD:<int> / YYYY-MM:<int> micro-USD counters (or \'\')', () => {
+  const { s, team } = teamHarness();
+  assert.equal(SETTINGS_DEFAULTS.brain_usd_day, '');
+  assert.equal(SETTINGS_DEFAULTS.brain_usd_month, '');
+  for (const ok of ['2026-11-27:0', '2026-11-27:1234567', '2026-11-27:300000000', '']) {
+    assert.equal(team.setSetting('brain_usd_day', ok), ok, ok);
+  }
+  for (const ok of ['2026-11:0', '2026-11:20000000', '']) {
+    assert.equal(team.setSetting('brain_usd_month', ok), ok, ok);
+  }
+  const badDay = ['2026-11-27', '2026-11:5', '2026-11-27:', '2026-11-27:-1', '2026-11-27:1.5', '2026-11-27:01', '2026-13-27:5',
+    '2026-11-32:5', '2026-11-27:5 ', '2026-11-27:1e9', '2026-11-27:12345678901234567', String(NOW)];
+  for (const bad of badDay) assert.equal(codeOf(() => team.setSetting('brain_usd_day', bad)), 'bad_setting_value', `day ${bad}`);
+  const badMonth = ['2026-11', '2026-11-27:5', '2026-13:5', '2026-00:5', '2026-11:', '2026-11:-1', '2026-11:1.5', '2026-11:007', '2026-11:5x'];
+  for (const bad of badMonth) assert.equal(codeOf(() => team.setSetting('brain_usd_month', bad)), 'bad_setting_value', `month ${bad}`);
+  s.close();
+});
+
+test('the month-alert markers take \'\' or YYYY-MM with an optional :80 / :100 level', () => {
+  const { s, team } = teamHarness();
+  for (const key of ['brain_month_alerted', 'dana_month_alerted']) {
+    assert.equal(SETTINGS_DEFAULTS[key], '', `${key} ships empty`);
+    for (const ok of ['2026-11', '2026-11:80', '2026-11:100', '']) assert.equal(team.setSetting(key, ok), ok, `${key} = ${ok}`);
+    for (const bad of ['2026-13', '2026-11:50', '2026-11:', '2026-11-27', String(NOW), 'yes', '2026-11:80,100']) {
+      assert.equal(codeOf(() => team.setSetting(key, bad)), 'bad_setting_value', `${key} = ${bad}`);
+    }
+  }
+  s.close();
+});
+
+test('mail_cursor is an opaque state string: visible ASCII only, at most 256 characters', () => {
+  const { s, team } = teamHarness();
+  assert.equal(SETTINGS_DEFAULTS.mail_cursor, '');
+  for (const ok of ['', 'sb2k', 'a1B2-c3_d4.e5:f6/g7+h8=', 'x'.repeat(256)]) assert.equal(team.setSetting('mail_cursor', ok), ok);
+  for (const bad of ['has space', 'tab\there', 'line\nbreak', 'x'.repeat(257), 'ü']) {
+    assert.equal(codeOf(() => team.setSetting('mail_cursor', bad)), 'bad_setting_value', JSON.stringify(bad));
+  }
+  s.close();
+});
+
+test('every setting key has an allowed list or pattern: none accepts any string', () => {
+  for (const key of Object.keys(SETTINGS_DEFAULTS)) {
+    const allowed = SETTINGS_ALLOWED[key];
+    assert.ok(Array.isArray(allowed) || allowed instanceof RegExp, `${key} has no allowed values`);
+    const dflt = SETTINGS_DEFAULTS[key];
+    assert.ok(Array.isArray(allowed) ? allowed.includes(dflt) : allowed.test(dflt), `${key}'s default is itself allowed`);
+  }
+});
