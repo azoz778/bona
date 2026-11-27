@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { inspect } from 'node:util';
 import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES } from '../lib/tools.mjs';
 import { createInventory, readInventoryFile, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
-import { createUnits, WORKTREE_UNITS } from '../lib/units.mjs';
+import { createUnits, STAT_MS, WORKTREE_UNITS } from '../lib/units.mjs';
 import { createStore } from '../lib/store.mjs';
 import { normaliseLead, leadNote, appendLead, appendJsonl } from '../lib/leads.mjs';
 import { openDb } from '../lib/db.mjs';
@@ -445,6 +446,8 @@ const PUBLISHED_CUT = {
   ],
   delivery: '2028-06', updated: '2026-09-02',
 };
+// A priced unit whose bedroom count is a unit ref (a malformed sheet): it must never reach a label.
+const ODD_BEDS_UNIT = { ...UNIT('B95-17', 1, 'Standard', 57.5, [722750, 738750, 795250, 831250]), beds: 'B95-17' };
 const UNITS_NOW = Date.parse('2026-11-27T09:00:00Z');
 const SOURCES = ['bona-whatsapp', 'bona-email', 'bona-web', undefined, 'someone-else'];
 // What a model asking for a unit would send: a unit ref, a plan, a bed count, a budget.
@@ -457,37 +460,58 @@ function w014Inventory(status = 'available') {
   return createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk', read: () => [w014] });
 }
 
-function unitsHarness({ sheet = SHEET, status = 'available', withUnits = true, extra = {} } = {}) {
+function unitsHarness({ sheet = SHEET, status = 'available', withUnits = true, extra = {}, unitsNow = Date.now } = {}) {
   const h = harness();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-tool-units-'));
   const file = path.join(dir, 'units.json');
   fs.writeFileSync(file, JSON.stringify(sheet));
   const tools = createToolHandlers({
-    ...h.deps, inventory: w014Inventory(status), units: withUnits ? createUnits({ file }) : null, now: () => UNITS_NOW, ...extra,
+    ...h.deps, inventory: w014Inventory(status), units: withUnits ? createUnits({ file, now: unitsNow }) : null, now: () => UNITS_NOW, ...extra,
   });
   const ask = async (source, args = UNIT_ARGS) => {
     const raw = await tools.run('search_units', { chat: { chat_id: `units-${source}`, metadata: source === undefined ? {} : { source } }, args });
     return { raw, result: JSON.parse(raw) };
   };
-  return { ...h, tools, ask, cleanup: () => { h.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); } };
+  return { ...h, tools, ask, file, cleanup: () => { h.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); } };
 }
 
-/** Nothing unpublished in the tool result: no per-unit rows, refs, plan keys or prices beyond the "from" rows. */
+/**
+ * Nothing unpublished in the tool result: no per-unit rows, refs, plan keys or prices beyond the "from" rows.
+ * A failure prints in a public CI log, so it never shows the result or the value it found: assert.ok on a boolean
+ * (its `actual` is `false`, not the result), and a unit named by its place on the sheet, never by its ref or amount.
+ */
 function assertNoUnpublished(raw, sheet = SHEET) {
-  assert.doesNotMatch(raw, /price_to/, 'no price_to / price_to_en (the highest cash price)');
-  assert.doesNotMatch(raw, /price_two_year/, 'no two-year price key');
-  assert.doesNotMatch(raw, /"(plan|plans|cash|half|year|twoYear|price_cash_en|price_en|price_ar|availability|total_matching)"\s*:/, 'no plan or per-unit price key');
-  assert.doesNotMatch(raw, /\bB\d{2}-\d{2}\b/, 'no unit reference (B00-00 shape)');
-  assert.doesNotMatch(raw, /\bB\d{2}-\d+\b/, 'no unit reference of any length');
-  assert.doesNotMatch(raw, /results/, 'no per-unit results list');
+  const absent = (re, what) => assert.ok(!re.test(raw), `${what} is in the result`);
+  absent(/price_to/, 'price_to / price_to_en (the highest cash price)');
+  absent(/price_two_year/, 'a two-year price key');
+  absent(/"(plan|plans|cash|half|year|twoYear|price_cash_en|price_en|price_ar|availability|total_matching)"\s*:/, 'a plan or per-unit price key');
+  absent(/\bB\d{2}-\d{2}\b/, 'a unit reference (B00-00 shape)');
+  absent(/\bB\d{2}-\d+\b/, 'a unit reference of any length');
+  absent(/results/, 'a per-unit results list');
   const published = new Set(JSON.parse(raw).summary?.rows.map((r) => r.cashFrom) ?? []);
-  for (const u of sheet.units) {
+  sheet.units.forEach((u, i) => {
     for (const [plan, amount] of Object.entries(u.price)) {
       if (typeof amount !== 'number' || (plan === 'cash' && published.has(amount))) continue;
-      assert.ok(!raw.includes(String(amount)) && !raw.includes(amount.toLocaleString('en-US')), `${u.ref} ${plan} ${amount} is not published`);
+      assert.ok(!raw.includes(String(amount)) && !raw.includes(amount.toLocaleString('en-US')), `unit #${i}: its unpublished ${plan} price is in the result`);
     }
-  }
+  });
 }
+
+test('assertNoUnpublished catches a leak without printing the leaked value or the result (public CI logs)', () => {
+  const [ref, amount] = [SHEET.units[1].ref, SHEET.units[1].price.twoYear];
+  const leaks = [
+    { summary: null, note: `ask about ${ref}` },
+    { summary: null, note: `two years: ${amount}` },
+    { summary: null, note: `two years: SAR ${amount.toLocaleString('en-US')}` },
+  ];
+  for (const leak of leaks) {
+    let err = null;
+    try { assertNoUnpublished(JSON.stringify(leak)); } catch (e) { err = e; }
+    assert.ok(err instanceof assert.AssertionError, 'the leak is caught');
+    const shown = `${err.message}\n${inspect(err)}`;
+    assert.ok(![ref, String(amount), amount.toLocaleString('en-US'), leak.note].some((v) => shown.includes(v)), 'the failure output shows no leaked value');
+  }
+});
 
 const keys = (o) => Object.keys(o).sort();
 
@@ -545,10 +569,52 @@ test('the search_units fixture is made up: no unit ref or price of it is on the 
   assert.ok(real.length > 0, 'the real sheet has units');
   const refs = new Set(real.map((u) => u.ref));
   const amounts = new Set(real.flatMap((u) => Object.values(u.price ?? {})).filter((n) => typeof n === 'number'));
-  for (const u of SHEET.units) {
-    assert.ok(!refs.has(u.ref), `${u.ref} is a real unit reference`);
-    for (const [plan, amount] of Object.entries(u.price)) assert.ok(!amounts.has(amount), `${u.ref} ${plan} ${amount} is a real price`);
+  // The messages name the fixture unit by its place, never by a value: a failure here prints in a public CI log.
+  [...SHEET.units, ODD_BEDS_UNIT].forEach((u, i) => {
+    assert.ok(!refs.has(u.ref), `fixture unit #${i}: its ref is on the real sheet`);
+    for (const plan of Object.keys(u.price)) assert.ok(!amounts.has(u.price[plan]), `fixture unit #${i}: its ${plan} price is on the real sheet`);
+  });
+});
+
+test('search_units: a priced unit with a unit ref (or no number) for its bedroom count is left out, never put in a label', async () => {
+  for (const beds of [ODD_BEDS_UNIT.beds, null, 1.5]) {
+    const h = unitsHarness({ sheet: { ...SHEET, units: [...SHEET.units, { ...ODD_BEDS_UNIT, beds }] } });
+    try {
+      for (const source of SOURCES) {
+        const { raw, result } = await h.ask(source);
+        assert.deepEqual(result.summary, PUBLISHED_CUT, `beds ${JSON.stringify(beds)}, ${source}: the well-formed rows only`);
+        assert.equal(result.count, 5, `beds ${JSON.stringify(beds)}, ${source}: the odd unit is not counted`);
+        assertNoUnpublished(raw, { units: [...SHEET.units, ODD_BEDS_UNIT] });
+      }
+    } finally { h.cleanup(); }
   }
+});
+
+test('search_units on a warm loader stops quoting once units.json is removed or broken, and quotes again once it is back', async () => {
+  let t = Date.parse('2026-11-27T09:00:00Z');
+  const h = unitsHarness({ unitsNow: () => t });
+  let sec = 1_800_000_000;
+  const put = (text) => { fs.writeFileSync(h.file, text); fs.utimesSync(h.file, (sec += 60), sec); };
+  const notPublished = async (why) => {
+    for (const source of SOURCES) {
+      const { raw, result } = await h.ask(source);
+      assert.deepEqual(result, { count: 0, summary: null, note: result.note }, `${why}, ${source}: nothing quoted`);
+      assert.match(result.note, /not published/, `${why}, ${source}`);
+      assertNoUnpublished(raw);
+    }
+  };
+  try {
+    assert.deepEqual((await h.ask('bona-whatsapp')).result.summary, PUBLISHED_CUT, 'warm');
+    fs.rmSync(h.file);
+    t += STAT_MS + 1;
+    await notPublished('the file is removed');
+    put(JSON.stringify(SHEET));
+    t += STAT_MS + 1;
+    assert.deepEqual((await h.ask('bona-whatsapp')).result.summary, PUBLISHED_CUT, 'back');
+    put('{"listingId": "BONA-W014", "units": [');
+    t += STAT_MS + 1;
+    await notPublished('broken JSON');
+  } finally { h.cleanup(); }
 });
 
 test('search_units: the source set the full rows by default is empty (deny by default); the veto is that one set', async () => {

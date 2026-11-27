@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { createUnits, money, WORKTREE_UNITS } from '../lib/units.mjs';
+import { createUnits, money, RELOAD_MS, STAT_MS, WORKTREE_UNITS } from '../lib/units.mjs';
 import { liveSummary, unitSummary } from '../lib/units-summary.mjs';
 
 // Refs and amounts are made up: the public repo must not carry a real unit's unpublished prices in a fixture
@@ -132,6 +132,52 @@ describe('units', () => {
     assert.deepEqual(u.search({ listingId: 'BONA-W014' }).units, []);
   });
 
+  it('stops serving a sheet once units.json is removed, unreadable or broken, and serves it again once it is back (fail closed)', () => {
+    withFile(FIXTURE, (file) => {
+      let t = 1_000_000;
+      const u = createUnits({ file, now: () => t });
+      // Each write gets its own mtime: two writes inside one kernel tick can share one.
+      let sec = 1_800_000_000;
+      const put = (text, mtimeSec = (sec += 60)) => { fs.writeFileSync(file, text); fs.utimesSync(file, mtimeSec, mtimeSec); return mtimeSec; };
+      const good = put(JSON.stringify(FIXTURE));
+      const served = () => u.forListing('BONA-W014');
+      const nothing = (why) => {
+        assert.equal(served(), null, `${why}: no sheet`);
+        assert.equal(u.summary('BONA-W014'), null, `${why}: no veto-path summary`);
+        assert.equal(u.search({ listingId: 'BONA-W014' }).total, 0, `${why}: no veto-path rows`);
+      };
+      assert.equal(served()?.units.length, 2, 'a warm loader');
+
+      fs.rmSync(file);
+      t += STAT_MS + 1;
+      nothing('the file is removed');
+      put(JSON.stringify(FIXTURE), good);
+      t += STAT_MS + 1;
+      assert.equal(served()?.units.length, 2, 'back at the next stat, even with its old mtime');
+
+      put('{"listingId": "BONA-W014", "units": [');
+      t += STAT_MS + 1;
+      nothing('broken JSON');
+      put(JSON.stringify(FIXTURE));
+      t += STAT_MS + 1;
+      assert.equal(served()?.units.length, 2, 'fixed');
+
+      fs.rmSync(file);
+      fs.mkdirSync(file);
+      t += STAT_MS + 1;
+      nothing('a directory where the file was (unreadable)');
+      fs.rmSync(file, { recursive: true });
+      put(JSON.stringify(FIXTURE));
+      t += STAT_MS + 1;
+      assert.equal(served()?.units.length, 2, 'readable again');
+
+      // The full reload (past RELOAD_MS, no stat window) fails closed too.
+      put('not json');
+      t += RELOAD_MS + 1;
+      nothing('broken JSON at the full reload');
+    });
+  });
+
   it('formats money the same way in both locales, Western digits', () => {
     assert.equal(money(701500, 'en'), 'SAR 701,500');
     assert.equal(money(701500, 'ar'), '701,500 ر.س');
@@ -150,6 +196,11 @@ describe('units-summary (the published per-bedroom "from" rows)', () => {
     type: { en: 'Penthouse', ar: 'بنتهاوس' }, areaSqm: 210.5, roofSqm: 80, feature: { en: 'Sea', ar: 'بحر' },
     price: { cash: 2100000, half: 2145000, year: 2310000, twoYear: 2415000 },
   };
+  // Priced units whose bedroom count is not a whole number of bedrooms: a unit ref, nothing, a fraction, a string.
+  const ODD_BEDS = ['B91-24', null, 2.5, '2', -1, 1e9].map((beds, i) => ({
+    ...FIXTURE.units[0], ref: `B94-${i + 1}`, unit: String(i + 1), beds,
+    price: { cash: 744250 + i * 1000, half: 760250 + i * 1000, year: 818250 + i * 1000, twoYear: 855250 + i * 1000 },
+  }));
 
   it('gives one row per bedroom count, penthouses apart, with the lowest cash price and the area range', () => {
     const s = unitSummary({ ...FIXTURE, units: [...FIXTURE.units, PENTHOUSE] });
@@ -187,6 +238,17 @@ describe('units-summary (the published per-bedroom "from" rows)', () => {
     });
   });
 
+  it('drops a unit whose bedroom count is not a whole number, so no unit ref or stray text reaches a published label', () => {
+    withFile({ ...FIXTURE, units: [...FIXTURE.units, ...ODD_BEDS] }, (file) => {
+      const served = createUnits({ file }).forListing('BONA-W014');
+      assert.deepEqual(served.units.map((x) => x.ref), ['B91-22', 'B92-2'], 'only the units with a real bedroom count');
+      const live = liveSummary(served, AVAILABLE, NOW);
+      assert.deepEqual(live, liveSummary(FIXTURE, AVAILABLE, NOW), 'the summary of the well-formed sheet');
+      const labels = JSON.stringify(live.rows.map((r) => r.label));
+      assert.ok(!/B\d{2}-\d+|null|NaN|undefined|1000000000|-1/.test(labels), 'no ref or stray value in a label');
+    });
+  });
+
   it('reads units.json as an array of sheets, one per project, like the listing page (src/lib recordFor)', () => {
     const other = { ...FIXTURE, listingId: 'BONA-W999', updated: '2026-10-01', units: [{ ...FIXTURE.units[1], ref: 'B93-14' }] };
     withFile([other, FIXTURE], (file) => {
@@ -213,9 +275,10 @@ describe('units-summary (the published per-bedroom "from" rows)', () => {
     assert.ok(real.length > 0, 'the real sheet has units');
     const refs = new Set(real.map((x) => x.ref));
     const amounts = new Set(real.flatMap((x) => Object.values(x.price ?? {})).filter((n) => typeof n === 'number'));
-    for (const x of [...FIXTURE.units, PENTHOUSE]) {
-      assert.ok(!refs.has(x.ref), `${x.ref} is a real unit reference`);
-      for (const [plan, amount] of Object.entries(x.price)) assert.ok(!amounts.has(amount), `${x.ref} ${plan} ${amount} is a real price`);
-    }
+    // The messages name the fixture unit by its place, never by a value: a failure here prints in a public CI log.
+    [...FIXTURE.units, PENTHOUSE, ...ODD_BEDS].forEach((x, i) => {
+      assert.ok(!refs.has(x.ref), `fixture unit #${i}: its ref is on the real sheet`);
+      for (const plan of Object.keys(x.price)) assert.ok(!amounts.has(x.price[plan]), `fixture unit #${i}: its ${plan} price is on the real sheet`);
+    });
   });
 });

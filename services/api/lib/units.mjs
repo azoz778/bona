@@ -12,7 +12,10 @@
  * (TAQEEM), and a unit with no cash price is dropped rather than guessed at.
  *
  * Mirrors inventory.mjs: same lazy read + mtime reload, same "the file is
- * generated, we only ever read it" contract.
+ * generated, we only ever read it" contract. One difference: a reload that
+ * finds the file missing, unreadable or broken serves NO sheet (fail closed)
+ * rather than the last good copy, so prices never outlive the file they came
+ * from; it tries again at every stat until the file is back.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,6 +38,11 @@ export const PLAN_LABELS = {
 };
 
 const fmt = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') : null);
+
+/** The most bedrooms a real unit has; a larger "count" is some other number in the wrong column. */
+const MAX_BEDS = 20;
+/** A unit search_units may summarise: a printed cash price (TAQEEM) and a whole bedroom count. */
+const isServable = (u) => typeof u?.price?.cash === 'number' && Number.isInteger(u.beds) && u.beds >= 0 && u.beds <= MAX_BEDS;
 
 /** "SAR 1,069,607" / "1,069,607 ر.س" — same digits both locales, like inventory.mjs. */
 export function money(amount, lang = 'en') {
@@ -61,13 +69,28 @@ export function createUnits({ file = WORKTREE_UNITS, now = Date.now } = {}) {
   let mtime = 0;
 
   /** Every sheet in the file, each with its priced units only. units.json is one record today and an array once
-      a second project has a sheet: the two shapes the listing page reads (src/lib/units-summary.mjs recordFor). */
+      a second project has a sheet: the two shapes the listing page reads (src/lib/units-summary.mjs recordFor).
+      A unit also needs a whole bedroom count: the published row label is built from it, so a malformed sheet
+      (a unit ref or nothing in `beds`) must not put that text in front of a client. */
   function read() {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
     const records = (Array.isArray(raw) ? raw : [raw])
       .filter((r) => r && typeof r === 'object' && !Array.isArray(r))
-      .map((r) => ({ ...r, units: (Array.isArray(r.units) ? r.units : []).filter((u) => typeof u?.price?.cash === 'number') }));
+      .map((r) => ({ ...r, units: (Array.isArray(r.units) ? r.units : []).filter(isServable) }));
     return { records };
+  }
+
+  /** (Re)read the file. Missing, unreadable or broken: no sheet at all, and mtime -1 so the next stat tries again. */
+  function refresh(t) {
+    try {
+      const m = fs.statSync(file).mtimeMs;   // before the read: a write after it shows up at the next stat
+      doc = read();
+      mtime = m;
+    } catch {
+      doc = { records: [] };
+      mtime = -1;
+    }
+    loadedAt = t;
   }
 
   function load() {
@@ -76,20 +99,13 @@ export function createUnits({ file = WORKTREE_UNITS, now = Date.now } = {}) {
       // Cheap stat so an edit shows up long before the full reload window.
       if (t - statedAt > STAT_MS) {
         statedAt = t;
-        try {
-          const m = fs.statSync(file).mtimeMs;
-          if (m !== mtime) { doc = read(); mtime = m; loadedAt = t; }
-        } catch { /* keep what we have */ }
+        let m = -1;
+        try { m = fs.statSync(file).mtimeMs; } catch { /* gone: refresh() fails closed */ }
+        if (m === -1 || m !== mtime) refresh(t);
       }
       return doc;
     }
-    try {
-      doc = read();
-      mtime = fs.statSync(file).mtimeMs;
-    } catch {
-      doc = doc ?? { records: [] };
-    }
-    loadedAt = t;
+    refresh(t);
     statedAt = t;
     return doc;
   }

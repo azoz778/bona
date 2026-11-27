@@ -31,9 +31,11 @@ function isSparseCheckout(root) {
 const SPARSE = isSparseCheckout(REPO_ROOT);
 const NO_SRC_LIB = SPARSE && !existsSync(SITE_LIB);
 
-const W014 = JSON.parse(readFileSync(WORKTREE_UNITS, 'utf8'));
+// units.json is one record today and an array once a second project has a sheet: the W014 record from either.
+const UNITS_FILE = JSON.parse(readFileSync(WORKTREE_UNITS, 'utf8'));
+const W014 = [UNITS_FILE].flat().find((r) => r?.listingId === 'BONA-W014');
 const LISTINGS = JSON.parse(readFileSync(path.join(REPO_ROOT, 'src/data/listings.json'), 'utf8'));
-const LISTING = LISTINGS.find((l) => l.id === W014.listingId) ?? { id: W014.listingId, status: 'available' };
+const LISTING = LISTINGS.find((l) => l.id === 'BONA-W014') ?? { id: 'BONA-W014', status: 'available' };
 const NOW = new Date('2026-11-27T09:00:00Z');
 
 /** Variants of the W014 sheet that hit each branch of the site's code. */
@@ -58,7 +60,9 @@ function cases() {
 
 test('lib/units-summary.mjs publishes exactly what src/lib/units-summary.mjs publishes (W014 sheet and edge cases)', { skip: NO_SRC_LIB ? 'NO_SRC_LIB' : false }, async () => {
   const site = await import(pathToFileURL(SITE_LIB).href);
-  assert.ok(W014.units.length > 0, 'the W014 sheet has units');
+  assert.ok(W014?.units?.length > 0, 'units.json has a W014 sheet with units');
+  // The page reads the file as it stands, whichever shape: the same record the API copy finds.
+  assert.deepEqual(api.recordFor(UNITS_FILE, W014.listingId), site.recordFor(UNITS_FILE, W014.listingId));
   for (const [name, record, listing] of cases()) {
     assert.deepEqual(api.unitSummary(record), site.unitSummary(record), `unitSummary: ${name}`);
     assert.deepEqual(api.liveSummary(record, listing, NOW), site.liveSummary(record, listing, NOW), `liveSummary: ${name}`);
