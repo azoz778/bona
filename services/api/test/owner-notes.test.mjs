@@ -1033,13 +1033,115 @@ test("a later hour's outage alert keeps the outage's cause: a budget stop says s
   h.at(NOW + HOUR + 40 * MIN);
   assert.deepEqual(h.notes.alert('brain_out', { code: 'quota' }), { queued: false, reason: 'duplicate' }, "this hour's alert went");
   assert.equal(h.row(`al:brain_out:${hour + 1}`).meta.code, 'budget', 'what went is kept as it went');
-  assert.equal(h.row(`al:brain_out:${hour + 2}`).meta.code, 'quota', 'the queued next-hour alert takes the new cause');
   h.at(NOW + 2 * HOUR);
   await h.notes.tick();
   assert.equal(h.sent.length, 3);
   assert.match(h.sent[2], /^\*Bona — alert\*\nOpenAI credit ran out\./);
   assert.match(h.sent[2], /Second Example \(WhatsApp\)/);
+  assert.equal(h.row(`al:brain_out:${hour + 2}`).meta.code, 'quota', 'the 12:00 alert went with the new cause, and its row says so');
+  assert.equal(h.row(`al:brain_out:${hour + 1}`).meta.code, 'budget', 'the 11:00 alert still says what it went with');
   assert.ok(!h.sent.some((s) => s.includes(HEADERS.handover)));
+});
+
+test("an outage alert's sentence is the outage's latest cause, chosen when it goes: an alert() refused as a duplicate still counts, a later hour with no alert() keeps it, a new cause wins, and what went keeps its sentence", async () => {
+  const hour = Math.floor(NOW / HOUR);
+  const SAYS = {
+    quota: /^\*Bona — alert\*\nOpenAI credit ran out\. .*Top up at platform\.openai\.com\./,
+    auth: /^\*Bona — alert\*\nOpenAI refused the Bona key \(auth\)\./,
+    budget: /^\*Bona — alert\*\nThe AI spend stop was reached\./,
+    down: /^\*Bona — alert\*\nThe AI service \(OpenAI\) is not answering\./,
+  };
+  const setup = (...names) => {
+    const h = harness();
+    const leads = names.map((name) => addLead(h, { name }));
+    for (const l of leads) h.autoIds.add(l.lead_id);
+    return [h, ...leads];
+  };
+
+  // (1) A 'down' alert went at 10:00; alert(quota) at 10:30 is a duplicate; a chat at 10:31: the 11:00 alert says quota.
+  {
+    const [h, one] = setup('One Example');
+    h.notes.alert('brain_out', { code: 'down' });
+    await h.notes.tick();
+    assert.match(h.sent[0], SAYS.down);
+    h.at(NOW + 30 * MIN);
+    assert.deepEqual(h.notes.alert('brain_out', { code: 'quota' }), { queued: false, reason: 'duplicate' }, "10:30: this hour's alert went");
+    h.at(NOW + 31 * MIN);
+    assert.equal(h.notes.handover(one, { kind: 'brain' }).queued, true);
+    h.at(NOW + HOUR);
+    await h.notes.tick();
+    assert.equal(h.sent.length, 2);
+    assert.match(h.sent[1], SAYS.quota, '(1) the 11:00 alert has the quota sentence');
+    assert.match(h.sent[1], /One Example \(WhatsApp\)/);
+    assert.equal(h.row(`al:brain_out:${hour}`).meta.code, 'down', '(1) the 10:00 alert keeps the cause it went with');
+    assert.equal(h.row(`al:brain_out:${hour + 1}`).meta.code, 'quota', '(1) the 11:00 alert records the cause it went with');
+    const { kind, lead_id: leadId, status, send_id: sendId, meta } = h.row('brain_out:cause');
+    assert.deepEqual({ kind, leadId, status, sendId, meta }, { kind: 'alert', leadId: null, status: 'dropped', sendId: null, meta: { cause: 'quota' } },
+      'the cause is one row holding a code only, never queued or sent');
+  }
+  // (2) A quota alert went at 10:00; a chat at 11:03 with no alert() call: the 11:00-hour alert says quota.
+  {
+    const [h, one] = setup('One Example');
+    h.notes.alert('brain_out', { code: 'quota' });
+    await h.notes.tick();
+    h.at(NOW + HOUR + 3 * MIN);
+    assert.equal(h.notes.handover(one, { kind: 'brain' }).queued, true);
+    assert.equal(h.row(`ho:${one.lead_id}:brain:${hour + 1}`).meta.alertHour, hour + 1);
+    await h.notes.tick();
+    assert.equal(h.sent.length, 2);
+    assert.match(h.sent[1], SAYS.quota, '(2) the 11:00-hour alert has the quota sentence');
+    assert.match(h.sent[1], /One Example \(WhatsApp\)/);
+  }
+  // (3) A budget stop at 10:00, no chat in hour 11, a chat at 12:05: the 12:00-hour alert says the spend stop.
+  {
+    const [h, one] = setup('One Example');
+    h.notes.alert('brain_out', { code: 'budget' });
+    await h.notes.tick();
+    for (const t of [NOW + HOUR, NOW + HOUR + 30 * MIN]) { h.at(t); await h.notes.tick(); }
+    assert.equal(h.sent.length, 1, 'no chat in hour 11: no 11:00 alert');
+    h.at(NOW + 2 * HOUR + 5 * MIN);
+    assert.equal(h.notes.handover(one, { kind: 'brain' }).queued, true);
+    await h.notes.tick();
+    assert.equal(h.sent.length, 2);
+    assert.match(h.sent[1], SAYS.budget, '(3) the 12:00-hour alert says the spend stop');
+    assert.doesNotMatch(h.sent[1], /is not answering/);
+  }
+  // (4) The cause changes quota → auth mid-outage, before or after the next hour's alert was opened: that alert says auth,
+  //     and so does the one after it (no alert() in between).
+  for (const authFirst of [true, false]) {
+    const label = authFirst ? 'auth before the chat' : 'auth after the chat';
+    const [h, one, two] = setup('One Example', 'Two Example');
+    h.notes.alert('brain_out', { code: 'quota' });
+    await h.notes.tick();
+    assert.match(h.sent[0], SAYS.quota);
+    if (authFirst) { h.at(NOW + 40 * MIN); assert.equal(h.notes.alert('brain_out', { code: 'auth' }).queued, false, label); }
+    h.at(NOW + 45 * MIN);
+    assert.equal(h.notes.handover(one, { kind: 'brain' }).queued, true, label);
+    if (!authFirst) { h.at(NOW + 50 * MIN); assert.equal(h.notes.alert('brain_out', { code: 'auth' }).queued, false, label); }
+    h.at(NOW + HOUR);
+    await h.notes.tick();
+    assert.equal(h.sent.length, 2, label);
+    assert.match(h.sent[1], SAYS.auth, `(4) ${label}: the next alert uses auth`);
+    assert.match(h.sent[1], /One Example \(WhatsApp\)/, label);
+    h.at(NOW + HOUR + 10 * MIN);
+    assert.equal(h.notes.handover(two, { kind: 'brain' }).queued, true, label);
+    h.at(NOW + 2 * HOUR);
+    await h.notes.tick();
+    assert.equal(h.sent.length, 3, label);
+    assert.match(h.sent[2], SAYS.auth, `(4) ${label}: still auth at 12:00`);
+    assert.match(h.sent[0], SAYS.quota, `(4) ${label}: what went at 10:00 is as it went`);
+    assert.equal(h.row(`al:brain_out:${hour}`).meta.code, 'quota', label);
+    assert.ok(!h.sent.some((s) => s.includes(HEADERS.handover)), label);
+  }
+  // No alert() ever (no cause recorded): a brain hand-over's alert says 'down'.
+  {
+    const [h, one] = setup('One Example');
+    assert.equal(h.notes.handover(one, { kind: 'brain' }).queued, true);
+    await h.notes.tick();
+    assert.equal(h.sent.length, 1);
+    assert.match(h.sent[0], SAYS.down);
+    assert.match(h.sent[0], /One Example \(WhatsApp\)/);
+  }
 });
 
 test('mail: sender and subject read at send time (60 chars), what to do, the dashboard link; never stored in the ledger', async () => {

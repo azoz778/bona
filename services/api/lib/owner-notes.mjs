@@ -20,10 +20,11 @@
  *   - handover `ho:<lead>:<kind>:<10-min bucket>` (auto mode only): the only dedupe, so the same
  *     kind 11 min later alerts again (critic round 2 #11). Kind `brain` (an AI outage) takes an
  *     HOUR bucket and folds into that hour's `brain_out` alert, which lists the chats (the next
- *     hour's once this hour's went, and that one never goes before its hour, with the outage's
- *     cause carried on): one note an hour however many chats wait. An outage alert dropped while
- *     owner notes were off is queued again by the next hand-over or alert once they are on; with
- *     notes off a brain hand-over opens no alert.
+ *     hour's once this hour's went, and that one never goes before its hour): one note an hour
+ *     however many chats wait. Its sentence is chosen when it goes, from the outage's LATEST
+ *     cause (below, `brain_out:cause`), and the row then keeps the code it went with. An outage
+ *     alert dropped while owner notes were off is queued again by the next hand-over or alert once
+ *     they are on; with notes off a brain hand-over opens no alert.
  *   - booking `bk:<id>` / `bk-untold:<id>`, stopped `stop:<lead>:<ts>` (auto mode only).
  *   - summary `sum:<day>` / `sumtest:<ts>` (only while owner_as_client or own_inbox is '1';
  *     lib/daily-summary.mjs).
@@ -33,6 +34,10 @@
  *     or candidate>:<day>`. Link-down and identity alerts go by web push and Kuma only, never
  *     as a WhatsApp note through another instance: they are refused here.
  *   - mail `mail:<message id>` (Track C; sender and subject read at send time from mail_seen).
+ *   - one row that is never a note: `brain_out:cause` (kind alert, always `dropped`, no lead, no
+ *     send), whose meta holds only the outage cause code the last alert('brain_out', {code})
+ *     brought (quota/auth/down/budget), recorded even when that call was a duplicate or owner
+ *     notes were off. Never queued, sent, counted or purged.
  * Same-release rule (DESIGN §2): hand-over, booking and stopped notes go only for a lead in auto
  * mode (checked when queued and again when sent); new_client, command and alert notes always
  * go, a new client outside auto mode with today's lines plus the Lead link only.
@@ -385,27 +390,40 @@ function createLedgerNotes({
   /** An outage alert that went, or may have; a dropped one has not (it can be queued again). */
   const BRAIN_GONE = new Set(['sent', 'merged', 'uncertain', 'failed']);
   const brainCode = (code) => (Object.hasOwn(BRAIN_OUT, code) ? code : 'down');
+  /** The one row that holds the outage's latest cause (a code only): never queued, so never a note. */
+  const BRAIN_CAUSE_KEY = 'brain_out:cause';
+  /** alert('brain_out', {code}) records its cause here every time, a duplicate or not, notes on or off. */
+  function recordBrainCause(why) {
+    const t = now();
+    prep(`INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, send_id, meta, created, updated)
+          VALUES (?, 'alert', NULL, ?, ?, 'dropped', NULL, ?, ?, ?)
+          ON CONFLICT(dedupe_key) DO UPDATE SET meta = excluded.meta, updated = excluded.updated`)
+      .run(`NOTE-${t.toString(36)}-${randomId(6)}`, BRAIN_CAUSE_KEY, t, JSON.stringify({ cause: why }), t, t);
+  }
+  /** The latest cause an outage alert recorded, or null when none ever was. */
+  const latestBrainCause = () => {
+    const c = byKey(BRAIN_CAUSE_KEY)?.meta.cause;
+    return typeof c === 'string' && Object.hasOwn(BRAIN_OUT, c) ? c : null;
+  };
   /**
    * The first hour, from `hour` on (at most a day ahead), whose brain_out alert has not gone: none
    * yet, queued, or dropped while owner notes were off (never counted as gone, or each hand-over
    * made while notes were off would push the next chat another hour). `row` is that hour's alert
-   * if there is one, `prev` the last one that went (whose cause a new one carries on).
+   * if there is one.
    */
   function openBrainHour(hour) {
     let alertHour = hour;
-    let prev = null;
     let row = byKey(`al:brain_out:${alertHour}`);
     for (let i = 0; i < 24 && row && BRAIN_GONE.has(row.status); i += 1) {
-      prev = row;
       alertHour += 1;
       row = byKey(`al:brain_out:${alertHour}`);
     }
-    return { alertHour, row, prev };
+    return { alertHour, row };
   }
   /**
-   * Hour `alertHour`'s brain_out alert, due at `due`, with the cause `code`: a new row, or a dropped
-   * one queued again (owner notes are on). A queued one or one that went is left as it is. True when
-   * this call queued it.
+   * Hour `alertHour`'s brain_out alert, due at `due`, with the cause `code` (only a fallback: the
+   * sentence is the latest cause when it goes): a new row, or a dropped one queued again (owner
+   * notes are on). A queued one or one that went is left as it is. True when this call queued it.
    */
   function openBrainAlert(alertHour, due, code) {
     if (!notesOn()) return false;
@@ -557,7 +575,11 @@ function createLedgerNotes({
   }
 
   function renderAlert(r, queued) {
-    const sentence = alertSentence(r.meta.alert, r.meta);
+    // An outage alert says the outage's latest cause as it goes (a later alert() may have brought
+    // a new one, even as a duplicate), and its row keeps the code it went with (`meta`, below).
+    const brainOut = r.meta.alert === 'brain_out';
+    const meta = brainOut ? { ...r.meta, code: latestBrainCause() ?? brainCode(r.meta.code) } : r.meta;
+    const sentence = alertSentence(r.meta.alert, meta);
     if (!sentence) return null;
     const lines = [HEADERS.alert, sentence];
     const folded = [];
@@ -578,7 +600,7 @@ function createLedgerNotes({
       }
     }
     if (r.meta.alert === 'old_out_wrote') lines.push(`Chats to check: ${link('/dashboard/inbox?tab=unsure')}`);
-    return { text: clipUnits(lines.join('\n'), MAX_NOTE_CHARS), folded, drop };
+    return { text: clipUnits(lines.join('\n'), MAX_NOTE_CHARS), folded, drop, ...(brainOut ? { meta } : {}) };
   }
 
   function renderMail(r) {
@@ -794,7 +816,8 @@ function createLedgerNotes({
       dropped.push(...(out.drop ?? []));
       const extra = (parts.length ? 2 : 0) + out.text.length;
       if (parts.length && size + extra > MAX_NOTE_CHARS) break;
-      parts.push({ row: c.row, due: c.due, text: out.text, folded: out.folded ?? [] });
+      // A rendered meta (an outage alert's cause) is what sendBatch writes back with the outcome.
+      parts.push({ row: out.meta ? { ...c.row, meta: out.meta } : c.row, due: c.due, text: out.text, folded: out.folded ?? [] });
       size += extra;
       if (c.row.kind === 'summary') break;
     }
@@ -873,16 +896,16 @@ function createLedgerNotes({
     if (k === 'brain') {
       // One note an hour for an outage: the chat is listed in the first hour's brain_out alert,
       // from this one on, that has not gone (openBrainHour), so it is never a hand-over of its
-      // own. A later hour's alert never goes before its hour (step), and it keeps the outage's
-      // cause: its own, or that of the last alert that went (a later alert() brings a new one).
+      // own. A later hour's alert never goes before its hour (step); its sentence is the
+      // outage's latest cause when it goes (renderAlert), however many hours on.
       // Owner notes off: only the hand-over, dropped; no hour's alert is opened or stepped past.
       const hour = Math.floor(t / HOUR_MS);
       if (!notesOn()) {
         return answer(enqueue({ kind: 'handover', leadId: l.lead_id, key: `ho:${l.lead_id}:brain:${hour}`, due: t, meta: { ...meta, alertHour: hour } }));
       }
-      const { alertHour, row, prev } = openBrainHour(hour);
+      const { alertHour, row } = openBrainHour(hour);
       const due = alertHour === hour ? t : alertHour * HOUR_MS;
-      openBrainAlert(alertHour, due, row?.meta.code ?? prev?.meta.code);
+      openBrainAlert(alertHour, due, latestBrainCause() ?? row?.meta.code);
       return answer(enqueue({ kind: 'handover', leadId: l.lead_id, key: `ho:${l.lead_id}:brain:${hour}`, due, meta: { ...meta, alertHour } }));
     }
     return answer(enqueue({ kind: 'handover', leadId: l.lead_id, key: `ho:${l.lead_id}:${k}:${Math.floor(t / HANDOVER_BUCKET_MS)}`, due: t, meta }));
@@ -932,15 +955,14 @@ function createLedgerNotes({
     const hour = Math.floor(t / HOUR_MS);
     if (c === 'brain_out') {
       const why = brainCode(m.code);
+      // The outage's latest cause, whatever this call returns: the next alert to go says it.
+      recordBrainCause(why);
       if (!notesOn()) return answer(enqueue({ kind: 'alert', key: `al:brain_out:${hour}`, due: t, meta: { alert: c, code: why, hour } }));
       // This hour's note: new, or queued again when it was dropped while owner notes were off.
-      const { alertHour, row } = openBrainHour(hour);
+      // Otherwise (queued already, or gone, with the next hour's opened by a hand-over or not
+      // yet) a duplicate: the recorded cause is what a note not gone yet will say.
+      const { alertHour } = openBrainHour(hour);
       if (alertHour === hour && openBrainAlert(hour, t, why)) return { queued: true };
-      // Not sent yet (this hour's, or once that went, the next hour's that a hand-over opened):
-      // it takes the cause, which a hand-over may have carried on from an earlier one.
-      if (row && row.meta.code !== why) {
-        prep("UPDATE owner_notes SET meta = ? WHERE note_id = ? AND status IN ('queued', 'dropped')").run(JSON.stringify({ ...row.meta, code: why }), row.note_id);
-      }
       return { queued: false, reason: 'duplicate' };
     }
     const out = { alert: c };
