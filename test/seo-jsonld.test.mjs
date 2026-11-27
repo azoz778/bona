@@ -21,7 +21,9 @@ import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { liveSummary, localFaq, recordFor, sheetDateText, sheetVars } from '../src/lib/units-summary.mjs';
+import { isBedLabel, parsePublishedUnits } from '../services/api/lib/published-units.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'dist');
@@ -441,6 +443,66 @@ for (const [route, lang] of [['/properties/darco-prime-waterfront-al-shati/', 'e
     assert.equal(nodesOf(p, 'ItemPage')[0]?.['@id'], `${url}#webpage`, 'the automatic ItemPage node must survive');
   });
 }
+
+// ---- the units table's machine-readable copy (2026-11-27) -------------------------------------------------------
+// The units table's container carries data-units-summary: the summary the table prints, as JSON. bona-api's
+// search_units quotes exactly that from the LIVE page (services/api/lib/published-units.mjs; DESIGN §4.5), so it must
+// be on every page with the table, on no other, say what the cells say and carry nothing the page does not print.
+// Every comparison is a boolean (figures stay out of the log).
+
+const UNITS_ATTR_RE = /\sdata-units-summary="([^"]*)"/g;
+const numText = (n) => new Intl.NumberFormat('en-US').format(n);
+const areaText = (lo, hi) => (lo === hi ? numText(lo) : `${numText(lo)}–${numText(hi)}`);
+
+test('data-units-summary is on every units table and nowhere else, says what the table\'s cells say, and the API reads it back', () => {
+  let withTable = 0;
+  for (const p of pages) {
+    const sections = [...p.html.matchAll(/<section[^>]*data-project-details[^>]*>([\s\S]*?)<\/section>/g)];
+    const all = [...p.html.matchAll(UNITS_ATTR_RE)];
+    const inTables = sections.flatMap((sec) => [...sec[1].matchAll(UNITS_ATTR_RE)]);
+    assert.equal(all.length, sections.length, `${p.route}: one data-units-summary per units table, and none without one`);
+    assert.equal(inTables.length, all.length, `${p.route}: the attribute sits inside the units block`);
+    if (!sections.length) continue;
+    withTable += 1;
+    const slug = p.route.replace(/^\/(?:ar\/)?properties\//, '').replace(/\/$/, '');
+    const listing = listingsSource.find((l) => l.slug === slug);
+    assert.ok(listing, `${p.route}: a units table on a page that is not a listing`);
+    const json = decode(inTables[0][1]);
+    const data = JSON.parse(json);
+    assert.deepEqual(Object.keys(data).sort(), ['areaMax', 'areaMin', 'cashFrom', 'count', 'delivery', 'listingId', 'rows', 'updated'], `${p.route}: attribute keys`);
+    for (const r of data.rows) {
+      assert.deepEqual(Object.keys(r).sort(), ['areaMax', 'areaMin', 'cashFrom', 'count', 'label'], `${p.route}: row keys`);
+      assert.deepEqual(Object.keys(r.label).sort(), ['ar', 'en'], `${p.route}: label keys`);
+    }
+    assert.ok(data.listingId === listing.id, `${p.route}: the attribute names this page's listing`);
+    assert.ok(!/"(key|ref|units|plan|plans|cash|half|year|twoYear|price[^"]*)"\s*:/.test(json), `${p.route}: a unit, plan or instalment key in the attribute`);
+    assert.ok(!/\bB\d{2}-\d+\b/.test(json), `${p.route}: a unit reference in the attribute`);
+    // The table's body rows, cell by cell: one per summary row, then the total.
+    const body = sections[0][1].match(/<tbody>([\s\S]*?)<\/tbody>/)?.[1] ?? '';
+    const rows = [...body.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].map((m) => [...m[1].matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g)].map((c) => text(c[1])));
+    assert.equal(rows.length, data.rows.length + 1, `${p.route}: one table row per summary row, plus the total`);
+    const lang = p.lang === 'ar' ? 'ar' : 'en';
+    const expect = [...data.rows.map((r) => [r.label[lang], r]), [null, data]];
+    expect.forEach(([label, r], i) => {
+      const [cLabel, cArea, cCash, cCount] = rows[i];
+      if (label !== null) assert.ok(cLabel === label, `${p.route}: row ${i} label`);
+      assert.ok(cArea === areaText(r.areaMin, r.areaMax), `${p.route}: row ${i} area`);
+      assert.ok(cCash.includes(numText(r.cashFrom)), `${p.route}: row ${i} "from" price`);
+      assert.ok(cCount === numText(r.count), `${p.route}: row ${i} count`);
+    });
+    assert.ok(text(p.html).includes(sheetDateText(data.updated, lang)), `${p.route}: the sheet date the page prints`);
+    if (data.delivery) assert.ok(text(p.html).includes(sheetDateText(data.delivery, lang)), `${p.route}: the handover the page prints`);
+    // bona-api's reader takes exactly this from the built page. It refuses a row label that is not a whole bedroom
+    // count (a malformed sheet: "null bedrooms"); that only makes search_units say "not published", so it does not
+    // fail the deploy, but any other refusal or difference is a format drift between the page and the API.
+    const read = parsePublishedUnits(p.html, listing.id);
+    const oddLabel = !data.rows.every((r) => isBedLabel(r.label));
+    assert.ok(read === null ? oddLabel : isDeepStrictEqual(read, data), `${p.route}: search_units reads the attribute back exactly`);
+  }
+  // Not a vacuous pass: while the Darco sheet is live, both of its pages carry the table.
+  const darco = listingsSource.find((l) => l.id === 'BONA-W014');
+  if (darco && liveFor(darco).live && !liveFor(darco).boundary) assert.ok(withTable >= 2, 'the Darco pages carry the units table');
+});
 
 test('a listing without a unit sheet or faq has neither block', () => {
   const plain = listingsSource.find((l) => !l.faq && l.id !== 'BONA-W014');

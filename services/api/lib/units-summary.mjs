@@ -1,8 +1,8 @@
 /* The per-bedroom summary of a developer unit sheet that the listing page publishes: a copy of
    src/lib/units-summary.mjs (unitSummary, liveSummary and the date checks they use), because the VPS runs
-   bona-api from a sparse checkout (services + src/data) that has no src/lib. search_units builds its answer
-   from liveSummary for every source (through tools.mjs quotableSummary, which never quotes a sheet before the
-   page's build shows it), so a client hears only what the page shows (DESIGN §4.5).
+   bona-api from a sparse checkout (services + src/data) that has no src/lib. search_units quotes the summary
+   the LIVE page carries (lib/published-units.mjs, DESIGN §4.5), and checks it against this copy: its row labels
+   must be ones unitSummary builds from whole bedroom counts, its dates real ones (isSheetDate, isDeliveryDate).
    Keep it in step with the site: test/units-summary-parity.test.mjs compares both wherever src/lib exists.
    Every number comes from the sheet; a unit without a printed cash price is skipped (TAQEEM). */
 

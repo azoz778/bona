@@ -16,8 +16,7 @@ import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normaliseSearchArgs } from './actions.mjs';
 import { toAsciiDigits } from './inventory.mjs';
 import { ensureHandoff } from './lead-tasks.mjs';
-import { isSheetDate, liveSummary, unitSummary } from './units-summary.mjs';
-import { riyadhDay } from './budget.mjs';
+import { createPublishedUnits } from './published-units.mjs';
 
 export const TOOL_NAMES = ['search_properties', 'show_property', 'search_units', 'create_lead', 'request_human'];
 /** The WhatsApp agent's hand-over tool (Phase 4): its invocation in a completion is what lib/dana-wa.mjs looks for. */
@@ -35,8 +34,9 @@ export const UNITS_NOTE = "These are the published starting cash prices per bedr
 export const UNITS_NOT_PUBLISHED_NOTE = 'Unit prices for that project are not published. Answer from search_properties only, never invent a unit, a price or a payment plan, and offer a person.';
 
 /**
- * The allow-list a client may hear (DESIGN §4.5): the listing page's per-bedroom rows (label, count, area range,
- * lowest cash price), the delivery and the sheet date. Built key by key, so nothing new in the summary passes.
+ * The allow-list a client may hear (DESIGN §4.5): the live listing page's per-bedroom rows (label, count, area
+ * range, lowest cash price), the delivery and the sheet date, from the summary lib/published-units.mjs read off
+ * that page. Built key by key, so nothing new in the summary passes.
  */
 export function publishedUnitsCut(live) {
   if (!live) return null;
@@ -46,51 +46,6 @@ export function publishedUnitsCut(live) {
     })),
     delivery: live.delivery, updated: live.updated,
   };
-}
-
-/** The most bedrooms a real unit has; a larger count is some other figure in the wrong column. */
-const MAX_BEDS = 20;
-let bedLabels = null;
-/** True for a row label the listing page builds from whole bedroom counts 0..MAX_BEDS (one count, or a penthouse
-    range), taken from lib/units-summary.mjs itself so the two cannot drift. A unit ref, a blank (null), a fraction or
-    a negative count in a unit's `beds` gives a label outside this set ("B08-19 bedrooms", "null bedrooms"…). */
-function isBedLabel(label) {
-  if (!bedLabels) {
-    const unit = (beds, cls) => ({ beds, class: cls, areaSqm: 1, price: { cash: 1 } });
-    const labels = [];
-    for (let lo = 0; lo <= MAX_BEDS; lo++) {
-      labels.push(unitSummary({ units: [unit(lo, 'Standard')] }).rows[0].label);
-      for (let hi = lo; hi <= MAX_BEDS; hi++) labels.push(unitSummary({ units: [unit(lo, 'Penthouse'), unit(hi, 'Penthouse')] }).rows[0].label);
-    }
-    bedLabels = new Set(labels.map((l) => JSON.stringify([l.en, l.ar])));
-  }
-  return bedLabels.has(JSON.stringify([label?.en, label?.ar]));
-}
-
-/** How long units.json must sit unchanged on disk before search_units quotes it (quotableSummary, "Arrival"). */
-export const SHEET_SETTLE_MS = 60 * 60 * 1000;
-
-/**
- * What search_units may quote from one sheet at request time `nowMs` (ms): the listing page's own summary, or null.
- * `changedAtMs` is when the file the sheet came from last changed on disk (units.mjs changedAt()). The API never
- * says anything earlier than the page, nor anything other than the page:
- * - Date. Pages builds at 03:00 UTC daily and on pushes (.github/workflows/deploy.yml), and hides a sheet dated after
- *   its build day (UTC). So a sheet is quoted only once its date is before today in Riyadh: from 21:00 UTC on that
- *   date, after that day's build. The API may lag the page by up to a day; it never leads it.
- * - Arrival. repo-sync pulls main every 5 minutes, so the merge that brings a sheet can land it on the VPS while that
- *   merge's push build of the page is still running: a sheet dated D merged at 20:58 UTC on D would be quoted at 21:00,
- *   before the page shows it. So nothing is quoted until the file has been unchanged for SHEET_SETTLE_MS (an hour; the
- *   build takes minutes). An unknown change time, or one in the future (a clock ahead of ours), quotes nothing.
- *   Residual: a push build that FAILS (or is not live within the hour) leaves the page on the previous sheet until the
- *   next build that succeeds (the 03:00 UTC daily build or a re-run); in that window the API quotes the new sheet.
- * - Rows. The rows are liveSummary's over the same units the page summarises. When a row label is not a whole bedroom
- *   count (a malformed sheet: the page would print a unit ref or "null bedrooms"), nothing is quoted for the project.
- */
-export function quotableSummary(record, listing, nowMs, changedAtMs) {
-  if (!isSheetDate(record?.updated) || record.updated >= riyadhDay(nowMs)) return null;
-  if (!Number.isFinite(changedAtMs) || !(nowMs - changedAtMs >= SHEET_SETTLE_MS)) return null;
-  const live = liveSummary(record, listing, new Date(nowMs));
-  return live && live.rows.every((r) => isBedLabel(r.label)) ? live : null;
 }
 
 /** A duplicate `create_lead` inside this window returns the first lead's id. */
@@ -178,9 +133,11 @@ export function toolArgs(body = {}) {
 export function createToolHandlers({
   inventory, units = null, store, db, dataDir, siteUrl, env = {}, sendWhatsApp, log = () => {},
   now = () => Date.now(), leadDedupeMs = LEAD_DEDUPE_MS, notifyHandoff = async () => {},
-  fullUnitRowSources = FULL_UNIT_ROW_SOURCES,
+  fullUnitRowSources = FULL_UNIT_ROW_SOURCES, publishedUnits = null,
 }) {
   if (!db) throw new TypeError('createToolHandlers needs the store (db)');
+  /** The live listing pages' published unit summaries (one GET per listing per 15 minutes at most, fail closed). */
+  const published = publishedUnits ?? createPublishedUnits({ siteUrl, now, log });
   /** leadKey → { at, id }. Bounded by the dedupe window, pruned on every save. */
   const recentLeads = new Map();
 
@@ -207,12 +164,12 @@ export function createToolHandlers({
 
   /**
    * Unit prices inside one project (today: Darco Prime Waterfront, BONA-W014), for every source: WhatsApp,
-   * email, the website chat and a missing or unknown source. The answer is what the listing page publishes
-   * (quotableSummary over lib/units-summary.mjs liveSummary): one row per bedroom count with its lowest cash
-   * price, or null when the page publishes nothing (listing not available, sheet date impossible or in the
-   * future), has not been built with the sheet yet (its date, or units.json changed less than an hour ago), or would
-   * print a malformed row label. No unit refs, no per-unit prices, no payment plans: those are not published
-   * (DESIGN §4.5). The model's filters are ignored.
+   * email, the website chat and a missing or unknown source. The answer is what the LIVE listing page publishes
+   * (DESIGN §4.5): the summary its units table carries (lib/published-units.mjs), one row per bedroom count with
+   * its lowest cash price. Nothing (the "not published" note) when the inventory does not list the project as
+   * available, or the live page shows no table, a malformed one or another listing's, or could not be read for
+   * six hours. units.json is not read here: the page alone says what is published. No unit refs, no per-unit
+   * prices, no payment plans: those are not published. The model's filters are ignored.
    */
   async function search_units(args, ctx) {
     // The first id that is not blank; none (missing, null, '' or spaces) means W014, as the tool schema says.
@@ -221,9 +178,9 @@ export function createToolHandlers({
     const source = ctx.source ?? ctx.attr?.source ?? null;
     if (units && fullUnitRowSources.includes(source)) return unitRows(args, ctx, listingId);
 
-    const record = units ? units.forListing(listingId) : null;
-    const listing = record ? inventory.find(listingId) : null;
-    const live = record && listing?.id === record.listingId ? quotableSummary(record, listing, now(), units.changedAt()) : null;
+    const listing = inventory.find(listingId);
+    const available = listing?.id === listingId && listing.status === 'available';
+    const live = available ? await published.get(listing) : null;
     if (!live) return { count: 0, summary: null, note: UNITS_NOT_PUBLISHED_NOTE };
 
     // Put the project card on screen so the visitor sees what is being discussed.

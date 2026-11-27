@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { inspect } from 'node:util';
-import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES, quotableSummary, SHEET_SETTLE_MS } from '../lib/tools.mjs';
+import { inspect, isDeepStrictEqual } from 'node:util';
+import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES, UNITS_NOTE, UNITS_NOT_PUBLISHED_NOTE } from '../lib/tools.mjs';
 import { createInventory, readInventoryFile, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
-import { createUnits, STAT_MS, WORKTREE_UNITS } from '../lib/units.mjs';
+import { createUnits, WORKTREE_UNITS } from '../lib/units.mjs';
+import { createPublishedUnits } from '../lib/published-units.mjs';
+import { recordFor, unitSummary } from '../lib/units-summary.mjs';
 import { createStore } from '../lib/store.mjs';
 import { normaliseLead, leadNote, appendLead, appendJsonl } from '../lib/leads.mjs';
 import { openDb } from '../lib/db.mjs';
@@ -23,6 +25,8 @@ function harness() {
     inventory, store, db, dataDir, siteUrl: 'https://bona.azoz.uk', env: {},
     // The real Evolution API is NEVER touched from tests.
     sendWhatsApp: async (text) => { sent.push(text); return { ok: true }; },
+    // Nor the live site: search_units reads the listing page through this (a test that needs a page brings its own).
+    publishedUnits: createPublishedUnits({ fetch: async () => { throw new Error('tests never touch the network'); } }),
   };
   const tools = createToolHandlers(deps);
   return { deps, dataDir, sent, store, db, tools, cleanup: () => { db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); } };
@@ -413,12 +417,14 @@ test("the tool notes offer the site's WhatsApp number (src/data/site.json)", asy
   h.cleanup();
 });
 
-/* ---------------- search_units: the published cut for every source (DESIGN §4.5, PR-0) ---------------- */
+
+/* ---------------- search_units: the live page's published cut for every source (DESIGN §4.5, PR-0) ---------------- */
 
 // A W014-shaped sheet: two 1-bed units (the dearer one's cash price is NOT published), a 3-bed, a priceless
 // 2-bed, and two penthouses (the dearest cash price, units.mjs summary()'s price_to_en, is NOT published).
 // Every unit has instalment prices, none of which is published. Refs and amounts are made up: the public repo
 // must not carry a real unit's unpublished prices in a fixture (a test below checks them against the real sheet).
+// search_units no longer reads it (it quotes the live page); the owner's veto path and the leak checks do.
 const UNIT = (ref, beds, cls, areaSqm, [cash, half, year, twoYear]) => ({
   ref, building: ref.split('-')[0], unit: ref.split('-')[1], floor: { en: '3rd', ar: 'الدور الثالث' }, floorIndex: 3,
   facing: { en: 'South', ar: 'جنوبية' }, beds, baths: beds + 1, maidRoom: beds > 2, class: cls,
@@ -446,18 +452,34 @@ const PUBLISHED_CUT = {
   ],
   delivery: '2028-06', updated: '2026-09-02',
 };
-// A priced unit whose bedroom count is a unit ref (a malformed sheet): it must never reach a label.
-const ODD_BEDS_UNIT = { ...UNIT('B95-17', 1, 'Standard', 57.5, [722750, 738750, 795250, 831250]), beds: 'B95-17' };
-// A blank bedroom cell on a penthouse (build-units.py writes beds: null): the page keeps it in the penthouse row.
-const BLANK_PENTHOUSE = { ...UNIT('B07-33', 2, 'Penthouse', 205.75, [1950000, 1991000, 2144000, 2242000]), beds: null };
-// The first unit at a new cash price: the sheet repo-sync brings in a test of the settle hour.
-const REPRICED_UNIT = { ...SHEET.units[0], price: { ...SHEET.units[0].price, cash: 690250 } };
+/** What the live listing page's data-units-summary carries for SHEET: the table it prints (ProjectDetails.astro). */
+const PAGE_SUMMARY = {
+  listingId: 'BONA-W014', count: 5, areaMin: 54.25, areaMax: 230.25, cashFrom: 701500,
+  delivery: PUBLISHED_CUT.delivery, updated: PUBLISHED_CUT.updated, rows: PUBLISHED_CUT.rows,
+};
+// The page as an earlier build printed it (made-up figures): the site has not deployed the newer sheet yet.
+const OLDER_PAGE_SUMMARY = {
+  ...PAGE_SUMMARY, count: 4, cashFrom: 698250, updated: '2026-08-20',
+  rows: [{ ...PAGE_SUMMARY.rows[0], count: 1, cashFrom: 698250 }, ...PAGE_SUMMARY.rows.slice(1)],
+};
+const OLDER_CUT = { rows: OLDER_PAGE_SUMMARY.rows, delivery: OLDER_PAGE_SUMMARY.delivery, updated: OLDER_PAGE_SUMMARY.updated };
+const SITE = 'https://site.example.com';
+const W014_PAGE = `${SITE}/properties/darco-prime-waterfront-fixture/`;
 const UNITS_NOW = Date.parse('2026-11-27T09:00:00Z');
 const MINUTE = 60_000;
-const DAY = 24 * 60 * MINUTE;
+const HOUR = 60 * MINUTE;
 const SOURCES = ['bona-whatsapp', 'bona-email', 'bona-web', undefined, 'someone-else'];
 // What a model asking for a unit would send: a unit ref, a plan, a bed count, a budget.
 const UNIT_ARGS = { listing_id: 'BONA-W014', beds: 1, plan: 'twoYear', query: 'B91-23', max_price: 900000, limit: 20, maid_room: false };
+
+/** Astro's attribute escaping (html-escaper): & < > ' " become entities. */
+const escapeAttr = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+/** A listing page as the site builds it; `summary` null is a page without the units table (sold, hidden, no sheet). */
+function listingPage(summary) {
+  const table = summary == null ? '' : `<section id="units" data-project-details><div class="mt-5 overflow-x-auto" data-units-summary="${
+    escapeAttr(typeof summary === 'string' ? summary : JSON.stringify(summary))}"><table></table></div></section>`;
+  return `<!doctype html><html lang="en"><body><main><h1>Darco Prime Waterfront</h1>${table}</main></body></html>`;
+}
 
 /** A one-listing inventory (W014, with the given status) built on a real listing so cards render. */
 function w014Inventory(status = 'available') {
@@ -466,22 +488,39 @@ function w014Inventory(status = 'available') {
   return createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk', read: () => [w014] });
 }
 
-/** `mtimeMs`: when units.json last changed on disk (repo-sync's pull). A day before UNITS_NOW by default, so the
-    hour search_units waits after a change (SHEET_SETTLE_MS) is over unless a test says otherwise. */
-function unitsHarness({ sheet = SHEET, status = 'available', withUnits = true, extra = {}, unitsNow = Date.now, mtimeMs = UNITS_NOW - DAY } = {}) {
+/** A fake live site: `answer(url, callNo)` gives a page (a string: 200), a Response, or an Error (thrown). */
+function fakeSite(answer) {
+  const calls = [];
+  const fetch = async (url) => {
+    calls.push(String(url));
+    const a = await answer(String(url), calls.length);
+    if (a instanceof Error) throw a;
+    return typeof a === 'string' ? new Response(a, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }) : a;
+  };
+  return { fetch, calls };
+}
+
+/** `page`: the summary the live W014 page carries (null: none). `answer` replaces the whole fake site. */
+function unitsHarness({ sheet = SHEET, status = 'available', withUnits = true, extra = {}, page = PAGE_SUMMARY, answer = null, timeoutMs } = {}) {
   const h = harness();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-tool-units-'));
   const file = path.join(dir, 'units.json');
   fs.writeFileSync(file, JSON.stringify(sheet));
-  fs.utimesSync(file, mtimeMs / 1000, mtimeMs / 1000);
+  let clock = UNITS_NOW;
+  const site = fakeSite(answer ?? ((url) => (url === W014_PAGE ? listingPage(page) : new Response('not found', { status: 404 }))));
   const tools = createToolHandlers({
-    ...h.deps, inventory: w014Inventory(status), units: withUnits ? createUnits({ file, now: unitsNow }) : null, now: () => UNITS_NOW, ...extra,
+    ...h.deps, siteUrl: SITE, inventory: w014Inventory(status), units: withUnits ? createUnits({ file }) : null, now: () => clock,
+    publishedUnits: createPublishedUnits({ siteUrl: SITE, fetch: site.fetch, now: () => clock, ...(timeoutMs ? { timeoutMs } : {}) }),
+    ...extra,
   });
   const ask = async (source, args = UNIT_ARGS) => {
     const raw = await tools.run('search_units', { chat: { chat_id: `units-${source}`, metadata: source === undefined ? {} : { source } }, args });
     return { raw, result: JSON.parse(raw) };
   };
-  return { ...h, tools, ask, file, cleanup: () => { h.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); } };
+  return {
+    ...h, tools, ask, file, site, advance: (ms) => { clock += ms; },
+    cleanup: () => { h.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); },
+  };
 }
 
 /**
@@ -523,8 +562,11 @@ test('assertNoUnpublished catches a leak without printing the leaked value or th
 });
 
 const keys = (o) => Object.keys(o).sort();
+const notPublished = (result, what) => {
+  assert.deepEqual(result, { count: 0, summary: null, note: UNITS_NOT_PUBLISHED_NOTE }, `${what}: the allow-listed shape, nothing quoted`);
+};
 
-test('search_units: every source (WhatsApp, email, website, none, unknown) gets only the published per-bedroom "from" rows', async () => {
+test('search_units: every source (WhatsApp, email, website, none, unknown) gets exactly the live page\'s per-bedroom "from" rows', async () => {
   const h = unitsHarness();
   try {
     for (const source of SOURCES) {
@@ -535,8 +577,9 @@ test('search_units: every source (WhatsApp, email, website, none, unknown) gets 
         assert.deepEqual(keys(row), ['areaMax', 'areaMin', 'cashFrom', 'count', 'label'], `${source}: row keys`);
         assert.deepEqual(keys(row.label), ['ar', 'en'], `${source}: label keys`);
       }
-      assert.deepEqual(result.summary, PUBLISHED_CUT, `${source}: the rows the listing page shows`);
-      assert.equal(result.count, 5, `${source}: the available units the page counts (the priceless one is not)`);
+      assert.deepEqual(result.summary, PUBLISHED_CUT, `${source}: the rows the live page shows`);
+      assert.equal(result.count, 5, `${source}: the available units the page counts`);
+      assert.equal(result.note, UNITS_NOTE, source);
       assertNoUnpublished(raw);
     }
     // The project card still goes on the visitor's screen (the website chat's "mentioned properties").
@@ -552,25 +595,127 @@ test('search_units: every source (WhatsApp, email, website, none, unknown) gets 
       assertNoUnpublished(r.raw);
     }
     // The first id that is not blank decides: a blank listing_id does not hide the id given beside it.
-    assert.equal((await h.ask('bona-whatsapp', { listing_id: ' ', id: 'BONA-005' })).result.summary, null);
+    notPublished((await h.ask('bona-whatsapp', { listing_id: ' ', id: 'BONA-005' })).result, 'BONA-005 beside a blank id');
+    // Every call above, every source: one GET of the live W014 page (the 15-minute cache).
+    assert.deepEqual(h.site.calls, [W014_PAGE]);
   } finally { h.cleanup(); }
 });
 
-test('search_units reads units.json as an array of sheets (a second project), the way the listing page does', async () => {
-  const other = { ...SHEET, listingId: 'BONA-W999', units: [UNIT('B93-14', 2, 'Standard', 88.5, [655500, 669500, 720500, 753500])] };
-  const h = unitsHarness({ sheet: [other, SHEET] });
+test('search_units quotes the live page, never units.json: a sheet the page does not show yet is not quoted, and no local sheet is needed', async () => {
+  // units.json on the VPS has the newer sheet (SHEET); the live page still shows the build before it.
+  const behind = unitsHarness({ page: OLDER_PAGE_SUMMARY });
   try {
     for (const source of SOURCES) {
-      const { raw, result } = await h.ask(source);
-      assert.deepEqual(result.summary, PUBLISHED_CUT, `${source}: W014's rows from the array, as the page renders them`);
-      assert.equal(result.count, 5, source);
-      assertNoUnpublished(raw, { units: [...other.units, ...SHEET.units] });
+      const { raw, result } = await behind.ask(source);
+      assert.deepEqual(result.summary, OLDER_CUT, `${source}: the page's rows, not the newer sheet's`);
+      assert.equal(result.count, OLDER_PAGE_SUMMARY.count, source);
+      assertNoUnpublished(raw);
     }
-    // The other sheet answers for its own listing only, and that listing is not in this inventory: nothing.
-    const { raw, result } = await h.ask('bona-whatsapp', { listing_id: 'BONA-W999' });
-    assert.deepEqual(result, { count: 0, summary: null, note: result.note });
-    assertNoUnpublished(raw, { units: [...other.units, ...SHEET.units] });
+  } finally { behind.cleanup(); }
+  // units.json has a current sheet, the page shows no table (a failed build, a hidden table): nothing.
+  const hidden = unitsHarness({ page: null });
+  try {
+    for (const source of SOURCES) notPublished((await hidden.ask(source)).result, `no table on the page, ${source}`);
+    assert.equal(hidden.store.getCall('units-bona-web'), null, 'no project card for an unpublished summary');
+  } finally { hidden.cleanup(); }
+  // No sheet loaded on this host at all: the page alone decides.
+  const noSheet = unitsHarness({ withUnits: false });
+  try {
+    for (const source of SOURCES) assert.deepEqual((await noSheet.ask(source)).result.summary, PUBLISHED_CUT, `no units.json, ${source}`);
+  } finally { noSheet.cleanup(); }
+});
+
+test('search_units: a page whose summary is malformed, not the allow-listed shape, another listing\'s or a non-bedroom label → the "not published" note, no card', async () => {
+  const row0 = PAGE_SUMMARY.rows[0];
+  const withRow = (r) => ({ ...PAGE_SUMMARY, rows: [r, ...PAGE_SUMMARY.rows.slice(1)] });
+  for (const [name, page] of [
+    ['broken JSON', '{"listingId":"BONA-W014","rows":['],
+    ['per-unit rows beside the summary', { ...PAGE_SUMMARY, units: [{ ref: 'B91-22' }] }],
+    ['a plan price in a row', withRow({ ...row0, twoYear: 806500 })],
+    ['a unit ref in a row', withRow({ ...row0, ref: 'B91-22' })],
+    ['a negative price', withRow({ ...row0, cashFrom: -1 })],
+    ['a price that is not a number', withRow({ ...row0, cashFrom: null })],
+    ['another listing\'s summary', { ...PAGE_SUMMARY, listingId: 'BONA-W999' }],
+    ['a unit ref as a row label (a malformed sheet)', withRow({ ...row0, label: { en: 'B95-17 bedrooms', ar: 'B95-17 غرف نوم' } })],
+    ['a blank bedroom count as a row label', withRow({ ...row0, label: { en: 'null bedrooms', ar: 'null غرف نوم' } })],
+  ]) {
+    const h = unitsHarness({ page });
+    try {
+      for (const source of SOURCES) {
+        const { raw, result } = await h.ask(source);
+        notPublished(result, `${name}, ${source}`);
+        assertNoUnpublished(raw);
+      }
+      assert.equal(h.store.getCall('units-bona-web'), null, `${name}: no project card`);
+    } finally { h.cleanup(); }
+  }
+  // A penthouse with a blank bedroom cell: the page prints "Penthouse, 0–2 bedrooms", a whole-count label, quoted.
+  const blank = { label: { en: 'Penthouse, 0–2 bedrooms', ar: 'بنتهاوس، من 0 إلى 2 غرف نوم' }, count: 3, areaMin: 205.75, areaMax: 230.25, cashFrom: 1950000 };
+  const h = unitsHarness({ page: { ...PAGE_SUMMARY, count: 6, rows: [...PAGE_SUMMARY.rows.slice(0, 2), blank] } });
+  try {
+    assert.deepEqual((await h.ask('bona-whatsapp')).result.summary, { ...PUBLISHED_CUT, rows: [...PUBLISHED_CUT.rows.slice(0, 2), blank] });
   } finally { h.cleanup(); }
+});
+
+test('search_units: the site down (HTTP 500, a timeout) → the last good page for at most 6 hours, then the "not published" note', async () => {
+  for (const [name, down] of [
+    ['HTTP 500', () => new Response('oops', { status: 500 })],
+    ['a timeout', () => new Promise(() => {})],
+    ['a network error', () => new TypeError('fetch failed')],
+  ]) {
+    let up = true;
+    const h = unitsHarness({ answer: () => (up ? listingPage(PAGE_SUMMARY) : down()), timeoutMs: 20 });
+    try {
+      assert.deepEqual((await h.ask('bona-whatsapp')).result.summary, PUBLISHED_CUT, `${name}: up`);
+      up = false;
+      h.advance(6 * HOUR - MINUTE);
+      for (const source of SOURCES) {
+        const { raw, result } = await h.ask(source);
+        assert.deepEqual(result.summary, PUBLISHED_CUT, `${name}, ${source}: the last good page, within 6 hours`);
+        assertNoUnpublished(raw);
+      }
+      h.advance(15 * MINUTE);
+      for (const source of SOURCES) notPublished((await h.ask(source)).result, `${name}, ${source}: past 6 hours`);
+      assert.equal(h.site.calls.length, 3, `${name}: one GET per 15 minutes, failures included`);
+    } finally { h.cleanup(); }
+  }
+});
+
+test('search_units: a listing the inventory does not list as available, an unknown project or one without a page → not published, and only a listed project\'s page is asked', async () => {
+  const sold = unitsHarness({ status: 'sold' });
+  try {
+    for (const source of SOURCES) notPublished((await sold.ask(source)).result, `a sold listing, ${source}`);
+    assert.deepEqual(sold.site.calls, [], 'a listing the inventory has as sold: the page is not asked');
+    assert.equal(sold.store.getCall('units-bona-web'), null);
+  } finally { sold.cleanup(); }
+  const h = unitsHarness();
+  try {
+    for (const listing_id of ['BONA-005', 'BONA-W999', 'darco-prime-waterfront-fixture', '../admin']) {
+      const { raw, result } = await h.ask('bona-whatsapp', { listing_id });
+      notPublished(result, listing_id);
+      assertNoUnpublished(raw);
+    }
+    assert.deepEqual(h.site.calls, [], 'an id the inventory does not list by that exact id: no request');
+  } finally { h.cleanup(); }
+  // The page is gone (404): nothing.
+  const gone = unitsHarness({ answer: () => new Response('not found', { status: 404 }) });
+  try {
+    notPublished((await gone.ask('bona-whatsapp')).result, 'a 404');
+  } finally { gone.cleanup(); }
+});
+
+test('search_units: by default it reads the live page of the site the service is configured with (siteUrl: BONA_SITE or site.json)', async () => {
+  const h = harness();
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url) => { calls.push(String(url)); return new Response(listingPage(PAGE_SUMMARY), { status: 200 }); };
+  try {
+    const { publishedUnits: _fake, ...deps } = h.deps;
+    const tools = createToolHandlers({ ...deps, siteUrl: 'https://live.example.com', inventory: w014Inventory() });
+    const result = JSON.parse(await tools.run('search_units', { chat: { chat_id: 'default', metadata: { source: 'bona-whatsapp' } }, args: {} }));
+    assert.deepEqual(result.summary, PUBLISHED_CUT);
+    assert.deepEqual(calls, ['https://live.example.com/properties/darco-prime-waterfront-fixture/']);
+  } finally { globalThis.fetch = realFetch; h.cleanup(); }
 });
 
 test('the search_units fixture is made up: no unit ref or price of it is on the real sheet (src/data/units.json)', () => {
@@ -579,165 +724,11 @@ test('the search_units fixture is made up: no unit ref or price of it is on the 
   const refs = new Set(real.map((u) => u.ref));
   const amounts = new Set(real.flatMap((u) => Object.values(u.price ?? {})).filter((n) => typeof n === 'number'));
   // The messages name the fixture unit by its place, never by a value: a failure here prints in a public CI log.
-  [...SHEET.units, ODD_BEDS_UNIT, BLANK_PENTHOUSE, REPRICED_UNIT].forEach((u, i) => {
+  SHEET.units.forEach((u, i) => {
     assert.ok(!refs.has(u.ref), `fixture unit #${i}: its ref is on the real sheet`);
     for (const plan of Object.keys(u.price)) assert.ok(!amounts.has(u.price[plan]), `fixture unit #${i}: its ${plan} price is on the real sheet`);
   });
-});
-
-test('search_units: a penthouse with a blank bedroom cell is quoted in the penthouse row with its price, as the listing page shows it', async () => {
-  const h = unitsHarness({ sheet: { ...SHEET, units: [...SHEET.units, BLANK_PENTHOUSE] } });
-  try {
-    // The page's own label for that row (lib/units-summary.mjs reads the blank as 0), its count and its "from".
-    const penthouse = {
-      label: { en: 'Penthouse, 0–2 bedrooms', ar: 'بنتهاوس، من 0 إلى 2 غرف نوم' }, count: 3, areaMin: 205.75, areaMax: 230.25, cashFrom: 1950000,
-    };
-    for (const source of SOURCES) {
-      const { raw, result } = await h.ask(source);
-      assert.deepEqual(result.summary, { ...PUBLISHED_CUT, rows: [...PUBLISHED_CUT.rows.slice(0, 2), penthouse] }, `${source}: the page's rows`);
-      assert.equal(result.count, 6, `${source}: the blank-bedroom penthouse is counted, as on the page`);
-      assertNoUnpublished(raw, { units: [...SHEET.units, BLANK_PENTHOUSE] });
-    }
-  } finally { h.cleanup(); }
-});
-
-test('search_units: a bedroom count that would put a unit ref or stray text in a row label (a malformed sheet) quotes nothing for that project', async () => {
-  // The page would print "B95-17 bedrooms", "null bedrooms", "1.5 bedrooms", "Penthouse, NaN–NaN bedrooms"…; the API says less, never that.
-  const odd = [
-    ...[ODD_BEDS_UNIT.beds, null, 1.5, -1, 1e9].map((beds) => ({ ...ODD_BEDS_UNIT, beds })),
-    { ...ODD_BEDS_UNIT, class: 'Penthouse' },
-  ];
-  for (const [i, unit] of odd.entries()) {
-    const h = unitsHarness({ sheet: { ...SHEET, units: [...SHEET.units, unit] } });
-    try {
-      for (const source of SOURCES) {
-        const { raw, result } = await h.ask(source);
-        assert.deepEqual(result, { count: 0, summary: null, note: result.note }, `odd unit #${i}, ${source}: nothing quoted`);
-        assert.match(result.note, /not published/, `odd unit #${i}, ${source}`);
-        assertNoUnpublished(raw, { units: [...SHEET.units, unit] });
-        assert.ok(!raw.includes(ODD_BEDS_UNIT.beds), `odd unit #${i}, ${source}: its bedroom text is in the result`);
-      }
-      assert.equal(h.store.getCall('units-bona-web'), null, `odd unit #${i}: no project card`);
-    } finally { h.cleanup(); }
-  }
-});
-
-test('search_units never quotes a sheet before the listing page can show it: dated tomorrow, it waits for 00:00 Riyadh the day after its date', async () => {
-  // Pages builds at 03:00 UTC daily (and on pushes) and hides a sheet dated after its build day. The API may lag it
-  // by up to a day, never lead it: it quotes a sheet once its date is before today in Riyadh (21:00 UTC on that date).
-  let clock = Date.parse('2026-11-27T09:00:00Z');
-  const h = unitsHarness({ sheet: { ...SHEET, updated: '2026-11-28' }, extra: { now: () => clock } });
-  const quoted = { ...PUBLISHED_CUT, updated: '2026-11-28' };
-  try {
-    for (const [at, expected] of [
-      ['2026-11-27T09:00:00Z', null],    // the page built today hides it
-      ['2026-11-27T21:30:00Z', null],    // already the sheet's date in Riyadh
-      ['2026-11-28T00:00:00Z', null],    // the sheet's date in UTC, three hours before that day's Pages build
-      ['2026-11-28T02:59:59Z', null],
-      ['2026-11-28T20:59:59Z', null],    // 23:59:59 in Riyadh on the sheet's date
-      ['2026-11-28T21:00:00Z', quoted],  // 00:00 in Riyadh the next day: the 03:00 UTC build ran 18 hours ago
-      ['2026-12-05T09:00:00Z', quoted],
-    ]) {
-      clock = Date.parse(at);
-      for (const source of SOURCES) {
-        const { raw, result } = await h.ask(source);
-        assert.deepEqual(result.summary, expected, `${at}, ${source}`);
-        assert.match(result.note, expected ? /quote them as 'from'/ : /not published/, `${at}, ${source}`);
-        assertNoUnpublished(raw);
-      }
-      if (!expected) assert.equal(h.store.getCall('units-bona-web'), null, `${at}: no project card before the page shows the sheet`);
-    }
-  } finally { h.cleanup(); }
-});
-
-test('quotableSummary waits SHEET_SETTLE_MS (an hour) after units.json changed on disk, and never quotes a change from the future or of no known time', () => {
-  assert.equal(SHEET_SETTLE_MS, 60 * MINUTE);
-  const listing = { id: 'BONA-W014', status: 'available' };
-  const page = (t) => quotableSummary(SHEET, listing, UNITS_NOW, t);
-  assert.equal(page(UNITS_NOW - 59 * MINUTE), null, 'changed 59 minutes ago: the push-triggered Pages build may not be live yet');
-  assert.equal(page(UNITS_NOW - 60 * MINUTE + 1), null, 'a millisecond short of the hour');
-  assert.ok(page(UNITS_NOW - 60 * MINUTE), 'changed an hour ago: quoted');
-  assert.ok(page(UNITS_NOW - 61 * MINUTE), 'changed 61 minutes ago: quoted');
-  assert.equal(page(UNITS_NOW), null, 'changed just now');
-  assert.equal(page(UNITS_NOW + MINUTE), null, 'changed a minute in the future (a clock ahead of ours)');
-  assert.equal(page(UNITS_NOW + DAY), null, 'changed a day in the future');
-  for (const unknown of [undefined, null, NaN, Infinity, -Infinity, '0', {}]) {
-    assert.equal(page(unknown), null, `no known change time (${String(unknown)}): nothing`);
-  }
-  // Settled is not enough: the date gate still holds (a sheet dated today in Riyadh waits for tomorrow).
-  assert.equal(quotableSummary({ ...SHEET, updated: '2026-11-27' }, listing, UNITS_NOW, UNITS_NOW - DAY), null, 'settled, dated today');
-  assert.ok(quotableSummary({ ...SHEET, updated: '2026-11-26' }, listing, UNITS_NOW, UNITS_NOW - 61 * MINUTE), 'settled, dated yesterday');
-});
-
-test('search_units quotes nothing for an hour after units.json changed (repo-sync can land it while the push-triggered Pages build still runs)', async () => {
-  for (const [name, mtimeMs, expected] of [
-    ['changed 59 minutes ago', UNITS_NOW - 59 * MINUTE, null],
-    ['changed 61 minutes ago', UNITS_NOW - 61 * MINUTE, PUBLISHED_CUT],
-    ['changed a minute in the future', UNITS_NOW + MINUTE, null],
-    ['changed a day in the future', UNITS_NOW + DAY, null],
-  ]) {
-    const h = unitsHarness({ mtimeMs });
-    try {
-      for (const source of SOURCES) {
-        const { raw, result } = await h.ask(source);
-        assert.deepEqual(result.summary, expected, `${name}, ${source}`);
-        assert.match(result.note, expected ? /quote them as 'from'/ : /not published/, `${name}, ${source}`);
-        assertNoUnpublished(raw);
-      }
-      if (!expected) assert.equal(h.store.getCall('units-bona-web'), null, `${name}: no project card`);
-    } finally { h.cleanup(); }
-  }
-});
-
-test('search_units on a warm loader: a new units.json (repo-sync) stops the quotes at the next stat, and the new sheet is quoted an hour after it landed', async () => {
-  let clock = UNITS_NOW;
-  const h = unitsHarness({ unitsNow: () => clock, extra: { now: () => clock } });
-  const newer = { ...SHEET, updated: '2026-11-20', units: [REPRICED_UNIT, ...SHEET.units.slice(1)] };
-  const newerCut = { ...PUBLISHED_CUT, updated: '2026-11-20', rows: [{ ...PUBLISHED_CUT.rows[0], cashFrom: REPRICED_UNIT.price.cash }, ...PUBLISHED_CUT.rows.slice(1)] };
-  try {
-    assert.deepEqual((await h.ask('bona-whatsapp')).result.summary, PUBLISHED_CUT, 'the settled sheet');
-    // repo-sync replaces the file a minute later (past the loader's stat window), with that minute as its mtime.
-    const landed = (clock += MINUTE);
-    assert.ok(MINUTE > STAT_MS);
-    fs.writeFileSync(h.file, JSON.stringify(newer));
-    fs.utimesSync(h.file, landed / 1000, landed / 1000);
-    for (const [after, expected] of [[0, null], [30 * MINUTE, null], [60 * MINUTE - 1, null], [60 * MINUTE, newerCut], [2 * DAY, newerCut]]) {
-      clock = landed + after;
-      for (const source of SOURCES) {
-        const { raw, result } = await h.ask(source);
-        assert.deepEqual(result.summary, expected, `${after / MINUTE} min after the new file, ${source}`);
-        assertNoUnpublished(raw, { units: [...SHEET.units, ...newer.units] });
-      }
-    }
-  } finally { h.cleanup(); }
-});
-
-test('search_units on a warm loader stops quoting once units.json is removed or broken, and quotes again once it is back', async () => {
-  let t = Date.parse('2026-11-27T09:00:00Z');
-  const h = unitsHarness({ unitsNow: () => t });
-  // Each write gets a new mtime, a day or more before the tools' clock (UNITS_NOW): the settle hour is over.
-  let sec = (UNITS_NOW - 2 * DAY) / 1000;
-  const put = (text) => { fs.writeFileSync(h.file, text); fs.utimesSync(h.file, (sec += 60), sec); };
-  const notPublished = async (why) => {
-    for (const source of SOURCES) {
-      const { raw, result } = await h.ask(source);
-      assert.deepEqual(result, { count: 0, summary: null, note: result.note }, `${why}, ${source}: nothing quoted`);
-      assert.match(result.note, /not published/, `${why}, ${source}`);
-      assertNoUnpublished(raw);
-    }
-  };
-  try {
-    assert.deepEqual((await h.ask('bona-whatsapp')).result.summary, PUBLISHED_CUT, 'warm');
-    fs.rmSync(h.file);
-    t += STAT_MS + 1;
-    await notPublished('the file is removed');
-    put(JSON.stringify(SHEET));
-    t += STAT_MS + 1;
-    assert.deepEqual((await h.ask('bona-whatsapp')).result.summary, PUBLISHED_CUT, 'back');
-    put('{"listingId": "BONA-W014", "units": [');
-    t += STAT_MS + 1;
-    await notPublished('broken JSON');
-  } finally { h.cleanup(); }
+  [OLDER_PAGE_SUMMARY.cashFrom].forEach((n, i) => assert.ok(!amounts.has(n), `older page figure #${i} is on the real sheet`));
 });
 
 test('search_units: the source set the full rows by default is empty (deny by default); the veto is that one set', async () => {
@@ -757,36 +748,6 @@ test('search_units: the source set the full rows by default is empty (deny by de
   } finally { h.cleanup(); }
 });
 
-test('search_units: no live summary (listing not available, future or impossible sheet date, unknown project, no sheet) → summary null, the "not published" note', async () => {
-  const cases = [
-    ['a listing that is not available', { status: 'sold' }],
-    ['a sheet dated in the future', { sheet: { ...SHEET, updated: '2026-12-30' } }],
-    ['an impossible sheet date', { sheet: { ...SHEET, updated: '2026-02-30' } }],
-    ['no unit sheet loaded', { withUnits: false }],
-    ['a sheet with no priced unit', { sheet: { ...SHEET, units: [SHEET.units[3]] } }],
-  ];
-  for (const [name, opts] of cases) {
-    const h = unitsHarness(opts);
-    try {
-      for (const source of SOURCES) {
-        const { raw, result } = await h.ask(source);
-        assert.deepEqual(result, { count: 0, summary: null, note: result.note }, `${name}, ${source}: the allow-listed shape`);
-        assert.match(result.note, /not published/, `${name}, ${source}: ${result.note}`);
-        assertNoUnpublished(raw, opts.sheet ?? SHEET);
-      }
-      assert.equal(h.store.getCall('units-bona-web'), null, `${name}: no project card for an unpublished summary`);
-    } finally { h.cleanup(); }
-  }
-  // A project with no sheet at all.
-  const h = unitsHarness();
-  try {
-    const { raw, result } = await h.ask('bona-whatsapp', { listing_id: 'BONA-005' });
-    assert.equal(result.summary, null);
-    assert.match(result.note, /not published/);
-    assertNoUnpublished(raw);
-  } finally { h.cleanup(); }
-});
-
 test('search_units: the note says the prices are "from" prices and no longer asks for a unit reference', async () => {
   const h = unitsHarness();
   try {
@@ -797,26 +758,33 @@ test('search_units: the note says the prices are "from" prices and no longer ask
       assert.match(result.note, /payment plans are not published: offer a person/, result.note);
       assert.doesNotMatch(result.note, /unit reference|B\d{2}-\d+|quote them exactly/i, result.note);
     }
+    assert.match(UNITS_NOT_PUBLISHED_NOTE, /not published/);
+    assert.doesNotMatch(UNITS_NOT_PUBLISHED_NOTE, /unit reference|B\d{2}-\d+/i);
   } finally { h.cleanup(); }
 });
 
-test('search_units on the real W014 sheet (src/data/units.json): nothing beyond the published "from" rows, for every source', async () => {
-  const h = harness();
+test('search_units on the real W014 sheet (src/data/units.json), as the page would publish it: nothing beyond the "from" rows, for every source', async () => {
+  // The page's attribute for the real sheet, built the way ProjectDetails.astro builds it (from the summary the
+  // table prints). Every check is a boolean: these are the real sheet's figures (public CI logs).
+  const record = recordFor(JSON.parse(fs.readFileSync(WORKTREE_UNITS, 'utf8')), 'BONA-W014');
+  const s = unitSummary(record);
+  assert.ok(s !== null, 'the real W014 sheet summarises');
+  const page = {
+    listingId: 'BONA-W014', count: s.count, areaMin: s.areaMin, areaMax: s.areaMax, cashFrom: s.cashFrom, delivery: s.delivery, updated: s.updated,
+    rows: s.rows.map((r) => ({ label: r.label, count: r.count, areaMin: r.areaMin, areaMax: r.areaMax, cashFrom: r.cashFrom })),
+  };
+  const h = unitsHarness({ page });
   try {
-    // A checkout (CI's included) writes units.json just now: the clock is past its settle hour, so the real sheet is
-    // checked on what it quotes, not skipped as "not published yet".
-    const settled = fs.statSync(WORKTREE_UNITS).mtimeMs + SHEET_SETTLE_MS;
-    const tools = createToolHandlers({ ...h.deps, units: createUnits({ file: WORKTREE_UNITS }), now: () => Math.max(Date.now(), settled) });
     // One record today, an array once a second project has a sheet: every unit of every sheet is checked.
     const sheet = { units: [JSON.parse(fs.readFileSync(WORKTREE_UNITS, 'utf8'))].flat().flatMap((r) => r?.units ?? []) };
     for (const source of SOURCES) {
-      const raw = await tools.run('search_units', { chat: { chat_id: 'real', metadata: { source } }, args: UNIT_ARGS });
-      const result = JSON.parse(raw);
+      const { raw, result } = await h.ask(source);
       assert.deepEqual(keys(result), ['count', 'note', 'summary']);
-      if (result.summary) {
-        assert.deepEqual(keys(result.summary), ['delivery', 'rows', 'updated']);
-        for (const row of result.summary.rows) assert.deepEqual(keys(row), ['areaMax', 'areaMin', 'cashFrom', 'count', 'label']);
-      }
+      assert.ok(result.summary !== null, `${source}: the real sheet's page summary is quoted`);
+      assert.deepEqual(keys(result.summary), ['delivery', 'rows', 'updated']);
+      for (const row of result.summary.rows) assert.deepEqual(keys(row), ['areaMax', 'areaMin', 'cashFrom', 'count', 'label']);
+      assert.ok(isDeepStrictEqual(result.summary.rows, page.rows), `${source}: exactly the page's rows`);
+      assert.ok(result.count === s.count, `${source}: the page's count`);
       assertNoUnpublished(raw, sheet);
     }
   } finally { h.cleanup(); }
