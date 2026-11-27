@@ -172,6 +172,58 @@ test('a range shares one currency: the bound without one takes the other bound\'
   for (const s of lowerTakes) assert.deepEqual(checkReply(s, { toolResults: both }), { ok: true, hits: [] }, `${s}: both bounds returned`);
 });
 
+test('a currency (never a scale) is shared across a spaced dash, a slash and "or"/"and" in either order, when the other number is money on its own', () => {
+  const cur = (s) => findAmounts(s).map((a) => [a.raw, a.currency]);
+  const upper = [JSON.stringify({ results: [{ id: 'BONA-902', price_en: 'SAR 90,000 / year', price_ar: '90,000 ر.س سنوياً' }] })];
+  const lower = [JSON.stringify({ results: [{ id: 'BONA-902', price_en: 'SAR 80,000 / year', price_ar: '80,000 ر.س سنوياً' }] })];
+  const lowerTakes = [
+    'Annual rent is 80,000 – 90,000 SAR.', 'Annual rent is 80,000 - 90,000 SAR.', 'الإيجار 80,000 - 90,000 ريال سنوياً', 'Annual rent is 80,000 / 90,000 SAR.',
+    'Annual rent is 80,000/90,000 SAR.', 'Annual rent is 80000 – 90,000 SAR.',
+  ];
+  const upperTakes = ['SAR 80,000 – 90,000 per year', 'SAR 80,000 - 90,000 per year', 'ر.س 80,000 – 90,000 سنوياً', 'SAR 80,000/90,000 per year'];
+  for (const s of lowerTakes) {
+    assert.deepEqual(cur(s), [[80_000, 'SAR'], [90_000, 'SAR']], s);
+    assert.deepEqual(checkReply(s, { toolResults: upper }).hits, [{ kind: 'amount' }], `${s}: a lower bound no tool returned`);
+  }
+  for (const s of upperTakes) {
+    assert.deepEqual(cur(s), [[80_000, 'SAR'], [90_000, 'SAR']], s);
+    assert.deepEqual(checkReply(s, { toolResults: lower }).hits, [{ kind: 'amount' }], `${s}: an upper bound no tool returned`);
+  }
+  const range = [JSON.stringify({ results: [{ id: 'BONA-902', price_en: 'SAR 80,000 – 90,000 / year' }] })];
+  for (const s of [...lowerTakes, ...upperTakes]) assert.deepEqual(checkReply(s, { toolResults: range }), { ok: true, hits: [] }, `${s}: the tool's own range`);
+
+  // A second figure below the first: an invented discount is a negotiation (DESIGN §5.4).
+  const discounts = [
+    'Rent is SAR 90,000 or 85,000 paid in one payment.', 'الإيجار 90,000 ريال أو 85,000 دفعة وحدة', 'الإيجار 90,000 ريال او 85,000 دفعة وحدة',
+    'الإيجار 90,000 ريال و85,000 دفعة وحدة', 'SAR 90,000 and 85,000 in one payment', 'Rent is SAR 90,000 – 85,000 paid in one payment.',
+    'Rent is SAR 90,000-85,000 paid in one payment.', 'Reduced from SAR 90,000 to 85,000.', 'Rent is 90,000 or 85,000 SAR.',
+  ];
+  const twoFigures = [JSON.stringify({ results: [{ rent: 90_000 }, { rent_cash: 85_000 }] })];
+  for (const s of discounts) {
+    assert.deepEqual(cur(s), [[90_000, 'SAR'], [85_000, 'SAR']], s);
+    assert.deepEqual(checkReply(s, { toolResults: upper }).hits, [{ kind: 'amount' }], `${s}: a second figure no tool returned`);
+    assert.deepEqual(checkReply(s, { toolResults: twoFigures }), { ok: true, hits: [] }, `${s}: both figures returned`);
+  }
+
+  // The scale is never shared across a spaced dash, and a number that is not money on its own takes no currency.
+  for (const s of ['Villa 2 – 3.2 million', 'Option 2 - 3.2 million', '1- 3.2 مليون']) assert.deepEqual(amounts(s), [3_200_000], s);
+  for (const [s, want] of [
+    ['Option 1 – SAR 90,000', [[90_000, 'SAR']]], ['SAR 85,000 or 2 years', [[85_000, 'SAR']]], ['SAR 2 million or 3 bedrooms', [[2_000_000, 'SAR']]],
+    ['SAR 90,000 / 12 months', [[90_000, 'SAR']]], ['SAR 90,000 / 2026', [[90_000, 'SAR']]], ['Built 2019 – SAR 2,950,000', [[2_950_000, 'SAR']]],
+    ['SAR 90,000 or 5% off', [[90_000, 'SAR']]], ['SAR 85,000 and 1,250 m² of land', [[85_000, 'SAR']]], ['1,250 sqm – SAR 6,700,000', [[6_700_000, 'SAR']]],
+    ['SAR 6,700,000 – 1500m from the beach', [[6_700_000, 'SAR']]], ['SAR 6,700,000 – 1500 م من البحر', [[6_700_000, 'SAR']]],
+    ['Call 0500000000 – SAR 90,000', [[90_000, 'SAR']]], ['+966 50 000 0000 or SAR 90,000', [[90_000, 'SAR']]], ['29/11/2026 – SAR 90,000', [[90_000, 'SAR']]],
+    ['Ref 12 3456 – SAR 90,000', [[90_000, 'SAR']]], ['1500 م – SAR 90,000', [[90_000, 'SAR']]], ['500m – SAR 90,000', [[90_000, 'SAR']]],
+    ['SAR 90,000 – 10:30', [[90_000, 'SAR']]], ['10:30 – SAR 90,000', [[90_000, 'SAR']]], ['SAR 90,000 / 1447', [[90_000, 'SAR']]],
+  ]) assert.deepEqual(cur(s), want, s);
+  assert.deepEqual(cur('SAR 80,000, 85,000 or 90,000'), [[80_000, 'SAR']], 'a comma list stays outside the guard (the general clause form)');
+  assert.deepEqual(cur('SAR 80,000 or 85,000 or 90,000'), [[80_000, 'SAR'], [85_000, 'SAR'], [90_000, 'SAR']], 'a chain shares the currency on');
+  assert.deepEqual(checkReply('Option 1 – SAR 90,000', { toolResults: upper }), { ok: true, hits: [] });
+  assert.deepEqual(checkReply('SAR 85,000 or 2 years', { toolResults: [JSON.stringify({ results: [{ price_en: 'SAR 85,000' }] })] }), { ok: true, hits: [] });
+  assert.deepEqual(checkReply('Villa 1 – SAR 90,000, villa 2 – SAR 80,000.', { toolResults: [...upper, ...lower] }), { ok: true, hits: [] });
+  assert.deepEqual(checkReply('Villa 2 – 3.2 million', { toolResults: [JSON.stringify({ results: [{ price_cash: 3_200_000 }] })] }), { ok: true, hits: [] });
+});
+
 test('"SR" is riyals; a spelled-out thousand after a number word, or before a currency, is an amount of unknown value; idioms and areas are not', () => {
   const [sr] = findAmounts('Rent SR 85,000 a year');
   assert.deepEqual([sr.raw, sr.currency], [85_000, 'SAR']);

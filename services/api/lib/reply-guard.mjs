@@ -9,6 +9,11 @@
  * history's assistant role; email and the website chat hand in none. A client's own figure is
  * therefore never allowed back ("within your budget" instead).
  *
+ * A number without a currency is an amount from 100,000 on (DESIGN §5.4) or when it shares the currency of
+ * a number right next to it ("80,000 – 90,000 SAR", "SAR 90,000 or 85,000", `findAmounts`). A figure further
+ * away in the sentence ("SAR 90,000 a year, or 85,000 if paid in one go") stays outside the guard, as §5.4's
+ * bare-number threshold leaves it: the prompt rule ("never negotiate, discount or promise") and the eval carry it.
+ *
  * Also refused: a unit reference (`B08-19`) no tool returned in this turn, and a link to a home
  * no tool returned in this turn (an earlier guarded reply allows amounts only: yesterday's link to a
  * home that is sold or removed is a hit) or on any site but Bona's (`siteUrl`: the same scheme, host
@@ -92,16 +97,28 @@ const FRACTION_BEFORE_RE = /(?:^|[^\p{L}])[وفبكل]?(?:نص|نصف|ربع|ث�
 /** "and a half" / "and a quarter" after a scale word ("مليون ونص", "مليون و نصف", "مليون إلا ربع", "a million and a half"). */
 const FRACTION_AFTER_RE = /^[\s-]{0,2}(?:و|and[\s-]+(?:an?[\s-]+)?|(?:إلا|الا)\s{0,2})\s{0,2}(?:نص|نصف|ربع|half|quarter)(?![\p{L}])/iu;
 /**
- * The upper bound of a range right after a number: "2 and 3 million", "2.9–3.1 million", "2 إلى 3 مليون",
- * "2 و3 ملايين", "2-3m", "500-900k", "80,000–90,000 SAR", "1.2-1.5 م ريال". The lower bound takes the upper
- * bound's scale and currency, the upper bound the lower bound's currency ("SAR 80,000–90,000"). A dash counts
- * only glued on both sides: "Villa 2 – 3.2 million" and "1- 2.5 مليون" are list lines, not ranges.
+ * The number right after a number, joined by a dash, a slash or a word: "2 and 3 million", "2.9–3.1 million",
+ * "2 إلى 3 مليون", "2 و3 ملايين", "2-3m", "500-900k", "80,000–90,000 SAR", "1.2-1.5 م ريال", "80,000 – 90,000 SAR",
+ * "80,000/90,000 SAR", "SAR 90,000 or 85,000", "90,000 ريال أو 85,000".
+ *   A range (`glued`: a dash glued on both sides, or `conn`: a word) shares its scale, and then its currency, when the
+ *   lower bound is below the upper one: "between 2 and 3 million" is 2M and 3M, "SAR 80,000–90,000" both SAR.
+ *   A spaced dash or a slash never shares a scale: "Villa 2 – 3.2 million" and "1- 2.5 مليون" are list lines.
+ *   Any of them shares a currency, in either order, with a number that is money on its own (`findAmounts`).
  */
-const RANGE_AFTER_RE = new RegExp(
-  String.raw`^(?:[-–—~]|\s{0,2}(?:to|and|or|till|until|إلى|الى|حتى|لين|لـ?|و|أو|او)\s{0,2})(?:(?<cur1>${CUR})\s{0,2})?(?<num>${NUM})(?![\d])` +
+const NEXT_AFTER_RE = new RegExp(
+  String.raw`^(?:(?<glued>[-–—~])|\s{0,2}[-–—~/]\s{0,2}|\s{0,2}(?<conn>to|and|or|till|until|إلى|الى|حتى|لين|لـ?|و|أو|او)\s{0,2})` +
+  String.raw`(?:(?<cur1>${CUR})\s{0,2})?(?<num>${NUM})(?![\d])` +
   String.raw`(?<att>[km](?![\p{L}\d]))?(?:\s{0,2}(?<word>${SCALE})(?![\p{L}])|\s{0,2}(?<short>${SHORT_SCALE})(?![\p{L}\d]))?(?:\s{0,2}(?<cur2>${CUR})(?![\p{L}]))?`,
   'diu',
 );
+/** A four-digit year ("2026", Hijri "1447"), a phone or licence shape ("0500000000", nine digits or more): never money on its own. */
+const notMoneyDigits = (num) => /^(?:14|19|20)\d{2}$/.test(num) || /^0\d/.test(num) || num.length >= 9;
+/**
+ * Money on its own, the only kind of number that takes the currency of the number next to it across a spaced dash,
+ * a slash or a descending "or": thousands-grouped ("85,000", "2.950.000") or 1,000 and over at its own scale, never a
+ * year or a phone shape. Areas, percents, times and metres are ruled out by the callers (`findAmounts`, `nextNumber`).
+ */
+const moneyOnItsOwn = (num, amount) => amount >= 1000 && !(!/[,.]/.test(num) && notMoneyDigits(num));
 const AREA_AFTER_RE = /^\s{0,2}(?:m²|m2\b|sqm|sq\.?\s?m|square\s+met|sq\.?\s?ft|م²|م2|متر|مترا|أمتار|امتار)/iu;
 const PERCENT_AFTER_RE = /^\s{0,2}(?:%|٪|percent|per\s?cent|بالمية|بالمئة|في\s?المية|في\s?المئة)/iu;
 const URL_RE = /https?:\/\/[^\s<>"'`]+/giu;
@@ -164,27 +181,32 @@ function readNumber(num) {
 }
 
 /**
- * The upper bound of a range right after a number, read as `findAmounts` reads an amount: its value, its scale
- * ("2 and 3 million" → 1e6, "500-900k" → 1e3, "1.2-1.5 م ريال" → 1e6, else 1), its currency, and where its
- * number starts in `after`; null when no range follows or the upper bound is an area ("2-3 million m²").
- * Metres ("200-500m") read as scale 1, as they do for the upper bound itself. The caller decides whether it is
- * a range at all: a "lower bound" that is not below the upper one is not ("Villa 3-2.5 million").
+ * The number right after a number (`NEXT_AFTER_RE`), read as `findAmounts` reads an amount: its value, its scale
+ * ("2 and 3 million" → 1e6, "500-900k" → 1e3, "1.2-1.5 م ريال" → 1e6, else 1), its currency, where its number
+ * starts in `after`, `range` (joined so that it may share its scale: a glued dash or a word) and `money` (money on
+ * its own, so it may take the other number's currency); null when no number follows or it is an area ("2-3 million
+ * m²"). Metres ("200-500m", "1500 م") read as scale 1 and are never money, as they are for the number itself. The
+ * caller decides whether it is a range at all: a "lower bound" that is not below the upper one is not ("Villa
+ * 3-2.5 million").
  */
-function rangeUpper(after) {
-  const r = RANGE_AFTER_RE.exec(after);
+function nextNumber(after) {
+  const r = NEXT_AFTER_RE.exec(after);
   if (!r) return null;
-  const value = readNumber(r.groups.num);
+  const { num, att: rawAtt, word, short, glued, conn } = r.groups;
+  const value = readNumber(num);
   const currency = currencyOf(r.groups.cur1) ?? currencyOf(r.groups.cur2);
   // A short scale with no currency is no scale ("15-20 م"): what follows it is read from where it starts.
-  const end = r.groups.short && !currency ? r.indices.groups.short[0] : r[0].length;
+  const end = short && !currency ? r.indices.groups.short[0] : r[0].length;
   if (value === null || AREA_AFTER_RE.test(after.slice(end))) return null;
-  const att = r.groups.att?.toLowerCase();
+  const att = rawAtt?.toLowerCase();
   let scale = 1;
-  if (r.groups.word) scale = scaleOf(r.groups.word);
-  else if (r.groups.short && currency) scale = r.groups.short.toLowerCase() === 'k' ? 1e3 : 1e6;
+  if (word) scale = scaleOf(word);
+  else if (short && currency) scale = short.toLowerCase() === 'k' ? 1e3 : 1e6;
   else if (att === 'k') scale = 1e3;
   else if (att === 'm' && (value < 100 || currency)) scale = 1e6;
-  return { value, scale, currency, at: r.indices.groups.num[0] };
+  const metres = (att === 'm' || (short && short.toLowerCase() !== 'k')) && scale === 1;
+  const money = !metres && !PERCENT_AFTER_RE.test(after.slice(r[0].length)) && moneyOnItsOwn(num, value * scale);
+  return { value, scale, currency, at: r.indices.groups.num[0], range: Boolean(glued || conn), money };
 }
 
 /**
@@ -198,7 +220,7 @@ export function findAmounts(text) {
   const out = [];
   /** Where the scale words an amount used start: the word passes below skip only those. */
   const used = new Set();
-  /** Where an upper bound's number starts → the currency it takes from its lower bound ("SAR 80,000–90,000"). */
+  /** Where a next number starts → the currency it takes from the number before it ("SAR 80,000–90,000", "SAR 90,000 or 85,000"). */
   const shared = new Map();
   for (const m of s.matchAll(AMOUNT_RE)) {
     const { cur1, num, att, word, short, cur2 } = m.groups;
@@ -225,9 +247,10 @@ export function findAmounts(text) {
       continue;
     }
     const bare = !/[,.]/.test(num);
-    // The range is read after the whole amount: "80,000 ريال إلى 90,000", "2 million to 3 million SAR", "500k-900k SAR".
+    // The next number is read after the whole amount: "80,000 ريال إلى 90,000", "2 million to 3 million SAR", "500k-900k SAR".
     const amountEnd = m.index + m[0].length;
-    const up = rangeUpper(s.slice(amountEnd));
+    const next = nextNumber(s.slice(amountEnd));
+    const up = next?.range ? next : null;
     const shortScale = short && currency ? (short.toLowerCase() === 'k' ? 1e3 : 1e6) : 0; // "1.2 م ريال"; "15 م" is metres
     let scale = word ? scaleOf(word) : shortScale || 1;
     if (att) {
@@ -239,8 +262,13 @@ export function findAmounts(text) {
     // A range only when this bound is below the upper one, both read at their scale ("2.5 million or 85,000 SAR" is none).
     const range = up && value * (ownScale ? scale : up.scale) < up.value * up.scale ? up : null;
     if (range && !ownScale) scale = range.scale; // "between 2 and 3 million": the 2 is 2,000,000
-    const cur = currency ?? range?.currency ?? null; // "80,000–90,000 SAR": the 80,000 is SAR 80,000 too
-    if (range && cur && !range.currency) shared.set(amountEnd + range.at, cur); // "SAR 80,000–90,000": so is the 90,000
+    let cur = currency ?? range?.currency ?? null; // "80,000–90,000 SAR": the 80,000 is SAR 80,000 too
+    // Not a range, or across a spaced dash or a slash: the currency only (never the scale), in either order, to money on its
+    // own ("80,000 – 90,000 SAR", "90,000 or 85,000 SAR"); never to "Option 1 – SAR 90,000", metres ("1500 م – SAR 90,000")
+    // or the tail of a spaced digit run ("+966 50 000 1000 – SAR 90,000").
+    const spacedTail = bare && /\d[ \u00A0\u202F]$/.test(s.slice(0, numStart));
+    if (!cur && next?.currency && !short && !spacedTail && moneyOnItsOwn(num, value * scale)) cur = next.currency;
+    if (cur && next && !next.currency && (next === range || next.money)) shared.set(amountEnd + next.at, cur); // "SAR 80,000–90,000", "SAR 90,000 or 85,000"
     if (bare && !cur && scale === 1 && (num.length >= 9 || /^0\d/.test(num))) continue; // a phone, an ID or a licence number
     if (!Number.isFinite(value) || value <= 0) { use(); continue; }
     const raw = Math.round(value * scale);
