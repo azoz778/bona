@@ -39,11 +39,12 @@
  *     fit waits for the next send): the first row `sent`, the others `merged` into it. A summary
  *     always goes on its own (nothing joins it, and it joins nothing);
  *   - at least 25 s between two sends, read back from the ledger so a restart cannot skip it;
- *   - at most 40 sends a (Riyadh) day, every kind counted, the summary included: the overflow is
+ *   - at most 40 sends a (Riyadh) day, every kind counted, the summary included, a send that may
+ *     have gone too (a restart mid-call), and a purged lead's (onPurge below): the overflow is
  *     kept for the summary (`merged`, `over`). While summaries are on and the day's 08:00 summary
  *     has not gone yet, one of the 40 is kept for it, so the note that carries the overflow is
  *     never itself held back (DESIGN §7.3: exactly one a day) and the total stays at 40;
- *   - each send's rows are marked `uncertain` BEFORE the call: a process that dies mid-send
+ *   - each send's rows are marked `uncertain`, with the send's id, BEFORE the call: a process that dies mid-send
  *     leaves them so, and they are never sent again. The answer then decides: ok → sent; the
  *     Sending switch off or the note's minute used up → back to queued, held (30 s / 15 s, or
  *     at once when Sending is back on), sent later, nothing lost; an answer that may have gone
@@ -65,10 +66,12 @@
  * The module wakes itself when its next note is really due (one unref'd timer, at most a minute
  * ahead): the answer-adjusted time, the 25 s gap and a hold taken into account, and every 5 s
  * while a WhatsApp client's note waits for the assistant's first answer, so an answer is seen in
- * time. Only an answer WhatsApp took (outbox `accepted`) counts; one still in flight does not.
+ * time. Only an answer WhatsApp took (outbox `accepted`) counts, from the time it was taken; one
+ * still in flight does not.
  * A pass that throws still re-arms the timer. PR-INT's 5 s tick is welcome (one run at a time).
  * Nothing here logs a note's text, a name or a number: ids and codes only. A purge deletes a
- * lead's rows through the store's `onPurge` seam (rows only, never the network).
+ * lead's rows through the store's `onPurge` seam (rows only, never the network); a row holding
+ * one of today's sends is kept for the count with nothing of the lead left on it.
  *
  * INERT until PR-INT (PLAN §0, the INERT rule; Codex r1 P0 on PR-B2): all of the above runs only
  * when the caller opts in with `createOwnerNotes({ ledger: true, … })`, which PR-INT (T14, the
@@ -371,8 +374,10 @@ function createLedgerNotes({
     return { inserted, noteId: inserted ? id : null, status: inserted ? status : 'exists' };
   }
 
-  // Only an answer WhatsApp took: a `pending` row is still in flight (and may yet fail).
-  const firstAnswerSince = (leadId, since) => prep(`SELECT MIN(created) AS t FROM wa_outbox
+  // Only an answer WhatsApp took: a `pending` row is still in flight (and may yet fail). Its time is
+  // when it was TAKEN (the row's `updated`, written as it turns `accepted`: lib/wa-send.mjs, or the
+  // poller matching WhatsApp's copy; an accepted row is never written again), not when it began.
+  const firstAnswerSince = (leadId, since) => prep(`SELECT MIN(updated) AS t FROM wa_outbox
       WHERE lead_id = ? AND sender_kind = 'dana' AND status = 'accepted' AND created >= ?`).get(String(leadId), Math.trunc(since))?.t ?? null;
   const firstClientMessage = (leadId, since) => prep(`SELECT text, media_type, ts FROM wa_messages
       WHERE lead_id = ? AND direction = 'in' AND ts >= ? ORDER BY ts ASC, rowid ASC LIMIT 1`).get(String(leadId), Math.trunc(since)) ?? null;
@@ -467,8 +472,13 @@ function createLedgerNotes({
       title ? `${b.listing_id} · ${title}` : String(b.listing_id),
       [oneLine(lead.name, 60) || 'a client', phone].filter(Boolean).join(' · '),
     ];
-    if (listing) lines.push(listing.mapPrecision === 'exact' ? 'Meeting point: map link sent' : 'Meeting point: NEEDED (district only)');
-    if (!r.meta.told) lines.push('Booked, but the client was NOT told; please write to them.');
+    const told = Boolean(r.meta.told);
+    // Untold: the confirmation (and its map link) did not reach the client, so nothing says it was sent.
+    if (listing) {
+      lines.push(listing.mapPrecision !== 'exact' ? 'Meeting point: NEEDED (district only)'
+        : told ? 'Meeting point: map link sent' : 'Meeting point: exact pin, map link NOT sent');
+    }
+    if (!told) lines.push('Booked, but the client was NOT told; please write to them.');
     lines.push(leadLine(lead.lead_id));
     return { text: clipUnits(lines.join('\n'), MAX_NOTE_CHARS) };
   }
@@ -596,8 +606,13 @@ function createLedgerNotes({
     const carrier = parts[0].row;
     const members = parts.flatMap((p) => [p.row, ...p.folded]);
     const text = parts.map((p) => p.text).join('\n\n');
+    // The send's id is written with the `uncertain` mark, BEFORE the call: a process that dies
+    // after WhatsApp took the message still leaves this send counted in the day's 40.
+    const provisional = `NB-${t.toString(36)}-${randomId(6)}`;
     db.transaction(() => {
-      for (const m of members) prep("UPDATE owner_notes SET status = 'uncertain', updated = ? WHERE note_id = ? AND status = 'queued'").run(t, m.note_id);
+      for (const m of members) {
+        prep("UPDATE owner_notes SET status = 'uncertain', send_id = ?, updated = ? WHERE note_id = ? AND status = 'queued'").run(provisional, t, m.note_id);
+      }
     });
     for (const m of members) inflight.add(m.note_id);
     let res;
@@ -621,7 +636,7 @@ function createLedgerNotes({
     const outcome = classify(res);
     const t2 = now();
     if (outcome !== 'held') lastAttemptAt = Math.max(lastAttemptAt, t2);
-    const sendId = typeof res?.sendId === 'string' && res.sendId ? res.sendId : `NB-${t2.toString(36)}-${randomId(6)}`;
+    const sendId = typeof res?.sendId === 'string' && res.sendId ? res.sendId : provisional;
     const forms = [];
     db.transaction(() => {
       for (const m of members) {
@@ -897,10 +912,20 @@ function createLedgerNotes({
     return answer(enqueue({ kind: 'summary', key: `sum:${day}`, due: t, meta: { day, days: span } }));
   }
 
-  /** Inside purgeLead's transaction (store.mjs `onPurge`): the lead's rows go; nothing else, no network. */
+  /**
+   * Inside purgeLead's transaction (store.mjs `onPurge`): the lead's rows go; nothing else, no
+   * network. A row that carries one of TODAY's sends stays as a record with nothing of the lead
+   * (no lead id, a dedupe key of its own note id, no meta), as purgeLead keeps the day's outbox
+   * rows: the day's 40 and the 25 s gap count it still, so a purge never hands a send back. Such
+   * records go at the next purge once their day is over.
+   */
   function onPurge(leadId) {
     if (!db) return;
-    prep('DELETE FROM owner_notes WHERE lead_id = ?').run(String(leadId ?? ''));
+    const id = String(leadId ?? '');
+    const today = dayStart(dayKey(now(), off), off);
+    prep('DELETE FROM owner_notes WHERE lead_id = ? AND (send_id IS NULL OR updated < ?)').run(id, today);
+    prep("UPDATE owner_notes SET lead_id = NULL, dedupe_key = 'purged:' || note_id, meta = '{}' WHERE lead_id = ?").run(id);
+    prep("DELETE FROM owner_notes WHERE lead_id IS NULL AND substr(dedupe_key, 1, 7) = 'purged:' AND updated < ?").run(today);
   }
 
   function stop() {

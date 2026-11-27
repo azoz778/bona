@@ -196,6 +196,23 @@ test('an answer still in flight (a pending outbox row) is not an answer: the not
   }
 });
 
+test('the first answer counts from when WhatsApp TOOK it, not from when its send began: begun at +5 s, accepted at +15 s → due at +35 s, "answered in 15 s"', async () => {
+  for (const tickEvery of [0, 5_000]) {
+    const h = harness({ timers: true });
+    const lead = addLead(h, { name: 'Sara Example' });
+    h.autoIds.add(lead.lead_id);
+    clientSays(h, lead, `IN-ACC-${tickEvery}`, NOW, 'Hello');
+    await h.notes.leadEvent(lead, { why: 'wa', created: true, ts: NOW });
+    await h.runUntil(NOW + 5_000, { tickEvery });
+    danaAnswered(h, lead, `SND-ACC-${tickEvery}`, NOW, 'pending');
+    await h.runUntil(NOW + 15_000, { tickEvery });
+    h.inbox.updateOutbox(`SND-ACC-${tickEvery}`, { status: 'accepted', key_id: `KEY-ACC-${tickEvery}` });
+    await h.runUntil(NOW + 10 * MIN, { tickEvery });
+    assert.deepEqual(h.sentAt, [NOW + 35_000], `tick every ${tickEvery} ms`);
+    assert.match(h.sent[0], /\nAI: answered in 15 s\n/);
+  }
+});
+
 /* ---------------- 2. merging and pacing ---------------- */
 
 test('merging: notes due within 2 min go out as ONE message, the first row sent and the others merged into it', async () => {
@@ -336,6 +353,48 @@ test('with no summary on (before go-live) the limit holds all the same: the 41st
   assert.equal(h.sent.length, MAX_PER_DAY, 'nothing over 40');
   assert.deepEqual(overRows(h).map((r) => r.kind).sort(), ['alert', 'command', 'new_client']);
   assert.equal(h.receipt('ev-over-0000001'), 'over', 'held over the limit, not dropped');
+});
+
+test('a purge never reopens the day\'s 40: a lead whose note went on its own is purged after the 40th send, and the 41st is still held', async () => {
+  const h = harness();
+  const lead = addLead(h, { name: 'Sara Example', inbox_state: 'out' });
+  h.notes.alert('old_out_wrote', { leadId: lead.lead_id });
+  await h.notes.tick();
+  await alertsEvery25s(h, MAX_PER_DAY - 1, NOW + MIN_GAP_MS, 'P');
+  assert.equal(h.sent.length, MAX_PER_DAY);
+  h.notes.onPurge(lead.lead_id);
+  const raw = JSON.stringify(h.db.db.prepare('SELECT * FROM owner_notes').all());
+  assert.ok(!raw.includes(lead.lead_id), 'nothing of the purged lead is left');
+  h.at(NOW + MAX_PER_DAY * MIN_GAP_MS);
+  h.notes.alert('breaker');
+  await h.notes.tick();
+  h.at(NOW + (MAX_PER_DAY + 1) * MIN_GAP_MS);
+  await h.notes.tick();
+  assert.equal(h.sent.length, MAX_PER_DAY, 'the purge did not hand back a send');
+  assert.deepEqual(overRows(h).map((r) => [r.kind, r.meta.alert]), [['alert', 'breaker']]);
+});
+
+test('a send cut off by a restart (WhatsApp may have taken it) counts: the 40th send dies mid-call, and after the restart the 41st is held', async () => {
+  let calls = 0;
+  const h = harness({ sendNote: async () => { calls += 1; return calls < MAX_PER_DAY ? { ok: true } : new Promise(() => {}); } });
+  for (let i = 0; i < MAX_PER_DAY; i += 1) {
+    h.at(NOW + i * MIN_GAP_MS);
+    h.notes.alert('old_out_wrote', { candId: `CND-X-${String(i).padStart(4, '0')}` });
+    if (i < MAX_PER_DAY - 1) await h.notes.tick();
+    else { void h.notes.tick(); await new Promise((resolve) => setImmediate(resolve)); }
+  }
+  assert.equal(calls, MAX_PER_DAY);
+  h.notes.stop();
+
+  const after = [];
+  const restarted = createOwnerNotes({ ...h.deps, sendNote: async (t) => { after.push(t); return { ok: true }; } });
+  h.at(NOW + MAX_PER_DAY * MIN_GAP_MS);
+  restarted.alert('breaker');
+  await restarted.tick();
+  h.at(NOW + (MAX_PER_DAY + 1) * MIN_GAP_MS);
+  await restarted.tick();
+  assert.deepEqual(after, [], 'nothing goes over 40');
+  assert.deepEqual(overRows(h).map((r) => [r.kind, r.meta.alert]), [['alert', 'breaker']]);
 });
 
 /* ---------------- 3. switches ---------------- */
@@ -648,6 +707,20 @@ test('booking: told (with the meeting point by the pin) and untold; outside auto
   assert.equal(d.notes.booking('BK-NONE', { told: true }).queued, false, 'an unknown booking');
 });
 
+test('an untold booking never says something went to the client, even for an exact pin', async () => {
+  const h = harness({ inventory: inventory('exact') });
+  const lead = addLead(h, { name: 'Sara Example', phone_e164: '966500000011' });
+  h.autoIds.add(lead.lead_id);
+  const id = bookingFixture(h, lead);
+  assert.equal(h.notes.booking(id, { told: false }).queued, true);
+  await h.notes.tick();
+  assert.equal(h.sent[0], [
+    '*Bona — viewing booked*', 'Sun 29 Nov 14:00-15:00', 'BONA-W012 · Marina Tower Villa', 'Sara Example · +966500000011',
+    'Meeting point: exact pin, map link NOT sent', 'Booked, but the client was NOT told; please write to them.', leadLink(lead.lead_id),
+  ].join('\n'));
+  assert.doesNotMatch(h.sent[0], /link sent/);
+});
+
 test('stopped: the header, the reason, the link, and never a quote', async () => {
   const h = harness();
   const lead = addLead(h, { name: 'Sara Example' });
@@ -707,6 +780,27 @@ test('old_out_wrote: a fixed sentence and the Chats to check link, no name; once
   ].join('\n'));
   assert.doesNotMatch(h.sent[0], /Sara|966500/);
   assert.equal(h.rows()[0].dedupe_key, `al:old_out_wrote:${lead.lead_id}:2026-11-29`);
+  const sent = h.rows()[0];
+  h.notes.onPurge(lead.lead_id);
+  // Today's send stays counted, as a record with nothing of the lead (no id, its own key, no meta).
+  assert.deepEqual(h.rows().map((r) => [r.note_id, r.lead_id, r.dedupe_key, r.meta, r.send_id, r.updated]),
+    [[sent.note_id, null, `purged:${sent.note_id}`, {}, sent.send_id, sent.updated]]);
+  // The lead can be told about again (its keys are free), and the record goes once its day is over.
+  assert.equal(h.notes.alert('old_out_wrote', { leadId: lead.lead_id }).queued, true);
+  h.at(Date.UTC(2026, 10, 29, 21, 0, 0));
+  h.notes.onPurge(lead.lead_id);
+  assert.deepEqual(h.rows(), []);
+});
+
+test('purge: rows with no send are deleted; a send of an earlier day is deleted outright', async () => {
+  const h = harness();
+  const lead = addLead(h, { name: 'Sara Example', inbox_state: 'out' });
+  h.notes.alert('old_out_wrote', { leadId: lead.lead_id });
+  await h.notes.tick();
+  h.at(Date.UTC(2026, 10, 29, 21, 0, 0)); // the next Riyadh day
+  h.autoIds.add(lead.lead_id);
+  h.notes.handover(lead, { kind: 'offer' });
+  assert.deepEqual(h.rows().map((r) => [r.kind, r.status]), [['alert', 'sent'], ['handover', 'queued']]);
   h.notes.onPurge(lead.lead_id);
   assert.deepEqual(h.rows(), []);
 });
