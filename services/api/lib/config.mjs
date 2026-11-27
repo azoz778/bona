@@ -64,6 +64,84 @@ export function version() {
 
 const truthy = (v, fallback = false) => (v == null || v === '' ? fallback : !['0', 'false', 'no', 'off'].includes(String(v).toLowerCase()));
 
+/**
+ * An ISO 8601 instant that states its offset (`2026-11-26T05:25:00+03:00`, or `Z`), as ms;
+ * anything else is null. Stricter than `Date.parse`, which reads a value with no offset as
+ * local time and rolls `02-30` over into March: for the warm-up anchor a guess is worse
+ * than none, because none means the strictest tier.
+ */
+export function parseIsoInstant(raw) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(?:(Z)|([+-])(\d{2}):(\d{2}))$/.exec(String(raw ?? '').trim());
+  if (!m) return null;
+  const [, y, mo, d, h, mi, sec = '0', frac = '0', z, sign, oh, om] = m;
+  const n = (v) => Number(v);
+  if (n(mo) < 1 || n(mo) > 12 || n(h) > 23 || n(mi) > 59 || n(sec) > 59) return null;
+  if (!z && (n(oh) > 14 || n(om) > 59 || (n(oh) === 14 && n(om) > 0))) return null;
+  const local = Date.UTC(n(y), n(mo) - 1, n(d), n(h), n(mi), n(sec), n(frac.padEnd(3, '0')));
+  const back = new Date(local);
+  // A day that does not exist (02-30, 11-31) comes back as another date.
+  if (back.getUTCFullYear() !== n(y) || back.getUTCMonth() !== n(mo) - 1 || back.getUTCDate() !== n(d)) return null;
+  const offsetMs = z ? 0 : (sign === '-' ? -1 : 1) * (n(oh) * 60 + n(om)) * 60_000;
+  return local - offsetMs;
+}
+
+/** A plain positive number (`20`, `32.5`): no sign, no exponent, no hex, no unit; else the fallback. */
+const positiveAmount = (v, fallback) => {
+  const s = String(v ?? '').trim();
+  const num = /^\d+(?:\.\d+)?$/.test(s) ? Number(s) : NaN;
+  return Number.isFinite(num) && num > 0 ? num : fallback;
+};
+/** A plain positive whole number; else the fallback. */
+const positiveCount = (v, fallback) => {
+  const s = String(v ?? '').trim();
+  const num = /^\d{1,9}$/.test(s) ? Number(s) : NaN;
+  return Number.isSafeInteger(num) && num > 0 ? num : fallback;
+};
+/** A model id as the provider writes it (`gpt-5.6-sol`); anything else is the fallback, never sent. */
+const modelId = (v, fallback) => {
+  const s = String(v ?? '').trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(s) ? s : fallback;
+};
+/** A comma list, blanks dropped. */
+const list = (v) => String(v ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+
+/**
+ * The owner's personal WhatsApp instance, on the same Evolution server as Bona's (lib/wa.mjs
+ * defaults to it). The identity guard (DESIGN §5.3) refuses it whatever the env says, so it
+ * is always in the list; BONA_WA_PERSONAL_INSTANCES can only add names.
+ */
+export const PERSONAL_INSTANCE = 'abdulaziz-personal';
+const instanceNames = (v) => [...new Set([PERSONAL_INSTANCE, ...list(v).filter((x) => /^[A-Za-z0-9._-]{1,64}$/.test(x))])];
+
+/**
+ * The AI service's knobs (brain/DESIGN-brain.md §2, DESIGN §5.2): code defaults, so every
+ * one is optional in bona-vps.env. T26's eval may swap the two models; T18.0 writes a $50
+ * month stop while the shared phone-line key is in use.
+ */
+export const BRAIN_DEFAULTS = Object.freeze({
+  model: 'gpt-5.6-sol', backupModel: 'gpt-6.1-terra', classifyModel: 'gpt-6.1-terra', backupMode: 'answer',
+  monthAlertUsd: 40, dayStopUsd: 20, monthStopUsd: 300,
+});
+/**
+ * `answer` (the backup model answers) or `handover` (it is never called; the client gets the
+ * hand-over line). Unset is the default; a value that is neither — a typo — fails safe to
+ * `handover`, so a backup the owner meant to keep quiet never answers a client.
+ */
+const backupMode = (v) => {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (!s) return BRAIN_DEFAULTS.backupMode;
+  return s === 'answer' || s === 'handover' ? s : 'handover';
+};
+
+/**
+ * Generic AI keys are never config: the AI key lives in ~/.secrets/bona-brain.env and only
+ * lib/brain reads it (DESIGN §5.2). TK's production env holds OPENAI_API_KEY and
+ * ANTHROPIC_API_KEY, so a shared process environment could hand them in; they are dropped
+ * from `cfg.env`, which every tool handler sees, as well as never being read here.
+ */
+const AI_KEY_NAME = /^(?:BONA_)?(?:OPENAI|ANTHROPIC)_/i;
+const withoutAiKeys = (env) => Object.fromEntries(Object.entries(env ?? {}).filter(([k]) => !AI_KEY_NAME.test(k)));
+
 export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir() } = {}) {
   const fromSite = siteDefaults();
   const siteUrl = String(env.BONA_SITE ?? fromSite.siteUrl ?? 'https://bona-real-estate.com').replace(/\/+$/, '');
@@ -135,7 +213,28 @@ export function loadConfig({ env = loadEnv(), ids = readIds(), home = os.homedir
     tiktokEventsToken: String(env.TIKTOK_EVENTS_ACCESS_TOKEN ?? '').trim(),
     tiktokTestEventCode: String(env.TIKTOK_TEST_EVENT_CODE ?? '').trim(),
     logLevel: env.BONA_LOG_LEVEL ?? 'info',
-    env,
+    // Full automation (2026-11-27 DESIGN §5.2): read here, used by the modules their tasks
+    // build. Nothing reads them yet, so a deploy of this changes no behaviour.
+    // The warm-up anchor: when Bona's own number was linked. null = the strictest pacing tier.
+    waLinkedAt: parseIsoInstant(env.BONA_WA_LINKED_AT),
+    // Never a Bona instance (DESIGN §5.3): the owner's personal WhatsApp is always in it.
+    waPersonalInstances: instanceNames(env.BONA_WA_PERSONAL_INSTANCES),
+    // A volume alert at 80% and 100% of this many Dana turns a month (no $ figure).
+    danaTurnsMonthAlert: positiveCount(env.BONA_DANA_TURNS_MONTH_ALERT, 1500),
+    // The viewing calendar (DESIGN §8): ids and the key file's path, env only (never the repo).
+    gcalSaFile: String(env.BONA_GCAL_SA_FILE ?? '').trim(),
+    gcalCalendarId: String(env.BONA_GCAL_CALENDAR_ID ?? '').trim(),
+    gcalExtraBusyIds: list(env.BONA_GCAL_EXTRA_BUSY_IDS),
+    // The Kuma push URL for the WhatsApp link probe; it carries a push token.
+    kumaWaLinkPush: String(env.BONA_KUMA_WA_LINK_PUSH ?? '').trim(),
+    brainModel: modelId(env.BONA_BRAIN_MODEL, BRAIN_DEFAULTS.model),
+    brainBackupModel: modelId(env.BONA_BRAIN_BACKUP_MODEL, BRAIN_DEFAULTS.backupModel),
+    brainClassifyModel: modelId(env.BONA_BRAIN_CLASSIFY_MODEL, BRAIN_DEFAULTS.classifyModel),
+    brainBackupMode: backupMode(env.BONA_BRAIN_BACKUP_MODE),
+    brainMonthAlertUsd: positiveAmount(env.BONA_BRAIN_MONTH_ALERT_USD, BRAIN_DEFAULTS.monthAlertUsd),
+    brainDayStopUsd: positiveAmount(env.BONA_BRAIN_DAY_STOP_USD, BRAIN_DEFAULTS.dayStopUsd),
+    brainMonthStopUsd: positiveAmount(env.BONA_BRAIN_MONTH_STOP_USD, BRAIN_DEFAULTS.monthStopUsd),
+    env: withoutAiKeys(env),
     ids,
     version: version(),
   };
@@ -161,5 +260,14 @@ export function redacted(cfg) {
     hasTiktokAccountsAppId: Boolean(cfg.tiktokAccountsAppId), hasTiktokAccountsAppSecret: Boolean(cfg.tiktokAccountsAppSecret), hasTiktokAccountsAuthUrl: Boolean(cfg.tiktokAccountsAuthUrl),
     tiktokPixelId: cfg.tiktokPixelId || null, hasTiktokEventsToken: Boolean(cfg.tiktokEventsToken),
     hasMetaCapiToken: Boolean(cfg.metaCapiToken), hasGa4ApiSecret: Boolean(cfg.ga4ApiSecret), hasSnapCapiToken: Boolean(cfg.snapCapiToken),
+    // Full automation: the knobs are not secrets; a calendar id, a key file's path and a
+    // push URL are said only to exist.
+    waLinkedAt: cfg.waLinkedAt ?? null, waPersonalInstances: cfg.waPersonalInstances, danaTurnsMonthAlert: cfg.danaTurnsMonthAlert,
+    hasGcalSaFile: Boolean(cfg.gcalSaFile), hasGcalCalendarId: Boolean(cfg.gcalCalendarId),
+    gcalExtraBusyCount: Array.isArray(cfg.gcalExtraBusyIds) ? cfg.gcalExtraBusyIds.length : 0,
+    hasKumaWaLinkPush: Boolean(cfg.kumaWaLinkPush),
+    brainModel: cfg.brainModel, brainBackupModel: cfg.brainBackupModel, brainClassifyModel: cfg.brainClassifyModel,
+    brainBackupMode: cfg.brainBackupMode, brainMonthAlertUsd: cfg.brainMonthAlertUsd, brainDayStopUsd: cfg.brainDayStopUsd,
+    brainMonthStopUsd: cfg.brainMonthStopUsd,
   };
 }

@@ -9,6 +9,15 @@
  *                                 GA4_MEASUREMENT_ID, GA4_API_SECRET, SNAP_PIXEL_ID,
  *                                 SNAP_CAPI_TOKEN — empty = that integration off
  *                                 (template: services/deploy/bona-marketing.env.example)
+ *   ~/.secrets/bona-vps.env       the VPS's own BONA_* knobs (2026-11-27 DESIGN §5.2): the poll
+ *                                 interval, the warm-up anchor, the calendar file, the brain's
+ *                                 models and $ limits. VPS only, written there, read LAST so it
+ *                                 wins over bona-services.env; NOT in deploy/vps/lib.sh
+ *                                 SECRET_FILES, so sync-secrets.sh never overwrites it.
+ *
+ * Two files are deliberately NOT here: `bona-brain.env` (the AI key) and `bona-mail.env` (the
+ * mailbox password). Each is read only by the module that needs it, so neither key ever sits
+ * in `cfg.env`, which every tool handler sees.
  *
  * Values are never logged. `process.env` always wins over a file so systemd
  * (`EnvironmentFile=`) and one-off overrides stay authoritative.
@@ -54,7 +63,7 @@ export function secretsDir(home = os.homedir()) {
   return path.join(home, '.secrets');
 }
 
-/** The four env files the services read, lowest precedence first. */
+/** The five env files the services read, lowest precedence first. A missing one reads as `{}`. */
 export function defaultEnvFiles(home = os.homedir()) {
   const dir = secretsDir(home);
   return [
@@ -62,6 +71,7 @@ export function defaultEnvFiles(home = os.homedir()) {
     path.join(dir, 'evolution-api.env'),
     path.join(dir, 'bona-services.env'),
     path.join(dir, 'bona-marketing.env'),
+    path.join(dir, 'bona-vps.env'),
   ];
 }
 
