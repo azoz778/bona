@@ -11,7 +11,8 @@
  *
  * Message text is personal data. Nothing here logs, and nothing here puts text into an
  * error message. A login code never reaches the file: a `code` outbox row stores NULL
- * text whatever the caller passes (design §4.2).
+ * text whatever the caller passes (design §4.2). Nor does an owner note (DESIGN §7.1): a
+ * `note` row stores NULL text too, so a note about a client is never stored text.
  */
 import { newId } from '../db.mjs';
 import { INBOX_STATES, MAX_PROPERTY_WORDS } from './eligibility.mjs';
@@ -91,11 +92,19 @@ const IN_CHAT = "l.inbox_state = 'in' AND (l.wa_jid IS NOT NULL OR l.wa_lid IS N
 // the owner decides.
 const UNSURE_CHAT = "(l.inbox_state = 'unsure' OR l.inbox_state IS NULL) AND (l.wa_jid IS NOT NULL OR l.wa_lid IS NOT NULL)";
 
+/** The outbox kinds that keep no text (and, from the sender, no lead): a login code, an owner note. */
+const TEXTLESS_KINDS = new Set(['code', 'note']);
+
 /**
  * @param {ReturnType<import('../db.mjs').openDb>} store
- * @param {{ now?: () => number }} [o]
+ * @param {{ now?: () => number, onPurge?: (leadId: string) => void }} [o]
+ *   `onPurge(leadId)` is called by `purgeLead`, inside its transaction and before anything is
+ *   deleted (PR-F2b, critic round 2 #15): the one seam through which the viewing bookings and
+ *   the owner-notes ledger forget a purged chat (index.mjs fans it out). A subscriber only
+ *   writes rows (never the network); one that throws rolls the whole purge back.
  */
-export function createInboxStore(store, { now = () => Date.now() } = {}) {
+export function createInboxStore(store, { now = () => Date.now(), onPurge = () => {} } = {}) {
+  if (typeof onPurge !== 'function') throw new TypeError('createInboxStore: onPurge must be a function');
   const { db, transaction } = store;
   const stmts = new Map();
   const prep = (sql) => {
@@ -236,7 +245,9 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    * Written before the HTTP call, so a send that dies half-way still counts against the
    * day cap and can still be matched to the message it became. A `send_id` already there
    * is left exactly as it is: a double submit gets the row the first submit made. A new
-   * staff or Dana row of a chat moves that chat's revision on (`revision`).
+   * staff or Dana row of a chat moves that chat's revision on (`revision`). An owner note's
+   * row belongs to no chat whatever the caller passes (DESIGN §7.1): a note about client X
+   * never sits under X.
    *
    * @returns {{ inserted: boolean, row: object }}
    */
@@ -246,8 +257,8 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
     if (!OUTBOX_KINDS.includes(sender_kind)) throw new RangeError(`unknown outbox kind ${sender_kind}`);
     if (!OUTBOX_STATUSES.includes(status)) throw new RangeError(`unknown outbox status ${status}`);
     const t = now();
-    const stored = sender_kind === 'code' ? null : capText(text);
-    const chatId = str(lead_id);
+    const stored = TEXTLESS_KINDS.has(sender_kind) ? null : capText(text);
+    const chatId = sender_kind === 'note' ? null : str(lead_id);
     return transaction(() => {
       const { changes } = prep(`INSERT OR IGNORE INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts)
                                 VALUES (?,?,?,?,?,?,?,NULL,?,?,NULL,?)`)
@@ -306,8 +317,9 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   /**
    * Sends that may have gone since `sinceTs` — the durable day cap (P2-4). A failed send
    * never reached WhatsApp, so it does not count; an uncertain one may have. `excludeJid` /
-   * `excludeJids` (at most two) leave out the chats outside the shared budget: the owner's
-   * and the instance's own (one jid while BONA_WA_INSTANCE_JID is unset).
+   * `excludeJids` (at most two) leave out what is outside the shared budget: login codes and
+   * owner notes to the owner's chat and to the instance's own (one jid while
+   * BONA_WA_INSTANCE_JID is unset). A Dana or staff send to either still counts (critic C13).
    */
   function countSentSince(sinceTs, { excludeJid = null, excludeJids = [] } = {}) {
     const ex = [...new Set([excludeJid, ...excludeJids].map(str).filter(Boolean))];
@@ -315,7 +327,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
     const [a = null, b = null] = ex;
     return prep(`SELECT COUNT(*) AS n FROM wa_outbox
                  WHERE status IN ('pending','accepted','uncertain') AND created >= ?
-                   AND (? IS NULL OR jid != ?) AND (? IS NULL OR jid != ?)`)
+                   AND NOT (sender_kind IN ('code','note') AND ((? IS NOT NULL AND jid = ?) OR (? IS NOT NULL AND jid = ?)))`)
       .get(num(sinceTs), a, a, b, b).n;
   }
 
@@ -338,10 +350,11 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
 
   /**
    * Rows that only ever feed the day cap go once they are out of its window: login codes,
-   * and the stubs `purgeLead` leaves of a purged chat's sends (no text, no chat).
+   * owner notes (DESIGN §7.1; no text, no chat), and the stubs `purgeLead` leaves of a purged
+   * chat's sends (no text, no chat).
    */
   const pruneCodeRows = (beforeTs) => prep(`DELETE FROM wa_outbox
-                                            WHERE (sender_kind = 'code' OR (sender_kind IN ('staff','dana') AND lead_id IS NULL))
+                                            WHERE (sender_kind IN ('code','note') OR (sender_kind IN ('staff','dana') AND lead_id IS NULL))
                                               AND created < ?`).run(num(beforeTs)).changes;
 
   /* -------------------- read marks -------------------- */
@@ -550,6 +563,29 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
   }
 
   /**
+   * Dana's TURNS since `sinceTs` — one chat's, or everyone's (DESIGN §6.3, critic C5): the
+   * caps count answers, not bubbles, so a turn that went as a text and a brochure is one.
+   * A turn is one chat's `covers_ts` (the newest client message her batch answered, written
+   * with every row of that turn): distinct per chat, so two chats answered for a message of
+   * the same second are two turns. Counted from the outbox like `countDanaSends`, so a
+   * restart cannot hand out a fresh window; a `failed` row sent nothing. A purged chat's
+   * stubs (no lead) still count, each chat's apart: the stub keeps its jid, which stands in for
+   * the lead it lost, so two purged chats answered in the same second stay two turns. A row
+   * with no `covers_ts` (written before the column) has nothing to group it by: it is a turn of
+   * its own, so the count can run high there but never low.
+   */
+  function countDanaTurns({ leadId = null, sinceTs } = {}) {
+    // A cap read must never fail open.
+    if (!hasNumber(sinceTs)) throw new RangeError('sinceTs is required');
+    return prep(`SELECT COUNT(*) AS n FROM (
+                   SELECT DISTINCT COALESCE(lead_id, 'jid:' || jid) AS chat, covers_ts,
+                          CASE WHEN covers_ts IS NULL THEN send_id END AS lone
+                   FROM wa_outbox
+                   WHERE sender_kind = 'dana' AND status <> 'failed' AND created >= ? AND (? IS NULL OR lead_id = ?))`)
+      .get(toTs(sinceTs), str(leadId), str(leadId)).n;
+  }
+
+  /**
    * How many chats in the Bona inbox Dana is testing on (P4-4): the Team page's "Off" line
    * must not deny a test the owner armed. A chat that left the inbox had its flag reset; a
    * chat where Dana is switched off is no test (`chat_off` wins in `eligible`).
@@ -609,11 +645,17 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
    * `dana_introduced`): a chat that comes back is a fresh conversation, and she introduces
    * herself again (P4-12).
    *
+   * First, inside the same transaction and before anything is deleted, `onPurge(leadId)` (the
+   * store's option): the viewing bookings and the owner-notes ledger forget the chat there, so
+   * `leaveInbox`, `retentionPurge` and the test switch-off all reach them through this one
+   * call. A subscriber that throws rolls the purge back with it.
+   *
    * @returns {{ messages: number, outbox: number, gaps: number, reads: number }}
    */
   function purgeLead(leadId) {
     const id = String(leadId ?? '');
     return transaction(() => {
+      onPurge(id);
       const t = now();
       const sends = "lead_id = ? AND sender_kind IN ('staff','dana')";
       const counts = {
@@ -818,7 +860,7 @@ export function createInboxStore(store, { now = () => Date.now() } = {}) {
     insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
     markRead, listInbox, unreadTotal, listUnsure, countUnsure, isUnsureChat, inChatsWithoutMessages, listedLeads,
     addGap, gapsFor, clearGap, clearJoinGaps,
-    setInboxState, setHandler, setNeedsHuman, noteHumanOutbound, countDanaSends, countDanaTests, humanOutboundAfter, unansweredClientMessages,
+    setInboxState, setHandler, setNeedsHuman, noteHumanOutbound, countDanaSends, countDanaTurns, countDanaTests, humanOutboundAfter, unansweredClientMessages,
     purgeLead, leaveInbox, retentionPurge,
     noteCandidate, listCandidates, countCandidates, getCandidate, dismissCandidate, removeCandidate, removeCandidatesFor, pruneCandidates,
   };

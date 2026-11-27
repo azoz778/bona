@@ -1419,3 +1419,148 @@ test('countSentSince can leave two jids out: the owner\'s and the instance\'s ow
   assert.throws(() => inbox.countSentSince(NOW - DAY, { excludeJids: ['a', 'b', 'c'] }), TypeError);
   s.close();
 });
+
+/* -------------------- PR-F2b (DESIGN §6.3, §7.1, §8.4): note rows, turns, the purge seam -------------------- */
+
+test("a 'note' outbox row stores no text, whatever the caller passes (a note about a client never sits in the outbox)", () => {
+  const { s, inbox } = harness();
+  const { inserted, row: r } = inbox.insertOutbox({ send_id: 'SND-note', jid: OWNER_JID, text: '*Bona — new enquiry*\nName: Sara', sender_kind: 'note' });
+  assert.equal(inserted, true);
+  assert.equal(r.text, null);
+  assert.equal(r.lead_id, null);
+  assert.equal(s.db.prepare("SELECT text FROM wa_outbox WHERE send_id = 'SND-note'").get().text, null);
+  s.close();
+});
+
+test("a 'note' outbox row belongs to no chat, even when the caller names a real client's lead", () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  const rev = s.getLead('L-1').chat_rev;
+  const { row: r } = inbox.insertOutbox({ send_id: 'SND-note-lead', lead_id: 'L-1', jid: OWNER_JID, text: '*Bona — new enquiry*\nName: Sara', sender_kind: 'note' });
+  assert.deepEqual([r.lead_id, r.text], [null, null], "a note about client L-1 is never in L-1's outbox");
+  assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM wa_outbox WHERE lead_id = 'L-1'").get().n, 0);
+  assert.equal(s.getLead('L-1').chat_rev, rev, "the client's chat does not move");
+  s.close();
+});
+
+test('pruneCodeRows also prunes note rows older than the cutoff, and keeps a younger one', () => {
+  const { s, inbox, at } = harness();
+  at(NOW - 3 * DAY);
+  inbox.insertOutbox({ send_id: 'SND-note-old', jid: OWNER_JID, sender_kind: 'note', status: 'accepted' });
+  inbox.insertOutbox(out({ send_id: 'SND-staff-old', status: 'accepted' }));
+  at(NOW - DAY);
+  inbox.insertOutbox({ send_id: 'SND-note-new', jid: OWNER_JID, sender_kind: 'note', status: 'accepted' });
+  assert.equal(inbox.pruneCodeRows(NOW - 2 * DAY), 1);
+  assert.equal(inbox.getOutbox('SND-note-old'), null);
+  assert.ok(inbox.getOutbox('SND-note-new'));
+  assert.ok(inbox.getOutbox('SND-staff-old'), "a chat's send is never a code or note row");
+  s.close();
+});
+
+test("countSentSince leaves out only the free kinds (code, note) to an excluded jid: Dana and staff to the owner count (critic C13)", () => {
+  const { s, inbox, at } = harness();
+  at(NOW);
+  inbox.insertOutbox({ send_id: 'SND-code', jid: OWNER_JID, sender_kind: 'code', status: 'accepted' });
+  inbox.insertOutbox({ send_id: 'SND-note', jid: OWNER_JID, sender_kind: 'note', status: 'accepted' });
+  inbox.insertOutbox(out({ send_id: 'SND-dana', jid: OWNER_JID, user_id: null, sender_kind: 'dana', status: 'accepted', covers_ts: NOW - 1000 }));
+  inbox.insertOutbox(out({ send_id: 'SND-staff', jid: OWNER_JID, status: 'uncertain' }));
+  assert.equal(inbox.countSentSince(NOW - DAY), 4);
+  assert.equal(inbox.countSentSince(NOW - DAY, { excludeJids: [OWNER_JID] }), 2, "the owner's code and note rows are outside the budget; his Dana and staff rows are not");
+  s.close();
+});
+
+test('countDanaTurns counts distinct turns (covers_ts) per chat and in all, never a failed row', () => {
+  const { s, inbox } = harness();
+  const T = 1_790_600_000_000;
+  const row = (send_id, lead_id, covers, created, status = 'accepted', kind = 'dana') => s.db.prepare(
+    'INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, covers_ts) VALUES (?,?,?,?,NULL,?,?,NULL,?,?,?)',
+  ).run(send_id, lead_id, '966500000031@s.whatsapp.net', 't', kind, status, created, created, covers);
+  // One turn of chat A answered in two bubbles (text + brochure): one turn.
+  row('A1a', 'LEAD-A', T - 60_000, T - 50_000);
+  row('A1b', 'LEAD-A', T - 60_000, T - 45_000);
+  // A second turn of chat A, uncertain: it may have gone, so it counts.
+  row('A2', 'LEAD-A', T - 30_000, T - 20_000, 'uncertain');
+  // A failed turn sent nothing.
+  row('A3', 'LEAD-A', T - 10_000, T - 5_000, 'failed');
+  // Chat B answered a message stamped the same second as chat A's first turn: a different turn.
+  row('B1', 'LEAD-B', T - 60_000, T - 40_000);
+  // A staff row is never a Dana turn; an older turn is out of the window.
+  row('S1', 'LEAD-A', T - 1_000, T - 1_000, 'accepted', 'staff');
+  row('A0', 'LEAD-A', T - 3 * 3_600_000, T - 3 * 3_600_000);
+  assert.equal(inbox.countDanaTurns({ leadId: 'LEAD-A', sinceTs: T - 3_600_000 }), 2);
+  assert.equal(inbox.countDanaTurns({ sinceTs: T - 3_600_000 }), 3, 'every chat; two chats with one covers_ts are two turns');
+  assert.equal(inbox.countDanaTurns({ sinceTs: T - DAY }), 4);
+  assert.equal(inbox.countDanaSends({ leadId: 'LEAD-A', sinceTs: T - 3_600_000 }), 3, 'the per-send count is unchanged');
+  assert.throws(() => inbox.countDanaTurns({ sinceTs: undefined }), RangeError, 'a cap read never fails open');
+  s.close();
+});
+
+test("countDanaTurns: a purged chat's stubs stay their own chat's turns (by their jid), and a row without covers_ts is a turn of its own", () => {
+  const { s, inbox } = harness();
+  const T = 1_790_600_000_000;
+  const row = (send_id, lead_id, jid, covers, created) => s.db.prepare(
+    "INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, covers_ts) VALUES (?,?,?,NULL,NULL,'dana','accepted',NULL,?,?,?)",
+  ).run(send_id, lead_id, jid, created, created, covers);
+  const P = '966500000041@s.whatsapp.net';
+  const Q = '966500000042@s.whatsapp.net';
+  // Two purged chats (lead_id NULL), each answered for a message of the same second: two turns,
+  // and P's turn in two bubbles is still one.
+  row('P1a', null, P, T - 60_000, T - 50_000);
+  row('P1b', null, P, T - 60_000, T - 45_000);
+  row('Q1', null, Q, T - 60_000, T - 40_000);
+  // Two rows of one chat with no covers_ts (written before the column): nothing groups them, so
+  // each is a turn, never one for the pair, never none (a cap read must not fail open).
+  row('C1', 'LEAD-C', '966500000043@s.whatsapp.net', null, T - 30_000);
+  row('C2', 'LEAD-C', '966500000043@s.whatsapp.net', null, T - 20_000);
+  assert.equal(inbox.countDanaTurns({ sinceTs: T - 3_600_000 }), 4);
+  assert.equal(inbox.countDanaTurns({ leadId: 'LEAD-C', sinceTs: T - 3_600_000 }), 2);
+  s.close();
+});
+
+test('purgeLead calls onPurge once per lead, inside its transaction, before anything is deleted', () => {
+  const s = openDb(':memory:');
+  const seen = [];
+  let inbox = null;
+  inbox = createInboxStore(s, {
+    now: () => NOW,
+    onPurge: (leadId) => seen.push({ leadId, inTx: s.db.isTransaction, messages: inbox.countMessages(leadId) }),
+  });
+  chat(s, 'L-1');
+  chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net', last_msg_ts: NOW - 10 * DAY });
+  inbox.upsertMessage(msg());
+  inbox.upsertMessage(msg({ key_id: 'K-2', lead_id: 'L-2', jid: '966500000002@s.whatsapp.net', ts: NOW - 10 * DAY }));
+  inbox.purgeLead('L-1');
+  assert.deepEqual(seen, [{ leadId: 'L-1', inTx: true, messages: 1 }]);
+  seen.length = 0;
+  inbox.leaveInbox('L-2');
+  assert.deepEqual(seen, [{ leadId: 'L-2', inTx: true, messages: 1 }], 'leaveInbox reaches it through purgeLead, once');
+  seen.length = 0;
+  chat(s, 'L-3', { wa_jid: '966500000003@s.whatsapp.net' });
+  inbox.upsertMessage(msg({ key_id: 'K-3', lead_id: 'L-3', jid: '966500000003@s.whatsapp.net', ts: NOW - 6 * 365 * DAY }));
+  inbox.retentionPurge(NOW - RETENTION_MS);
+  assert.deepEqual(seen.map((e) => e.leadId), ['L-3'], 'the retention purge reaches it once per purged chat');
+  s.close();
+});
+
+test('a throwing onPurge subscriber rolls the whole purge back: nothing of the chat is deleted', () => {
+  const s = openDb(':memory:');
+  const inbox = createInboxStore(s, { now: () => NOW, onPurge: () => { throw new Error('subscriber failed'); } });
+  chat(s, 'L-1');
+  inbox.upsertMessage(msg());
+  inbox.insertOutbox(out());
+  const revBefore = inbox.revision('L-1');
+  assert.throws(() => inbox.leaveInbox('L-1'), /subscriber failed/);
+  assert.equal(inbox.countMessages('L-1'), 1);
+  assert.ok(inbox.getOutbox('SND-1'));
+  assert.equal(s.getLead('L-1').inbox_state, 'in', 'leaveInbox rolled back with it');
+  assert.equal(inbox.revision('L-1'), revBefore);
+  s.close();
+});
+
+test('createInboxStore without onPurge purges exactly as before (the default is a no-op)', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  inbox.upsertMessage(msg());
+  assert.deepEqual(inbox.purgeLead('L-1'), { messages: 1, outbox: 0, gaps: 0, reads: 0 });
+  s.close();
+});

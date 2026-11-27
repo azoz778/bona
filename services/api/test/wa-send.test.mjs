@@ -125,11 +125,11 @@ test('bad_text: empty, oversized, or not a string at all', async () => {
   h.s.close();
 });
 
-test('bad_kind: "code", "staff" and "dana" are the real kinds; a note is never sent', async () => {
+test('bad_kind: "code", "staff", "dana" and "note" are the real kinds; a note to anyone but the owner is never sent', async () => {
   const h = harness();
   const jid = '966500000001@s.whatsapp.net';
   assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'reply' }), { ok: false, error: 'bad_kind' });
-  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'note' }), { ok: false, error: 'bad_kind' });
+  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'note' }), { ok: false, error: 'bad_recipient' }, 'a note is the owner\'s alone (PR-F2b)');
   assert.deepEqual(await h.sender.sendTo({ jid, text: 'x' }), { ok: false, error: 'bad_kind' });
   assert.equal(h.calls.length, 0);
   assert.equal((await h.sender.sendTo({ jid, text: 'x', kind: 'staff' })).ok, true);
@@ -1323,6 +1323,110 @@ test('unset: only the owner is outside the shared day budget, as before the spli
   const h = harness();
   seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true);
+  assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'note' })).ok, true, "the owner's notes are outside it too");
   assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  // Only the login code and the note are free (critic C13): Dana and a staff reply into the
+  // owner's own chat (the test chat) are paced like any client's.
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited' });
+  h.inbox.insertOutbox({ send_id: 'SND-dana-owner-full', lead_id: 'LEAD-O', jid: OWNER_JID, text: 'x', sender_kind: 'dana', covers_ts: NOW - 1000 });
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'dana', leadId: 'LEAD-O', sendId: 'SND-dana-owner-full' }),
+    { ok: false, error: 'rate_limited', sendId: 'SND-dana-owner-full' });
+  h.s.close();
+});
+
+/* ---------------- kind 'note': the owner's notes (DESIGN §7.1, PR-F2b) ---------------- */
+
+/** A pending Dana row into the owner's own chat (the test chat), as Dana writes it before her send. */
+function danaOwnerRow(h, n) {
+  const send_id = `SND-dana-owner-${String(n).padStart(4, '0')}`;
+  h.inbox.insertOutbox({ send_id, lead_id: 'LEAD-O', jid: OWNER_JID, text: `Dana ${n}`, user_id: null, sender_kind: 'dana', covers_ts: NOW - 1000 });
+  return send_id;
+}
+
+test("a note goes only to the owner's own jid: anyone else is bad_recipient, before any row or call", async () => {
+  const h = harness({ env: SPLIT_ENV });
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: '*Bona — new enquiry*', kind: 'note' }), { ok: false, error: 'bad_recipient' });
+  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: '*Bona — new enquiry*', kind: 'note' }), { ok: false, error: 'bad_recipient' },
+    "not even the Bona number's own chat");
+  assert.equal(h.calls.length, 0);
+  assert.equal(outboxRows(h).length, 0);
+  h.s.close();
+});
+
+test("a note's outbox row keeps the key and the status but no text and no lead", async () => {
+  const h = harness();
+  const text = '*Bona — new enquiry*\nName: Sara\nPhone: +966500000000';
+  const out = await h.sender.sendTo({ jid: OWNER_JID, text, kind: 'note', leadId: 'LEAD-X' });
+  assert.equal(out.ok, true);
+  assert.deepEqual(h.calls[0].body, { number: OWNER_JID.split('@')[0], text }, 'WhatsApp gets the text; the ledger does not');
+  const rows = outboxRows(h);
+  assert.equal(rows.length, 1);
+  assert.deepEqual([rows[0].sender_kind, rows[0].text, rows[0].lead_id, rows[0].status, rows[0].key_id], ['note', null, null, 'accepted', 'KEY-1']);
+  assert.equal(JSON.stringify(h.logs).includes('Sara'), false);
+  h.s.close();
+});
+
+test("a note obeys the Sending switch (no bypass, ever) and BONA_WA_NOTIFY", async () => {
+  const h = harness();
+  h.team.setSetting('sending_enabled', '0');
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'n', kind: 'note', bypassSwitch: true }), { ok: false, error: 'sending_disabled' },
+    'only the owner\'s login code may pass the switch');
+  h.s.close();
+  const off = harness({ env: { ...ENV, BONA_WA_NOTIFY: '0' } });
+  assert.deepEqual(await off.sender.sendTo({ jid: OWNER_JID, text: 'n', kind: 'note' }), { ok: false, error: 'disabled' });
+  assert.equal(off.calls.length, 0);
+  off.s.close();
+});
+
+test('a note is outside the shared budget and pays its own per-recipient limit', async () => {
+  const h = harness();
+  // The shared minute used up by sends to other people...
+  for (let i = 0; i < SEND_PER_MIN; i += 1) {
+    assert.equal((await h.sender.sendTo({ jid: `9665000001${String(i).padStart(2, '0')}@s.whatsapp.net`, text: 'x', kind: 'code' })).ok, true);
+  }
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000199@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  // ...and the shared day too.
+  seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
+  for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) {
+    assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: `note ${i}`, kind: 'note' })).ok, true, `note ${i}: neither stops it`);
+  }
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'one too many', kind: 'note' }), { ok: false, error: 'rate_limited' });
+  h.s.close();
+});
+
+test("notes and Dana's sends to the owner use separate limiter keys: 6 notes do not make the next Dana send rate_limited (critic round 2 #9)", async () => {
+  const h = harness();
+  for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: `note ${i}`, kind: 'note' })).ok, true);
+  // The notes' own minute really is used up (the clock is frozen)...
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'note 7', kind: 'note' }), { ok: false, error: 'rate_limited' });
+  // ...and Dana's next send into the owner's chat goes all the same.
+  const id = danaOwnerRow(h, 1);
+  assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'Dana 1', kind: 'dana', leadId: 'LEAD-O', sendId: id })).ok, true);
+  h.s.close();
+
+  // And the other way round, in a minute of its own: Dana uses up HER per-recipient limit
+  // into the owner's chat first, and a note in that same frozen minute still goes.
+  const r = harness();
+  for (let n = 1; n <= PER_RECIPIENT_PER_MIN; n += 1) {
+    const more = danaOwnerRow(r, n);
+    assert.equal((await r.sender.sendTo({ jid: OWNER_JID, text: `Dana ${n}`, kind: 'dana', leadId: 'LEAD-O', sendId: more })).ok, true);
+  }
+  const over = danaOwnerRow(r, 99);
+  assert.deepEqual(await r.sender.sendTo({ jid: OWNER_JID, text: 'Dana 99', kind: 'dana', leadId: 'LEAD-O', sendId: over }), { ok: false, error: 'rate_limited', sendId: over });
+  const calls = r.calls.length;
+  assert.equal((await r.sender.sendTo({ jid: OWNER_JID, text: 'same minute', kind: 'note' })).ok, true, "Dana's full minute is not the note's");
+  assert.equal(r.calls.length, calls + 1);
+  r.s.close();
+});
+
+test("Dana to the owner's jid is counted in the day budget, and her row is counted once", async () => {
+  const h = harness();
+  seedOutbox(h, SEND_PER_DAY - 1, { created: NOW - 3_600_000 });
+  const id = danaOwnerRow(h, 1);
+  assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'Dana 1', kind: 'dana', leadId: 'LEAD-O', sendId: id })).ok, true,
+    'the 500th send of the day: her own pending row is this send, not an earlier one');
+  assert.equal(h.inbox.countSentSince(NOW - DAY, { excludeJids: [OWNER_JID] }), SEND_PER_DAY, 'it counts toward the 500');
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited' });
+  assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'n', kind: 'note' })).ok, true, 'a note still goes');
   h.s.close();
 });

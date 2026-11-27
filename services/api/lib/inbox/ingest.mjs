@@ -33,6 +33,13 @@
  *     written or learned. A send that went uncertain never recorded an id, and the daily
  *     upkeep prunes code rows, so a record whose text is a login code's own message is
  *     refused as well, whichever way it went.
+ *   - nor is an owner note (DESIGN §7.1, critic C2): our notes to the owner sit in his own
+ *     chat, which joins the inbox under his test switch (PR-A2). Its outbox row has no lead and
+ *     no text, so it is recognised by its message id alone, and refused before anything is
+ *     written or learned: ahead of the record-names-an-excluded-number check too, whose lesson
+ *     (the owner's number onto a lid-only row) would be taught by our own note, not by the chat.
+ *     (One whose send went uncertain never recorded an id; the poller's own-note header check,
+ *     wa-poller.mjs `OWN_NOTE_RE`, is that case's net.)
  *   - who sent an outbound record (P2-17). The dashboard's own sends are found by the
  *     WhatsApp message id their send came back with. A send that never came back
  *     (`uncertain`, or `pending` when a restart cut it off) is found by its exact text within
@@ -230,7 +237,7 @@ export function createIngest({
   /**
    * @param {object|null} lead  a `leads` row; only its `lead_id` is trusted, the row is read again
    * @param {import('../evolution.mjs').NormalisedRecord} rec
-   * @returns {{ stored: false, reason: 'not_in_inbox'|'excluded'|'no_id'|'noise'|'before_floor'|'code' }
+   * @returns {{ stored: false, reason: 'not_in_inbox'|'excluded'|'no_id'|'noise'|'before_floor'|'code'|'note' }
    *          | { stored: true, inserted: boolean, senderKind: 'client'|'staff'|'dana'|'owner_number' }}
    */
   function ingest(lead, rec) {
@@ -244,6 +251,11 @@ export function createIngest({
       if (Number.isFinite(rec.ts) && Number.isFinite(current.history_from) && rec.ts < current.history_from) {
         return { stored: false, reason: 'before_floor' };
       }
+      // The outbox row its id names, if any: read here because an owner note is refused before
+      // the exclusion check below can learn a number from it, and reused further down.
+      const byKey = inbox.outboxByKey(rec.id);
+      // An owner note, by the same id rule as a code: never a bubble in the owner's test chat.
+      if (byKey?.sender_kind === 'note') return { stored: false, reason: 'note' };
       if (recordNamesExcluded(current, rec, isExcluded, rec.fromMe ? ownersNumber() : null)) {
         // A row that learns the number excludes itself from then on; otherwise the lead id is
         // logged. Learning is from a received record only (see `learnable`).
@@ -257,7 +269,6 @@ export function createIngest({
       // And by the id its outbox row keeps, however the record is filed: refused before the
       // direction is looked at, so a code record filed as received is neither stored nor
       // learned from. The row is reused below to find who sent an outbound record.
-      const byKey = inbox.outboxByKey(rec.id);
       if (byKey?.sender_kind === 'code') return { stored: false, reason: 'code' };
 
       const direction = rec.fromMe ? 'out' : 'in';

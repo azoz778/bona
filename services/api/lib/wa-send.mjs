@@ -13,11 +13,13 @@
  *     `0`). A group, a broadcast, an `…@lid`, or a local-format number that never got
  *     turned into an international one, is refused: `lid` digits are an opaque id, not a
  *     phone number (see wa-poller.mjs).
- *   - a real `kind` — 'code' (a login code), 'staff' (a team member's reply) or 'dana'
+ *   - a real `kind` — 'code' (a login code), 'staff' (a team member's reply), 'dana'
  *     (Dana's WhatsApp answers, lib/dana-wa.mjs, which pass this same gate after her own
- *     caps) — and a `text` that is a non-empty string of at most 4096 characters. A 'dana'
- *     send must name the pending outbox row she wrote first (`sendId`), or it is refused
- *     `bad_send_id`: a Dana row is never born without the `covers_ts` it answers.
+ *     caps) or 'note' (a note to the owner, lib/owner-notes.mjs; DESIGN §7.1) — and a `text`
+ *     that is a non-empty string of at most 4096 characters. A 'dana' send must name the
+ *     pending outbox row she wrote first (`sendId`), or it is refused `bad_send_id`: a Dana
+ *     row is never born without the `covers_ts` it answers. A 'note' goes only to the
+ *     owner's own jid (`BONA_OWNER_JID`); any other recipient is `bad_recipient`.
  *   - the owner's Sending switch (`settings.sending_enabled`). It is bypassed only when
  *     the recipient IS the owner's jid (`BONA_OWNER_JID`) AND the message is a login
  *     `code` — `bypassSwitch` is a hint from the caller, never trusted on its own, because
@@ -27,10 +29,14 @@
  *   - 20 a minute across every sender, 6 a minute to any one recipient and 30 a minute
  *     from any one team member, all asked before any is charged (see lib/ratelimit.mjs
  *     `peek`), and 500 in any 24 hours, counted from the outbox (below) so that a restart
- *     cannot hand out a fresh day. Messages to the owner's jid and to the instance's own
- *     number (`BONA_WA_INSTANCE_JID`, the same number while that is unset) skip the shared
- *     per-minute and daily budget (still capped per-recipient), so a busy day of
- *     team-member codes cannot lock the owner out of logging in.
+ *     cannot hand out a fresh day. A login `code` or a `note` to the owner's jid or to the
+ *     instance's own number (`BONA_WA_INSTANCE_JID`, the same number while that is unset)
+ *     skips the shared per-minute and daily budget (still capped per-recipient), so a busy
+ *     day of team-member codes cannot lock the owner out of logging in. Only those two
+ *     kinds: Dana and a staff reply into the owner's own chat (his test chat) are paced
+ *     like any client's (critic C13). A note pays its own per-recipient limit, keyed
+ *     `note:to:<digits>`, never the `send:to:<digits>` that Dana's sends into the test chat
+ *     use, so a burst of notes cannot make her next answer `rate_limited` (critic round 2 #9).
  *   - `BONA_WA_NOTIFY=0` (`cfg.enabled`) was built to stop the lead note, and stops team
  *     replies too (see services/README.md); a login `code` only needs Evolution to be
  *     configured (`baseUrl`/`apiKey`) — otherwise the owner could be locked out by an env
@@ -38,7 +44,8 @@
  *
  * Every send that passes the gate is written to `wa_outbox` BEFORE the HTTP call, then
  * marked with what came back. A login code's row has no text (a code is never written
- * anywhere but the WhatsApp message) and no lead. The ledger is what makes the daily cap
+ * anywhere but the WhatsApp message) and no lead, and neither has a note's (a note about a
+ * client must never sit in the outbox as text, or under that client). The ledger is what makes the daily cap
  * survive a restart, what turns a send cut off by a crash into `uncertain` instead of
  * forgotten (`recoverInterrupted`), and what lets the poller tell a team member's reply
  * from the owner typing on his phone. The poller may see a message go (and mark its row
@@ -59,7 +66,9 @@
  * submit of it gets the first one's answer back — an `uncertain` one included.
  *
  * The owner's new-lead note to his own chat stays in lib/wa.mjs: that one is a message to
- * himself.
+ * himself. PR-F2b adds the 'note' kind but leaves that note where it is; PR-B2 (T11) moves it
+ * onto this kind together with the notes ledger, which holds a note this gate refuses for now.
+ * Until then no production caller sends a 'note'.
  */
 import { createLimiter } from './ratelimit.mjs';
 import { waConfig } from './wa.mjs';
@@ -72,9 +81,11 @@ export const PER_USER_PER_MIN = 30;
 export const MAX_TEXT_LEN = 4096;
 /**
  * The kinds that may be sent. 'dana' = Dana's WhatsApp answers (lib/dana-wa.mjs), which pass
- * this same gate after her own caps.
+ * this same gate after her own caps; 'note' = a note to the owner (lib/owner-notes.mjs).
  */
-const VALID_KINDS = new Set(['code', 'staff', 'dana']);
+const VALID_KINDS = new Set(['code', 'staff', 'dana', 'note']);
+/** The kinds outside the shared budget when they go to the owner or the instance's own number, and whose rows keep no text and no lead. */
+const FREE_KINDS = new Set(['code', 'note']);
 const PHONE_JID_RE = /^(\d{8,15})@s\.whatsapp\.net$/;
 /** What the reply form's hidden `send_id` must look like; anything else is not ours. */
 const SEND_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
@@ -191,7 +202,7 @@ export function createSender({
   }
 
   /**
-   * @param {{ jid: string, text: string, kind: 'code'|'staff'|'dana', userId?: string|null, bypassSwitch?: boolean,
+   * @param {{ jid: string, text: string, kind: 'code'|'staff'|'dana'|'note', userId?: string|null, bypassSwitch?: boolean,
    *           leadId?: string|null, sendId?: string|null }} o
    * @returns {Promise<{ ok: true, keyId: string, status?: number, sendId: string }
    *                 | { ok: false, error: string, uncertain?: true, sendId?: string }>}
@@ -215,6 +226,8 @@ export function createSender({
     const m = PHONE_JID_RE.exec(String(jid ?? ''));
     if (!m || m[1].startsWith('0')) return refuse('bad_recipient');
     if (!VALID_KINDS.has(kind)) return refuse('bad_kind');
+    // A note is the owner's alone: never to a client, a colleague or the Bona number itself.
+    if (kind === 'note' && m[1] !== ownerDigits) return refuse('bad_recipient');
     // Dana writes her row first, with the `covers_ts` it answers; a bare Dana send never is.
     if (kind === 'dana' && !givenRow) return refuse('bad_send_id');
     if (typeof text !== 'string' || text.length === 0 || text.length > MAX_TEXT_LEN) return refuse('bad_text');
@@ -229,15 +242,17 @@ export function createSender({
     if (kind !== 'code' && !cfg.enabled) return refuse('disabled');
     if (!cfg.baseUrl || !cfg.apiKey) return refuse('evolution-not-configured');
 
-    const free = unbudgeted.has(m[1]);
+    const free = FREE_KINDS.has(kind) && unbudgeted.has(m[1]);
     const gates = free
-      ? [[perRecipient, `send:to:${m[1]}`]]
+      ? [[perRecipient, `${kind === 'note' ? 'note' : 'send'}:to:${m[1]}`]]
       : [[perMinute, 'send:minute'], [perRecipient, `send:to:${m[1]}`], ...(userId ? [[perUser, `send:user:${userId}`]] : [])];
     let dayFull = false;
     if (!free) {
       const since = now() - DAY_MS;
       // The caller's own `pending` row is already in the count; it is this send, not an earlier one.
-      const own = givenRow && givenRow.created >= since && !unbudgetedJids.includes(givenRow.jid) ? 1 : 0;
+      // (`countSentSince` leaves out only free-kind rows to the unbudgeted jids, as `free` does.)
+      const own = givenRow && givenRow.created >= since
+        && !(FREE_KINDS.has(givenRow.sender_kind) && unbudgetedJids.includes(givenRow.jid)) ? 1 : 0;
       dayFull = inbox.countSentSince(since, { excludeJids: unbudgetedJids }) - own >= SEND_PER_DAY;
     }
     if (dayFull || gates.some(([limiter, key]) => !limiter.peek(key).ok)) {
@@ -249,9 +264,9 @@ export function createSender({
     // Written before the call, so a crash in the middle leaves a trace (`recoverInterrupted`).
     const row = givenRow ?? inbox.insertOutbox({
       send_id: given ?? newSendId(),
-      lead_id: kind === 'code' ? null : leadId,
+      lead_id: FREE_KINDS.has(kind) ? null : leadId,
       jid: `${m[1]}@s.whatsapp.net`,
-      text: kind === 'code' ? null : text,
+      text: FREE_KINDS.has(kind) ? null : text,
       user_id: userId,
       sender_kind: kind,
     }).row;

@@ -46,7 +46,7 @@ import { createStore } from './lib/store.mjs';
 import { createRetellClient, createHealthProbe, RetellError } from './lib/retell.mjs';
 import { createToolHandlers, extractToken, tokenMatches, TOOL_NAMES } from './lib/tools.mjs';
 import { extractActions } from './lib/actions.mjs';
-import { appendJsonl, createOrMergeLead, leadNote } from './lib/leads.mjs';
+import { appendJsonl, createOrMergeLead } from './lib/leads.mjs';
 import { sendText, waConfig } from './lib/wa.mjs';
 import { createTeam, TeamError, isExcludedLead } from './lib/team.mjs';
 import { createAudit } from './lib/audit.mjs';
@@ -61,6 +61,17 @@ import { createAlerts } from './lib/alerts.mjs';
 import { createDana } from './lib/dana-wa.mjs';
 import { createFundsWatch, fundsOutSince } from './lib/dana-funds.mjs';
 import { createDashboardRoutes } from './lib/dashboard/routes.mjs';
+// The module seams of the WhatsApp + email automation (PR-F2b; DESIGN §2, §7.1, §8.4). Each is a
+// stub that keeps today's behaviour until its own PR replaces it (PLAN §1.13).
+import { createOwnerTest } from './lib/owner-test.mjs';
+import { createOwnerNotes } from './lib/owner-notes.mjs';
+import { createViewing } from './lib/viewing.mjs';
+import { createWaLink } from './lib/wa-link.mjs';
+import { createPacing } from './lib/pacing.mjs';
+import { createPushPolicy } from './lib/push-policy.mjs';
+import { createDanaCommit } from './lib/dana-commit.mjs';
+import { createMail } from './lib/mail/index.mjs';
+import { createBrain } from './lib/brain.mjs';
 
 const GREETING = {
   en: "Hello, I'm Dana from Bona. How can I help you today?",
@@ -71,6 +82,11 @@ const GREETING = {
 const CODE_ROW_TTL_MS = 2 * 86_400_000;
 /** How often the real server runs `app.inboxMaintenance()`. */
 const INBOX_UPKEEP_EVERY_MS = 24 * 3_600_000;
+/**
+ * The only error codes /health may name (DESIGN §5.4): a fixed enum, never upstream text, which
+ * can carry a calendar id or an address. Anything else a module reports reads as null.
+ */
+const HEALTH_ERROR_CODES = new Set(['auth', 'forbidden', 'not_found', 'timeout', 'quota', 'network', 'bad_response']);
 
 const jsonLog = (level, obj) => {
   const line = JSON.stringify({ ts: new Date().toISOString(), level, ...obj });
@@ -229,9 +245,16 @@ export function createApp(options = {}) {
   // The fetch the sender, the backfill and the poller go out through. A test hands in a
   // fake so nothing leaves the process; left undefined, each falls back to the global fetch.
   const fetchImpl = options.fetchImpl;
+  // A chat's purge, fanned out (PR-F2b, critic round 2 #15): purgeLead calls it inside its own
+  // transaction, before it deletes anything, so leaveInbox, the retention purge and the test
+  // switch-off all reach the subscribers registered below (viewing, the owner-notes ledger)
+  // without either ever editing the store. A subscriber writes rows only; one that throws rolls
+  // the purge back.
+  const purgeSubscribers = [];
+  const onPurge = (leadId) => { for (const fn of purgeSubscribers) fn(leadId); };
   // The Bona inbox (2026-09-27 design §4): transcripts of inbox chats, the outbox every
   // send is written to before it goes, unread marks, and the gaps a thread owns up to.
-  const inboxStore = options.inboxStore ?? createInboxStore(db, { now: clock });
+  const inboxStore = options.inboxStore ?? createInboxStore(db, { now: clock, onPurge });
   // The ONE sender for messages from the owner's number to anyone else. Its per-minute
   // limits live in memory, so a second instance would be a second, independent budget;
   // the day's cap is counted from the outbox, so a restart no longer resets it.
@@ -276,8 +299,29 @@ export function createApp(options = {}) {
     pusher: pushKeys && pushSubject ? createPusher({ keys: pushKeys, subject: pushSubject, fetchImpl, now: clock }) : null,
     isExcludedLead: excludedLead, now: clock, log,
   });
+  // The instance identity guard and the link probe (DESIGN §5.3, PR-L). Stub: identity fails
+  // closed, the link reads as up, and nothing is started.
+  const waLink = options.waLink ?? createWaLink({ env: cfg.env ?? {}, alerts, fetchImpl, now: clock, log });
+  // The owner's test switch and the per-lead auto mode (DESIGN §2, §3.2, PR-A2). Stub: no test,
+  // no own-number rule, no auto mode — today's behaviour wherever it is read.
+  const ownerTest = options.ownerTest ?? createOwnerTest({ cfg, team, wa, link: waLink, log, now: clock });
+  // The owner's notes (DESIGN §7, PR-B2). Stub: today's new-enquiry note, sent at once, through
+  // today's transport, `sendWhatsApp` (the one handed to createApp, else lib/wa.mjs to the
+  // owner's chat), exactly as the form path sent it at 13e4954: PR-F2b is inert for that note.
+  // For T11: moving it onto the one sender's kind 'note' (lib/wa-send.mjs; the owner's jid only,
+  // its own `note:to:` limit, an outbox row without text) is PR-B2's change, together with the
+  // ledger that holds a note the Sending switch or the note's minute refuses for now. Until then
+  // no production caller sends kind 'note'.
+  const notes = options.notes ?? createOwnerNotes({
+    db, siteUrl: cfg.siteUrl, sendNote: sendWhatsApp, team, inbox: inboxStore, ownerTest, log, now: clock,
+  });
+  // Viewing bookings (DESIGN §8, PR-B1). Stub: nothing bookable, every hook a no-op.
+  const viewing = options.viewing ?? createViewing({ db, cfg, team, ownerTest, notes, log, now: clock });
+  // Each subscribes by its `onPurge(leadId)` (PR-B1: the lead's booked rows to cancel_pending;
+  // PR-B2: the lead's owner_notes rows). A module without one has nothing to forget.
+  purgeSubscribers.push((leadId) => viewing.onPurge?.(leadId), (leadId) => notes.onPurge?.(leadId));
   const given = options.ingest ?? createIngest({
-    db, inbox: inboxStore, ownerUserId, ownerPhone: selfDigits || null, isExcludedLead: excludedLead, log, now: clock,
+    db, inbox: inboxStore, ownerUserId, ownerPhone: selfDigits || null, isExcludedLead: excludedLead, ownerTest, log, now: clock,
   });
   // The backfill and the poller take the one-record function. A test may hand in either
   // shape, as createPoller allows; any other fails here, not on every record the poller reads.
@@ -306,28 +350,48 @@ export function createApp(options = {}) {
   // Retell out of credit (2026-10-05 design R2): every Retell call Dana makes tells this watch
   // how it went; a 402 flags it in settings and pushes the owners, six hours apart at most.
   const funds = options.funds ?? createFundsWatch({ team, alerts, now: clock, log });
+  // The concierge's tool handlers, built before Dana (PR-F2b) so the brain can run them
+  // in-process through `runTool` (DESIGN-brain §3.4). Constructing them contacts nothing.
+  const tools = createToolHandlers({
+    inventory, units, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, notifyHandoff, ownerTest, log,
+  });
+  // Bona's AI assistant on the OpenAI API (DESIGN-brain §3, PR-BR). Stub: not configured, every
+  // turn `off`; it reads no key file and calls nothing.
+  const brain = options.brain ?? createBrain({ cfg, runTool: (name, envelope) => tools.run(name, envelope), team, fetchImpl, now: clock, log });
+  // Dana's human timing and caps (DESIGN §6.2-6.3, PR-B3). Stub: today's numbers.
+  const pacing = options.pacing ?? createPacing({ cfg, now: clock });
+  // What an answer becomes after preSend (DESIGN §8.3, PR-B4). Stub: one text bubble.
+  const danaCommit = options.danaCommit ?? createDanaCommit({ viewing, notes, inventory, sender, log });
+  // `brain`, `ownerTest`, `pacing`, `commit` and `notes` are the seams PR-B3 (lib/dana-wa.mjs)
+  // reads; today's Dana ignores them, so she answers exactly as before.
   const dana = options.dana ?? createDana({
     db, inbox: inboxStore, team, sender, notifyHandoff, retell: cfg.retellMock && !danaOnMock ? null : retell, alerts, inventory, funds,
     siteUrl: cfg.siteUrl, agentId: cfg.waChatAgentId ?? null, isExcludedLead: excludedLead, backfill, budget, now: clock, log,
+    brain, ownerTest, pacing, commit: danaCommit, notes,
     ...(Number.isFinite(options.danaBatchMs) ? { batchMs: options.danaBatchMs } : {}),
   });
+  // What a stored client message sets off (PR-B2). Stub: today's hook — the phone alert, then
+  // Dana's wake — moved out of the poller's wiring below unchanged.
+  const pushPolicy = options.pushPolicy ?? createPushPolicy({ alerts, dana });
+  // Bona's mailbox (DESIGN §9, PR-C2). Stub: not configured, nothing started.
+  const mail = options.mail ?? createMail({ cfg, db, brain, notes, log, now: clock });
   // The WhatsApp Ref-code poller. Read-only, and only when `BONA_WA_POLL` says so —
   // constructing it contacts nothing; the real server (below) is what puts it on a timer.
   // Handed the inbox, so every live client message of an `in` chat is stored as it is
   // read; without `ingest` it would run in Phase 1 mode and store nothing, silently.
-  // A client message it stores raises the phone alert (P3-9) and wakes Dana (P4-16): both
-  // fired, never awaited — `notify` never rejects, `wake` only arms a timer — so a slow push
-  // service or a slow Retell never slows a tick.
+  // A client message it stores goes to the push policy, which today raises the phone alert
+  // (P3-9) and wakes Dana (P4-16): both fired, never awaited — `notify` never rejects, `wake`
+  // only arms a timer — so a slow push service or a slow Retell never slows a tick.
+  // `ownerTest`, `notes` and `link` are the seams PR-A1 (lib/wa-poller.mjs) reads; today's
+  // poller ignores them.
   const poller = options.poller ?? (cfg.waPoll ? createPoller({
     db, cfg, sendWhatsApp, isExcluded: team.isExcludedPhone, log, now: clock, fetchImpl, inboxStore, ingest: ingestRecord, backfill,
-    onClientMessage: (leadId, ts) => { alerts.notify(leadId, { ts }); dana.wake(leadId, ts); },
+    ownerTest, notes, link: waLink,
+    onClientMessage: (leadId, ts) => pushPolicy.onClientMessage(leadId, ts),
     // A stranger's chat that has just entered the Unsure list: the owners' phones say
     // "new chat to check" (2026-10-04 design, U1/U2).
     onUnsureLead: (leadId, ts) => { alerts.notify(leadId, { reason: 'check', ts }); },
   }) : null);
-  const tools = createToolHandlers({
-    inventory, units, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, notifyHandoff, log,
-  });
 
   const perMin = 60_000;
   const limiters = {
@@ -352,6 +416,7 @@ export function createApp(options = {}) {
   const app = {
     cfg, inventory, store, db, retell, tools, limiters, fanout, budget, team, audit, sender,
     inboxStore, ingest, backfill, alerts, dana, funds, handoffTelegram,
+    ownerTest, notes, viewing, waLink, pacing, pushPolicy, danaCommit, mail, brain,
     poller: options.poller ?? null,
   };
 
@@ -503,9 +568,17 @@ export function createApp(options = {}) {
 
   // The owner's dashboard. It owns its own auth (a WhatsApp one-time code), its own
   // security headers and its own limiter; nothing about it is CORS-enabled.
+  // `ownerTest`, `onSettingChanged` and `hooks` are the seams PR-F2a / PR-A3 read in
+  // lib/dashboard/routes.mjs: a Team-page switch that changed tells the test switch, a task set
+  // to cancelled and a lead leaving tell the viewing bookings. Unread until then.
   const dashboard = options.dashboard ?? createDashboardRoutes({
     db, cfg, inventory, fanout, app, log, sendWhatsApp, probeRetell, team, audit, sendCode,
-    inbox: inboxStore, sender, backfill, alerts,
+    inbox: inboxStore, sender, backfill, alerts, ownerTest,
+    onSettingChanged: (key, value) => ownerTest.onSettingChanged?.(key, value),
+    hooks: {
+      onTaskChange: (task, patch) => viewing.onTaskChange?.(task, patch),
+      onLeadLeaving: (leadId) => viewing.onLeadLeaving?.(leadId),
+    },
   });
 
   function dynamicVariables({ locale, page, sessionId }) {
@@ -570,6 +643,26 @@ export function createApp(options = {}) {
     let dbStatus = 'error';
     try { dbStatus = db.ping() ? 'ok' : 'error'; } catch { dbStatus = 'error'; }
     const fanoutCounts = () => { try { return db.fanoutCounts(); } catch { return { pending: 0, sent: 0, failed: 0, skipped: 0 }; } };
+    // Each seam module's own health (DESIGN §5.4), read so that /health only ever carries
+    // booleans and fixed enums: a module that throws, or answers anything else, reads as
+    // false / null rather than taking the report down or leaking its text. health() is
+    // synchronous: a promise is no answer (it reads as {}), and one that rejects is caught here
+    // rather than left to take the process down as an unhandled rejection.
+    const read = (fn) => {
+      try {
+        const got = fn();
+        if (got && typeof got.then === 'function') { Promise.resolve(got).catch(() => {}); return {}; }
+        return got ?? {};
+      } catch { return {}; }
+    };
+    const yes = (v) => v === true;
+    const code = (v) => (HEALTH_ERROR_CODES.has(v) ? v : null);
+    const owner = read(() => ownerTest.health());
+    const link = read(() => waLink.health());
+    const brainHealth = read(() => brain.health());
+    const booking = read(() => viewing.health());
+    const noteHealth = read(() => notes.health());
+    const mailHealth = read(() => mail.health());
     return {
       ok: inventoryOk,
       service: 'bona-api',
@@ -588,10 +681,25 @@ export function createApp(options = {}) {
       // devices, or anything a push carries.
       push: { configured: alerts.configured },
       leadReadiness: {...taskCounts(db),telegramConfigured:handoffTelegram.configured,telegramEnabled:handoffTelegram.enabled},
+      // The Bona inbox's rule (DESIGN §3, §5.3): the own-number rule or the shared one, the
+      // owner's test switch, and whether the instance's identity checked out.
+      inbox: { rule: owner.rule === 'own' ? 'own' : 'shared', ownerAsClient: yes(owner.ownerAsClient), identityOk: yes(link.identityOk) },
+      wa: { linkOk: yes(link.linkOk) },
       // Dana on WhatsApp (P4-17): whether her agent id is set, and the global switch — never a
       // chat, a count of answers, or anything she said.
       // `fundsOut`: Retell is refusing her for lack of credit (R2) — a yes or no, never when.
-      dana: { configured: dana.configured, enabled: team.danaEnabled(), fundsOut: fundsOutSince(team) !== null },
+      // `brainOk` / `brainBackup` (DESIGN-brain §10) are NOT part of `ok`: an AI outage never
+      // marks bona-api down. `breaker` and `latencyOk` are filled by PR-B3 / PR-INT.
+      dana: {
+        configured: dana.configured, enabled: team.danaEnabled(), brainOk: yes(brainHealth.ok), brainBackup: yes(brainHealth.backup),
+        fundsOut: fundsOutSince(team) !== null, breaker: false, latencyOk: null,
+      },
+      booking: {
+        enabled: yes(booking.enabled),
+        gcal: { configured: yes(booking.gcal?.configured), ok: yes(booking.gcal?.ok), lastErrorCode: code(booking.gcal?.lastErrorCode) },
+      },
+      notes: { enabled: yes(noteHealth.enabled), ok: yes(noteHealth.ok) },
+      mail: { configured: yes(mailHealth.configured), ok: yes(mailHealth.ok), lastErrorCode: code(mailHealth.lastErrorCode), replies: yes(mailHealth.replies) },
       inventory: inventory.count(),
       budget: budget.counters(),
       mock: cfg.retellMock || undefined,
@@ -778,20 +886,9 @@ export function createApp(options = {}) {
     const {lead,created} = result;
     log({ evt: 'enquiry', leadId: lead.lead_id, created, form: q.form, source: lead.source, listingId: lead.listing_id });
 
-    if (sendWhatsApp) {
-      try {
-        let timer;
-        const res = await Promise.race([
-          sendWhatsApp(leadNote(lead, { siteUrl: cfg.siteUrl })),
-          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('owner notification unconfirmed')), 4000); }),
-        ]).finally(() => clearTimeout(timer));
-        db.db.prepare('UPDATE enquiry_receipts SET notify_status=? WHERE event_id=?').run(res?.ok ? 'sent' : 'uncertain', q.event_id);
-        if (!res?.ok) log({ evt: 'lead.wa_failed', id: lead.lead_id, error: res?.error ?? 'unknown' });
-      } catch (err) {
-        db.db.prepare("UPDATE enquiry_receipts SET notify_status='uncertain' WHERE event_id=?").run(q.event_id);
-        log({ evt: 'lead.wa_error', id: lead.lead_id, error: String(err?.message ?? err) });
-      }
-    }
+    // The owner's note (DESIGN §7.1): the notes module sends it through today's transport and
+    // records the receipt's notify_status; the request waits for it for up to 4 s, as before.
+    await notes.leadEvent(lead, { why: 'form', created, eventId: q.event_id });
     await notifyHandoff(lead.lead_id);
     return { lead_id: lead.lead_id };
   }
