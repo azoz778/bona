@@ -16,7 +16,8 @@ import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normaliseSearchArgs } from './actions.mjs';
 import { toAsciiDigits } from './inventory.mjs';
 import { ensureHandoff } from './lead-tasks.mjs';
-import { liveSummary } from './units-summary.mjs';
+import { isSheetDate, liveSummary, unitSummary } from './units-summary.mjs';
+import { riyadhDay } from './budget.mjs';
 
 export const TOOL_NAMES = ['search_properties', 'show_property', 'search_units', 'create_lead', 'request_human'];
 /** The WhatsApp agent's hand-over tool (Phase 4): its invocation in a completion is what lib/dana-wa.mjs looks for. */
@@ -45,6 +46,40 @@ export function publishedUnitsCut(live) {
     })),
     delivery: live.delivery, updated: live.updated,
   };
+}
+
+/** The most bedrooms a real unit has; a larger count is some other figure in the wrong column. */
+const MAX_BEDS = 20;
+let bedLabels = null;
+/** True for a row label the listing page builds from whole bedroom counts 0..MAX_BEDS (one count, or a penthouse
+    range), taken from lib/units-summary.mjs itself so the two cannot drift. A unit ref, a blank (null), a fraction or
+    a negative count in a unit's `beds` gives a label outside this set ("B08-19 bedrooms", "null bedrooms"…). */
+function isBedLabel(label) {
+  if (!bedLabels) {
+    const unit = (beds, cls) => ({ beds, class: cls, areaSqm: 1, price: { cash: 1 } });
+    const labels = [];
+    for (let lo = 0; lo <= MAX_BEDS; lo++) {
+      labels.push(unitSummary({ units: [unit(lo, 'Standard')] }).rows[0].label);
+      for (let hi = lo; hi <= MAX_BEDS; hi++) labels.push(unitSummary({ units: [unit(lo, 'Penthouse'), unit(hi, 'Penthouse')] }).rows[0].label);
+    }
+    bedLabels = new Set(labels.map((l) => JSON.stringify([l.en, l.ar])));
+  }
+  return bedLabels.has(JSON.stringify([label?.en, label?.ar]));
+}
+
+/**
+ * What search_units may quote from one sheet at request time `nowMs` (ms): the listing page's own summary, or null.
+ * It never says anything earlier than the page, nor anything other than the page:
+ * - Time. Pages builds at 03:00 UTC daily and on pushes (.github/workflows/deploy.yml), and hides a sheet dated after
+ *   its build day (UTC). So a sheet is quoted only once its date is before today in Riyadh: from 21:00 UTC on that
+ *   date, after that day's build. The API may lag the page by up to a day; it never leads it.
+ * - Rows. The rows are liveSummary's over the same units the page summarises. When a row label is not a whole bedroom
+ *   count (a malformed sheet: the page would print a unit ref or "null bedrooms"), nothing is quoted for the project.
+ */
+export function quotableSummary(record, listing, nowMs) {
+  if (!isSheetDate(record?.updated) || record.updated >= riyadhDay(nowMs)) return null;
+  const live = liveSummary(record, listing, new Date(nowMs));
+  return live && live.rows.every((r) => isBedLabel(r.label)) ? live : null;
 }
 
 /** A duplicate `create_lead` inside this window returns the first lead's id. */
@@ -162,8 +197,9 @@ export function createToolHandlers({
   /**
    * Unit prices inside one project (today: Darco Prime Waterfront, BONA-W014), for every source: WhatsApp,
    * email, the website chat and a missing or unknown source. The answer is what the listing page publishes
-   * (lib/units-summary.mjs liveSummary): one row per bedroom count with its lowest cash price, or null when the
-   * page publishes nothing (listing not available, sheet date impossible or in the future). No unit refs, no
+   * (quotableSummary over lib/units-summary.mjs liveSummary): one row per bedroom count with its lowest cash
+   * price, or null when the page publishes nothing (listing not available, sheet date impossible or in the
+   * future), has not been built with the sheet yet, or would print a malformed row label. No unit refs, no
    * per-unit prices, no payment plans: those are not published (DESIGN §4.5). The model's filters are ignored.
    */
   async function search_units(args, ctx) {
@@ -175,7 +211,7 @@ export function createToolHandlers({
 
     const record = units ? units.forListing(listingId) : null;
     const listing = record ? inventory.find(listingId) : null;
-    const live = record && listing?.id === record.listingId ? liveSummary(record, listing, new Date(now())) : null;
+    const live = record && listing?.id === record.listingId ? quotableSummary(record, listing, now()) : null;
     if (!live) return { count: 0, summary: null, note: UNITS_NOT_PUBLISHED_NOTE };
 
     // Put the project card on screen so the visitor sees what is being discussed.

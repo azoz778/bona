@@ -1,14 +1,18 @@
 // lib/units-summary.mjs is a copy of the site's src/lib/units-summary.mjs (unitSummary, liveSummary and the
 // date checks they use), because the VPS runs bona-api from a sparse checkout (services + src/data) with no
 // src/lib (DESIGN §4.5). The copy must publish exactly what the listing page publishes, so this test runs
-// both on the W014 sheet and on the edge cases the site already handles. On the VPS sparse checkout it is
-// skipped (NO_SRC_LIB); anywhere else (the PC, a worktree, CI) a missing src/lib fails the import below.
+// both on the W014 sheet and on the edge cases the site already handles, and checks that search_units
+// (units.mjs → tools.mjs quotableSummary) quotes the page's rows or nothing, never before the page's build. On
+// the VPS sparse checkout it is skipped (NO_SRC_LIB); anywhere else (the PC, a worktree, CI) a missing src/lib
+// fails the import below. Every comparison is a boolean: the values are the real sheet's (public CI logs).
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { inspect, isDeepStrictEqual } from 'node:util';
 import test from 'node:test';
+import { publishedUnitsCut, quotableSummary } from '../lib/tools.mjs';
 import * as api from '../lib/units-summary.mjs';
 import { createUnits, WORKTREE_UNITS } from '../lib/units.mjs';
 
@@ -37,51 +41,78 @@ const W014 = [UNITS_FILE].flat().find((r) => r?.listingId === 'BONA-W014');
 const LISTINGS = JSON.parse(readFileSync(path.join(REPO_ROOT, 'src/data/listings.json'), 'utf8'));
 const LISTING = LISTINGS.find((l) => l.id === 'BONA-W014') ?? { id: 'BONA-W014', status: 'available' };
 const NOW = new Date('2026-11-27T09:00:00Z');
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
 
-/** Variants of the W014 sheet that hit each branch of the site's code. */
+/** Every value compared here comes from the real W014 sheet (unit refs, unpublished instalment prices), and a failing
+    assertion prints in a public CI log: compare to a boolean, so a failure shows its message and never either value. */
+function assertSame(a, b, what) {
+  assert.ok(isDeepStrictEqual(a, b), `${what}: the API side differs from the site`);
+}
+
+/** The listing page's newest scheduled build at or before t (.github/workflows/deploy.yml: cron '0 3 * * *', 03:00 UTC). */
+function lastCronBuild(t) {
+  const d = new Date(t);
+  const build = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 3);
+  return build <= t ? build : build - DAY;
+}
+
+/** Variants of the W014 sheet that hit each branch of the site's code, and whether search_units quotes it at NOW. */
 function cases() {
   const units = W014.units;
   const penthouse = (beds, cash, ref) => ({ ...units[0], ref, class: 'Penthouse', beds, areaSqm: 210.5, price: { ...units[0].price, cash } });
+  const standard = units.find((x) => x.class !== 'Penthouse');
+  const available = { ...LISTING, status: 'available' };
   return [
-    ['the W014 sheet', W014, { ...LISTING, status: 'available' }],
-    ['the W014 sheet on a listing that is not available', W014, { ...LISTING, status: 'sold' }],
-    ['a sheet dated in the future', { ...W014, updated: '2026-12-30' }, { ...LISTING, status: 'available' }],
-    ['an impossible sheet date', { ...W014, updated: '2026-02-30' }, { ...LISTING, status: 'available' }],
-    ['an impossible delivery', { ...W014, delivery: '2028-13' }, { ...LISTING, status: 'available' }],
-    ['a delivery given as a day', { ...W014, delivery: '2028-02-29' }, { ...LISTING, status: 'available' }],
-    ['units without a cash price or an area', { ...W014, units: [...units.slice(0, 5), { ...units[0], price: { ...units[0].price, cash: null } }, { ...units[1], areaSqm: null }, { ...units[2], price: { ...units[2].price, cash: 0 } }] }, { ...LISTING, status: 'available' }],
-    ['penthouses of one size', { ...W014, units: [...units.slice(0, 4), penthouse(2, 2_100_000, 'B07-31'), penthouse(2, 2_450_000, 'B07-32')] }, { ...LISTING, status: 'available' }],
-    ['penthouses of 1–2 bedrooms', { ...W014, units: [...units.slice(0, 4), penthouse(1, 1_900_000, 'B07-31'), penthouse(2, 2_450_000, 'B07-32')] }, { ...LISTING, status: 'available' }],
-    ['penthouses of 3–11 bedrooms', { ...W014, units: [...units.slice(0, 4), penthouse(3, 3_100_000, 'B07-31'), penthouse(11, 9_450_000, 'B07-32')] }, { ...LISTING, status: 'available' }],
-    ['a sheet with no priced unit', { ...W014, units: [] }, { ...LISTING, status: 'available' }],
-    ['no sheet at all', null, { ...LISTING, status: 'available' }],
+    ['the W014 sheet', W014, available, true],
+    ['the W014 sheet on a listing that is not available', W014, { ...LISTING, status: 'sold' }, false],
+    ['a sheet dated in the future', { ...W014, updated: '2026-12-30' }, available, false],
+    ['an impossible sheet date', { ...W014, updated: '2026-02-30' }, available, false],
+    ['an impossible delivery', { ...W014, delivery: '2028-13' }, available, true],
+    ['a delivery given as a day', { ...W014, delivery: '2028-02-29' }, available, true],
+    ['units without a cash price or an area', { ...W014, units: [...units.slice(0, 5), { ...units[0], price: { ...units[0].price, cash: null } }, { ...units[1], areaSqm: null }, { ...units[2], price: { ...units[2].price, cash: 0 } }] }, available, true],
+    ['penthouses of one size', { ...W014, units: [...units.slice(0, 4), penthouse(2, 2_100_000, 'B07-31'), penthouse(2, 2_450_000, 'B07-32')] }, available, true],
+    ['penthouses of 1–2 bedrooms', { ...W014, units: [...units.slice(0, 4), penthouse(1, 1_900_000, 'B07-31'), penthouse(2, 2_450_000, 'B07-32')] }, available, true],
+    ['penthouses of 3–11 bedrooms', { ...W014, units: [...units.slice(0, 4), penthouse(3, 3_100_000, 'B07-31'), penthouse(11, 9_450_000, 'B07-32')] }, available, true],
+    // build-units.py writes beds: null for a blank bedroom cell. On a penthouse the page keeps the unit in the penthouse
+    // row (and its price can be the row's "from"): the API quotes that same row.
+    ['a penthouse with a blank bedroom cell', { ...W014, units: [...units, penthouse(null, 1_000, 'B07-33')] }, available, true],
+    // On any other unit the page prints a "null bedrooms" row: the API quotes nothing rather than that label.
+    ['a standard unit with a blank bedroom cell', { ...W014, units: [...units, { ...standard, ref: 'B07-34', beds: null }] }, available, false],
+    ['a sheet with no priced unit', { ...W014, units: [] }, available, false],
+    ['no sheet at all', null, available, false],
   ];
 }
+
+test('assertSame fails without printing either value (public CI logs)', () => {
+  const unit = W014.units[0];
+  let err = null;
+  try { assertSame(W014, { ...W014, units: [] }, 'a record'); } catch (e) { err = e; }
+  assert.ok(err instanceof assert.AssertionError, 'a difference fails');
+  const shown = `${err.message}\n${inspect(err)}`;
+  assert.ok(![unit.ref, ...Object.values(unit.price).filter(Number.isFinite).map(String)].some((v) => shown.includes(v)),
+    'the failure output shows no unit ref or price');
+});
 
 test('lib/units-summary.mjs publishes exactly what src/lib/units-summary.mjs publishes (W014 sheet and edge cases)', { skip: NO_SRC_LIB ? 'NO_SRC_LIB' : false }, async () => {
   const site = await import(pathToFileURL(SITE_LIB).href);
   assert.ok(W014?.units?.length > 0, 'units.json has a W014 sheet with units');
   // The page reads the file as it stands, whichever shape: the same record the API copy finds.
-  assert.deepEqual(api.recordFor(UNITS_FILE, W014.listingId), site.recordFor(UNITS_FILE, W014.listingId));
+  assertSame(api.recordFor(UNITS_FILE, W014.listingId), site.recordFor(UNITS_FILE, W014.listingId), 'recordFor on units.json');
   for (const [name, record, listing] of cases()) {
-    assert.deepEqual(api.unitSummary(record), site.unitSummary(record), `unitSummary: ${name}`);
-    assert.deepEqual(api.liveSummary(record, listing, NOW), site.liveSummary(record, listing, NOW), `liveSummary: ${name}`);
-    for (const s of [record?.updated, record?.delivery]) {
-      assert.equal(api.isSheetDate(s), site.isSheetDate(s), `isSheetDate(${s}): ${name}`);
-      assert.equal(api.isDeliveryDate(s), site.isDeliveryDate(s), `isDeliveryDate(${s}): ${name}`);
+    assertSame(api.unitSummary(record), site.unitSummary(record), `unitSummary: ${name}`);
+    assertSame(api.liveSummary(record, listing, NOW), site.liveSummary(record, listing, NOW), `liveSummary: ${name}`);
+    for (const [i, s] of [record?.updated, record?.delivery].entries()) {
+      assert.equal(api.isSheetDate(s), site.isSheetDate(s), `isSheetDate(date #${i}): ${name}`);
+      assert.equal(api.isDeliveryDate(s), site.isDeliveryDate(s), `isDeliveryDate(date #${i}): ${name}`);
     }
     assert.equal(api.isSheetCurrent(record, NOW), site.isSheetCurrent(record, NOW), `isSheetCurrent: ${name}`);
   }
   // units.json as one record today, an array once a second project has a sheet.
   for (const data of [W014, [{ listingId: 'BONA-W999', units: [] }, W014]]) {
-    assert.deepEqual(api.recordFor(data, W014.listingId), site.recordFor(data, W014.listingId));
-    assert.deepEqual(api.recordFor(data, 'BONA-005'), site.recordFor(data, 'BONA-005'));
+    assertSame(api.recordFor(data, W014.listingId), site.recordFor(data, W014.listingId), 'recordFor W014');
+    assertSame(api.recordFor(data, 'BONA-005'), site.recordFor(data, 'BONA-005'), 'recordFor a listing without a sheet');
   }
-  // What bona-api actually summarises is units.mjs's copy of the record (priced units only): it must give the
-  // page's summary of the raw file.
-  const served = createUnits({ file: WORKTREE_UNITS }).forListing(W014.listingId);
-  const live = { ...LISTING, status: 'available' };
-  assert.deepEqual(api.liveSummary(served, live, NOW), site.liveSummary(W014, live, NOW));
   // The same through the production loader once units.json is an array (a second project has a sheet).
   const dir = mkdtempSync(path.join(os.tmpdir(), 'bona-units-array-'));
   try {
@@ -90,10 +121,40 @@ test('lib/units-summary.mjs publishes exactly what src/lib/units-summary.mjs pub
     writeFileSync(file, JSON.stringify(data));
     const loader = createUnits({ file });
     for (const id of [W014.listingId, 'BONA-W999']) {
-      assert.deepEqual(api.liveSummary(loader.forListing(id), { id, status: 'available' }, NOW),
+      assertSame(api.liveSummary(loader.forListing(id), { id, status: 'available' }, NOW),
         site.liveSummary(site.recordFor(data, id), { id, status: 'available' }, NOW), `array units.json: ${id}`);
     }
-    assert.equal(loader.forListing('BONA-005'), site.recordFor(data, 'BONA-005'));
+    assert.ok(loader.forListing('BONA-005') === null && site.recordFor(data, 'BONA-005') === null, 'array units.json: no sheet for BONA-005');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('search_units quotes what the page shows or nothing, and never before the page\'s build shows it (file → units.mjs → quotableSummary)', { skip: NO_SRC_LIB ? 'NO_SRC_LIB' : false }, async () => {
+  const site = await import(pathToFileURL(SITE_LIB).href);
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bona-units-quote-'));
+  try {
+    for (const [i, [name, record, listing, quotesNow]] of cases().entries()) {
+      // What bona-api actually summarises: units.mjs's copy of the record, read from the file the page builds from.
+      const file = path.join(dir, `units-${i}.json`);
+      writeFileSync(file, JSON.stringify(record));
+      const served = createUnits({ file }).forListing(W014.listingId);
+      assertSame(api.liveSummary(served, listing, NOW), site.liveSummary(record, listing, NOW), `served record: ${name}`);
+      assert.equal(Boolean(quotableSummary(served, listing, NOW.getTime())), quotesNow, `quoted at NOW: ${name}`);
+      // Every hour from a day before the sheet's date to three days after it: nothing, or the page's rows as the
+      // newest daily build shows them. A push can build the page earlier, never later than that build.
+      const base = api.isSheetDate(record?.updated) ? Date.parse(`${record.updated}T00:00:00Z`) : NOW.getTime();
+      let first = null;
+      for (let t = base - DAY; t <= base + 3 * DAY; t += HOUR) {
+        const quoted = quotableSummary(served, listing, t);
+        if (!quoted) continue;
+        first ??= t;
+        const page = site.liveSummary(record, listing, new Date(lastCronBuild(t)));
+        assert.ok(page, `${name}: quoted at ${new Date(t).toISOString()}, before the page's build shows the sheet`);
+        assertSame(publishedUnitsCut(quoted), publishedUnitsCut(page), `${name}: rows quoted at ${new Date(t).toISOString()}`);
+        assert.equal(quoted.count, page.count, `${name}: count quoted at ${new Date(t).toISOString()}`);
+      }
+      // A current sheet is quoted from 00:00 Riyadh the day after its date (21:00 UTC), less than a day after the page.
+      if (quotesNow) assert.equal(first, base + 21 * HOUR, `${name}: first quoted at 21:00 UTC on the sheet's date`);
+    }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

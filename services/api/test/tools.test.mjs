@@ -448,6 +448,8 @@ const PUBLISHED_CUT = {
 };
 // A priced unit whose bedroom count is a unit ref (a malformed sheet): it must never reach a label.
 const ODD_BEDS_UNIT = { ...UNIT('B95-17', 1, 'Standard', 57.5, [722750, 738750, 795250, 831250]), beds: 'B95-17' };
+// A blank bedroom cell on a penthouse (build-units.py writes beds: null): the page keeps it in the penthouse row.
+const BLANK_PENTHOUSE = { ...UNIT('B07-33', 2, 'Penthouse', 205.75, [1950000, 1991000, 2144000, 2242000]), beds: null };
 const UNITS_NOW = Date.parse('2026-11-27T09:00:00Z');
 const SOURCES = ['bona-whatsapp', 'bona-email', 'bona-web', undefined, 'someone-else'];
 // What a model asking for a unit would send: a unit ref, a plan, a bed count, a budget.
@@ -570,24 +572,75 @@ test('the search_units fixture is made up: no unit ref or price of it is on the 
   const refs = new Set(real.map((u) => u.ref));
   const amounts = new Set(real.flatMap((u) => Object.values(u.price ?? {})).filter((n) => typeof n === 'number'));
   // The messages name the fixture unit by its place, never by a value: a failure here prints in a public CI log.
-  [...SHEET.units, ODD_BEDS_UNIT].forEach((u, i) => {
+  [...SHEET.units, ODD_BEDS_UNIT, BLANK_PENTHOUSE].forEach((u, i) => {
     assert.ok(!refs.has(u.ref), `fixture unit #${i}: its ref is on the real sheet`);
     for (const plan of Object.keys(u.price)) assert.ok(!amounts.has(u.price[plan]), `fixture unit #${i}: its ${plan} price is on the real sheet`);
   });
 });
 
-test('search_units: a priced unit with a unit ref (or no number) for its bedroom count is left out, never put in a label', async () => {
-  for (const beds of [ODD_BEDS_UNIT.beds, null, 1.5]) {
-    const h = unitsHarness({ sheet: { ...SHEET, units: [...SHEET.units, { ...ODD_BEDS_UNIT, beds }] } });
+test('search_units: a penthouse with a blank bedroom cell is quoted in the penthouse row with its price, as the listing page shows it', async () => {
+  const h = unitsHarness({ sheet: { ...SHEET, units: [...SHEET.units, BLANK_PENTHOUSE] } });
+  try {
+    // The page's own label for that row (lib/units-summary.mjs reads the blank as 0), its count and its "from".
+    const penthouse = {
+      label: { en: 'Penthouse, 0–2 bedrooms', ar: 'بنتهاوس، من 0 إلى 2 غرف نوم' }, count: 3, areaMin: 205.75, areaMax: 230.25, cashFrom: 1950000,
+    };
+    for (const source of SOURCES) {
+      const { raw, result } = await h.ask(source);
+      assert.deepEqual(result.summary, { ...PUBLISHED_CUT, rows: [...PUBLISHED_CUT.rows.slice(0, 2), penthouse] }, `${source}: the page's rows`);
+      assert.equal(result.count, 6, `${source}: the blank-bedroom penthouse is counted, as on the page`);
+      assertNoUnpublished(raw, { units: [...SHEET.units, BLANK_PENTHOUSE] });
+    }
+  } finally { h.cleanup(); }
+});
+
+test('search_units: a bedroom count that would put a unit ref or stray text in a row label (a malformed sheet) quotes nothing for that project', async () => {
+  // The page would print "B95-17 bedrooms", "null bedrooms", "1.5 bedrooms", "Penthouse, NaN–NaN bedrooms"…; the API says less, never that.
+  const odd = [
+    ...[ODD_BEDS_UNIT.beds, null, 1.5, -1, 1e9].map((beds) => ({ ...ODD_BEDS_UNIT, beds })),
+    { ...ODD_BEDS_UNIT, class: 'Penthouse' },
+  ];
+  for (const [i, unit] of odd.entries()) {
+    const h = unitsHarness({ sheet: { ...SHEET, units: [...SHEET.units, unit] } });
     try {
       for (const source of SOURCES) {
         const { raw, result } = await h.ask(source);
-        assert.deepEqual(result.summary, PUBLISHED_CUT, `beds ${JSON.stringify(beds)}, ${source}: the well-formed rows only`);
-        assert.equal(result.count, 5, `beds ${JSON.stringify(beds)}, ${source}: the odd unit is not counted`);
-        assertNoUnpublished(raw, { units: [...SHEET.units, ODD_BEDS_UNIT] });
+        assert.deepEqual(result, { count: 0, summary: null, note: result.note }, `odd unit #${i}, ${source}: nothing quoted`);
+        assert.match(result.note, /not published/, `odd unit #${i}, ${source}`);
+        assertNoUnpublished(raw, { units: [...SHEET.units, unit] });
+        assert.ok(!raw.includes(ODD_BEDS_UNIT.beds), `odd unit #${i}, ${source}: its bedroom text is in the result`);
       }
+      assert.equal(h.store.getCall('units-bona-web'), null, `odd unit #${i}: no project card`);
     } finally { h.cleanup(); }
   }
+});
+
+test('search_units never quotes a sheet before the listing page can show it: dated tomorrow, it waits for 00:00 Riyadh the day after its date', async () => {
+  // Pages builds at 03:00 UTC daily (and on pushes) and hides a sheet dated after its build day. The API may lag it
+  // by up to a day, never lead it: it quotes a sheet once its date is before today in Riyadh (21:00 UTC on that date).
+  let clock = Date.parse('2026-11-27T09:00:00Z');
+  const h = unitsHarness({ sheet: { ...SHEET, updated: '2026-11-28' }, extra: { now: () => clock } });
+  const quoted = { ...PUBLISHED_CUT, updated: '2026-11-28' };
+  try {
+    for (const [at, expected] of [
+      ['2026-11-27T09:00:00Z', null],    // the page built today hides it
+      ['2026-11-27T21:30:00Z', null],    // already the sheet's date in Riyadh
+      ['2026-11-28T00:00:00Z', null],    // the sheet's date in UTC, three hours before that day's Pages build
+      ['2026-11-28T02:59:59Z', null],
+      ['2026-11-28T20:59:59Z', null],    // 23:59:59 in Riyadh on the sheet's date
+      ['2026-11-28T21:00:00Z', quoted],  // 00:00 in Riyadh the next day: the 03:00 UTC build ran 18 hours ago
+      ['2026-12-05T09:00:00Z', quoted],
+    ]) {
+      clock = Date.parse(at);
+      for (const source of SOURCES) {
+        const { raw, result } = await h.ask(source);
+        assert.deepEqual(result.summary, expected, `${at}, ${source}`);
+        assert.match(result.note, expected ? /quote them as 'from'/ : /not published/, `${at}, ${source}`);
+        assertNoUnpublished(raw);
+      }
+      if (!expected) assert.equal(h.store.getCall('units-bona-web'), null, `${at}: no project card before the page shows the sheet`);
+    }
+  } finally { h.cleanup(); }
 });
 
 test('search_units on a warm loader stops quoting once units.json is removed or broken, and quotes again once it is back', async () => {

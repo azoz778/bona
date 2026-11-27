@@ -39,10 +39,10 @@ export const PLAN_LABELS = {
 
 const fmt = (n) => (typeof n === 'number' ? n.toLocaleString('en-US') : null);
 
-/** The most bedrooms a real unit has; a larger "count" is some other number in the wrong column. */
-const MAX_BEDS = 20;
-/** A unit search_units may summarise: a printed cash price (TAQEEM) and a whole bedroom count. */
-const isServable = (u) => typeof u?.price?.cash === 'number' && Number.isInteger(u.beds) && u.beds >= 0 && u.beds <= MAX_BEDS;
+/** A unit with a printed cash price (TAQEEM). Nothing else is filtered here: the listing page summarises every such
+    unit, so search_units must too, or it would quote another "from" than the page (a blank bedroom cell is beds: null).
+    A bedroom count that would put a unit ref or stray text in a row label is caught in tools.mjs quotableSummary. */
+const isPriced = (u) => typeof u?.price?.cash === 'number';
 
 /** "SAR 1,069,607" / "1,069,607 ر.س" — same digits both locales, like inventory.mjs. */
 export function money(amount, lang = 'en') {
@@ -69,14 +69,12 @@ export function createUnits({ file = WORKTREE_UNITS, now = Date.now } = {}) {
   let mtime = 0;
 
   /** Every sheet in the file, each with its priced units only. units.json is one record today and an array once
-      a second project has a sheet: the two shapes the listing page reads (src/lib/units-summary.mjs recordFor).
-      A unit also needs a whole bedroom count: the published row label is built from it, so a malformed sheet
-      (a unit ref or nothing in `beds`) must not put that text in front of a client. */
+      a second project has a sheet: the two shapes the listing page reads (src/lib/units-summary.mjs recordFor). */
   function read() {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
     const records = (Array.isArray(raw) ? raw : [raw])
       .filter((r) => r && typeof r === 'object' && !Array.isArray(r))
-      .map((r) => ({ ...r, units: (Array.isArray(r.units) ? r.units : []).filter(isServable) }));
+      .map((r) => ({ ...r, units: (Array.isArray(r.units) ? r.units : []).filter(isPriced) }));
     return { records };
   }
 
@@ -96,11 +94,16 @@ export function createUnits({ file = WORKTREE_UNITS, now = Date.now } = {}) {
   function load() {
     const t = now();
     if (doc && t - loadedAt < RELOAD_MS) {
-      // Cheap stat so an edit shows up long before the full reload window.
+      // Cheap stat so an edit shows up long before the full reload window. The access check catches a permission
+      // change, which keeps the mtime: an unreadable file must stop being quoted at this stat, not at the reload.
       if (t - statedAt > STAT_MS) {
         statedAt = t;
         let m = -1;
-        try { m = fs.statSync(file).mtimeMs; } catch { /* gone: refresh() fails closed */ }
+        try {
+          const st = fs.statSync(file);
+          fs.accessSync(file, fs.constants.R_OK);
+          m = st.mtimeMs;
+        } catch { /* gone or unreadable: refresh() fails closed */ }
         if (m === -1 || m !== mtime) refresh(t);
       }
       return doc;

@@ -178,6 +178,24 @@ describe('units', () => {
     });
   });
 
+  it('a warm loader stops serving a sheet it can no longer read, even when its mtime is unchanged (a permission change)', { skip: process.getuid?.() === 0 ? 'root reads a 000 file' : false }, () => {
+    withFile(FIXTURE, (file) => {
+      let t = 1_000_000;
+      const u = createUnits({ file, now: () => t });
+      assert.equal(u.forListing('BONA-W014')?.units.length, 2, 'a warm loader');
+      const { mtimeMs } = fs.statSync(file);
+      fs.chmodSync(file, 0o000);
+      try {
+        assert.equal(fs.statSync(file).mtimeMs, mtimeMs, 'chmod keeps the mtime');
+        t += STAT_MS + 1;
+        assert.equal(u.forListing('BONA-W014'), null, 'unreadable: no sheet at the next stat');
+        assert.equal(u.summary('BONA-W014'), null, 'and no veto-path summary');
+      } finally { fs.chmodSync(file, 0o644); }
+      t += STAT_MS + 1;
+      assert.equal(u.forListing('BONA-W014')?.units.length, 2, 'readable again at the next stat');
+    });
+  });
+
   it('formats money the same way in both locales, Western digits', () => {
     assert.equal(money(701500, 'en'), 'SAR 701,500');
     assert.equal(money(701500, 'ar'), '701,500 ر.س');
@@ -201,6 +219,8 @@ describe('units-summary (the published per-bedroom "from" rows)', () => {
     ...FIXTURE.units[0], ref: `B94-${i + 1}`, unit: String(i + 1), beds,
     price: { cash: 744250 + i * 1000, half: 760250 + i * 1000, year: 818250 + i * 1000, twoYear: 855250 + i * 1000 },
   }));
+  // A blank bedroom cell on a penthouse (build-units.py writes beds: null): the page keeps it in the penthouse row.
+  const BLANK_PENTHOUSE = { ...PENTHOUSE, ref: 'B07-33', unit: '33', beds: null, price: { cash: 1950000, half: 1991000, year: 2144000, twoYear: 2242000 } };
 
   it('gives one row per bedroom count, penthouses apart, with the lowest cash price and the area range', () => {
     const s = unitSummary({ ...FIXTURE, units: [...FIXTURE.units, PENTHOUSE] });
@@ -238,14 +258,19 @@ describe('units-summary (the published per-bedroom "from" rows)', () => {
     });
   });
 
-  it('drops a unit whose bedroom count is not a whole number, so no unit ref or stray text reaches a published label', () => {
-    withFile({ ...FIXTURE, units: [...FIXTURE.units, ...ODD_BEDS] }, (file) => {
+  it('serves every priced unit whatever its bedroom count, so search_units summarises the units the listing page does', () => {
+    // A malformed bedroom count is not dropped here: dropping it would quote another "from" than the page. The label
+    // check that keeps a unit ref or stray text away from a client is in tools.mjs (quotableSummary).
+    const sheet = { ...FIXTURE, units: [...FIXTURE.units, ...ODD_BEDS, PENTHOUSE, BLANK_PENTHOUSE] };
+    withFile(sheet, (file) => {
       const served = createUnits({ file }).forListing('BONA-W014');
-      assert.deepEqual(served.units.map((x) => x.ref), ['B91-22', 'B92-2'], 'only the units with a real bedroom count');
+      assert.deepEqual(served.units.map((x) => x.ref), ['B91-22', 'B92-2', ...ODD_BEDS.map((x) => x.ref), 'B07-31', 'B07-33'],
+        'every unit with a printed cash price, none dropped for its bedroom count');
       const live = liveSummary(served, AVAILABLE, NOW);
-      assert.deepEqual(live, liveSummary(FIXTURE, AVAILABLE, NOW), 'the summary of the well-formed sheet');
-      const labels = JSON.stringify(live.rows.map((r) => r.label));
-      assert.ok(!/B\d{2}-\d+|null|NaN|undefined|1000000000|-1/.test(labels), 'no ref or stray value in a label');
+      assert.deepEqual(live, liveSummary(sheet, AVAILABLE, NOW), 'the summary the page builds from the raw sheet');
+      const penthouse = live.rows.find((r) => r.key === 'penthouse');
+      assert.equal(penthouse.count, 2, 'the blank-bedroom penthouse is in the penthouse row');
+      assert.equal(penthouse.cashFrom, 1950000, 'and its cash price is the row\'s "from"');
     });
   });
 
@@ -276,7 +301,7 @@ describe('units-summary (the published per-bedroom "from" rows)', () => {
     const refs = new Set(real.map((x) => x.ref));
     const amounts = new Set(real.flatMap((x) => Object.values(x.price ?? {})).filter((n) => typeof n === 'number'));
     // The messages name the fixture unit by its place, never by a value: a failure here prints in a public CI log.
-    [...FIXTURE.units, PENTHOUSE, ...ODD_BEDS].forEach((x, i) => {
+    [...FIXTURE.units, PENTHOUSE, ...ODD_BEDS, BLANK_PENTHOUSE].forEach((x, i) => {
       assert.ok(!refs.has(x.ref), `fixture unit #${i}: its ref is on the real sheet`);
       for (const plan of Object.keys(x.price)) assert.ok(!amounts.has(x.price[plan]), `fixture unit #${i}: its ${plan} price is on the real sheet`);
     });
