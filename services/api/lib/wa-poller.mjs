@@ -80,7 +80,11 @@
  *     (`pruneCandidates({ phones: true })`, PR-A2);
  *   - whatever the switches say, a chat the owner marked *Not a client* on that list
  *     (`dismissedCandidateFor`, PR-A2) is held: no lead, no join, nothing stored, by its phone,
- *     jid or lid, whichever rule would have taken it;
+ *     jid or lid, whichever rule would have taken it, in either direction (a `fromMe` Bona link
+ *     too), and the mark is never removed by the poller;
+ *   - whatever the switches say, a chat with no number anywhere (an `@lid` with no phone alt, and
+ *     no lead with a phone for it) never makes a lead or joins, whatever it carries (a Ref, ad
+ *     evidence, a keyword, a click);
  *   - under the own-number rule (`ownerTest.ownRuleFor`, lib/owner-test.mjs: the identity check
  *     passed and `own_inbox` is on) every 1:1 chat with a phone joins `in` (`own_number`, and
  *     `leads.inbox_via` is stamped at the join); a lid-only chat is listed instead (the ids, the
@@ -90,10 +94,13 @@
  *     moment the switch went on, and Bona's own lines to him (notes, call alerts) never start or
  *     join it.
  * Before the team check, an owner `#dana …` command goes to `ownerTest.command`, which consumes
- * it: never stored, never a lead. A chat that joined under the own rule or the test is left
- * alone while the identity check fails (the rollback guard): not joined again, not stored, so
- * nobody is woken. On the personal number (`ownNumberFrom` 'owner' or 'invalid') every rule is
- * the shared one above, exactly; without `ownerTest` no rule changes at all.
+ * it: never stored, never a lead. The own rule and the test also need the poller's own ask of the
+ * identity check (`ownerTest.ownNumberOk`), at the first attempt and again at a retry (fail
+ * closed), and a chat that joined under either is left alone while that check fails (the
+ * rollback guard): not joined again, not stored, so nobody is woken. Without `ownerTest` there is
+ * no own rule, no test and no command, but the first three holds above still apply on Bona's
+ * number (with the inbox wired). On the personal number (`ownNumberFrom` 'owner' or 'invalid')
+ * every rule is the shared one above, exactly.
  */
 import { parseRef } from './attribution.mjs';
 import { MAX_PAGES, PAGE_SIZE, bareJid, oldestFirst, readWindow } from './evolution.mjs';
@@ -145,8 +152,14 @@ export const KEYWORD_RE = new RegExp(`${BONA_WORD_RE.source}|${LISTING_ID_RE.sou
  * merged note starts with its first note's). A note says "Bona" and mostly a listing id or a
  * site link, so without this it would keyword-match and become an enquiry from ourselves, or
  * join the owner's chat. `fromMe` normally keeps it out; this is the belt to that pair of braces.
+ *
+ * The WHOLE first line, exactly as a note renders it: `*Bona — alert*` (the stars balanced, or
+ * none), then the end of the line or of the text; only the command reply's `*Bona — test mode*`
+ * may carry its ` ON` / ` OFF` (DESIGN §7.2). A prefix is not enough: a client's
+ * "Bona — email me the floor plan for BONA-W003" starts the same way, and dropping it would lose
+ * an enquiry (T06-9 pins both sides; lib/owner-notes.mjs keeps every header on its own line).
  */
-export const OWN_NOTE_RE = /^\*?Bona — (?:new enquiry|hand-over|viewing booked|assistant stopped|daily summary|test mode|alert|email)/;
+export const OWN_NOTE_RE = /^(\*?)Bona — (?:(?:new enquiry|hand-over|viewing booked|assistant stopped|daily summary|alert|email)\1|test mode\1(?: (?:ON|OFF))?)[ \t]*(?:\r?\n|$)/;
 /** What the owner's list shows for a chat WhatsApp shows by its lid alone (DESIGN §3.1): no words of its own. */
 export const LID_ONLY_WORD = 'lid-only';
 /** Riyadh is UTC+3 all year: the day an `old_out_wrote` note is counted in. */
@@ -380,7 +393,8 @@ const NO_EXCLUSIONS = () => false;
  * @param {object} [o.ownerTest] lib/owner-test.mjs (PR-A2): `ownRuleFor(jids)`, `active()`,
  *        `ownNumberOk()`, `ownerLid()` and `command(rec)` (sync or async), read on Bona's own
  *        number only (module header). Every answer is checked for exactly `true` (or a lid), and
- *        one that throws means "no": the rule of today. Omitted (older wiring, the Phase 1
+ *        one that throws means "no": the rule of today. `ownRuleFor()` and `active()` count only
+ *        while `ownNumberOk()` says yes as well (fail closed). Omitted (older wiring, the Phase 1
  *        tests), there is no own rule, no test and no command.
  * @param {object} [o.notes] lib/owner-notes.mjs: the new-enquiry note goes through
  *        `notes.leadEvent(lead, { why, created, ts })` — why 'wa' for a lead this loop created
@@ -468,15 +482,22 @@ export function createPoller({
   }
   /** Bona's number, and its identity checked out (DESIGN §5.3): the rollback guard's key. */
   const ownNumberOk = () => bonaNumber && askTest('ownNumberOk', false) === true;
-  /** The owner's test switch is in force (and his number is not the instance's). */
-  const testActive = () => bonaNumber && ownerApart && askTest('active', false) === true;
+  /**
+   * The owner's test switch is in force (and his number is not the instance's). lib/owner-test.mjs
+   * folds the identity check into `active()` and `ownRuleFor()` itself; the poller asks it again on
+   * its own (fail closed), so an answer that disagrees with `ownNumberOk()` is today's rule.
+   */
+  const testActive = () => ownerApart && ownNumberOk() && askTest('active', false) === true;
   /** The owner's own lid (his users row), for the team-lid exception and to know his chat by lid. */
   function ownerLid() {
     const lid = askTest('ownerLid', null);
     return isLid(lid) ? lid : null;
   }
-  /** The own-number rule holds for these jids (lib/owner-test.mjs decides: identity, own_inbox, the test). */
-  const ownRuleOn = (jids) => bonaNumber && inboxOn && askTest('ownRuleFor', false, jids) === true;
+  /**
+   * The own-number rule holds for these jids (lib/owner-test.mjs decides: identity, own_inbox, the
+   * test), and the identity check, asked here too (fail closed, as `testActive`), passed.
+   */
+  const ownRuleOn = (jids) => inboxOn && ownNumberOk() && askTest('ownRuleFor', false, jids) === true;
 
   /** The owner's own chat (his personal number, or his lid), seen on this instance. */
   function isOwnerChat(jids, lead = null) {
@@ -497,6 +518,16 @@ export function createPoller({
     if (jids.waJid) return jids.waJid.endsWith('@s.whatsapp.net') ? jids.phone : null;
     return jids.waLid ? (lead?.phone_e164 ?? null) : null;
   }
+
+  /**
+   * A chat with no number anywhere on Bona's number (DESIGN §3.1, "Lid-only records"): the record
+   * shows none (an `@lid` with no phone alt) and no lead the tick knows for it has one. It never
+   * makes a lead or joins, whatever it carries (a Ref, ad evidence, a keyword, a click): a lid
+   * cannot be checked against the team or the never list, cannot be replied to, and the exclusion
+   * sweep cannot catch it later (A7). Under the own rule it is listed as `lid-only` instead
+   * (noteCandidateSafely). A lead the owner moved `in` by hand is not joining, so it is stored.
+   */
+  const numberless = (jids, lead = null) => bonaNumber && inboxOn && !jids.phone && !lead?.phone_e164;
 
   let testSinceStmt = null;
   /**
@@ -614,11 +645,15 @@ export function createPoller({
 
   /**
    * A *Not a client* on the list to check holds on Bona's number (DESIGN §3.1; PLAN T06 tests 16,
-   * 16b, 16c): an inbound record of a chat whose phone, jid or lid is on a dismissed row makes no
-   * lead, joins nothing and stores nothing, under the own rule or the shared one (a dismissed
-   * caller's Ref line included). A lead already `in` is not held: its own inbox state rules (the
-   * owner moved it in). Under the own rule, a mark made before the move is noted for the owner.
-   * The store's `dismissedCandidateFor` is PR-A2's; until it is there nothing is held.
+   * 16b, 16c, 16d): a record of a chat whose phone, jid or lid is on a dismissed row makes no lead,
+   * joins nothing and stores nothing, under the own rule or the shared one, in either direction:
+   * a dismissed caller's Ref line, and a `fromMe` Bona link or listing id (typed on the phone, a
+   * staff send, a WhatsApp Business Greeting/Away message) alike. Nor does the list's cleanup
+   * (noteCandidateSafely) run for it, so the mark is never removed by the poller: only the
+   * owner's own action on the dashboard brings such a chat in. A lead already `in` is not held:
+   * its own inbox state rules (the owner moved it in). Under the own rule, a mark made before the
+   * move is noted for the owner when the chat writes (an inbound record only). The store's
+   * `dismissedCandidateFor` is PR-A2's; until it is there nothing is held.
    * @returns {boolean} held
    */
   function heldAsDismissed(rec) {
@@ -629,7 +664,7 @@ export function createPoller({
     if (lead?.inbox_state === 'in') return false;
     const row = inboxStore.dismissedCandidateFor({ phone: jids.phone, jid: jids.waJid, lid: jids.waLid });
     if (!row) return false;
-    if (ownRuleOn(jids) && !isOwnerChat(jids, lead) && beforeLink(row.updated)) oldOutWrote({ candId: row.cand_id });
+    if (!rec.fromMe && ownRuleOn(jids) && !isOwnerChat(jids, lead) && beforeLink(row.updated)) oldOutWrote({ candId: row.cand_id });
     return true;
   }
 
@@ -814,6 +849,8 @@ export function createPoller({
   async function handleInbound(rec, ts) {
     const jids = jidsOf(rec);
     const existing = findLead(jids);
+    // On Bona's number a chat with no number anywhere makes no lead, by any rule (`numberless`).
+    if (!existing && numberless(jids)) return null;
     const text = typeof rec.text === 'string' ? rec.text : '';
     const rule = ruleFor(jids, existing, ts);
     const match = classify({ text, contextInfo: rec.contextInfo, existing, ts, rule });
@@ -979,17 +1016,28 @@ export function createPoller({
    * from when his test went on (stamped 'owner_test'). Such a join tells the owner (why
    * 'joined') before the record is stored, so a store failure retried later cannot lose it. A
    * chat stamped either way is left alone while the identity check fails (the rollback guard).
+   * The rule a record was judged under is asked again here, not trusted from its first attempt
+   * (fail closed): a retry after the identity check lapsed is today's rule, and the owner's own
+   * message once his test is no longer in force is a colleague's (held, never stored).
+   *
+   * A chat with no number anywhere (`numberless`) does not join, whatever the message carries: it
+   * keeps its state (an undecided one goes to Unsure, as any guess), and nothing is stored unless
+   * the owner had already moved it `in`.
    */
-  async function inboxAfterInbound(rec, ts, { lead: seen, method, refKnown, created = false, own = false, ownerTest: isTest = false }, tally) {
+  async function inboxAfterInbound(rec, ts, { lead: seen, method, refKnown, created = false, own: ownThen = false, ownerTest: testThen = false }, tally) {
     const lead = db.getLead(seen.lead_id);
     if (!lead) return;
     if (lead.inbox_via && !ownNumberOk()) { tally.held += 1; return; }
+    const own = ownThen && ownNumberOk();
+    const isTest = testThen && testActive();
+    if (testThen && !isTest) { tally.held += 1; return; }
     const text = typeof rec.text === 'string' ? rec.text : '';
     const signal = inboundSignal({ text, hasAdMeta: hasAdEvidence(adMetaOf(rec.contextInfo)), refKnown });
     // createOrMergeLead puts a chat the owner starts `in` by itself (lib/leads.mjs OWNER_METHODS):
     // his test chat, created by this record and not stamped yet, is joining now.
     const testCreated = isTest && created && method === 'owner_test' && lead.inbox_via == null;
-    const next = testCreated ? 'in' : nextInboxState(lead.inbox_state, { signal, method, own: own || isTest });
+    let next = testCreated ? 'in' : nextInboxState(lead.inbox_state, { signal, method, own: own || isTest });
+    if (next === 'in' && lead.inbox_state !== 'in' && numberless(jidsOf(rec), lead)) next = null;
     if (next === 'in' && (lead.inbox_state !== 'in' || testCreated)) {
       const inboxVia = isTest ? 'owner_test' : (own ? 'own_number' : null);
       const floor = isTest ? (testSince() ?? ts) : null;
@@ -1333,8 +1381,14 @@ export function createPoller({
             // every attempt and is written off never stamps `first_reply_ts`, so the Hermes
             // watchdog nags about a lead that was answered — the harmless direction; a Dana
             // record silencing the watchdog for an unanswered lead is the harmful one.
+            //
+            // A chat the owner marked "Not a client" on the list to check, on Bona's number, is held
+            // on this side too (`heldAsDismissed`): no lead, no join, nothing stored, the mark kept.
+            // The reply clock of a lead it already has still stamps: that writes no message.
             const seen = findLead(jidsOf(rec));
-            if (inboxOn) await inboxAfterOutbound(rec, ts, tally);
+            held = heldAsDismissed(rec);
+            if (held) tally.held += 1;
+            else if (inboxOn) await inboxAfterOutbound(rec, ts, tally);
             if (!isDanaRecordSafely(rec) && recordReply(seen, ts)) tally.replies += 1;
           } else if (handled) {
             // Matched and merged on an earlier attempt; only the inbox steps failed.
