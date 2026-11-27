@@ -460,6 +460,23 @@ test('a rate limit: one retry when retry-after is at most 3 s, else the backup m
   assert.equal(d.backup, false, 'the cooldown is over');
 });
 
+test('a rate-limit retry that becomes the last answer call of the turn goes out with tool_choice none; tools asked for in it end in bad_response', async () => {
+  const rate = () => http(429, { error: { type: 'rate_limit_exceeded' } }, { 'retry-after': '1' });
+  // Rounds 1-2 use tools (4 → 2 answer calls left); round 3 is rate-limited (1 left), so its retry is the last answer call.
+  const h = harness({ script: [toolCalls(['search_properties', { query: 'a' }]), toolCalls(['search_properties', { query: 'b' }]), rate(), reply('Here is what I found.')] });
+  const r = await h.brain.turn(turnArgs());
+  assert.equal(r.ok, true);
+  assert.equal(r.backup, false);
+  assert.deepEqual(h.slept, [1000]);
+  assert.deepEqual(h.calls.map((c) => c.body.tool_choice), ['auto', 'auto', 'auto', 'none'], 'the retry must answer');
+  // The same, but the retry still asks for a tool: nothing is left to answer with, the tool never runs, no fifth request.
+  const stuck = harness({ script: [toolCalls(['search_properties', { query: 'a' }]), toolCalls(['search_properties', { query: 'b' }]), rate(), toolCalls(['search_properties', { query: 'c' }]), reply('never')] });
+  assert.deepEqual(await stuck.brain.turn(turnArgs()), { ok: false, code: 'bad_response' });
+  assert.equal(stuck.calls.length, 4);
+  assert.equal(stuck.calls[3].body.tool_choice, 'none');
+  assert.equal(stuck.ran.length, 2, 'the tool asked for in the last answer call never runs');
+});
+
 test('5xx and network errors go to the backup model only when at least 12 s remain; backup mode handover never calls it', async () => {
   const h = harness({ script: [http(503, {}), reply('Backup here.')] });
   const r = await h.brain.turn(turnArgs());
@@ -840,6 +857,22 @@ test("the guard knows Bona's site (cfg.siteUrl): a reply that puts a returned ho
   assert.equal(r.messages.at(-1).content, `See ${row.url_en}`);
   assert.deepEqual(h.logs.filter((e) => e.evt === 'brain.guard'), [{ evt: 'brain.guard', leadId: LEAD, kind: 'link' }]);
   assert.equal(h.calls[2].raw.includes('evil.example'), false, 'the rejected draft is never sent back');
+});
+
+test('WhatsApp formatting never hides an amount from the guard: a draft "*85,000* SAR" gets the repair call, as the client would read "85,000 SAR"', async () => {
+  const h = harness({ script: [reply('The annual rent is *85,000* SAR.'), reply('A team member will confirm the rent.')] });
+  const r = await h.brain.turn(turnArgs());
+  assert.equal(r.ok, true);
+  assert.equal(r.guard.repaired, true);
+  assert.equal(h.calls.length, 2);
+  assert.equal(r.messages.at(-1).content, 'A team member will confirm the rent.');
+  assert.deepEqual(h.logs.filter((e) => e.evt === 'brain.guard'), [{ evt: 'brain.guard', leadId: LEAD, kind: 'amount' }]);
+  assert.equal(answerFrom({ messages: [{ role: 'agent', content: 'The annual rent is *85,000* SAR.' }] }, { inventory, siteUrl: SITE, language: 'en' }).text,
+    'The annual rent is 85,000 SAR.', 'what the WhatsApp path would have sent');
+  const link = harness({ script: [reply('See www.example.com/properties/sea-view-villa/'), reply('A team member will send you the link.')] });
+  const l = await link.brain.turn(turnArgs());
+  assert.equal(l.guard.repaired, true, 'a home link without a scheme is a link too');
+  assert.deepEqual(link.logs.filter((e) => e.evt === 'brain.guard'), [{ evt: 'brain.guard', leadId: LEAD, kind: 'link' }]);
 });
 
 test('amounts in earlier guarded replies of this lead are allowed (the caller hands them in)', async () => {

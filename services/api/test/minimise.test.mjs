@@ -194,5 +194,9 @@ test('a budget range of two thousand-grouped amounts on a dash or a slash stays 
     ['account 1234567890123 / 5000', 'account [account-number]'],
     ['2.950.000 - 3.100.000 - 4.000.000', '[account-number]'],
     ['2950 / 500000000', '2950 / [phone]'],
+    // Thousands groups are a head of 1-3 digits, then exactly 3 digits each: anything else on one dash is no budget range.
+    ['2950 000 - 3100 000', '[account-number]'],
+    ['32 34 56 78 - 90 12 34', '[account-number]'],
+    ['2 9500 000 - 3 100 000', '[account-number]'],
   ]) assert.equal(minimise(input), want, input);
 });

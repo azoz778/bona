@@ -11,12 +11,17 @@
  *
  * Also refused: a unit reference (`B08-19`) no tool returned in this turn, and a link to a home
  * no tool returned (this turn, or an earlier guarded reply) or on any site but Bona's (`siteUrl`:
- * the same scheme, host and port; no site URL, no home link). Each hit says only its kind; the
- * text and the amount are never repeated, so a hit can be logged.
+ * the same scheme, host and port; no site URL, no home link), written with a scheme or without one
+ * ("www.example.com/properties/x/"). Each hit says only its kind; the text and the amount are never
+ * repeated, so a hit can be logged.
+ *
+ * Every check reads the reply twice: as written, and as the client sees it (`shown`: the WhatsApp
+ * path's own cleanup, then WhatsApp's formatting marks gone), so "*85,000* SAR" is "85,000 SAR".
  *
  * `claimsBooking` is the booking-claim check of DESIGN §4.3's safety net, for the commit step.
  */
 import { toAsciiDigits } from './inventory.mjs';
+import { stripMarkers, plainText } from './actions.mjs';
 
 export const REPAIR_NOTE = "Your draft quoted an amount or unit that no tool returned in this turn. Write the reply again; quote prices only exactly as this turn's tool results give them, or say a team member will confirm.";
 
@@ -94,8 +99,20 @@ const RANGE_AFTER_RE = new RegExp(
 const AREA_AFTER_RE = /^\s{0,2}(?:m²|m2\b|sqm|sq\.?\s?m|square\s+met|sq\.?\s?ft|م²|م2|متر|مترا|أمتار|امتار)/iu;
 const PERCENT_AFTER_RE = /^\s{0,2}(?:%|٪|percent|per\s?cent|بالمية|بالمئة|في\s?المية|في\s?المئة)/iu;
 const URL_RE = /https?:\/\/[^\s<>"'`]+/giu;
+/** A word that may be a link written without a scheme: brackets end it ("[Villa](example.com/properties/x)"). */
+const WORD_RE = /[^\s<>"'`()[\]{}]+/gu;
+const HOME_PATH_RE = /\/(?:ar\/)?properties\//i;
+const DOT_HOST_RE = /[\p{L}\p{N}-]\.[\p{L}\p{N}]/u;
 const UNIT_RE = /(?<![A-Za-z0-9])B\d{2}-\d{2}(?![0-9])/gi;
 const PROPERTY_PATH_RE = /\/(?:ar\/)?properties\/([a-z0-9][a-z0-9-]*)/gi;
+
+/**
+ * The reply as the client reads it: what dana-wa's `answerFrom` makes of it (actions.mjs `stripMarkers`, then
+ * `plainText` over the message: markers out, markdown flattened, spaces collapsed), then without the marks WhatsApp
+ * draws as formatting (`*bold*`, `_italic_`, `~strike~`, ``` ```mono``` ```): a pair `plainText` leaves, or a mark
+ * it does not know.
+ */
+const shown = (text) => plainText(stripMarkers(text).text).replace(/[*_~`]/g, '');
 
 /**
  * "2 950 000" (a space, NBSP or narrow NBSP between groups of three) is one number. The run is taken whole or
@@ -238,22 +255,46 @@ export function unitRefs(text) {
 }
 
 const slugsIn = (url) => [...url.matchAll(PROPERTY_PATH_RE)].map((m) => m[1].toLowerCase());
-const propertySlugs = (text) => [...String(text ?? '').matchAll(URL_RE)].flatMap((u) => slugsIn(u[0]));
+/**
+ * The links of a text that may lead to a home: every http(s) URL, and every word with a dot-host before a home
+ * path but no scheme ("www.example.com/properties/x/", "example.com/ar/properties/x", "//evil.example/properties/x"),
+ * which a WhatsApp app shows as a link all the same. `bare` says the link has no scheme of its own.
+ */
+function homeLinks(text) {
+  const s = String(text ?? '');
+  const links = [...s.matchAll(URL_RE)].map((u) => ({ link: u[0], bare: false }));
+  for (const w of s.replace(URL_RE, ' ').matchAll(WORD_RE)) {
+    const word = w[0].replace(/^[^\p{L}\p{N}]+/u, ''); // "*", "«", "//" before the host
+    const at = word.search(HOME_PATH_RE);
+    if (at > 0 && DOT_HOST_RE.test(word.slice(0, at))) links.push({ link: word, bare: true });
+  }
+  return links;
+}
+const propertySlugs = (text) => homeLinks(text).flatMap((l) => slugsIn(l.link));
 /** "https://bona-real-estate.com" for any URL on it (host case and the default port do not matter), else null. */
 const originOf = (url) => {
   try { return new URL(String(url)).origin; } catch { return null; }
+};
+/** Bona's site as `{ origin, scheme }`, or null when `siteUrl` is not an http(s) URL (then no home link passes). */
+const siteOf = (siteUrl) => {
+  try {
+    const u = new URL(String(siteUrl));
+    return /^https?:$/.test(u.protocol) ? { origin: u.origin, scheme: u.protocol } : null;
+  } catch { return null; }
 };
 
 /**
  * A home link the reply may not carry: a home no tool returned, or a home's path on a host that is not
  * exactly Bona's site ("https://evil.example/properties/<a returned slug>/", a look-alike, http, a subdomain).
+ * A link without a scheme is read with the site's own ("bona-real-estate.com/properties/x" is on the site,
+ * "www.bona-real-estate.com/…" is a subdomain); a word that does not read as a URL is a hit (fail closed).
  */
-function badHomeLink(text, slugs, siteOrigin) {
-  for (const u of String(text).matchAll(URL_RE)) {
-    const found = slugsIn(u[0]);
+function badHomeLink(text, slugs, site) {
+  for (const { link, bare } of homeLinks(text)) {
+    const found = slugsIn(link);
     if (!found.length) continue;
     if (found.some((slug) => !slugs.has(slug))) return true;
-    if (!siteOrigin || originOf(u[0]) !== siteOrigin) return true;
+    if (!site || originOf(bare ? `${site.scheme}//${link}` : link) !== site.origin) return true;
   }
   return false;
 }
@@ -342,9 +383,12 @@ export function checkReply(text, ctx = {}) {
   const hits = [];
   const allowedAmount = (a) => a.raw !== null
     && (allowed.amounts.has(`sar:${a.sar}`) || allowed.amounts.has(a.currency ? `${a.currency}:${a.raw}` : `raw:${a.raw}`));
-  if (!findAmounts(text).every(allowedAmount)) hits.push({ kind: 'amount' });
-  if (unitRefs(text).some((u) => !allowed.units.has(u))) hits.push({ kind: 'unit' });
-  if (badHomeLink(text, allowed.slugs, originOf(ctx?.siteUrl))) hits.push({ kind: 'link' });
+  const site = siteOf(ctx?.siteUrl);
+  // As written, and as the client sees it: a hit in either is a hit.
+  const forms = [text, shown(text)];
+  if (forms.some((t) => !findAmounts(t).every(allowedAmount))) hits.push({ kind: 'amount' });
+  if (forms.some((t) => unitRefs(t).some((u) => !allowed.units.has(u)))) hits.push({ kind: 'unit' });
+  if (forms.some((t) => badHomeLink(t, allowed.slugs, site))) hits.push({ kind: 'link' });
   return { ok: hits.length === 0, hits };
 }
 

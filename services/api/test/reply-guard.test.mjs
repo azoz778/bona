@@ -289,3 +289,59 @@ test('a reply that names a currency must match the tool in that currency or in S
   assert.equal(checkReply('B08-19 is $2,950,000.', { toolResults: cash }).ok, false);
   assert.equal(checkReply('And the second one is $1,200,000.', { toolResults: [], earlierReplies: ['The second one is SAR 1,200,000.'] }).ok, false, 'an earlier reply keeps its currency');
 });
+
+test('WhatsApp formatting (* _ ~ ` ```) never hides an amount: the guard reads the reply as the client sees it after the WhatsApp cleanup', () => {
+  // dana-wa's answerFrom flattens markdown (actions.mjs plainText) and the app draws *bold*, _italic_, ~strike~ and ```mono```
+  // without their marks, so "*85,000* SAR" reaches the client as "85,000 SAR".
+  const rent = [JSON.stringify({ results: [{ id: 'BONA-902', price_en: 'SAR 85,000', price_ar: '85,000 ر.س' }] })];
+  for (const text of [
+    'The annual rent is *85,000* SAR.', 'The annual rent is **85,000** SAR.', 'The annual rent is _85,000_ SAR.', 'The annual rent is ~85,000~ SAR.',
+    'The annual rent is `85,000` SAR.', 'The annual rent is ```85,000``` SAR.', 'The annual rent is *_85,000_* SAR.', 'The annual rent is ~*85,000*~ riyals.',
+    'The annual rent is 85,000 *SAR*.', 'The annual rent is *SAR* *85,000*.', 'Rent: *85,000*SAR', 'The annual rent is *85,000* _SAR_ a year.',
+    'الإيجار السنوي *85,000* ريال', 'الإيجار السنوي _٨٥٬٠٠٠_ ريال', 'الإيجار السنوي ~٨٥،٠٠٠~ ر.س', 'الإيجار ```85,000``` ريال',
+    'الإيجار *85,000* *ريال*', 'الإيجار *ريال* *٨٥٬٠٠٠*', 'الإيجار *_٨٥٬٠٠٠_* ريال سنوياً',
+  ]) {
+    assert.deepEqual(checkReply(text, { toolResults: [] }), { ok: false, hits: [{ kind: 'amount' }] }, `${text} (no tool)`);
+    assert.deepEqual(checkReply(text.replace(/85,000|٨٥٬٠٠٠|٨٥،٠٠٠/, '95,000'), { toolResults: rent }).hits, [{ kind: 'amount' }], `${text} (another rent)`);
+    assert.deepEqual(checkReply(text, { toolResults: rent }), { ok: true, hits: [] }, `${text} (the tool's own rent)`);
+  }
+  for (const text of ['*Sea view villa* has *4 bedrooms* and _450 m²_.', 'نفتح ~10:00~ إلى *19:00*', 'رقم الإعلان *BONA-902*']) {
+    assert.deepEqual(checkReply(text, { toolResults: [] }), { ok: true, hits: [] }, text);
+  }
+});
+
+test("a home link written without a scheme (\"www.example.com/properties/x/\") is checked like an http(s) one: only on Bona's own host, only for a returned home", () => {
+  const ctx = { toolResults: [villa], siteUrl: SITE };
+  for (const text of [
+    'Here: bona-real-estate.com/properties/sea-view-villa/', 'هنا: bona-real-estate.com/ar/properties/sea-view-villa/', 'See (BONA-Real-Estate.com/properties/sea-view-villa).',
+    '*bona-real-estate.com/properties/sea-view-villa/*', 'bona-real-estate.com:443/properties/sea-view-villa/', `Both: ${SITE}/properties/sea-view-villa/ and bona-real-estate.com/ar/properties/sea-view-villa/`,
+  ]) assert.deepEqual(checkReply(text, ctx), { ok: true, hits: [] }, text);
+  for (const link of [
+    'www.example.com/properties/sea-view-villa/', // the www. form of another host
+    'example.com/ar/properties/sea-view-villa', // a bare domain
+    'example.com/properties/sea-view-villa',
+    'www.bona-real-estate.com/properties/sea-view-villa/', // the site behind www.: a subdomain, as with https
+    'listings.bona-real-estate.com/properties/sea-view-villa/',
+    'bona-real-estate.com.evil.example/properties/sea-view-villa/', // look-alikes
+    'bona-reaI-estate.com/properties/sea-view-villa/',
+    'bona-real-estate.co/ar/properties/sea-view-villa/',
+    'bоna-real-estate.com/properties/sea-view-villa/',
+    'bona-real-estate.com@evil.example/properties/sea-view-villa/', // the site as a user name
+    'bona-real-estate.com:8443/properties/sea-view-villa/', // another port
+    '//evil.example/properties/sea-view-villa/', // scheme-relative
+    'evil.example/go?to=/properties/sea-view-villa/', // the path in a query
+    'bona-real-estate.com/properties/other-villa/', // the real host without a scheme, a home no tool returned
+    'bona-real-estate.com/ar/properties/other-villa',
+    'BONA-REAL-ESTATE.COM/PROPERTIES/OTHER-VILLA/',
+  ]) {
+    assert.deepEqual(checkReply(`Here: ${link}`, ctx).hits, [{ kind: 'link' }], link);
+    assert.deepEqual(checkReply(`الرابط (${link})`, ctx).hits, [{ kind: 'link' }], `${link} (in brackets)`);
+  }
+  assert.deepEqual(checkReply('Here: bona-real-estate.com/properties/sea-view-villa/', { toolResults: [villa] }).hits, [{ kind: 'link' }], 'no siteUrl: no home link passes');
+  assert.equal(checkReply('Again: bona-real-estate.com/properties/other-villa/', { earlierReplies: [`${SITE}/properties/other-villa/`], siteUrl: SITE }).ok, true,
+    'an earlier guarded reply allows its home, with or without a scheme');
+  assert.equal(checkReply(`Again: ${SITE}/properties/other-villa/`, { earlierReplies: ['bona-real-estate.com/properties/other-villa/'], siteUrl: SITE }).ok, true);
+  assert.deepEqual(checkReply('Again: www.example.com/properties/other-villa/', { earlierReplies: [`${SITE}/properties/other-villa/`], siteUrl: SITE }).hits,
+    [{ kind: 'link' }], 'never another host');
+  assert.equal(checkReply('Our site: bona-real-estate.com and bona-real-estate.com/ar/', { siteUrl: SITE }).ok, true, 'the site itself is not a home');
+});
