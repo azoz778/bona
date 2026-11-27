@@ -3,17 +3,17 @@
 // network. Every figure here is made up (example.com site, invented areas and prices).
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as publishedUnitsModule from '../lib/published-units.mjs';
 import {
   createPublishedUnits, decodeEntities, isBedLabel, listingPageUrl, parsePublishedUnits,
-  DEFAULT_SITE, FETCH_TIMEOUT_MS, LAST_GOOD_MS, MAX_PAGE_BYTES, PAGE_TTL_MS,
+  DEFAULT_SITE, FETCH_TIMEOUT_MS, MAX_PAGE_BYTES,
 } from '../lib/published-units.mjs';
 
 const SITE = 'https://site.example.com';
 const LISTING = { id: 'BONA-W014', slug: 'darco-prime-waterfront-fixture', status: 'available' };
 const URL_W014 = `${SITE}/properties/darco-prime-waterfront-fixture/`;
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const T0 = Date.parse('2026-11-27T09:00:00Z');
+const OTHER_LISTING = { id: 'BONA-W999', slug: 'other-fixture', status: 'available' };
+const URL_OTHER = `${SITE}/properties/other-fixture/`;
 
 /** What the page's attribute carries: the table it prints, and nothing else. */
 const DATA = {
@@ -27,6 +27,11 @@ const DATA = {
 const OTHER = {
   ...DATA, listingId: 'BONA-W999', count: 1, areaMin: 88.5, areaMax: 88.5, cashFrom: 655500,
   rows: [{ label: { en: '2 bedrooms', ar: 'غرفتا نوم' }, count: 1, areaMin: 88.5, areaMax: 88.5, cashFrom: 655500 }],
+};
+/** The same listing after a Pages deploy changed a starting price (made-up figure). */
+const CHANGED = {
+  ...DATA, cashFrom: 689750, updated: '2026-11-20',
+  rows: [{ ...DATA.rows[0], cashFrom: 689750 }, ...DATA.rows.slice(1)],
 };
 
 /** Astro's attribute escaping (html-escaper): & < > ' " become entities. */
@@ -56,25 +61,29 @@ function fakeSite(answer) {
 }
 
 function harness(answer, opts = {}) {
-  let t = T0;
   const site = fakeSite(answer);
   const logs = [];
-  const pub = createPublishedUnits({ siteUrl: SITE, fetch: site.fetch, now: () => t, log: (o) => logs.push(o), ...opts });
-  return {
-    pub, site, logs,
-    get: (listing = LISTING) => pub.get(listing),
-    at: (ms) => { t = ms; },
-    advance: (ms) => { t += ms; },
-    get now() { return t; },
-  };
+  const pub = createPublishedUnits({ siteUrl: SITE, fetch: site.fetch, log: (o) => logs.push(o), ...opts });
+  return { pub, site, logs, get: (listing = LISTING) => pub.get(listing) };
 }
 
-test('the limits: an 8 s timeout, a 2 MB body cap, a 15 minute cache, the last good page for 6 hours, the live site by default', () => {
+/** Lets every pending callback run (the fetches that calls arriving together started). */
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+/** The failures a harness logged: their reasons, and the log keys (a reason and a count, never a page value). */
+function failures(h) {
+  const failed = h.logs.filter((l) => l.evt === 'units.page_failed');
+  for (const l of failed) assert.deepEqual(Object.keys(l).sort(), ['evt', 'failures', 'level', 'listing', 'reason'], 'the log keys');
+  return failed;
+}
+
+test('the limits: an 8 s timeout, a 2 MB body cap, the live site by default, and no cache or last-good window at all', () => {
   assert.equal(FETCH_TIMEOUT_MS, 8_000);
   assert.equal(MAX_PAGE_BYTES, 2 * 1024 * 1024);
-  assert.equal(PAGE_TTL_MS, 15 * MINUTE);
-  assert.equal(LAST_GOOD_MS, 6 * HOUR);
   assert.equal(DEFAULT_SITE, 'https://bona-real-estate.com');
+  for (const gone of ['PAGE_TTL_MS', 'LAST_GOOD_MS']) {
+    assert.ok(!(gone in publishedUnitsModule), `${gone} is gone: no cached answer and no last-good fallback`);
+  }
 });
 
 test('listingPageUrl is the English listing route (src/pages/properties/[slug].astro), or null for a slug or site it cannot trust', () => {
@@ -231,48 +240,83 @@ test('get: a malformed summary, extra keys, a negative price or another listing\
   }
 });
 
-test('get: one fetch per listing per 15 minutes, shared by calls that arrive together', async () => {
-  const h = harness((url) => (url === URL_W014 ? page(DATA) : page(OTHER)));
+test('get: no cache: every call reads the live page, so the next call quotes what the page shows now', async () => {
+  let shown = DATA;
+  const h = harness(() => page(shown));
   assert.deepEqual(await h.get(), DATA);
-  h.advance(15 * MINUTE - 1);
-  assert.deepEqual(await h.get(), DATA, 'a cache hit within 15 minutes');
-  assert.equal(h.site.calls.length, 1, 'one fetch');
-  h.advance(1);
-  assert.deepEqual(await h.get(), DATA);
-  assert.equal(h.site.calls.length, 2, 'fetched again at 15 minutes');
-  // Calls that arrive together share the one request.
-  h.advance(15 * MINUTE);
-  const both = await Promise.all([h.get(), h.get(), h.get()]);
-  assert.deepEqual(both, [DATA, DATA, DATA]);
-  assert.equal(h.site.calls.length, 3, 'three calls together, one fetch');
-  // Each listing has its own page and its own cache entry.
-  const other = { id: 'BONA-W999', slug: 'other-fixture', status: 'available' };
-  assert.deepEqual(await h.get(other), OTHER);
-  assert.equal(h.site.calls.at(-1).url, `${SITE}/properties/other-fixture/`);
-  assert.deepEqual(await h.get(), DATA, 'W014 still from its cache');
-  assert.equal(h.site.calls.length, 4);
+  assert.deepEqual(await h.get(), DATA, 'the same page, read again');
+  assert.equal(h.site.calls.length, 2, 'two calls in sequence, two fetches');
+  // A Pages deploy changes a starting price: the very next call quotes the new one, never the one before it.
+  shown = CHANGED;
+  assert.deepEqual(await h.get(), CHANGED, 'the changed price, at once');
+  assert.equal(h.site.calls.length, 3);
+  shown = DATA;
+  assert.deepEqual(await h.get(), DATA, 'and back');
+  assert.ok(h.site.calls.every((c) => c.url === URL_W014), 'every fetch is the W014 page');
+  assert.deepEqual(failures(h), [], 'a page that answers is not logged');
+  // Each listing has its own page.
+  const two = harness((url) => (url === URL_W014 ? page(DATA) : page(OTHER)));
+  assert.deepEqual(await two.get(OTHER_LISTING), OTHER);
+  assert.deepEqual(await two.get(), DATA);
+  assert.deepEqual(two.site.calls.map((c) => c.url), [URL_OTHER, URL_W014]);
 });
 
-test('get: an HTTP 500 keeps the last good summary for at most 6 hours, then null', async () => {
-  let up = true;
-  const h = harness(() => (up ? page(DATA) : html('oops', { status: 500 })));
-  assert.deepEqual(await h.get(), DATA);
-  up = false;
-  const good = h.now;
-  for (let t = good + 15 * MINUTE; t <= good + LAST_GOOD_MS; t += 15 * MINUTE) {
-    h.at(t);
-    assert.deepEqual(await h.get(), DATA, `${(t - good) / MINUTE} min after the last good page`);
+test('get: the page answering without a summary on the next call (the attribute removed, a bad one, another listing\'s, a 404 or 410) → null at once', async () => {
+  for (const [name, gone, reason] of [
+    ['the attribute removed', () => PLAIN_PAGE, 'no_summary'],
+    ['a malformed summary', () => page('{"listingId":'), 'bad_summary'],
+    ['a summary that is not the allow-listed shape', () => page({ ...DATA, units: [] }), 'bad_summary'],
+    ['two different summaries', () => page(DATA, CHANGED), 'bad_summary'],
+    ['another listing\'s summary', () => page(OTHER), 'other_listing'],
+    ['a 404', () => html('not found', { status: 404 }), 'http_404'],
+    ['a 410', () => html('gone', { status: 410 }), 'http_410'],
+  ]) {
+    let up = true;
+    const h = harness(() => (up ? page(DATA) : gone()));
+    assert.deepEqual(await h.get(), DATA, name);
+    up = false;
+    assert.equal(await h.get(), null, `${name}: null on the very next call`);
+    assert.equal(h.site.calls.length, 2, `${name}: one fetch per call`);
+    const failed = failures(h);
+    assert.deepEqual(failed.map((l) => [l.level, l.listing, l.reason, l.failures]), [['warn', 'BONA-W014', reason, 1]], `${name}: logged as ${reason}`);
+    assert.ok(!JSON.stringify(h.logs).includes('701500'), `${name}: no page figure in the log`);
   }
-  h.at(good + LAST_GOOD_MS + 1);
-  assert.equal(await h.get(), null, 'past 6 hours: null');
-  assert.ok(h.logs.some((l) => l.evt === 'units.page_failed' && l.reason === 'http_500' && l.listing === 'BONA-W014'), 'the failure is logged');
-  // The site comes back: the next fetch (15 minutes after the last) answers again.
-  up = true;
-  h.advance(15 * MINUTE);
-  assert.deepEqual(await h.get(), DATA);
 });
 
-test('get: a timeout (no answer, or a body that never ends) keeps the last good summary for at most 6 hours, then null', async () => {
+test('get: a failure on the next call (an HTTP error, a network error, a body over the cap) → null, never the summary before it (no last-good fallback)', async () => {
+  const big = `<!doctype html>${' '.repeat(4096)}`;
+  for (const [name, answer, reason] of [
+    ['an HTTP 500', () => html('oops', { status: 500 }), 'http_500'],
+    ['an HTTP 503', () => html('busy', { status: 503 }), 'http_503'],
+    ['an HTTP 403', () => html('denied', { status: 403 }), 'http_403'],
+    ['a network error', () => new TypeError('fetch failed'), 'network'],
+    ['a fetch that rejects at once', () => { throw new TypeError('bad'); }, 'network'],
+    ['a body over the cap', () => big, 'too_big'],
+    ['a body over the cap by its header', () => html('short', { headers: { 'content-length': String(1024 * 1024 * 1024) } }), 'too_big'],
+  ]) {
+    let up = true;
+    const h = harness(() => (up ? page(DATA) : answer()), { maxBytes: 4096 });
+    assert.deepEqual(await h.get(), DATA, name);
+    up = false;
+    assert.equal(await h.get(), null, `${name}: null, not the summary of the call before`);
+    assert.equal(await h.get(), null, `${name}: null while it keeps failing`);
+    // The site comes back: the next call quotes the page again.
+    up = true;
+    assert.deepEqual(await h.get(), DATA, `${name}: back`);
+    assert.equal(h.site.calls.length, 4, `${name}: one fetch per call, failures included`);
+    // Failures are counted per listing until a page answers; only the reason and the count are logged.
+    assert.deepEqual(failures(h).map((l) => [l.reason, l.failures]), [[reason, 1], [reason, 2]], `${name}: logged as ${reason}`);
+    up = false;
+    assert.equal(await h.get(), null);
+    assert.equal(failures(h).at(-1).failures, 1, `${name}: the count starts again after a page answered`);
+    assert.ok(!JSON.stringify(h.logs).includes('701500'), `${name}: no page figure in the log`);
+    // Never fetched before: null too.
+    const cold = harness(answer, { maxBytes: 4096 });
+    assert.equal(await cold.get(), null, `${name}: never answered, null`);
+  }
+});
+
+test('get: a timeout on the next call (no answer, a signal that is ignored, a body that never ends) → null within the timeout, no fallback', async () => {
   for (const hang of ['headers', 'headers, signal ignored', 'body']) {
     let up = true;
     const h = harness((url, init) => {
@@ -284,56 +328,40 @@ test('get: a timeout (no answer, or a body that never ends) keeps the last good 
     }, { timeoutMs: 20 });
     assert.deepEqual(await h.get(), DATA, hang);
     up = false;
-    h.advance(LAST_GOOD_MS - 1);
     const started = Date.now();
-    assert.deepEqual(await h.get(), DATA, `${hang}: within 6 hours, the last good`);
+    assert.equal(await h.get(), null, `${hang}: null, not the summary of the call before`);
     assert.ok(Date.now() - started < 5_000, `${hang}: the timeout ends the wait`);
-    assert.ok(h.logs.some((l) => l.reason === 'timeout'), `${hang}: logged as a timeout`);
-    h.advance(15 * MINUTE);
-    assert.equal(await h.get(), null, `${hang}: past 6 hours, null`);
+    assert.deepEqual(failures(h).map((l) => l.reason), ['timeout'], `${hang}: logged as a timeout`);
+    up = true;
+    assert.deepEqual(await h.get(), DATA, `${hang}: back`);
   }
 });
 
-test('get: a network error or a page over the 2 MB cap is a failure (last good within 6 hours); with no last good, null', async () => {
-  const big = `<!doctype html>${' '.repeat(4096)}`;
-  for (const [name, answer, reason] of [
-    ['a network error', () => new TypeError('fetch failed'), 'network'],
-    ['a fetch that rejects at once', () => { throw new TypeError('bad'); }, 'network'],
-    ['a body over the cap', () => big, 'too_big'],
-    ['a body over the cap by its header', () => html('short', { headers: { 'content-length': String(1024 * 1024 * 1024) } }), 'too_big'],
-  ]) {
-    let up = true;
-    const h = harness(() => (up ? page(DATA) : answer()), { maxBytes: 4096 });
-    assert.deepEqual(await h.get(), DATA, name);
-    up = false;
-    h.advance(15 * MINUTE);
-    assert.deepEqual(await h.get(), DATA, `${name}: the last good`);
-    assert.ok(h.logs.some((l) => l.reason === reason), `${name}: logged as ${reason}`);
-    h.advance(LAST_GOOD_MS);
-    assert.equal(await h.get(), null, `${name}: past 6 hours`);
-
-    const cold = harness(answer, { maxBytes: 4096 });
-    assert.equal(await cold.get(), null, `${name}: no last good, null`);
-  }
-});
-
-test('get: the page answering without a summary (200 without the attribute, a bad one, or a 404) is null at once, and forgets the last good', async () => {
-  for (const [name, gone] of [
-    ['a page without the attribute', () => PLAIN_PAGE],
-    ['a malformed summary', () => page('{"listingId":')],
-    ['a 404', () => html('not found', { status: 404 })],
-    ['a 410', () => html('gone', { status: 410 })],
-  ]) {
-    let state = 'up';
-    const h = harness(() => (state === 'up' ? page(DATA) : state === 'gone' ? gone() : html('oops', { status: 503 })));
-    assert.deepEqual(await h.get(), DATA, name);
-    state = 'gone';
-    h.advance(15 * MINUTE);
-    assert.equal(await h.get(), null, `${name}: null at once`);
-    state = 'down';
-    h.advance(15 * MINUTE);
-    assert.equal(await h.get(), null, `${name}: a later failure does not bring the old summary back`);
-  }
+test('get: calls that arrive together share one fetch; once it settles, the next call fetches again', async () => {
+  let open;
+  const gate = new Promise((resolve) => { open = resolve; });
+  let shown = DATA;
+  const h = harness(async () => { await gate; return page(shown); });
+  const together = [h.get(), h.get(), h.get()];
+  await settle();
+  assert.equal(h.site.calls.length, 1, 'three calls in flight, one fetch');
+  open();
+  assert.deepEqual(await Promise.all(together), [DATA, DATA, DATA]);
+  // Nothing is kept once it settled: the next call is a fetch of its own, and sees the page as it is now.
+  shown = CHANGED;
+  assert.deepEqual(await h.get(), CHANGED);
+  assert.equal(h.site.calls.length, 2);
+  // A shared fetch that fails is null for every caller, and the next call tries again.
+  const down = harness(() => html('oops', { status: 500 }));
+  assert.deepEqual(await Promise.all([down.get(), down.get()]), [null, null]);
+  assert.equal(down.site.calls.length, 1, 'two calls together, one failed fetch');
+  assert.equal(failures(down).length, 1, 'one failure logged for the one fetch');
+  assert.equal(await down.get(), null);
+  assert.equal(down.site.calls.length, 2);
+  // Two listings at once: one fetch each.
+  const two = harness((url) => (url === URL_W014 ? page(DATA) : page(OTHER)));
+  assert.deepEqual(await Promise.all([two.get(), two.get(OTHER_LISTING), two.get(), two.get(OTHER_LISTING)]), [DATA, OTHER, DATA, OTHER]);
+  assert.deepEqual(two.site.calls.map((c) => c.url).sort(), [URL_W014, URL_OTHER].sort(), 'one fetch per listing');
 });
 
 test('get: nothing to fetch (no listing, no id, no slug, an untrusted slug or site) → null without a request', async () => {
@@ -345,14 +373,4 @@ test('get: nothing to fetch (no listing, no id, no slug, an untrusted slug or si
   const bad = harness(() => page(DATA), { siteUrl: 'ftp://site.example.com' });
   assert.equal(await bad.get(), null);
   assert.equal(bad.site.calls.length, 0);
-});
-
-test('get: a clock that goes back does not keep a cached page forever, or a last good past its 6 hours', async () => {
-  let up = true;
-  const h = harness(() => (up ? page(DATA) : html('oops', { status: 500 })));
-  assert.deepEqual(await h.get(), DATA);
-  h.advance(-HOUR);
-  up = false;
-  assert.deepEqual(await h.get(), null, 'an hour before the last good page: no fresh check and no summary from the future');
-  assert.equal(h.site.calls.length, 2, 'the check before the clock is refetched');
 });

@@ -136,8 +136,8 @@ export function createToolHandlers({
   fullUnitRowSources = FULL_UNIT_ROW_SOURCES, publishedUnits = null,
 }) {
   if (!db) throw new TypeError('createToolHandlers needs the store (db)');
-  /** The live listing pages' published unit summaries (one GET per listing per 15 minutes at most, fail closed). */
-  const published = publishedUnits ?? createPublishedUnits({ siteUrl, now, log });
+  /** The live listing pages' published unit summaries (one GET per search_units call, no cache, fail closed). */
+  const published = publishedUnits ?? createPublishedUnits({ siteUrl, log });
   /** leadKey → { at, id }. Bounded by the dedupe window, pruned on every save. */
   const recentLeads = new Map();
 
@@ -166,10 +166,12 @@ export function createToolHandlers({
    * Unit prices inside one project (today: Darco Prime Waterfront, BONA-W014), for every source: WhatsApp,
    * email, the website chat and a missing or unknown source. The answer is what the LIVE listing page publishes
    * (DESIGN §4.5): the summary its units table carries (lib/published-units.mjs), one row per bedroom count with
-   * its lowest cash price. Nothing (the "not published" note) when the inventory does not list the project as
-   * available, or the live page shows no table, a malformed one or another listing's, or could not be read for
-   * six hours. units.json is not read here: the page alone says what is published. No unit refs, no per-unit
-   * prices, no payment plans: those are not published. The model's filters are ignored.
+   * its lowest cash price, read by one GET of the live page on every call (no cache, no last-good fallback): the
+   * quote is what the page showed to this call's GET. Nothing (the "not published" note) when the
+   * inventory does not list the project as available, or the live page shows no table, a malformed one or another
+   * listing's, or could not be read on this call. units.json is not read here: the page alone says what is
+   * published. No unit refs, no per-unit prices, no payment plans: those are not published. The model's filters
+   * are ignored.
    */
   async function search_units(args, ctx) {
     // The first id that is not blank; none (missing, null, '' or spaces) means W014, as the tool schema says.

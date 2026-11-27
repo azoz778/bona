@@ -463,11 +463,15 @@ const OLDER_PAGE_SUMMARY = {
   rows: [{ ...PAGE_SUMMARY.rows[0], count: 1, cashFrom: 698250 }, ...PAGE_SUMMARY.rows.slice(1)],
 };
 const OLDER_CUT = { rows: OLDER_PAGE_SUMMARY.rows, delivery: OLDER_PAGE_SUMMARY.delivery, updated: OLDER_PAGE_SUMMARY.updated };
+// The page after a Pages deploy changed a starting price (a made-up figure).
+const CHANGED_PAGE_SUMMARY = {
+  ...PAGE_SUMMARY, cashFrom: 689750, updated: '2026-11-20',
+  rows: [{ ...PAGE_SUMMARY.rows[0], cashFrom: 689750 }, ...PAGE_SUMMARY.rows.slice(1)],
+};
+const CHANGED_CUT = { rows: CHANGED_PAGE_SUMMARY.rows, delivery: CHANGED_PAGE_SUMMARY.delivery, updated: CHANGED_PAGE_SUMMARY.updated };
 const SITE = 'https://site.example.com';
 const W014_PAGE = `${SITE}/properties/darco-prime-waterfront-fixture/`;
 const UNITS_NOW = Date.parse('2026-11-27T09:00:00Z');
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
 const SOURCES = ['bona-whatsapp', 'bona-email', 'bona-web', undefined, 'someone-else'];
 // What a model asking for a unit would send: a unit ref, a plan, a bed count, a budget.
 const UNIT_ARGS = { listing_id: 'BONA-W014', beds: 1, plan: 'twoYear', query: 'B91-23', max_price: 900000, limit: 20, maid_room: false };
@@ -506,11 +510,10 @@ function unitsHarness({ sheet = SHEET, status = 'available', withUnits = true, e
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-tool-units-'));
   const file = path.join(dir, 'units.json');
   fs.writeFileSync(file, JSON.stringify(sheet));
-  let clock = UNITS_NOW;
   const site = fakeSite(answer ?? ((url) => (url === W014_PAGE ? listingPage(page) : new Response('not found', { status: 404 }))));
   const tools = createToolHandlers({
-    ...h.deps, siteUrl: SITE, inventory: w014Inventory(status), units: withUnits ? createUnits({ file }) : null, now: () => clock,
-    publishedUnits: createPublishedUnits({ siteUrl: SITE, fetch: site.fetch, now: () => clock, ...(timeoutMs ? { timeoutMs } : {}) }),
+    ...h.deps, siteUrl: SITE, inventory: w014Inventory(status), units: withUnits ? createUnits({ file }) : null, now: () => UNITS_NOW,
+    publishedUnits: createPublishedUnits({ siteUrl: SITE, fetch: site.fetch, ...(timeoutMs ? { timeoutMs } : {}) }),
     ...extra,
   });
   const ask = async (source, args = UNIT_ARGS) => {
@@ -518,7 +521,7 @@ function unitsHarness({ sheet = SHEET, status = 'available', withUnits = true, e
     return { raw, result: JSON.parse(raw) };
   };
   return {
-    ...h, tools, ask, file, site, advance: (ms) => { clock += ms; },
+    ...h, tools, ask, file, site,
     cleanup: () => { h.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); },
   };
 }
@@ -596,8 +599,9 @@ test('search_units: every source (WhatsApp, email, website, none, unknown) gets 
     }
     // The first id that is not blank decides: a blank listing_id does not hide the id given beside it.
     notPublished((await h.ask('bona-whatsapp', { listing_id: ' ', id: 'BONA-005' })).result, 'BONA-005 beside a blank id');
-    // Every call above, every source: one GET of the live W014 page (the 15-minute cache).
-    assert.deepEqual(h.site.calls, [W014_PAGE]);
+    // No cache: each of the 12 W014 answers above is a GET of the live W014 page of its own (BONA-005 is not fetched).
+    assert.equal(h.site.calls.length, SOURCES.length + 1 + 6, 'one GET per W014 call');
+    assert.ok(h.site.calls.every((url) => url === W014_PAGE), 'only the W014 page');
   } finally { h.cleanup(); }
 });
 
@@ -657,28 +661,67 @@ test('search_units: a page whose summary is malformed, not the allow-listed shap
   } finally { h.cleanup(); }
 });
 
-test('search_units: the site down (HTTP 500, a timeout) → the last good page for at most 6 hours, then the "not published" note', async () => {
-  for (const [name, down] of [
-    ['HTTP 500', () => new Response('oops', { status: 500 })],
-    ['a timeout', () => new Promise(() => {})],
-    ['a network error', () => new TypeError('fetch failed')],
-  ]) {
-    let up = true;
-    const h = unitsHarness({ answer: () => (up ? listingPage(PAGE_SUMMARY) : down()), timeoutMs: 20 });
-    try {
-      assert.deepEqual((await h.ask('bona-whatsapp')).result.summary, PUBLISHED_CUT, `${name}: up`);
-      up = false;
-      h.advance(6 * HOUR - MINUTE);
+test('search_units: no cache and no fallback: every call reads the live page; a changed price is quoted as changed, a removed table or a failure on the next call → "not published"', async () => {
+  let state = 'up';
+  const pages = {
+    up: () => listingPage(PAGE_SUMMARY),
+    changed: () => listingPage(CHANGED_PAGE_SUMMARY),
+    'the table removed': () => listingPage(null),
+    'HTTP 500': () => new Response('oops', { status: 500 }),
+    'a 404': () => new Response('not found', { status: 404 }),
+    'a timeout': () => new Promise(() => {}),
+    'a network error': () => new TypeError('fetch failed'),
+  };
+  const h = unitsHarness({ answer: () => pages[state](), timeoutMs: 20 });
+  let asked = 0;
+  const ask = (source) => { asked++; return h.ask(source); };
+  try {
+    for (const source of SOURCES) assert.deepEqual((await ask(source)).result.summary, PUBLISHED_CUT, `${source}: up`);
+    // A Pages deploy changes a starting price: the very next call quotes the new price, for every source.
+    state = 'changed';
+    for (const source of SOURCES) {
+      const { raw, result } = await ask(source);
+      assert.deepEqual(result.summary, CHANGED_CUT, `${source}: the changed price, at once`);
+      assert.equal(result.note, UNITS_NOTE);
+      assertNoUnpublished(raw);
+      assert.ok(!raw.includes('701500') && !raw.includes('701,500'), `${source}: the price the page no longer shows is not quoted`);
+    }
+    // The table taken off the page, then each kind of failure, each right after a good answer: "not published".
+    for (const gone of ['the table removed', 'HTTP 500', 'a 404', 'a timeout', 'a network error']) {
+      state = 'up';
+      assert.deepEqual((await ask('bona-whatsapp')).result.summary, PUBLISHED_CUT, `${gone}: up just before`);
+      state = gone;
       for (const source of SOURCES) {
-        const { raw, result } = await h.ask(source);
-        assert.deepEqual(result.summary, PUBLISHED_CUT, `${name}, ${source}: the last good page, within 6 hours`);
+        const { raw, result } = await ask(source);
+        notPublished(result, `${gone}, ${source}: on the very next call, not the summary a moment ago`);
         assertNoUnpublished(raw);
       }
-      h.advance(15 * MINUTE);
-      for (const source of SOURCES) notPublished((await h.ask(source)).result, `${name}, ${source}: past 6 hours`);
-      assert.equal(h.site.calls.length, 3, `${name}: one GET per 15 minutes, failures included`);
-    } finally { h.cleanup(); }
-  }
+    }
+    state = 'up';
+    assert.deepEqual((await ask('bona-email')).result.summary, PUBLISHED_CUT, 'back');
+    assert.equal(h.site.calls.length, asked, 'one GET of the live page per search_units call');
+    assert.ok(h.site.calls.every((url) => url === W014_PAGE));
+  } finally { h.cleanup(); }
+});
+
+test('search_units: calls that arrive together share one GET of the live page; the next call has a GET of its own', async () => {
+  let open;
+  const gate = new Promise((resolve) => { open = resolve; });
+  let summary = PAGE_SUMMARY;
+  const h = unitsHarness({ answer: async () => { await gate; return listingPage(summary); } });
+  try {
+    const together = [h.ask('bona-whatsapp'), h.ask('bona-web'), h.ask('bona-email')];
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(h.site.calls.length, 1, 'three calls in flight, one GET');
+    open();
+    for (const { raw, result } of await Promise.all(together)) {
+      assert.deepEqual(result.summary, PUBLISHED_CUT);
+      assertNoUnpublished(raw);
+    }
+    summary = CHANGED_PAGE_SUMMARY;
+    assert.deepEqual((await h.ask('bona-whatsapp')).result.summary, CHANGED_CUT, 'the next call reads the page as it is now');
+    assert.equal(h.site.calls.length, 2);
+  } finally { h.cleanup(); }
 });
 
 test('search_units: a listing the inventory does not list as available, an unknown project or one without a page → not published, and only a listed project\'s page is asked', async () => {
@@ -728,7 +771,7 @@ test('the search_units fixture is made up: no unit ref or price of it is on the 
     assert.ok(!refs.has(u.ref), `fixture unit #${i}: its ref is on the real sheet`);
     for (const plan of Object.keys(u.price)) assert.ok(!amounts.has(u.price[plan]), `fixture unit #${i}: its ${plan} price is on the real sheet`);
   });
-  [OLDER_PAGE_SUMMARY.cashFrom].forEach((n, i) => assert.ok(!amounts.has(n), `older page figure #${i} is on the real sheet`));
+  [OLDER_PAGE_SUMMARY.cashFrom, CHANGED_PAGE_SUMMARY.cashFrom].forEach((n, i) => assert.ok(!amounts.has(n), `made-up page figure #${i} is on the real sheet`));
 });
 
 test('search_units: the source set the full rows by default is empty (deny by default); the veto is that one set', async () => {

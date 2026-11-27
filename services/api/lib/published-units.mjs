@@ -7,12 +7,13 @@
  * quote a sheet before (or after) the page shows it: a push build that failed, a build still running, a sold
  * listing, an older build without the attribute.
  *
- * One outbound GET per listing per PAGE_TTL_MS at most (failures wait too), timeout FETCH_TIMEOUT_MS, body cap
- * MAX_PAGE_BYTES. Fail closed:
- * - The page answered (200, or 404/410): its summary, or null when it has none, a bad one or another listing's.
- *   That answer replaces the last good one at once.
- * - It did not (network error, timeout, another HTTP status, a body over the cap): the last good summary for at most
- *   LAST_GOOD_MS after it was fetched, then null.
+ * No cache and no fallback: every get() is one outbound GET of the live page (timeout FETCH_TIMEOUT_MS, body cap
+ * MAX_PAGE_BYTES), so a quote is never older than the page it comes from: a Pages deploy that changes or removes a
+ * price shows on the very next call. Calls for one listing that arrive while its GET is in flight share that GET
+ * (dedupe only: nothing is kept once it settles). Fail closed: anything but a 200 page carrying exactly one valid
+ * summary for that listing is null (a network error, a timeout, another HTTP status, a body over the cap, no
+ * attribute, a malformed one, another listing's). A failure is logged as a reason and a count of consecutive
+ * failures, never a value from the page.
  * Zero dependencies: global fetch, AbortController, TextDecoder.
  */
 import { propertyPath } from './inventory.mjs';
@@ -21,8 +22,6 @@ import { isDeliveryDate, isSheetDate, unitSummary } from './units-summary.mjs';
 export const DEFAULT_SITE = 'https://bona-real-estate.com';
 export const FETCH_TIMEOUT_MS = 8_000;
 export const MAX_PAGE_BYTES = 2 * 1024 * 1024;
-export const PAGE_TTL_MS = 15 * 60 * 1000;
-export const LAST_GOOD_MS = 6 * 60 * 60 * 1000;
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,119}$/;
 /** The most rows a page prints: one per bedroom count 0..MAX_BEDS and the penthouse row, with room to spare. */
@@ -98,16 +97,25 @@ function summaryOf(d, listingId) {
 
 const ATTR_RE = /\sdata-units-summary\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
 
+/** A listing page's HTML read for `listingId`: { value } with its one valid summary, or { reason } it has none:
+    'no_summary' (no attribute), 'other_listing' (it names another listing), 'bad_summary' (anything else). */
+function readPage(html, listingId) {
+  if (typeof html !== 'string' || typeof listingId !== 'string' || !listingId) return { reason: 'bad_summary' };
+  const values = new Set([...html.matchAll(ATTR_RE)].map((m) => m[1] ?? m[2]));
+  if (values.size === 0) return { reason: 'no_summary' };
+  if (values.size > 1) return { reason: 'bad_summary' };
+  let data;
+  try { data = JSON.parse(decodeEntities([...values][0])); } catch { return { reason: 'bad_summary' }; }
+  if (isPlain(data) && typeof data.listingId === 'string' && data.listingId !== listingId) return { reason: 'other_listing' };
+  const value = summaryOf(data, listingId);
+  return value ? { value } : { reason: 'bad_summary' };
+}
+
 /** The summary a listing page's HTML publishes for `listingId`: its data-units-summary attribute, validated; null
     when there is none, when it is malformed or not exactly the allow-listed shape, when it names another listing,
     or when the page carries two that differ. */
 export function parsePublishedUnits(html, listingId) {
-  if (typeof html !== 'string' || typeof listingId !== 'string' || !listingId) return null;
-  const values = new Set([...html.matchAll(ATTR_RE)].map((m) => m[1] ?? m[2]));
-  if (values.size !== 1) return null;
-  let data;
-  try { data = JSON.parse(decodeEntities([...values][0])); } catch { return null; }
-  return summaryOf(data, listingId);
+  return readPage(html, listingId).value ?? null;
 }
 
 class PageError extends Error {
@@ -143,20 +151,23 @@ async function readCapped(res, maxBytes) {
 }
 
 /**
- * @param {{ siteUrl?: string, fetch?: typeof fetch, now?: () => number, timeoutMs?: number, maxBytes?: number,
- *   ttlMs?: number, lastGoodMs?: number, log?: (o: object) => void }} [opts]
+ * @param {{ siteUrl?: string, fetch?: typeof fetch, timeoutMs?: number, maxBytes?: number,
+ *   log?: (o: object) => void }} [opts]
  *   siteUrl: the live site (bona-api's cfg.siteUrl: BONA_SITE, else src/data/site.json url; DEFAULT_SITE without one).
- * @returns {{ get(listing: {id: string, slug: string}): Promise<null | object> }}
+ * @returns {{ get(listing: {id: string, slug: string}): Promise<null | object> }} get: one GET of the listing's live
+ *   page per call (shared with calls for it already in flight), its summary or null.
  */
 export function createPublishedUnits({
-  siteUrl = DEFAULT_SITE, fetch = globalThis.fetch, now = Date.now, timeoutMs = FETCH_TIMEOUT_MS,
-  maxBytes = MAX_PAGE_BYTES, ttlMs = PAGE_TTL_MS, lastGoodMs = LAST_GOOD_MS, log = () => {},
+  siteUrl = DEFAULT_SITE, fetch = globalThis.fetch, timeoutMs = FETCH_TIMEOUT_MS, maxBytes = MAX_PAGE_BYTES,
+  log = () => {},
 } = {}) {
-  /** listing id → { checkedAt, answered, good, goodAt, pending }. Bounded by the inventory: only a listing it
-      resolved is ever asked for. */
-  const cache = new Map();
+  /** listing id + page URL → its GET in flight, deleted the moment it settles (no answer is kept). */
+  const inflight = new Map();
+  /** listing id → consecutive failures, for the log; deleted when the page answers. Bounded by the inventory: only
+      a listing it resolved is ever asked for. */
+  const failed = new Map();
 
-  /** One GET of the page: { answered: true, value } when the page answered, { answered: false, reason } otherwise. */
+  /** One GET of the page: { value } with its summary, or { reason } it gave none. */
   async function check(url, listingId) {
     const ac = new AbortController();
     let timer;
@@ -173,56 +184,40 @@ export function createPublishedUnits({
         })),
         timeout,
       ]);
-      if (res.status === 404 || res.status === 410) {
+      if (res.status !== 200) {
         res.body?.cancel?.().catch(() => {});
-        return { answered: true, value: null };
-      }
-      if (!res.ok) {
-        res.body?.cancel?.().catch(() => {});
-        return { answered: false, reason: `http_${res.status}` };
+        return { reason: `http_${res.status}` };
       }
       const html = await Promise.race([readCapped(res, maxBytes), timeout]);
-      return { answered: true, value: parsePublishedUnits(html, listingId) };
+      return readPage(html, listingId);
     } catch (err) {
       if (ac.signal.aborted) res?.body?.cancel?.().catch(() => {});
-      return { answered: false, reason: err instanceof PageError ? err.reason : ac.signal.aborted ? 'timeout' : 'network' };
+      return { reason: err instanceof PageError ? err.reason : ac.signal.aborted ? 'timeout' : 'network' };
     } finally {
       clearTimeout(timer);
     }
   }
 
-  function serve(e, t) {
-    if (e.good === null) return null;
-    if (e.answered) return e.good;
-    return t >= e.goodAt && t - e.goodAt <= lastGoodMs ? e.good : null;
-  }
-
-  async function get(listing) {
+  function get(listing) {
     const id = listing?.id;
     const url = typeof id === 'string' && id ? listingPageUrl(siteUrl, listing?.slug) : null;
-    if (!url) return null;
-    let e = cache.get(id);
-    if (!e) {
-      e = { checkedAt: -Infinity, answered: false, good: null, goodAt: -Infinity, pending: null };
-      cache.set(id, e);
-    }
-    const t = now();
-    // A clock behind the last check (it went back) refetches rather than trusting that check for longer.
-    if (!(t >= e.checkedAt && t - e.checkedAt < ttlMs)) {
-      e.pending ??= check(url, id).then((r) => {
-        const at = now();
-        e.checkedAt = at;
-        e.answered = r.answered;
-        if (r.answered) {
-          e.good = r.value;
-          e.goodAt = at;
-        } else {
-          log({ level: 'warn', evt: 'units.page_failed', listing: id, reason: r.reason });
+    if (!url) return Promise.resolve(null);
+    const key = `${id}\n${url}`;
+    let pending = inflight.get(key);
+    if (!pending) {
+      pending = check(url, id).then((r) => {
+        if (r.value) {
+          failed.delete(id);
+          return r.value;
         }
-      }).finally(() => { e.pending = null; });
-      await e.pending;
+        const failures = (failed.get(id) ?? 0) + 1;
+        failed.set(id, failures);
+        log({ level: 'warn', evt: 'units.page_failed', listing: id, reason: r.reason, failures });
+        return null;
+      }).finally(() => { inflight.delete(key); });
+      inflight.set(key, pending);
     }
-    return serve(e, now());
+    return pending;
   }
 
   return { get };
