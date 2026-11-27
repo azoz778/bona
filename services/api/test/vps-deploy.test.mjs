@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, lutimesSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
@@ -1608,7 +1608,7 @@ test('db-snapshot.mjs --max-age-days 30 (an injected clock): every label older t
       'bona-deploy-20991101T000000Z.db', // a later time (a clock that went back): not old
       'bona-deploy-20261341T000000Z.db', // no real UTC time in the name: not judged
       'bona-deploy-latest.db', 'bona-Deploy-20261001T000000Z.db', 'bona-deploy-20261001T000000Z.db.bak', 'notes.txt',
-      '.bona-deploy-20261001T000000Z.db.123.abc.partial', // another run's temp file
+      '.bona-deploy-20261001T000000Z.db.123.abc.partial', // not a temp name of this script (3 hex digits, not 12): never touched, however old
     ];
     for (const f of [...expired, ...kept]) writeFileSync(path.join(out, f), 'x', { mode: 0o600 });
     const r = snapshotDb({ db: file, outDir: out, label: 'deploy', keep: 5, maxAgeDays: 30, now });
@@ -1642,11 +1642,21 @@ test('db-snapshot.mjs --max-age-days on the command line: the real clock, "prune
     const old = `bona-pre-v8-${stamp(new Date(Date.now() - 31 * day))}.db`;
     const young = `bona-pre-v8-${stamp(new Date(Date.now() - 29 * day))}.db`;
     for (const f of [old, young]) writeFileSync(path.join(out, f), 'x', { mode: 0o600 });
+    // a temp copy a killed run left two days ago goes; one an hour old (a run still writing) stays
+    const killed = '.bona-deploy-20261101T000000Z.db.4242.0123456789ab.partial';
+    const writing = '.bona-pre-v8-20261101T000000Z.db.4243.0123456789ab.partial';
+    for (const [f, ms] of [[killed, 2 * day], [writing, 3600 * 1000]]) {
+      writeFileSync(path.join(out, f), 'a whole copy', { mode: 0o600 });
+      utimesSync(path.join(out, f), new Date(Date.now() - ms), new Date(Date.now() - ms));
+    }
     const r = snap(['--db', file, '--out', out, '--label', 'deploy', '--keep', '5', '--max-age-days', '30']);
     assert.equal(r.status, 0, r.stderr + r.stdout);
     const left = readdirSync(out);
     assert.ok(!left.includes(old) && left.includes(young), left.join('\n'));
     assert.match(r.stdout, new RegExp(`ok pruned ${reEsc(old)} \\(older than 30 days\\)`));
+    assert.ok(!left.includes(killed) && left.includes(writing), `the abandoned temp copy goes, the fresh one stays\n${left.join('\n')}`);
+    assert.match(r.stdout, new RegExp(`ok pruned ${reEsc(killed)} \\(a temp copy left by a run that was killed, older than 1 day\\)`));
+    assert.doesNotMatch(r.stdout, new RegExp(reEsc(writing)));
     assert.equal(left.filter((f) => SNAP_NAME('deploy').test(f)).length, 1, left.join('\n'));
     for (const v of ['0', '30d', '', '1.5']) {
       const bad = snap(['--db', file, '--out', out, '--max-age-days', v]);
@@ -1654,7 +1664,98 @@ test('db-snapshot.mjs --max-age-days on the command line: the real clock, "prune
       assert.match(bad.stderr, /bad --max-age-days/);
     }
     assert.match(readFileSync(SNAP, 'utf8'), /--max-age-days N/, 'the header says what it does');
+    for (const re of [/\.partial/, /1 day/]) assert.match(readFileSync(SNAP, 'utf8').split('\nimport ')[0], re, 'the header names the temp copies and their 1 day');
   } finally { db.close(); }
+});
+
+// PR-INFRA fix round 4 (Codex r4 P1): a run killed after VACUUM INTO and before it published the copy leaves a whole copy of
+// bona.db under its temporary name, .bona-<label>-<UTC time>.db.<pid>.<12 hex>.partial, and the age pass skipped those, so the
+// copy (conversations the live database has deleted since) stayed for ever. With --max-age-days, the prune also deletes such an
+// abandoned temp copy, of any label, once its file time is more than 1 day before the run's clock; a younger one can be a run
+// still writing (VACUUM INTO keeps writing it), so it stays; any other name, a sub-folder or a link is never touched.
+test('db-snapshot.mjs --max-age-days (an injected clock): an abandoned temp copy older than 1 day goes; a younger one, other names, sub-folders and links stay', async () => {
+  const { snapshotDb } = await import('../../deploy/vps/db-snapshot.mjs');
+  const { dir, file, db } = liveDb();
+  try {
+    const out = path.join(dir, 'release-backups');
+    mkdirSync(out, { mode: 0o700 });
+    const now = new Date('2026-12-31T12:00:00.000Z');
+    const HOUR = 3600 * 1000;
+    const DAY = 24 * HOUR;
+    const at = (f, ms) => { const t = new Date(now.getTime() - ms); utimesSync(path.join(out, f), t, t); };
+    const abandoned = [
+      '.bona-deploy-20261229T120000Z.db.4242.0123456789ab.partial', // two days
+      '.bona-pre-v8-20261230T115959Z.db.7.abcdef012345.partial', // another label, 1 day and a second
+    ];
+    const fresh = [
+      '.bona-deploy-20261231T110000Z.db.4243.0123456789ab.partial', // an hour: a run still writing
+      '.bona-deploy-20261230T120000Z.db.4244.0123456789ab.partial', // exactly 1 day: not older than 1 day
+      '.bona-deploy-20261001T000000Z.db.4245.0123456789ab.partial', // an old time in its name, a fresh file: judged by file time
+    ];
+    const other = [ // two days old, but not a temp name of this script
+      '.bona-deploy-20261001T000000Z.db.partial', '.bona-deploy-20261001T000000Z.db.123.abc.partial',
+      '.bona-Deploy-20261001T000000Z.db.123.0123456789ab.partial', '.bona-deploy-20261001T000000Z.db.123.0123456789AB.partial',
+      'bona-deploy-20261001T000000Z.db.123.0123456789ab.partial', '.bona-deploy-20261001T000000Z.db.123.0123456789ab.partial-journal',
+      '.bona-deploy-20261001T000000Z.db.0123456789ab.partial', '.bona-deploy.lock.123.0123456789ab', 'notes.partial',
+    ];
+    for (const f of [...abandoned, ...fresh, ...other]) writeFileSync(path.join(out, f), 'a whole copy', { mode: 0o600 });
+    for (const f of [...abandoned.slice(0, 1), ...other]) at(f, 2 * DAY);
+    at(abandoned[1], DAY + 1000);
+    at(fresh[0], HOUR);
+    at(fresh[1], DAY);
+    at(fresh[2], HOUR);
+    // a sub-folder named like a temp copy, a sub-folder holding one, a link named like one: never entered, followed or removed
+    const dirLike = '.bona-deploy-20261001T000000Z.db.9.0123456789ab.partial';
+    mkdirSync(path.join(out, dirLike, 'x'), { recursive: true });
+    writeFileSync(path.join(out, dirLike, 'x', 'keep.db'), 'inside');
+    mkdirSync(path.join(out, 'old'));
+    writeFileSync(path.join(out, 'old', abandoned[0]), 'inside');
+    utimesSync(path.join(out, 'old', abandoned[0]), new Date(now.getTime() - 2 * DAY), new Date(now.getTime() - 2 * DAY));
+    const target = path.join(dir, 'outside.db');
+    writeFileSync(target, 'outside');
+    utimesSync(target, new Date(now.getTime() - 2 * DAY), new Date(now.getTime() - 2 * DAY));
+    const linkLike = '.bona-deploy-20261001T000000Z.db.10.0123456789ab.partial';
+    symlinkSync(target, path.join(out, linkLike));
+    lutimesSync(path.join(out, linkLike), new Date(now.getTime() - 2 * DAY), new Date(now.getTime() - 2 * DAY));
+    at(dirLike, 2 * DAY);
+    at('old', 2 * DAY);
+
+    // without --max-age-days (a copy by hand) nothing is judged: every temp copy stays
+    const manual = snapshotDb({ db: file, outDir: out, label: 'deploy', keep: 5, now: new Date(now.getTime() - 60 * 1000) });
+    assert.deepEqual(manual.abandoned, [], 'no age pass, no temp copy deleted');
+    for (const f of abandoned) assert.ok(readdirSync(out).includes(f), `${f} stays without --max-age-days`);
+
+    const r = snapshotDb({ db: file, outDir: out, label: 'deploy', keep: 5, maxAgeDays: 30, now });
+    const left = readdirSync(out).sort();
+    for (const f of abandoned) assert.ok(!left.includes(f), `${f}: abandoned more than 1 day ago, deleted\n${left.join('\n')}`);
+    assert.deepEqual([...r.abandoned].sort(), [...abandoned].sort(), 'it names the temp copies it deleted');
+    assert.deepEqual(r.pruned, [], 'no snapshot was pruned (those lists are the published copies)');
+    assert.deepEqual(r.expired, []);
+    for (const f of [...fresh, ...other, dirLike, 'old', linkLike, path.basename(manual.file), path.basename(r.file)]) {
+      assert.ok(left.includes(f), `${f} stays\n${left.join('\n')}`);
+    }
+    assert.ok(lstatSync(path.join(out, linkLike)).isSymbolicLink(), 'the link is left as it is');
+    assert.equal(readFileSync(target, 'utf8'), 'outside', 'a link is never followed');
+    assert.equal(readFileSync(path.join(out, dirLike, 'x', 'keep.db'), 'utf8'), 'inside', 'a sub-folder named like a temp copy is never entered');
+    assert.equal(readFileSync(path.join(out, 'old', abandoned[0]), 'utf8'), 'inside', 'a sub-folder is never entered');
+  } finally { db.close(); }
+});
+
+test('db-snapshot.mjs pruneSnapshots: the run\'s own temp copy and the copy just made are never deleted, however old their files', async () => {
+  const { pruneSnapshots } = await import('../../deploy/vps/db-snapshot.mjs');
+  const out = mkdtempSync(path.join(tmpdir(), 'bona-snap-prune-'));
+  const now = new Date('2026-12-31T12:00:00.000Z');
+  const made = 'bona-deploy-20261231T120000Z.db';
+  const own = `.${made}.4242.0123456789ab.partial`;
+  const theirs = `.${made}.4243.0123456789ab.partial`;
+  const longAgo = new Date(now.getTime() - 10 * 24 * 3600 * 1000);
+  for (const f of [made, own, theirs]) {
+    writeFileSync(path.join(out, f), 'x', { mode: 0o600 });
+    utimesSync(path.join(out, f), longAgo, longAgo);
+  }
+  const r = pruneSnapshots({ outDir: out, label: 'deploy', made, ownPartial: own, keep: 1, maxAgeDays: 1, now });
+  assert.deepEqual(readdirSync(out).sort(), [own, made].sort(), 'the own temp copy and the copy just made stay');
+  assert.deepEqual(r, { pruned: [], expired: [], abandoned: [theirs] });
 });
 
 // Codex r3 P2: two runs that both found the same stale lock must not both take it over (the second rmSync used to delete the
@@ -1697,10 +1798,13 @@ test('services/README.md: snapshots are kept at most 30 days (deploy.sh --max-ag
   const at = readme.indexOf('`deploy.sh` snapshots');
   const para = readme.slice(at, readme.indexOf('\n\n', at));
   for (const re of [/--max-age-days 30/, /30 days/, /every label/, /pre-v8/, /PR-D1/, /T15/, /between deploys/i]) assert.match(para, re);
+  // Codex r4 P1: a run that was killed leaves a whole copy under its temp name; the deploy deletes it after 1 day
+  for (const re of [/\.partial/, /killed/, /older than 1 day/, /still writing/]) assert.match(para, re);
   assert.doesNotMatch(para, /never pruned/, 'a copy by hand expires too');
   const restore = readme.slice(readme.indexOf('To restore a snapshot'));
   assert.match(restore.slice(0, restore.indexOf('\n\n')), /at most 30 days/, 'the restore paragraph says how far back a snapshot can go');
   assert.match(readFileSync(path.join(VPS, 'deploy.sh'), 'utf8'), /older than 30 days/, 'the deploy.sh header says it too');
+  assert.match(readFileSync(path.join(VPS, 'deploy.sh'), 'utf8'), /\.partial/, 'and that a killed run\'s temp copy goes too');
 });
 
 test('services/README.md says how to restore a snapshot: stop bona-api, move bona.db-wal and bona.db-shm aside, copy, chmod 600, start', () => {

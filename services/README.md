@@ -498,7 +498,10 @@ VACUUM INTO, 0600, integrity-checked, `~/bona-data/release-backups/bona-deploy-<
 never the one just made; a file without Bona's schema, such as a zero-byte one, is refused; one run per label
 at a time, `release-backups/.bona-<label>.lock`); a failed snapshot leaves the running service as it is. Each
 deploy also deletes every snapshot in `release-backups` older than 30 days, of every label (`--max-age-days 30`,
-judged by the UTC time in its name; other files and sub-folders there are not touched). A copy by hand:
+judged by the UTC time in its name), and every temp copy a snapshot run that was killed left behind
+(`.bona-<label>-<UTC time>.db.<pid>.<random>.partial`, a whole copy when the run died after the copy and before it
+was checked and named) once its file is older than 1 day; a younger one can be a run still writing it, so it stays.
+Other files and sub-folders there are not touched. A copy by hand:
 `ssh hermes-vps '~/.local/opt/node-v24.19.0-linux-x64/bin/node /opt/bona/services/deploy/vps/db-snapshot.mjs --label pre-v8'`;
 its own run deletes nothing, and the first deploy after it is 30 days old deletes it. Nothing deletes a snapshot
 between deploys: when no deploy has run for a while, the copies there can be older than 30 days, so delete them by

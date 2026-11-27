@@ -13,7 +13,11 @@
 //   --max-age-days N
 //                afterwards also delete every snapshot in --out, of ANY label, whose UTC time in its name is more than
 //                N days before this run's clock (default: none); never the copy just made, never a name this script
-//                does not make (other files, sub-folders, temp files), never a name without a real UTC time.
+//                does not make (other files, sub-folders), never a name without a real UTC time. With it, also
+//                every temp copy a run that was killed left (.bona-<label>-<UTC time>.db.<pid>.<12 hex>.partial, any
+//                label, a plain file) whose file time is more than 1 day before this run's clock (Codex r4 P1: killed
+//                after VACUUM INTO, it is a whole copy); a younger one can be a run still writing it, so it stays, and
+//                this run's own never goes.
 //                deploy.sh passes --label deploy --keep 5 --max-age-days 30: the newest 5 deploy copies, and no copy
 //                (a hand-made pre-v8 one too) after the first deploy once it is 30 days old (Codex r3 P1: the copies
 //                hold conversations the live database has deleted). Nothing is deleted between deploys.
@@ -52,6 +56,10 @@ export function stamp(now = new Date()) {
 const nameRe = (label) => new RegExp(`^bona-${label}-\\d{8}T\\d{6}Z\\.db$`);
 /** A snapshot name of any label (LABEL_RE); group 1 is its stamp. */
 const ANY_NAME_RE = /^bona-[a-z0-9][a-z0-9-]{0,39}-(\d{8}T\d{6}Z)\.db$/;
+/** A run's temporary copy of any label, exactly as snapshotLocked names it (.<snapshot name>.<pid>.<12 hex>.partial). */
+const PARTIAL_RE = /^\.bona-[a-z0-9][a-z0-9-]{0,39}-\d{8}T\d{6}Z\.db\.[1-9]\d{0,9}\.[0-9a-f]{12}\.partial$/;
+/** A temp copy whose file was last written longer ago than this is a killed run's: a run still writing it keeps it fresh. */
+const PARTIAL_MAX_AGE_MS = DAY_MS;
 
 /** The time (ms) a stamp() stands for, or NaN when it is no real UTC time (20261341T000000Z: no 41st of a 13th month). */
 export function stampTime(s) {
@@ -158,10 +166,8 @@ export function takeLock(outDir, label, hooks = {}) {
 }
 
 /**
- * Copy `db` into `outDir`, check it, then prune that label down to `keep` (when given) and every label of copies older
- * than `maxAgeDays` days before `now` (when given), under the label's lock.
- * @returns {{ file: string, bytes: number, userVersion: number, pruned: string[], expired: string[] }}
- *   pruned = every snapshot this run deleted; expired = those of them deleted for their age.
+ * Copy `db` into `outDir`, check it, then prune (pruneSnapshots) under the label's lock.
+ * @returns {{ file: string, bytes: number, userVersion: number, pruned: string[], expired: string[], abandoned: string[] }}
  */
 export function snapshotDb({ db, outDir, label = 'manual', keep = 0, maxAgeDays = 0, now = new Date() }) {
   if (!LABEL_RE.test(label)) throw new UsageError(`bad --label ${JSON.stringify(label)}`);
@@ -220,34 +226,67 @@ function snapshotLocked({ db, outDir, label, keep, maxAgeDays, now }) {
     process.umask(mask);
   }
 
+  const r = pruneSnapshots({ outDir, label, made: name, ownPartial: path.basename(partial), keep, maxAgeDays, now });
+  return { file, bytes: fs.statSync(file).size, userVersion, ...r };
+}
+
+/**
+ * The prune after a copy, under `label`'s lock. Never deleted: `made` (the copy just made) and `ownPartial` (this run's
+ * temp name). keep > 0: all but the newest `keep` copies of `label`, `made` counted as one. maxAgeDays > 0: every
+ * snapshot of any label whose UTC time in its name is more than maxAgeDays days before `now`, and every temp copy of
+ * any label (PARTIAL_RE, a plain file: never a sub-folder or a link) whose file time is more than 1 day before `now`.
+ * @returns {{ pruned: string[], expired: string[], abandoned: string[] }}
+ *   pruned = every snapshot deleted; expired = those of them deleted for their age; abandoned = the temp copies deleted.
+ */
+export function pruneSnapshots({ outDir, label, made, ownPartial = null, keep = 0, maxAgeDays = 0, now = new Date() }) {
   const pruned = [];
   const expired = [];
+  const abandoned = [];
   // Gone already (a run of another label pruned it by age meanwhile) is not an error, and not this run's deletion.
-  const drop = (f) => {
+  const remove = (f) => {
     try {
       fs.rmSync(path.join(outDir, f));
     } catch (err) {
       if (err?.code === 'ENOENT') return false;
       throw err;
     }
+    return true;
+  };
+  const drop = (f) => {
+    if (!remove(f)) return false;
     pruned.push(f);
     return true;
   };
   if (keep > 0) {
     // The copy just made always stays; of the others the newest keep - 1 by name. Names sort by time, but a
     // clock that went back can give older copies later names, and the new one must not be what goes.
-    const others = fs.readdirSync(outDir).filter((f) => f !== name && nameRe(label).test(f)).sort().reverse();
+    const others = fs.readdirSync(outDir).filter((f) => f !== made && nameRe(label).test(f)).sort().reverse();
     for (const f of others.slice(keep - 1)) drop(f);
   }
   if (maxAgeDays > 0) {
     // Every label: the snapshots hold conversations the live database has deleted since, whoever made them.
     const cutoff = now.getTime() - maxAgeDays * DAY_MS;
     for (const f of fs.readdirSync(outDir).sort()) {
-      const m = f === name ? null : ANY_NAME_RE.exec(f);
+      const m = f === made ? null : ANY_NAME_RE.exec(f);
       if (m && stampTime(m[1]) < cutoff && drop(f)) expired.push(f);
     }
+    // Codex r4 P1: a run killed after VACUUM INTO and before it published left a whole copy under its temp name, of any
+    // label; a stale lock is taken over, but nothing else ever deletes that copy. Its file time, not its name, says
+    // whether a run may still be writing it (a clock that went back gives a fresh one an old name).
+    const partialCutoff = now.getTime() - PARTIAL_MAX_AGE_MS;
+    for (const f of fs.readdirSync(outDir).sort()) {
+      if (f === ownPartial || !PARTIAL_RE.test(f)) continue;
+      let st;
+      try {
+        st = fs.lstatSync(path.join(outDir, f));
+      } catch (err) {
+        if (err?.code === 'ENOENT') continue;
+        throw err;
+      }
+      if (st.isFile() && st.mtimeMs < partialCutoff && remove(f)) abandoned.push(f);
+    }
   }
-  return { file, bytes: fs.statSync(file).size, userVersion, pruned, expired };
+  return { pruned, expired, abandoned };
 }
 
 /** The defaults the API itself uses for its database (lib/config.mjs). */
@@ -285,6 +324,7 @@ export function main(argv = process.argv.slice(2)) {
     const r = snapshotDb(opts);
     console.log(`ok snapshot ${r.file} (${r.bytes} bytes, user_version ${r.userVersion}, integrity ok, mode 0600)`);
     for (const f of r.pruned) console.log(r.expired.includes(f) ? `ok pruned ${f} (older than ${opts.maxAgeDays} days)` : `ok pruned ${f}`);
+    for (const f of r.abandoned) console.log(`ok pruned ${f} (a temp copy left by a run that was killed, older than 1 day)`);
     return 0;
   } catch (err) {
     if (err instanceof UsageError) {

@@ -8,7 +8,8 @@
 # 0600 and integrity-checked, in ~/bona-data/release-backups/bona-deploy-<UTC time>.db, taken before
 # the restart because the new code applies its schema migrations at start; the newest 5 are kept, and
 # every snapshot there older than 30 days (any label, a hand-made pre-v8 copy too) is deleted
-# (--max-age-days 30: the copies hold conversations the live database has deleted since).
+# (--max-age-days 30: the copies hold conversations the live database has deleted since), and so is
+# a temp copy a killed run left (.bona-<label>-<UTC time>.db.<pid>.<hex>.partial) older than 1 day.
 # The units are SYSTEM units (lib.sh: BONA_UNIT_DIR, the userns restriction on Ubuntu 24.04), so
 # every systemctl/journalctl here goes through $VPS_SYSTEMCTL / $VPS_JOURNALCTL (sudo -n …).
 set -euo pipefail
