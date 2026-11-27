@@ -166,6 +166,15 @@ test('freeBusy fails closed: errors[], 401, 403, 404, 429, a timeout, a missing 
     ['429', () => json(429, { error: { code: 429 } }), 'quota'],
     ['500', () => json(500, { error: { code: 500 } }), 'bad_response'],
     ['missing calendar', () => json(200, { calendars: { [CAL]: { busy: [] } } }), 'bad_response'],
+    // A calendar without a well-formed busy list is no free calendar.
+    ['calendar {}', () => json(200, { calendars: { [CAL]: {}, [EXTRA]: { busy: [] } } }), 'bad_response'],
+    ['busy null', () => json(200, { calendars: { [CAL]: { busy: null }, [EXTRA]: { busy: [] } } }), 'bad_response'],
+    ['busy object', () => json(200, { calendars: { [CAL]: { busy: {} }, [EXTRA]: { busy: [] } } }), 'bad_response'],
+    ['extra busy missing', () => json(200, { calendars: { [CAL]: { busy: [] }, [EXTRA]: { errors: [] } } }), 'bad_response'],
+    ['errors not a list', () => json(200, { calendars: { [CAL]: { busy: [], errors: 'notFound' }, [EXTRA]: { busy: [] } } }), 'bad_response'],
+    ['calendars null', () => json(200, { calendars: null }), 'bad_response'],
+    ['calendars a list', () => json(200, { calendars: [] }), 'bad_response'],
+    ['body null', () => json(200, null), 'bad_response'],
     ['bad busy time', () => json(200, { calendars: { [CAL]: { busy: [{ start: 'soon', end: 'later' }] }, [EXTRA]: { busy: [] } } }), 'bad_response'],
     ['not json', () => new Response('<html>', { status: 200 }), 'bad_response'],
     ['timeout', () => 'hang', 'timeout'],
@@ -310,6 +319,16 @@ test('the event: no attendees, private, opaque, no location, +03:00; the summary
   assert.doesNotMatch(client, /[<>]/);
   assert.match(client, /^Client: .*Sara.*Example.* · \+966500000001$/);
   assert.equal(bookingEvent({ ...EVENT_INPUT, name: 'سارة مثال' }).description.split('\n')[0], 'Client: سارة مثال · +966500000001');
+  // Google links a URL, a bare domain or an address in a description: a name carries none of them.
+  const clientLine = (name) => bookingEvent({ ...EVENT_INPUT, name }).description.split('\n')[0];
+  for (const name of ['Sara https://evil.example/login', 'Sara www.evil.example', 'Sara evil.example.com', 'Sara sara@evil.example',
+    'Sara hxxp://evil.example', 'Sara evil。example。com', 'Sara javascript:alert(1)']) {
+    const got = clientLine(name);
+    assert.match(got, /^Client: Sara\b/, name);
+    assert.doesNotMatch(got.replace(/^Client: /, '').replace(' · +966500000001', ''), /:\/\/|www\.|[.。:@/]/i, `${name}: no link reaches the calendar`);
+  }
+  assert.equal(clientLine('Sara https://evil.example/login'), 'Client: Sara · +966500000001', 'a link is dropped whole');
+  assert.equal(clientLine('J.R. Example'), 'Client: J R Example · +966500000001', 'initials stay readable');
   // No phone (never expected for a WhatsApp lead): the line has the name only.
   assert.match(bookingEvent({ ...EVENT_INPUT, phone: null }).description, /^Client: Sara Example\n/);
 });

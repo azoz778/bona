@@ -368,12 +368,13 @@ test('a second active booking, or the same start for another lead, is refused by
   } finally { h.db.close(); }
 });
 
-test('a past booked row turns done in the same transaction, so a returning client can book again', async () => {
+test('a past booked row turns done before the reserve, once its event says it is over, so a returning client can book again', async () => {
   const clock = { t: NOW };
   const h = setup({ clock });
   try {
     const lead = h.lead();
-    insertRow(h.db, { id: 'bk-old', leadId: lead.lead_id, start: R(2026, 11, 30, 10), created: NOW - 5 * DAY });
+    const old = insertRow(h.db, { id: 'bk-old', leadId: lead.lead_id, start: R(2026, 11, 30, 10), created: NOW - 5 * DAY });
+    h.gcal.events.set(old, { id: old, status: 'confirmed', start: { dateTime: '2026-11-30T10:00:00+03:00' }, end: { dateTime: '2026-11-30T11:00:00+03:00' } });
     clock.t = NOW; // the old viewing (30 Nov) is over
     assert.equal(h.viewing.validate({ lead, listingId: 'BONA-W901', slotId: SLOT }).ok, true, 'a past booking is not active');
     const got = await h.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
@@ -822,6 +823,162 @@ test('the worker turns past booked rows done and keeps the holiday copy warm; it
     await first;
     assert.equal(h.rows()[0].status, 'done');
     assert.ok(h.gcal.calls.some((c) => c[0] === 'holidays'));
+  } finally { h.db.close(); }
+});
+
+/* ---------------- the stored times are a copy: a row is done only when its event is over ---------------- */
+
+const taskFor = (h, bookingId) => tasksForLead(h.db, h.rows().find((r) => r.booking_id === bookingId).lead_id)
+  .find((t) => t.details?.booking_id === bookingId);
+const moveEvent = (h, eventId, start, end) => {
+  const ev = h.gcal.events.get(eventId);
+  ev.start = { dateTime: start, timeZone: 'Asia/Riyadh' };
+  ev.end = { dateTime: end, timeZone: 'Asia/Riyadh' };
+};
+
+test('a viewing the owner moved LATER in Google after the reconcile is never done by its old end: the worker, slots and the next booking read the event first; the task follows and the lead keeps one booking', async () => {
+  const WED = '2026-12-09T10:00+03:00';
+  // 1. The worker runs first.
+  const clock = { t: NOW };
+  const h = setup({ clock });
+  try {
+    const lead = h.lead();
+    const first = await h.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+    assert.equal(first.ok, true);
+    clock.t = R(2026, 12, 6, 5); // Sunday 05:00: the reconcile finds it where it was booked
+    assert.deepEqual(await h.viewing.reconcile(), { checked: 1, moved: 0, cancelled: 0, held: 0 });
+    moveEvent(h, first.eventId, '2026-12-08T12:00:00+03:00', '2026-12-08T13:00:00+03:00'); // 07:00: moved to Tuesday 12:00
+    clock.t = R(2026, 12, 6, 11, 5); // past the old end
+    const out = await h.viewing.tick();
+    assert.equal(out.moved, 1);
+    const [row] = h.rows();
+    assert.deepEqual({ status: row.status, start: row.start_ts, end: row.end_ts }, { status: 'booked', start: R(2026, 12, 8, 12), end: R(2026, 12, 8, 13) });
+    assert.deepEqual({ status: taskFor(h, first.bookingId).status, due: taskFor(h, first.bookingId).due_ts }, { status: 'confirmed', due: R(2026, 12, 8, 12) });
+    assert.equal(h.viewing.validate({ lead, listingId: 'BONA-W902', slotId: WED }).reason, 'active_booking');
+    assert.deepEqual(await h.viewing.commitBooking({ lead, listingId: 'BONA-W902', slotId: WED }), { ok: false, reason: 'active_booking' });
+    // Tuesday 13:30: the moved viewing is over; it turns done, and the lead can book again.
+    clock.t = R(2026, 12, 8, 13, 30);
+    await h.viewing.tick();
+    assert.equal(h.rows()[0].status, 'done');
+    assert.equal((await h.viewing.commitBooking({ lead, listingId: 'BONA-W902', slotId: '2026-12-10T10:00+03:00' })).ok, true);
+  } finally { h.db.close(); }
+
+  // 2. The client asks again before the worker runs: the commit and slots read the event themselves.
+  const kc = { t: NOW };
+  const k = setup({ clock: kc });
+  try {
+    const lead = k.lead();
+    const first = await k.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+    kc.t = R(2026, 12, 6, 5);
+    await k.viewing.reconcile();
+    moveEvent(k, first.eventId, '2026-12-08T12:00:00+03:00', '2026-12-08T13:00:00+03:00');
+    kc.t = R(2026, 12, 6, 11, 2);
+    assert.deepEqual(await k.viewing.commitBooking({ lead, listingId: 'BONA-W902', slotId: WED }), { ok: false, reason: 'active_booking' });
+    assert.deepEqual(k.rows().map((r) => [r.status, r.start_ts, r.end_ts]), [['booked', R(2026, 12, 8, 12), R(2026, 12, 8, 13)]]);
+    assert.equal(taskFor(k, first.bookingId).due_ts, R(2026, 12, 8, 12));
+    assert.equal(k.gcal.calls.filter((c) => c[0] === 'insert').length, 1, 'no second event');
+    assert.deepEqual(await k.viewing.slots({ lead, listingId: 'BONA-W902' }), { bookable: false, reason: 'active_booking' });
+  } finally { k.db.close(); }
+  const sc = { t: NOW };
+  const s = setup({ clock: sc });
+  try {
+    const lead = s.lead();
+    const first = await s.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+    moveEvent(s, first.eventId, '2026-12-08T12:00:00+03:00', '2026-12-08T13:00:00+03:00');
+    sc.t = R(2026, 12, 6, 11, 2);
+    assert.deepEqual(await s.viewing.slots({ lead, listingId: 'BONA-W902' }), { bookable: false, reason: 'active_booking' });
+    assert.equal(s.rows()[0].start_ts, R(2026, 12, 8, 12));
+  } finally { s.db.close(); }
+
+  // 3. A calendar that cannot answer: the row stays booked (never done by its old end), and a booking waits for it.
+  const mc = { t: NOW };
+  const m = setup({ clock: mc });
+  try {
+    const lead = m.lead();
+    await m.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+    mc.t = R(2026, 12, 6, 11, 5);
+    m.gcal.fail.get = 'timeout';
+    await m.viewing.tick();
+    assert.equal(m.rows()[0].status, 'booked');
+    assert.deepEqual(await m.viewing.commitBooking({ lead, listingId: 'BONA-W902', slotId: WED }), { ok: false, reason: 'calendar', code: 'timeout' });
+    assert.equal(m.rows().length, 1);
+    delete m.gcal.fail.get;
+    await m.viewing.tick();
+    assert.equal(m.rows()[0].status, 'done', 'it was not moved: done once the calendar says so');
+    assert.equal((await m.viewing.commitBooking({ lead, listingId: 'BONA-W902', slotId: WED })).ok, true);
+  } finally { m.db.close(); }
+});
+
+test('a viewing the owner moved EARLIER (or deleted) in Google: done at its real end with the task following, by the worker or by the reconcile while its old end is still ahead', async () => {
+  // 1. Moved earlier, both ends past: the worker calls it done at its real time.
+  const clock = { t: NOW };
+  const h = setup({ clock });
+  try {
+    const lead = h.lead();
+    const first = await h.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+    moveEvent(h, first.eventId, '2026-12-03T18:00:00+03:00', '2026-12-03T19:00:00+03:00');
+    clock.t = R(2026, 12, 6, 11, 5);
+    assert.equal((await h.viewing.tick()).moved, 1);
+    assert.deepEqual(h.rows().map((r) => [r.status, r.start_ts, r.end_ts]), [['done', R(2026, 12, 3, 18), R(2026, 12, 3, 19)]]);
+    assert.equal(taskFor(h, first.bookingId).due_ts, R(2026, 12, 3, 18));
+    assert.equal((await h.viewing.commitBooking({ lead, listingId: 'BONA-W902', slotId: '2026-12-09T10:00+03:00' })).ok, true);
+  } finally { h.db.close(); }
+
+  // 2. Moved earlier, its old end still ahead: the reconcile follows it, and the lead is free again.
+  const kc = { t: NOW };
+  const k = setup({ clock: kc });
+  try {
+    const lead = k.lead();
+    const first = await k.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: '2026-12-08T10:00+03:00' });
+    moveEvent(k, first.eventId, '2026-12-07T10:00:00+03:00', '2026-12-07T11:00:00+03:00');
+    kc.t = R(2026, 12, 7, 12);
+    assert.deepEqual(await k.viewing.reconcile(), { checked: 1, moved: 1, cancelled: 0, held: 0 });
+    assert.deepEqual(k.rows().map((r) => [r.status, r.start_ts]), [['done', R(2026, 12, 7, 10)]]);
+    assert.equal(taskFor(k, first.bookingId).due_ts, R(2026, 12, 7, 10));
+    assert.equal(k.viewing.validate({ lead, listingId: 'BONA-W902', slotId: '2026-12-09T10:00+03:00' }).ok, true);
+  } finally { k.db.close(); }
+
+  // 3. Deleted in Google (its get answers status cancelled) before its time: cancelled with its task, never done.
+  const dc = { t: NOW };
+  const d = setup({ clock: dc });
+  try {
+    const lead = d.lead();
+    const first = await d.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+    d.gcal.events.get(first.eventId).status = 'cancelled';
+    dc.t = R(2026, 12, 6, 11, 5);
+    await d.viewing.tick();
+    assert.equal(d.rows()[0].status, 'cancelled');
+    assert.equal(taskFor(d, first.bookingId).status, 'cancelled');
+  } finally { d.db.close(); }
+});
+
+test('a restart that left an untold row (no task) past its slot: a booking before the first worker run never turns it done; the sweep takes it, booked or done, and its event goes', async () => {
+  const at = (ts) => ({ dateTime: new Date(ts).toISOString() });
+  const clock = { t: SLOT_TS + 2 * H }; // the new process starts after the slot ended
+  const h = setup({ clock });
+  try {
+    const statusOf = (id) => h.rows().find((r) => r.booking_id === id).status;
+    const a = h.lead('LEAD-20261201-0000aaaa');
+    const b = h.lead('LEAD-20261201-0000bbbb');
+    const c = h.lead('LEAD-20261201-0000cccc');
+    // The earlier process reserved A's and B's rows and Google created the events; it stopped before the tasks.
+    const eventA = insertRow(h.db, { id: 'bk-a', leadId: a.lead_id, start: SLOT_TS, taskId: null, created: NOW });
+    const eventB = insertRow(h.db, { id: 'bk-b', leadId: b.lead_id, start: SLOT_TS + 2 * H, taskId: null, created: NOW });
+    h.gcal.events.set(eventA, { id: eventA, status: 'confirmed', start: at(SLOT_TS), end: at(SLOT_TS + H) });
+    h.gcal.events.set(eventB, { id: eventB, status: 'confirmed', start: at(SLOT_TS + 2 * H), end: at(SLOT_TS + 3 * H) });
+    // An untold row an older build turned done (no task either): still the sweep's.
+    const eventC = insertRow(h.db, { id: 'bk-c', leadId: c.lead_id, start: R(2026, 12, 3, 10), status: 'done', taskId: null, created: NOW - 2 * DAY });
+    h.gcal.events.set(eventC, { id: eventC, status: 'confirmed', start: at(R(2026, 12, 3, 10)), end: at(R(2026, 12, 3, 11)) });
+
+    // Before the first worker run, another client books, and so does A.
+    const o = h.lead('LEAD-20261201-0000dddd');
+    assert.equal((await h.viewing.commitBooking({ lead: o, listingId: 'BONA-W902', slotId: '2026-12-08T10:00+03:00' })).ok, true);
+    assert.equal((await h.viewing.commitBooking({ lead: a, listingId: 'BONA-W901', slotId: '2026-12-08T12:00+03:00' })).ok, true);
+    assert.deepEqual([statusOf('bk-a'), statusOf('bk-b'), statusOf('bk-c')], ['cancel_pending', 'cancel_pending', 'cancel_pending'], 'never done: those clients were never told');
+    await h.viewing.tick();
+    assert.deepEqual([statusOf('bk-a'), statusOf('bk-b'), statusOf('bk-c')], ['cancelled', 'cancelled', 'cancelled']);
+    assert.deepEqual([eventA, eventB, eventC].map((id) => h.gcal.events.has(id)), [false, false, false], 'no event is left for a client who was never told');
+    assert.equal(h.rows().filter((r) => r.status === 'booked').length, 2, 'the two new bookings stand');
   } finally { h.db.close(); }
 });
 

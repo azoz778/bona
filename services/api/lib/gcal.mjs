@@ -6,8 +6,8 @@
  *   scopes, calendar.events and calendar.freebusy (freeBusy does not accept calendar.events alone).
  *   The access token is cached 55 minutes. Every call has a 5 s timeout.
  * - freeBusy fails closed: an `errors[]` entry, a 401, 403 or 404, a timeout, or an answer that is
- *   not what was asked → `{ ok: false, code }`, so no slot is ever offered on a calendar it could not
- *   read.
+ *   not what was asked (a calendar missing, or without a `busy` list) → `{ ok: false, code }`, so no
+ *   slot is ever offered on a calendar it could not read.
  * - holidays(): the Saudi holiday feed. A day is blocked when an event's description starts with
  *   "Public holiday", or its summary is on the allow-list (Eid al-Fitr, Eid al-Adha, Arafat Day,
  *   Founding Day, National Day), "(tentative)" included. "Observance" entries (Ramadan begins, Flag
@@ -83,8 +83,15 @@ export function eventIdFor(leadId, startTs, attempt = 0) {
 
 /** One line of text: no line breaks (a name cannot add a line to the description), clipped. */
 const line = (v, max = 200) => String(v ?? '').replace(/[\r\n\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
-/** The name the client typed: one line and no `<` or `>`, since Google renders HTML in a description (no disguised link). */
-const nameLine = (v) => line(String(v ?? '').replace(/[<>]/g, ' '), 80);
+/**
+ * The name the client typed, as plain words on one line. No `<` or `>`: Google renders HTML in a
+ * description (no disguised link). No link either, since Google also links a bare URL, domain or
+ * address there: a word with a scheme or `www.` is dropped, and `.`, `:`, `/`, `\` and `@` become spaces.
+ */
+const nameLine = (v) => line(String(v ?? '')
+  .replace(/[<>]/g, ' ')
+  .replace(/\S*(?::\/\/|\bwww[.\u3002\uFF0E\uFF61])\S*/giu, ' ')
+  .replace(/[.:/\\@\u3002\uFF0E\uFF61\uFF1A\uFF0F\uFF20]/gu, ' '), 80);
 
 /**
  * The calendar event of a booking (DESIGN §8.3 step 6). The summary carries the listing, never the
@@ -233,15 +240,18 @@ export function createGcal({
     if (r.reported) return fail(r.error);
     if (r.error) return failed('freeBusy', r.error);
     if (r.status !== 200) return failed('freeBusy', codeForStatus(r.status, r.body));
-    if (!r.parseOk || !r.body || typeof r.body.calendars !== 'object') return failed('freeBusy', 'bad_response');
+    const cals = r.parseOk ? r.body?.calendars : null;
+    if (!cals || typeof cals !== 'object' || Array.isArray(cals)) return failed('freeBusy', 'bad_response');
     const busy = [];
     for (const id of ids) {
-      const cal = r.body.calendars[id];
+      const cal = Object.hasOwn(cals, id) ? cals[id] : null;
       if (!cal || typeof cal !== 'object') return failed('freeBusy', 'bad_response');
-      if (Array.isArray(cal.errors) && cal.errors.length) {
-        return failed('freeBusy', cal.errors.some((e) => e?.reason === 'notFound') ? 'not_found' : 'bad_response');
+      if (cal.errors != null && (!Array.isArray(cal.errors) || cal.errors.length)) {
+        return failed('freeBusy', Array.isArray(cal.errors) && cal.errors.some((e) => e?.reason === 'notFound') ? 'not_found' : 'bad_response');
       }
-      for (const b of Array.isArray(cal.busy) ? cal.busy : []) {
+      // No busy list is no answer: never read as a free calendar.
+      if (!Array.isArray(cal.busy)) return failed('freeBusy', 'bad_response');
+      for (const b of cal.busy) {
         const start = Date.parse(b?.start ?? '');
         const end = Date.parse(b?.end ?? '');
         if (!Number.isFinite(start) || !Number.isFinite(end)) return failed('freeBusy', 'bad_response');

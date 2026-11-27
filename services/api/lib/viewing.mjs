@@ -15,8 +15,13 @@
  *     onLeadLeaving (Not a client, a new colleague's or never-list number → deleteForLead);
  *   - the inbox store's `onPurge` (purgeLead: leaving the inbox, the retention purge, the test
  *     switch going off) → cancelForLead;
- *   - the timers (PR-INT): tick() every 5 min (rows a restart left untold, cancellations, past →
- *     done, the holiday copy) and reconcile() at 05:00 and before the summary.
+ *   - the timers (PR-INT): tick() every 5 min (rows a restart left untold, bookings over by their
+ *     stored times, cancellations, the holiday copy) and reconcile() at 05:00 and before the summary.
+ *
+ * A row's start_ts/end_ts are a copy of its event's times, from the booking or the last check: the
+ * owner may move the event in Google at any time (DESIGN §8.4, the calendar is the source of truth).
+ * So a row is never `done` by its stored end alone: settle() reads the event first (the worker,
+ * slots and every commit for the lead), and the row follows it.
  *
  * The hooks and the purge only write rows, synchronously, inside the caller's transaction; they
  * never call Google (DESIGN §8.4). Google is called from slots, commitBooking, tick and reconcile.
@@ -156,7 +161,6 @@ export function createViewing(deps = {}) {
   const activeBooking = (leadId, t) => Boolean(prep("SELECT 1 FROM viewing_bookings WHERE lead_id = ? AND status = 'booked' AND end_ts >= ? LIMIT 1").get(String(leadId), t));
   const slotTaken = (startTs) => Boolean(prep("SELECT 1 FROM viewing_bookings WHERE start_ts = ? AND status = 'booked' LIMIT 1").get(startTs));
   const bookedToday = (t) => prep('SELECT COUNT(*) n FROM viewing_bookings WHERE created >= ?').get(dayStart(riyadhDay(t))).n;
-  const flipDone = (t) => prep("UPDATE viewing_bookings SET status = 'done', updated = ? WHERE status = 'booked' AND end_ts < ?").run(t, t).changes;
 
   /** What slots() checks before it asks Google. */
   function precheck(lead, listingId, t) {
@@ -190,8 +194,14 @@ export function createViewing(deps = {}) {
 
   async function slots(o = {}) {
     if (!enabled()) return { bookable: false };
+    const lead = leadOf(o);
+    const first = precheck(lead, o.listingId, now());
+    if (first) return { bookable: false, reason: first };
+    // The lead's booking that is over by its stored times: is it really (settle())?
+    const s = await settle(now(), lead.lead_id);
+    if (s.code) return { bookable: false, reason: 'calendar', code: s.code };
     const t = now();
-    const why = precheck(leadOf(o), o.listingId, t);
+    const why = s.checked ? precheck(lead, o.listingId, t) : null;
     if (why) return { bookable: false, reason: why };
     const hol = await gcal.holidays();
     if (!hol.ok) return { bookable: false, reason: 'calendar', code: hol.code };
@@ -220,10 +230,13 @@ export function createViewing(deps = {}) {
     return run;
   };
 
-  /** Step 3: done for what is over, then the `booked` row, in one write transaction. */
+  /**
+   * Step 3: the `booked` row, in one write transaction. The lead's own booking that is over was
+   * settled just before (commit()), from its event: a blind "end_ts < now → done" here would end a
+   * viewing the owner moved later, or a row a restart left untold (DESIGN §8.4).
+   */
   function reserve(v, t) {
     return db.transaction(() => {
-      flipDone(t);
       // Google keeps a deleted event's id, and a booking the owner moved keeps the id of its first
       // start: a lead booking that start again takes the first id no row holds yet. (Every event id
       // the robot ever sent has a row: dropRow only removes a row whose insert never went out or
@@ -241,23 +254,32 @@ export function createViewing(deps = {}) {
   const markPending = (bookingId) => prep("UPDATE viewing_bookings SET status = 'cancel_pending', updated = ? WHERE booking_id = ? AND status IN ('booked','done')").run(now(), bookingId);
 
   /**
-   * A restart between the reserve (step 3) and the task (step 7) leaves a `booked` row with no task:
-   * its insert may have landed, and the client was never told. Such a row → cancel_pending, so the
-   * worker deletes any event (404 = none) and the lead and the start are free again. A row this
-   * process's own commit holds is never touched; every other commit sets its task, drops its row or
-   * marks it before it lets go (place()).
+   * A restart between the reserve (step 3) and the task (step 7) leaves a row with no task: its
+   * insert may have landed, and the client was never told. Such a row → cancel_pending, so the
+   * worker deletes any event (404 = none) and the lead and the start are free again. It runs first
+   * in every commit, worker run and reconcile, so no commit counts it, and settle() and reconcile
+   * never read a row with no task (nor turn one done). A row this process's own commit holds is never
+   * touched; every other commit sets its task, drops its row or marks it before it lets go (place()).
    */
   function sweepStranded(t) {
-    const rows = prep("SELECT booking_id FROM viewing_bookings WHERE status = 'booked' AND task_id IS NULL AND created < ? ORDER BY created, booking_id")
+    // `done` too: nothing here turns a row with no task done any more, but an older build's flip did.
+    const rows = prep("SELECT booking_id FROM viewing_bookings WHERE status IN ('booked','done') AND task_id IS NULL AND created < ? ORDER BY created, booking_id")
       .all(t - STRANDED_MS).filter((r) => !inFlight.has(r.booking_id));
     if (!rows.length) return 0;
-    const marked = db.transaction(() => rows.filter((r) => prep("UPDATE viewing_bookings SET status = 'cancel_pending', updated = ? WHERE booking_id = ? AND status = 'booked' AND task_id IS NULL")
+    const marked = db.transaction(() => rows.filter((r) => prep("UPDATE viewing_bookings SET status = 'cancel_pending', updated = ? WHERE booking_id = ? AND status IN ('booked','done') AND task_id IS NULL")
       .run(t, r.booking_id).changes === 1));
     for (const r of marked) log({ level: 'warn', evt: 'viewing.stranded', bookingId: r.booking_id });
     return marked.length;
   }
 
   async function commit(o) {
+    // Before anything counts: a row a restart left untold is no booking, and never turns done.
+    sweepStranded(now());
+    const pre = validate(o);
+    if (!pre.ok) return pre;
+    // The lead's booking that is over by its stored times: its event says whether it is (moved later = still to come).
+    const s = await settle(now(), pre.leadId);
+    if (s.code) return { ok: false, reason: 'calendar', code: s.code };
     const v = validate(o);
     if (!v.ok) return v;
     const lead = db.getLead(v.leadId);
@@ -381,11 +403,15 @@ export function createViewing(deps = {}) {
   function onLeadLeaving(leadId) { deleteForLead(leadId); }
   function onPurge(leadId) { cancelForLead(leadId); }
 
-  /** The worker: rows a restart left untold → cancel_pending, past → done, then the cancellations, oldest first; a failure waits for the next run. */
+  /**
+   * The worker: rows a restart left untold → cancel_pending; bookings over by their stored times →
+   * their events read (settle()); then the cancellations, oldest first. A failure waits for the next run.
+   */
   async function work() {
     const t = now();
     const stranded = sweepStranded(t);
-    const out = { stranded, done: flipDone(t), cancelled: 0, failed: 0 };
+    const settled = await settle(t);
+    const out = { stranded, done: settled.done, moved: settled.moved, cancelled: settled.cancelled, failed: 0 };
     const pending = prep("SELECT booking_id, event_id FROM viewing_bookings WHERE status = 'cancel_pending' ORDER BY updated, booking_id LIMIT ?").all(WORKER_BATCH)
       .filter((r) => !inFlight.has(r.booking_id));
     // A delete answers 404 on a calendar the robot cannot see as well: that is no "already gone".
@@ -431,12 +457,103 @@ export function createViewing(deps = {}) {
   /** 'not_found' while the last reconcile found none of its bookings' events in the calendar (health shows it). */
   let held = null;
 
+  /** A booked row and its open task → cancelled (the calendar cancelled it). 1 when the row changed. */
+  const cancelRow = (r) => db.transaction(() => {
+    const n = prep("UPDATE viewing_bookings SET status = 'cancelled', updated = ? WHERE booking_id = ? AND status = 'booked'").run(now(), r.booking_id).changes;
+    if (n && r.task_id) cancelBookedViewing(db, { taskId: r.task_id, bookingId: r.booking_id, now: now() });
+    return n;
+  });
+  const markDone = (r) => prep("UPDATE viewing_bookings SET status = 'done', updated = ? WHERE booking_id = ? AND status = 'booked'").run(now(), r.booking_id).changes;
+
+  /**
+   * A booked row takes its event's state (DESIGN §8.4: the calendar is the source of truth). A
+   * cancelled event (Google's get returns a deleted one that way) cancels the row and its task.
+   * Otherwise the row takes the event's real start and end, its task the start as due_ts, and the
+   * row is done only once that real end is past.
+   * @returns {'cancelled'|'moved'|'done'|null}  null: nothing changed (or the move landed on another booking's start)
+   */
+  function follow(r, event, t) {
+    if (event?.status === 'cancelled') return cancelRow(r) ? 'cancelled' : null;
+    const start = eventTime(event?.start);
+    const end = eventTime(event?.end);
+    const real = Number.isFinite(start) && Number.isFinite(end) && end > start;
+    const s = real ? start : r.start_ts;
+    const e = real ? end : r.end_ts;
+    const moved = s !== r.start_ts || e !== r.end_ts;
+    const status = e < t ? 'done' : 'booked';
+    if (!moved && status === 'booked') return null;
+    try {
+      return db.transaction(() => {
+        const n = prep("UPDATE viewing_bookings SET start_ts = ?, end_ts = ?, status = ?, updated = ? WHERE booking_id = ? AND status = 'booked'")
+          .run(s, e, status, now(), r.booking_id).changes;
+        if (!n) return null;
+        if (moved && r.task_id) moveBookedViewing(db, { taskId: r.task_id, bookingId: r.booking_id, dueTs: s, now: now() });
+        return moved ? 'moved' : 'done';
+      });
+    } catch (err) {
+      // Moved onto another booking's start: the unique index refuses it; the owner sees both in the calendar.
+      log({ level: 'warn', evt: 'viewing.reconcile_conflict', bookingId: r.booking_id, error: errClass(err) });
+      return null;
+    }
+  }
+
+  /**
+   * Reads each row's event and follows it (follow()). A 404 on a row that is over by its stored
+   * times makes it done: nothing says it moved. A 404 on one still ahead comes back in `gone`, for
+   * reconcile to judge. A calendar that cannot answer leaves the rows as they are, with `code`.
+   * Rows a commit in this process holds are skipped.
+   */
+  async function readEvents(op, rows, t) {
+    const res = { checked: 0, moved: 0, done: 0, cancelled: 0, found: 0, gone: [], code: null, stopped: false };
+    const todo = rows.filter((r) => !inFlight.has(r.booking_id));
+    if (!todo.length) return res;
+    // A calendar the robot cannot see any more answers 404 for every event too: no 404 is read before this.
+    const probe = await gcal.access();
+    if (!probe.ok) {
+      log({ level: 'warn', evt: `viewing.${op}_stopped`, code: probe.code });
+      return { ...res, code: probe.code, stopped: true };
+    }
+    for (const r of todo) {
+      res.checked += 1;
+      const got = await gcal.get(r.event_id);
+      if (!got.ok && got.gone === true) {
+        if (r.end_ts >= t) res.gone.push(r);
+        else res.done += markDone(r);
+        continue;
+      }
+      if (!got.ok) {
+        res.code = got.code;
+        log({ level: 'warn', evt: `viewing.${op}_failed`, bookingId: r.booking_id, code: got.code });
+        if (CALENDAR_DOWN.has(got.code)) { res.stopped = true; break; }
+        continue;
+      }
+      res.found += 1;
+      const did = follow(r, got.event, t);
+      if (did) res[did] += 1;
+    }
+    return res;
+  }
+
+  /**
+   * Bookings over by their stored times (every one, or one lead's): a row is done only once its
+   * event says so, since the owner may have moved it later after the last reconcile. Until the
+   * calendar answers (`code`), the row stays booked, so the lead keeps one booking. Rows with no
+   * task are the stranded sweep's, never read here.
+   */
+  function settle(t, leadId = null) {
+    const rows = leadId === null
+      ? prep("SELECT * FROM viewing_bookings WHERE status = 'booked' AND task_id IS NOT NULL AND end_ts < ? ORDER BY end_ts, booking_id LIMIT ?").all(t, WORKER_BATCH)
+      : prep("SELECT * FROM viewing_bookings WHERE status = 'booked' AND task_id IS NOT NULL AND end_ts < ? AND lead_id = ? ORDER BY end_ts, booking_id").all(t, String(leadId));
+    return readEvents('settle', rows, t);
+  }
+
   /**
    * The calendar is the source of truth: a moved event moves the booking and its task; a deleted one
    * (Google's get returns it with status 'cancelled') cancels them. A 404 means the event is not in
    * this calendar: read as deleted only when the same run found other bookings' events there. When
    * none was found (another calendar id, say), the run is held: nothing changes, and health says
-   * not_found until a reconcile finds the events again.
+   * not_found until a reconcile finds the events again. Every booking with a task is read, over by
+   * its stored times or not.
    */
   async function reconcile() {
     const out = { checked: 0, moved: 0, cancelled: 0, held: 0 };
@@ -444,60 +561,21 @@ export function createViewing(deps = {}) {
     const t = now();
     // A row a restart left untold is no booking to check: the worker deletes its event.
     sweepStranded(t);
-    flipDone(t);
-    const rows = prep("SELECT * FROM viewing_bookings WHERE status = 'booked' AND end_ts >= ? ORDER BY start_ts, booking_id LIMIT ?").all(t, RECONCILE_BATCH);
+    const rows = prep("SELECT * FROM viewing_bookings WHERE status = 'booked' AND task_id IS NOT NULL ORDER BY start_ts, booking_id LIMIT ?").all(RECONCILE_BATCH);
     if (!rows.length) {
       held = null;
       log({ evt: 'viewing.reconciled', ...out });
       return out;
     }
-    const probe = await gcal.access();
-    if (!probe.ok) {
-      log({ level: 'warn', evt: 'viewing.reconcile_stopped', code: probe.code });
-      return out;
-    }
-    const cancel = (r) => db.transaction(() => {
-      const n = prep("UPDATE viewing_bookings SET status = 'cancelled', updated = ? WHERE booking_id = ? AND status = 'booked'").run(now(), r.booking_id).changes;
-      if (n && r.task_id) cancelBookedViewing(db, { taskId: r.task_id, bookingId: r.booking_id, now: now() });
-      out.cancelled += n;
-    });
-    const gone = [];
-    let found = 0;
-    let stopped = false;
-    for (const r of rows) {
-      if (inFlight.has(r.booking_id)) continue;
-      out.checked += 1;
-      const got = await gcal.get(r.event_id);
-      if (!got.ok && got.gone === true) { gone.push(r); continue; }
-      if (!got.ok) {
-        log({ level: 'warn', evt: 'viewing.reconcile_failed', bookingId: r.booking_id, code: got.code });
-        if (CALENDAR_DOWN.has(got.code)) { stopped = true; break; }
-        continue;
-      }
-      found += 1;
-      if (got.event?.status === 'cancelled') { cancel(r); continue; }
-      const start = eventTime(got.event.start);
-      const end = eventTime(got.event.end);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || (start === r.start_ts && end === r.end_ts)) continue;
-      try {
-        db.transaction(() => {
-          prep("UPDATE viewing_bookings SET start_ts = ?, end_ts = ?, status = ?, updated = ? WHERE booking_id = ? AND status = 'booked'")
-            .run(start, end, end < t ? 'done' : 'booked', now(), r.booking_id);
-          if (r.task_id) moveBookedViewing(db, { taskId: r.task_id, bookingId: r.booking_id, dueTs: start, now: now() });
-        });
-        out.moved += 1;
-      } catch (err) {
-        // Moved onto another booking's start: the unique index refuses it; the owner sees both in the calendar.
-        log({ level: 'warn', evt: 'viewing.reconcile_conflict', bookingId: r.booking_id, error: errClass(err) });
-      }
-    }
-    if (found > 0) {
+    const res = await readEvents('reconcile', rows, t);
+    Object.assign(out, { checked: res.checked, moved: res.moved, cancelled: res.cancelled });
+    if (res.found > 0) {
       held = null;
-      for (const r of gone) cancel(r);
-    } else if (gone.length && !stopped) {
+      for (const r of res.gone) out.cancelled += cancelRow(r);
+    } else if (res.gone.length && !res.stopped) {
       held = 'not_found';
-      out.held = gone.length;
-      log({ level: 'warn', evt: 'viewing.reconcile_held', gone: gone.length });
+      out.held = res.gone.length;
+      log({ level: 'warn', evt: 'viewing.reconcile_held', gone: res.gone.length });
     }
     log({ evt: 'viewing.reconciled', ...out });
     return out;
