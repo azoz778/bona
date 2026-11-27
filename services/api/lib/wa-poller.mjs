@@ -92,7 +92,11 @@
  *     noted for the owner (`old_out_wrote`, once a day);
  *   - under the owner's test switch his own chat joins as a client's (`owner_test`), from the
  *     moment the switch went on, and Bona's own lines to him (notes, call alerts) never start or
- *     join it.
+ *     join it;
+ *   - only a `fromMe` record of the owner's chat is ever dropped as our own note (its outbox key,
+ *     else its header line: `isOwnerNote`): never stored, never a reply. An inbound record, his
+ *     own included, and a record of any other chat never are (on the personal number today's
+ *     new-enquiry belt stays, `PERSONAL_NOTE_RE`).
  * Before the team check, an owner `#dana …` command goes to `ownerTest.command`, which consumes
  * it: never stored, never a lead. The own rule and the test also need the poller's own ask of the
  * identity check (`ownerTest.ownNumberOk`), at the first attempt and again at a retry (fail
@@ -147,19 +151,34 @@ export const SNIPPET_MAX = 200;
  */
 export const KEYWORD_RE = new RegExp(`${BONA_WORD_RE.source}|${LISTING_ID_RE.source}`, 'iu');
 /**
- * Our own notes to the owner, read back out of his chat: the header of every kind
- * lib/owner-notes.mjs sends (DESIGN §7.1; the new-enquiry one is leadNote()'s first line, and a
- * merged note starts with its first note's). A note says "Bona" and mostly a listing id or a
- * site link, so without this it would keyword-match and become an enquiry from ourselves, or
- * join the owner's chat. `fromMe` normally keeps it out; this is the belt to that pair of braces.
+ * Our own notes to the owner, read back out of his chat on Bona's number: the header of every
+ * kind lib/owner-notes.mjs sends (DESIGN §7.1; the new-enquiry one is leadNote()'s first line,
+ * and a merged note starts with its first note's). A note says "Bona" and mostly a listing id
+ * or a site link, so in his test chat it would be stored as a bubble of that chat.
  *
- * The WHOLE first line, exactly as a note renders it: `*Bona — alert*` (the stars balanced, or
- * none), then the end of the line or of the text; only the command reply's `*Bona — test mode*`
- * may carry its ` ON` / ` OFF` (DESIGN §7.2). A prefix is not enough: a client's
- * "Bona — email me the floor plan for BONA-W003" starts the same way, and dropping it would lose
- * an enquiry (T06-9 pins both sides; lib/owner-notes.mjs keeps every header on its own line).
+ * It is the net under the outbox key, never a filter of its own (`isOwnerNote`): it is asked
+ * only of a `fromMe` record in the owner's chat on Bona's number, the one place a note can be
+ * (wa-send's `note` kind refuses any other recipient), and only when no outbox row names the
+ * record's id as a note (a send that went uncertain recorded none). An inbound record, the
+ * owner's own included, and a record of any other chat are never judged by it (Codex PR #96 r4:
+ * a client's "Bona — email" + a new line + his question is his message).
+ *
+ * The WHOLE first line, as a note renders it: `*Bona — alert*` (the stars balanced, or none),
+ * the command reply's `*Bona — test mode*` with its ` ON` / ` OFF`, then, on the same line, only
+ * what a note renders after its header there: ` · ` and the rest of that line (the daily
+ * summary's ` · Thu 27 Nov`, DESIGN §7.3; a hand-over's ` · name (channel) · reason`, §7.2),
+ * then the end of the line or of the text. A prefix is not enough: "Bona — email me the floor
+ * plan" starts the same way (T06-9 pins both sides).
  */
-export const OWN_NOTE_RE = /^(\*?)Bona — (?:(?:new enquiry|hand-over|viewing booked|assistant stopped|daily summary|alert|email)\1|test mode\1(?: (?:ON|OFF))?)[ \t]*(?:\r?\n|$)/;
+export const OWN_NOTE_RE = /^(\*?)Bona — (?:(?:new enquiry|hand-over|viewing booked|assistant stopped|daily summary|alert|email)\1|test mode\1(?: (?:ON|OFF))?)(?: · [^\r\n]*)?[ \t]*(?:\r?\n|$)/;
+/**
+ * The personal number's belt (`ownNumberFrom` 'owner' or 'invalid'), main's byte for byte: there
+ * every rule is today's (PLAN T06 test 7), and today an inbound record, or a `fromMe` one that
+ * would make or join a lead, whose text starts with the new-enquiry header is our own note
+ * (its self-chat can arrive as a bare `@lid`; wa-poller.test.mjs pins it). Never asked on Bona's
+ * number.
+ */
+const PERSONAL_NOTE_RE = /^\*?Bona — new enquiry\*?/;
 /** What the owner's list shows for a chat WhatsApp shows by its lid alone (DESIGN §3.1): no words of its own. */
 export const LID_ONLY_WORD = 'lid-only';
 /** Riyadh is UTC+3 all year: the day an `old_out_wrote` note is counted in. */
@@ -870,6 +889,24 @@ export function createPoller({
     }
   }
 
+  /**
+   * Our own note to the owner, read back as a `fromMe` record of his chat on Bona's number
+   * (DESIGN §7.1): the only place a note can be, since a note goes from Bona's number to his
+   * alone (wa-send's `note` kind refuses any other recipient). The tick asks it of nothing
+   * else. Known first by the outbox row the record's id names (`sender_kind` 'note', the key
+   * ingest refuses a note by), whatever its text says; only when no row names it (a send that
+   * went uncertain recorded no id, the daily upkeep prunes old note rows) by its first line
+   * (`OWN_NOTE_RE`). A key lookup that throws leaves the first line to decide.
+   */
+  function isOwnerNote(rec) {
+    try {
+      if (rec.id && inboxStore?.outboxByKey?.(rec.id)?.sender_kind === 'note') return true;
+    } catch {
+      // the header line below decides
+    }
+    return OWN_NOTE_RE.test(String(rec.text ?? '').trimStart());
+  }
+
   async function handleInbound(rec, ts) {
     const jids = jidsOf(rec);
     const existing = findLead(jids);
@@ -1133,9 +1170,11 @@ export function createPoller({
    * a Ref line), and so does a Bona link he saves in his chat with himself. The tick skips
    * the owner's own chat and team and never-list numbers, but only where the record shows a
    * phone: his self-chat can arrive as a bare `@lid`, and its lid is practically never
-   * learned (every self-chat message is `fromMe`). So two more checks sit here (A7). Our own
-   * note is refused by its first line (`OWN_NOTE_RE`, which the tick applies to inbound
-   * records only). And a lid alone never starts or joins a chat: a lid cannot be checked
+   * learned (every self-chat message is `fromMe`). So two more checks sit here (A7). On the
+   * personal number our own note is refused by its first line (`PERSONAL_NOTE_RE`, today's
+   * belt); on Bona's number a note is only ever in the owner's chat, which the tick has already
+   * judged (`isOwnerNote`) and which never joins here, so nothing of any other chat is dropped
+   * as a note. And a lid alone never starts or joins a chat: a lid cannot be checked
    * against the team or never list, cannot be replied to (`lid_only`), and the exclusion
    * sweep cannot catch it later. So no NEW lead is made from a record with no phone, and an
    * existing lead that is not `in` joins only when the record or the lead carries a number
@@ -1145,8 +1184,9 @@ export function createPoller({
    *
    * The owner's own chat (DESIGN §3.1, critic round 2 #4): what Bona sends him — notes, the
    * phone line's call alerts ("Listings: BONA-W012"), command replies — never starts or joins
-   * his chat; his test chat joins only on his own message. Once it is `in`, ingest decides what
-   * of it is kept (PR-A2). And a chat that joined under the own rule or the test is left alone
+   * his chat; his test chat joins only on his own message. Once it is `in`, a note never gets
+   * here (the tick's `isOwnerNote`) and ingest decides what of the rest is kept (PR-A2). And a
+   * chat that joined under the own rule or the test is left alone
    * while the identity check fails, or his test chat while his test is off (the rollback guard,
    * `ruleOff`), asked again after a join's history read.
    *
@@ -1160,7 +1200,7 @@ export function createPoller({
     if (ruleOff(lead)) { tally.held += 1; return false; }
     if (lead?.inbox_state === 'out') return false;
     if (lead?.inbox_state !== 'in') {
-      if (OWN_NOTE_RE.test(String(rec.text ?? '').trimStart())) return false;
+      if (!bonaNumber && PERSONAL_NOTE_RE.test(String(rec.text ?? '').trimStart())) return false;
       if (!ownerOutboundJoins(rec)) return false;
       if (lead && !(jids.waJid || lead.phone_e164 || lead.wa_jid)) return false;
       let created = false;
@@ -1364,7 +1404,9 @@ export function createPoller({
 
         // The owner's own chat can also arrive as a `@lid` whose alt is his number.
         const isOwnChat = Boolean(ownerDigits) && [rec?.jid, rec?.jidAlt].some((j) => j && !isLid(j) && bareJid(j) === ownerDigits);
-        const isOwnNote = !rec?.fromMe && OWN_NOTE_RE.test(String(rec?.text ?? '').trimStart());
+        // Today's belt, on the personal number only. On Bona's number no inbound record is dropped
+        // as a note: our notes there are `fromMe` records of the owner's chat (`isOwnerNote`).
+        const isOwnNote = !bonaNumber && !rec?.fromMe && PERSONAL_NOTE_RE.test(String(rec?.text ?? '').trimStart());
         if (!rec?.id || isOwnChat || isOwnNote || isIgnorableChat(rec.jid, ownerDigits)) {
           // A self-chat lid pairs with the owner's own number the same way a team
           // member's does — via `jidAlt` on a message that also shows the real jid — so
@@ -1474,11 +1516,15 @@ export function createPoller({
             // there — the phone line's call alerts, notes, command replies — is no answer to his
             // test, so only a record ingest stored in his `in` test chat stamps it (ingest decides
             // what of that chat is kept, PR-A2). Before he writes, or while his chat is held,
-            // nothing does.
+            // nothing does. Our own note there (`isOwnerNote`: its outbox key, else its header
+            // line) never even reaches the inbox steps: never his lead's, never stored, never a
+            // reply. That is the one place a record is dropped as a note on Bona's number.
             const seen = findLead(jidsOf(rec));
             const ownerSide = bonaNumber && inboxOn && isOwnerChat(jidsOf(rec), seen);
+            const ownNote = !held && ownerSide && isOwnerNote(rec);
             let stored = false;
             if (held) tally.held += 1;
+            else if (ownNote) tally.ignored += 1;
             else if (inboxOn) stored = await inboxAfterOutbound(rec, ts, tally);
             if ((!ownerSide || stored) && !isDanaRecordSafely(rec) && recordReply(seen, ts)) tally.replies += 1;
           } else if (held) {

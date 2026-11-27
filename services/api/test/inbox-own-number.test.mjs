@@ -889,14 +889,130 @@ test('T06-9 OWN_NOTE_RE matches all 8 note headers (the renamed "assistant stopp
   ]) assert.ok(!re.test(text), text);
 });
 
-test('T06-9 an inbound record that starts with any note header is never an enquiry (the belt to fromMe)', async () => {
-  const h = harness({ state: { ownInbox: false }, notes: 'stub' });
-  const heads = ['hand-over', 'viewing booked', 'assistant stopped', 'daily summary', 'test mode', 'alert', 'email'];
-  h.push(heads.map((x, i) => msg({ id: `H${i}`, jid: jidOf(60 + i), ts: NOW - 60_000 + i, text: `*Bona — ${x}*\nBONA-W012 ${SITE}/properties/bona-w012/` })));
-  const tally = await h.tick();
-  assert.equal(tally.ignored, heads.length);
-  assert.equal(h.db.countLeads(), 0);
+test('T06-9 a header line may carry what the note renders after it on that line: the daily summary\'s date (DESIGN §7.3), a hand-over\'s name and reason', () => {
+  const re = pollerModule.OWN_NOTE_RE;
+  for (const text of [
+    '*Bona — daily summary* · Thu 27 Nov',
+    '*Bona — daily summary* · Thu 27 Nov\nNew clients: 6 (WhatsApp 5 · email 1) — 2 booked a viewing',
+    '*Bona — daily summary* · Thu 27 Nov (covers 2 days)\r\nAI: 41 answers',
+    '*Bona — hand-over* · Sara (WhatsApp) · asked for a person\nLast message: "…"',
+    '*Bona — test mode* ON · as a client\nBONA-W012',
+    'Bona — alert · link down',
+  ]) assert.ok(re.test(text), text);
+  for (const text of [
+    '*Bona — daily summary* Thu 27 Nov', '*Bona — daily summary*· Thu 27 Nov', '*Bona — daily summary* ·Thu 27 Nov',
+    '*Bona — daily summary*s · Thu', 'Bona — summary · Thu 27 Nov', '*Bona — daily summary · Thu 27 Nov',
+  ]) assert.ok(!re.test(text), text);
+});
+
+/** Codex PR #96 r4: a client's message whose FIRST line is exactly a header, the rest of it his question. */
+const HEADER_FIRST = 'Bona — email\nPlease send me the floor plan for BONA-W003';
+
+test('T06-9 on Bona\'s number no inbound record is judged by its text: a client\'s message that opens with a header line is stored and wakes Dana, switches off and on', async () => {
+  for (const state of [{ ownInbox: false, active: false }, { ownInbox: true, active: true }]) {
+    const h = harness({ state, owner: true });
+    seedLead(h, 'LEAD-in', 67, { inbox_state: 'in', inbox_since: NOW - DAY, history_from: NOW - 2 * DAY });
+    h.push([
+      msg({ id: 'E1', jid: jidOf(67), ts: NOW - 90_000, text: HEADER_FIRST }),
+      msg({ id: 'E2', jid: jidOf(65), ts: NOW - 80_000, text: HEADER_FIRST }),
+      msg({ id: 'E3', jid: jidOf(66), ts: NOW - 70_000, text: '*Bona — daily summary* · Thu 27 Nov\nis BONA-W012 still free?' }),
+    ]);
+    const tally = await h.tick(); // eslint-disable-line no-await-in-loop
+    const what = JSON.stringify(state);
+    assert.equal(tally.ignored, 0, `${what}: none of them is our own note`);
+    assert.deepEqual(h.rows('LEAD-in'), [['E1', 'in', 'client']], `${what}: stored in its inbox chat`);
+    const fresh = h.leads().filter((l) => l.lead_id !== 'LEAD-in');
+    assert.deepEqual(fresh.map((l) => [l.phone_e164, l.listing_id, l.inbox_state]).sort(), [
+      ['966500000065', 'BONA-W003', 'in'], ['966500000066', 'BONA-W012', 'in'],
+    ], `${what}: enquiries with a listing id, as any client's`);
+    for (const l of fresh) assert.equal(h.rows(l.lead_id).length, 1, `${what}: ${l.phone_e164} stored`);
+    assert.deepEqual(h.calls.wake.map(([id]) => id).sort(), ['LEAD-in', ...fresh.map((l) => l.lead_id)].sort(), `${what}: Dana is woken for each`);
+    h.close();
+  }
+});
+
+test('T06-9 the owner\'s own message in his test chat is never a note by its text: the same lines inbound from him join and are stored', async () => {
+  const h = harness({ state: { active: true }, owner: true });
+  h.push([msg({ id: 'HIS1', jid: OWNER, pushName: 'Owner Example', ts: NOW - 60_000, text: HEADER_FIRST })]);
+  const t1 = await h.tick();
+  assert.equal(t1.ignored, 0);
+  const [lead] = h.leads();
+  assert.equal(lead?.inbox_via, 'owner_test', 'his test chat joins on it');
+  assert.deepEqual(h.rows(lead.lead_id), [['HIS1', 'in', 'client']]);
+  assert.deepEqual(h.calls.wake, [[lead.lead_id, NOW - 60_000]]);
+  // A summary he sends back to Bona's number (a forward, a paste) is his message too.
+  h.push([msg({ id: 'HIS2', jid: OWNER, pushName: 'Owner Example', ts: NOW - 30_000, text: '*Bona — daily summary* · Thu 27 Nov\nwhy 2 hand-overs?' })]);
+  await h.tick();
+  assert.deepEqual(h.rows(lead.lead_id), [['HIS1', 'in', 'client'], ['HIS2', 'in', 'client']]);
   h.close();
+});
+
+test('T06-9 our own note in the owner\'s chat on Bona\'s number is never his chat\'s: known by its outbox key, else by its header line (the summary\'s date included)', async () => {
+  const h = harness({ state: { active: true }, owner: true });
+  h.db.insertLead({
+    lead_id: 'LEAD-own', created: NOW - DAY, updated: NOW - DAY, phone_e164: OWNER_DIGITS, wa_jid: OWNER, wa_lid: OWNER_LID,
+    channel: 'whatsapp', match_method: 'owner_test', stage: 'new', inbox_state: 'in', inbox_since: NOW - DAY, history_from: NOW - DAY,
+    inbox_via: 'owner_test',
+  });
+  // A note whose send came back with its message id: its outbox row (no text, no lead) names it, whatever its first line says.
+  h.inbox.insertOutbox({ send_id: 'SND-note', jid: OWNER, sender_kind: 'note', status: 'pending' });
+  h.inbox.updateOutbox('SND-note', { status: 'accepted', key_id: 'NOTE-BY-KEY' });
+  h.push([
+    // A send that went uncertain recorded no id: its header line is the net.
+    msg({ id: 'SUM', jid: OWNER, fromMe: true, pushName: null, ts: NOW - 90_000,
+      text: `*Bona — daily summary* · Thu 27 Nov\nNew clients: 6 (WhatsApp 5 · email 1)\nWaiting for you: 3 → ${SITE}/dashboard/inbox` }),
+    msg({ id: 'NOTE-BY-KEY', jid: OWNER, fromMe: true, pushName: null, ts: NOW - 80_000, text: 'Sara (WhatsApp) asked for a person\nBONA-W012' }),
+    msg({ id: 'BYLID', jid: OWNER_LID, fromMe: true, pushName: null, ts: NOW - 70_000, text: `*Bona — alert* · link down\n${SITE}/dashboard/inbox` }),
+  ]);
+  const tally = await h.tick();
+  assert.equal(tally.ignored, 3, 'all three are our own notes');
+  assert.equal(h.messages(), 0, 'nothing stored in his test chat');
+  assert.equal(tally.replies, 0, 'a note is no reply to his test');
+  assert.equal(h.lead('LEAD-own').first_reply_ts, null);
+  assert.equal(h.lead('LEAD-own').updated, NOW - DAY);
+  // An answer in his chat that is not a note is still his chat's.
+  h.push([msg({ id: 'REAL', jid: OWNER, fromMe: true, pushName: null, ts: NOW - 30_000, text: 'we will send the floor plan today' })]);
+  const t2 = await h.tick();
+  assert.equal(t2.ignored, 0);
+  assert.deepEqual(h.rows('LEAD-own').map(([k, d]) => [k, d]), [['REAL', 'out']]);
+  h.close();
+});
+
+test('T06-9 on Bona\'s number a fromMe message in a client\'s chat is never a note by its text: it is stored, and joins, as any of his', async () => {
+  const h = harness({ state: { ownInbox: false } });
+  seedLead(h, 'LEAD-in', 68, { inbox_state: 'in', inbox_since: NOW - DAY, history_from: NOW - 2 * DAY });
+  h.push([
+    msg({ id: 'F1', jid: jidOf(68), fromMe: true, pushName: null, ts: NOW - 90_000, text: '*Bona — daily summary* · Thu 27 Nov\nyour viewing is at 12:00' }),
+    msg({ id: 'F2', jid: jidOf(69), fromMe: true, pushName: null, ts: NOW - 80_000, text: `*Bona — new enquiry*\nBONA-W003 ${SITE}/properties/bona-w003/` }),
+  ]);
+  const tally = await h.tick();
+  assert.equal(tally.ignored, 0);
+  assert.deepEqual(h.rows('LEAD-in').map(([k, d]) => [k, d]), [['F1', 'out']], 'stored in its inbox chat');
+  const made = h.leads().find((l) => l.phone_e164 === digitsOf(69));
+  assert.deepEqual([made?.match_method, made?.inbox_state], ['owner_outbound', 'in'], 'a Bona link he sends a stranger joins, as today');
+  assert.deepEqual(h.rows(made.lead_id).map(([k, d]) => [k, d]), [['F2', 'out']]);
+  h.close();
+});
+
+test('T06-9 guard: on the personal number the belt is today\'s, byte for byte: only a new-enquiry first line is skipped; any other header is a client\'s', async () => {
+  for (const env of [PERSONAL, INVALID]) {
+    const h = harness({ env, ownerTest: null, notes: null });
+    h.push([
+      // Today's: our new-lead note read back as inbound, here by a bare lid (wa-poller.test.mjs pins the same).
+      msg({ id: 'N1', jid: '272516946294519@lid', ts: NOW - 95_000, text: '*Bona — new enquiry*\nName: Sara\nProperty: BONA-W003' }),
+      msg({ id: 'N2', jid: jidOf(67), fromMe: true, pushName: null, ts: NOW - 92_000, text: `*Bona — new enquiry*\nBONA-W003 ${SITE}/properties/bona-w003/` }),
+      msg({ id: 'E1', jid: jidOf(65), ts: NOW - 90_000, text: HEADER_FIRST }),
+      msg({ id: 'E2', jid: jidOf(66), ts: NOW - 80_000, text: '*Bona — alert*\nis BONA-W012 still free?' }),
+      msg({ id: 'F1', jid: jidOf(68), fromMe: true, pushName: null, ts: NOW - 70_000, text: `*Bona — alert*\nBONA-W005 ${SITE}/properties/bona-w005/` }),
+    ]);
+    const tally = await h.tick(); // eslint-disable-line no-await-in-loop
+    const what = JSON.stringify(env);
+    assert.equal(tally.ignored, 1, `${what}: only the inbound new-enquiry note`);
+    assert.deepEqual(h.leads().map((l) => [l.phone_e164, l.match_method, l.listing_id]).sort(), [
+      ['966500000065', 'keyword', 'BONA-W003'], ['966500000066', 'keyword', 'BONA-W012'], ['966500000068', 'owner_outbound', 'BONA-W005'],
+    ], `${what}: a fromMe new-enquiry note makes no lead (today); the rest are as any message`);
+    h.close();
+  }
 });
 
 test('T06-9 OWN_NOTE_RE takes a whole header line only: a client message that merely starts like one is never dropped', async () => {
