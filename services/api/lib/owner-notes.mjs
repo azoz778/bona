@@ -53,8 +53,10 @@
  *   - at least 25 s between two sends, read back from the ledger so a restart cannot skip it;
  *   - at most 40 sends a (Riyadh) day, every kind counted, the summary included, a send that may
  *     have gone too (a restart mid-call), and a purged lead's (onPurge below): the overflow is
- *     kept for the summary (`merged`, `over`), but never while Sending is off (nothing goes then,
- *     so a note stays queued and held, and the day it goes in decides once Sending is back on).
+ *     kept for the summary (`merged`, `over`; an outage alert with the chats it lists, each
+ *     `into` it, so none of them goes alone when the next day's 40 begins), but never while
+ *     Sending is off (nothing goes then, so a note stays queued and held, and the day it goes in
+ *     decides once Sending is back on).
  *     While summaries are on and the day's 08:00 summary
  *     has not gone yet, one of the 40 is kept for it, so the note that carries the overflow is
  *     never itself held back (DESIGN §7.3: exactly one a day) and the total stays at 40;
@@ -594,6 +596,25 @@ function createLedgerNotes({
     }
   }
 
+  /**
+   * An outage alert's chats: its hour's queued brain hand-overs, `folded` (listed, and settled
+   * with the alert, whether it goes or is held over the day's 40) with their leads, or `drop`
+   * (purged, or out of auto mode: never listed or counted).
+   */
+  function brainChats(r, queued) {
+    const folded = [];
+    const leads = [];
+    const drop = [];
+    for (const h of queued) {
+      if (!isBrainHandover(h) || h.meta.alertHour !== r.meta.hour) continue;
+      const lead = leadOf(h.lead_id);
+      if (!lead || !auto(lead)) { drop.push(h); continue; }
+      folded.push(h);
+      leads.push(lead);
+    }
+    return { folded, leads, drop };
+  }
+
   function renderAlert(r, queued) {
     // An outage alert says the outage's latest cause as it goes (a later alert() may have brought
     // a new one, even as a duplicate), and its row keeps the code it went with (`meta`, below).
@@ -602,17 +623,12 @@ function createLedgerNotes({
     const sentence = alertSentence(r.meta.alert, meta);
     if (!sentence) return null;
     const lines = [HEADERS.alert, sentence];
-    const folded = [];
-    const drop = [];
+    let folded = [];
+    let drop = [];
     if (r.meta.alert === 'brain_out') {
-      const chats = [];
-      for (const h of queued) {
-        if (!isBrainHandover(h) || h.meta.alertHour !== r.meta.hour) continue;
-        const lead = leadOf(h.lead_id);
-        if (!lead || !auto(lead)) { drop.push(h); continue; }
-        folded.push(h);
-        chats.push(who(lead));
-      }
+      const got = brainChats(r, queued);
+      ({ folded, drop } = got);
+      const chats = got.leads.map(who);
       if (chats.length) {
         lines.push(`Chats waiting: ${chats.length} → ${link('/dashboard/inbox?filter=needs_human')}`);
         const more = chats.length - MAX_LISTED_CHATS;
@@ -824,7 +840,18 @@ function createLedgerNotes({
       // or a chat handed over later in the hour would find it gone and go alone.
       if (isBrainAlert(c.row) && c.due > t) continue;
       if (!room(c.row)) {
-        if (c.due <= t) over.push(c.row);
+        if (c.due > t) continue;
+        if (isBrainAlert(c.row)) {
+          // Its chats wait for it (never a hand-over of their own), so they share its outcome: held
+          // over with it, none can go alone once a new day's 40 begins. One with no chat left that
+          // alert() did not ask for would not go at all: dropped, as at its send (renderAlert).
+          const { folded, drop } = brainChats(c.row, queued);
+          dropped.push(...drop);
+          if (!folded.length && !c.row.meta.asked) dropped.push(c.row);
+          else over.push(c.row, ...folded.map((h) => ({ ...h, meta: { ...h.meta, into: c.row.note_id } })));
+        } else {
+          over.push(c.row);
+        }
         continue;
       }
       // A summary is a message of its own: it goes first and alone, or waits for the next pass.

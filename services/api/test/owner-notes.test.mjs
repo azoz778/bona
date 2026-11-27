@@ -407,6 +407,68 @@ test('a send cut off by a restart (WhatsApp may have taken it) counts: the 40th 
   assert.deepEqual(overRows(h).map((r) => [r.kind, r.meta.alert]), [['alert', 'breaker']]);
 });
 
+test("an outage alert over the day's 40 takes its chats into the overflow with it: handed over at 23:58, held at 23:59, nothing of them goes after midnight, and the next summary counts them", async () => {
+  for (const asked of [true, false]) {
+    const label = asked ? 'alert() asked for it' : 'opened by the hand-overs only';
+    const h = harness();
+    h.team.setSetting('owner_as_client', '1');
+    h.notes.summary({ day: '2026-11-29' });
+    await h.notes.tick();
+    await alertsEvery25s(h, MAX_PER_DAY - 1, NOW + MIN_GAP_MS, `M${asked ? 'A' : 'H'}`);
+    assert.equal(h.sent.length, MAX_PER_DAY, label);
+    const [one, two, three, gone] = ['One Example', 'Two Example', 'Three Example', 'Gone Example'].map((name) => addLead(h, { name }));
+    for (const l of [one, two, three, gone]) h.autoIds.add(l.lead_id);
+    const at2358 = Date.UTC(2026, 10, 29, 20, 58, 0); // 23:58 Riyadh
+    const hour = Math.floor(at2358 / HOUR);
+    h.at(at2358);
+    if (asked) assert.deepEqual(h.notes.alert('brain_out', { code: 'quota' }), { queued: true }, label);
+    for (const l of [one, two, three, gone]) assert.equal(h.notes.handover(l, { kind: 'brain' }).queued, true, label);
+    const alertKey = `al:brain_out:${hour}`;
+    assert.equal(h.row(alertKey).status, 'queued', `${label}: the 23:00 hour's alert`);
+    h.autoIds.delete(gone.lead_id); // out of auto mode before the alert's turn: never listed, never counted
+    h.at(at2358 + MIN); // 23:59: over the day's 40
+    await h.notes.tick();
+    assert.equal(h.sent.length, MAX_PER_DAY, `${label}: nothing over 40`);
+    const alertRow = h.row(alertKey);
+    assert.deepEqual([alertRow.status, alertRow.meta.over], ['merged', '2026-11-29'], label);
+    for (const l of [one, two, three]) {
+      const r = h.row(`ho:${l.lead_id}:brain:${hour}`);
+      assert.deepEqual([r.status, r.meta.over, r.meta.into], ['merged', '2026-11-29', alertRow.note_id], `${label}: the chat is held with its alert`);
+    }
+    assert.equal(h.row(`ho:${gone.lead_id}:brain:${hour}`).status, 'dropped', label);
+    // After midnight a new day's 40: none of those chats goes as a hand-over of its own.
+    for (const t of [Date.UTC(2026, 10, 29, 21, 0, 30), Date.UTC(2026, 10, 29, 22, 0, 0)]) { h.at(t); await h.notes.tick(); }
+    assert.equal(h.sent.length, MAX_PER_DAY, `${label}: nothing after midnight`);
+    assert.ok(!h.sent.some((s) => s.includes(HEADERS.handover)), `${label}: no hand-over of its own`);
+    // The 08:00 summary counts the alert and its three chats as held over the limit.
+    h.at(Date.UTC(2026, 10, 30, 5, 0, 0));
+    h.notes.summary({ day: '2026-11-30' });
+    await h.notes.tick();
+    assert.equal(h.sent.length, MAX_PER_DAY + 1, label);
+    assert.match(h.sent.at(-1), /^\*Bona — daily summary\*/, label);
+    assert.match(h.sent.at(-1), /\nNotes over the day's limit: 4 \(hand-overs 3 · alerts 1\)(\n|$)/, label);
+  }
+});
+
+test("an outage alert over the day's 40 that only a hand-over opened, whose one chat left auto mode, is dropped (it would never go), not counted as held over", async () => {
+  const h = harness();
+  await alertsEvery25s(h, MAX_PER_DAY, NOW, 'ME');
+  assert.equal(h.sent.length, MAX_PER_DAY);
+  const lead = addLead(h, { name: 'Left Example' });
+  h.autoIds.add(lead.lead_id);
+  h.at(NOW + 2 * HOUR);
+  assert.equal(h.notes.handover(lead, { kind: 'brain' }).queued, true);
+  const hour = Math.floor((NOW + 2 * HOUR) / HOUR);
+  h.autoIds.delete(lead.lead_id);
+  h.at(NOW + 2 * HOUR + MIN);
+  await h.notes.tick();
+  assert.equal(h.sent.length, MAX_PER_DAY);
+  assert.equal(h.row(`al:brain_out:${hour}`).status, 'dropped');
+  assert.equal(h.row(`al:brain_out:${hour}`).meta.over, undefined);
+  assert.equal(h.row(`ho:${lead.lead_id}:brain:${hour}`).status, 'dropped');
+  assert.deepEqual(overRows(h), [], 'nothing held over: neither would ever have gone');
+});
+
 /* ---------------- 3. switches ---------------- */
 
 test('Sending off: the note stays queued (no outbox row, no call) and goes once Sending is back on', async () => {
