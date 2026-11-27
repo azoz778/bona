@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { openDb, newId, STAGES, FANOUT_DESTS, SCHEMA_VERSION, migrate, tokenHash } from '../lib/db.mjs';
 
@@ -956,6 +958,8 @@ test('v8 rolled back: a real v8 file opens under the v7 chain untouched, and the
   s.close();
 
   // What the v7 bona-api does at start (openDb at 13e4954): the same pragmas, then the chain, which ends at 7.
+  // Copied by hand, so it also runs where the history is missing (a shallow clone); the next test runs the
+  // real v7 release itself.
   const old = new DatabaseSync(file);
   try {
     old.exec('PRAGMA journal_mode=WAL');
@@ -989,6 +993,84 @@ test('v8 rolled back: a real v8 file opens under the v7 chain untouched, and the
   const again = openDb(file);
   try {
     assert.equal(again.db.prepare('PRAGMA user_version').get().user_version, 8);
+    assert.equal(again.getLead('L2').inbox_via, null);
+  } finally {
+    again.close();
+  }
+});
+
+/** The v7 release, the last one before v8: what a code rollback of this PR runs. */
+const V7_COMMIT = '13e4954cbf9e61140eb235f0dca779f5f13268ec';
+const git = (args, o = {}) => execFileSync('git', args, { cwd: import.meta.dirname, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 << 20, ...o });
+/** The checkout's top, or null; a test is skipped where the v7 commit is not in the history (a shallow clone, or no git). */
+const REPO_ROOT = (() => {
+  try {
+    git(['cat-file', '-e', `${V7_COMMIT}^{commit}`]);
+    return git(['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+  } catch {
+    return null;
+  }
+})();
+const V7_MISSING = REPO_ROOT ? false : 'the v7 release (13e4954) is not in this checkout\'s history (a shallow clone or no git)';
+
+/** services/api/lib exactly as the v7 release shipped it, unpacked into `dir`, so its own relative imports resolve to v7 code. */
+async function importV7(dir) {
+  // Run from the top: in a subdirectory, git archive keeps only what lies under it.
+  const tar = git(['archive', '--format=tar', `${V7_COMMIT}:services/api/lib`], { cwd: REPO_ROOT });
+  fs.mkdirSync(dir, { recursive: true });
+  execFileSync('tar', ['-x', '-C', dir], { input: tar });
+  const lib = (name) => import(pathToFileURL(path.join(dir, name)).href);
+  return { db: await lib('db.mjs'), inbox: await lib('inbox/store.mjs'), tasks: await lib('lead-tasks.mjs') };
+}
+
+test('v8 rolled back for real: the v7 release itself (13e4954) starts on a v8 file, changes nothing in it, and its own writes still work', { skip: V7_MISSING }, async (t) => {
+  const { dir, file, cleanup } = tmp();
+  t.after(cleanup);
+  const s = openDb(file);
+  s.insertLead({ lead_id: 'L1', created: 1, updated: 1, phone_e164: '966500000001', wa_jid: CLIENT_JID, inbox_state: 'in', inbox_via: 'own_number', dana_hold_until: 9000, dana_hold_reason: 'send_failed' });
+  s.db.prepare("INSERT INTO wa_outbox (send_id, lead_id, jid, text, sender_kind, status, created, updated, guarded) VALUES ('S-guarded', 'L1', ?, 'From SAR 1,000,000.', 'dana', 'accepted', 2, 2, 1)").run(CLIENT_JID);
+  s.db.prepare("INSERT INTO wa_outbox (send_id, lead_id, jid, text, sender_kind, status, created, updated, media_kind) VALUES ('S-doc', 'L1', ?, NULL, 'dana', 'accepted', 2, 2, 'document')").run(CLIENT_JID);
+  s.db.prepare("INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, created, updated) VALUES ('N-1', 'handover', 'L1', 'ho:L1:cap_day:1', 3, 'queued', 3, 3)").run();
+  s.db.prepare("INSERT INTO viewing_bookings (booking_id, lead_id, listing_id, start_ts, end_ts, event_id, status, created, updated) VALUES ('B-1', 'L1', 'BONA-W003', 4, 5, 'ev-1', 'booked', 4, 4)").run();
+  const before = dumpTables(s.db);
+  s.close();
+
+  const v7 = await importV7(path.join(dir, 'v7'));
+  assert.equal(v7.db.SCHEMA_VERSION, 7, 'this is the v7 code, not this branch');
+  const old = v7.db.openDb(file); // the v7 bona-api's own start: files, pragmas, its chain, its statements
+  try {
+    assert.equal(old.db.prepare('PRAGMA user_version').get().user_version, 8, 'the v7 start skips every step and never lowers the version');
+    assert.deepEqual(dumpTables(old.db), before, 'nothing in the file changed');
+    assert.equal(old.ping(), true);
+
+    // The v7 code's own writes, through its own helpers: none names a v8 column, so the v8 defaults fill them.
+    assert.equal(old.insertLead({ lead_id: 'L2', created: 4, updated: 4, phone_e164: '966500000002', wa_jid: '966500000002@s.whatsapp.net', channel: 'whatsapp', match_method: 'keyword' }).lead_id, 'L2');
+    assert.equal(old.updateLead('L1', { needs_human: 1, dana_off: 1 }), true);
+    assert.deepEqual(old.listLeads({}).map((l) => l.lead_id).sort(), ['L1', 'L2']);
+    const inbox = v7.inbox.createInboxStore(old, { now: () => 5 });
+    assert.equal(inbox.insertOutbox({ send_id: 'S-legacy', lead_id: 'L2', jid: '966500000002@s.whatsapp.net', text: 'Hello', sender_kind: 'dana', covers_ts: 4 }).inserted, true);
+    assert.equal(inbox.updateOutbox('S-legacy', { status: 'accepted', key_id: 'K-legacy' }), true);
+    assert.equal(v7.tasks.addTask(old, { leadId: 'L2', kind: 'viewing', source: 'dana', now: 6 }).status, 'requested');
+    assert.deepEqual(inbox.retentionPurge(0), { leads: 0, messages: 0, outbox: 0 }, 'the v7 retention timer still runs on a v8 file');
+
+    const out = (id) => ({ ...old.db.prepare('SELECT media_kind, guarded FROM wa_outbox WHERE send_id = ?').get(id) });
+    assert.deepEqual(out('S-legacy'), { media_kind: null, guarded: 0 }, 'a send made by the rolled-back code is text and never guarded');
+    assert.deepEqual(out('S-guarded'), { media_kind: null, guarded: 1 }, 'what v8 wrote is left as it was');
+    assert.deepEqual(out('S-doc'), { media_kind: 'document', guarded: 0 });
+    const pick = (l) => Object.fromEntries(V8_LEAD_COLUMNS.map((c) => [c, l[c]]));
+    assert.deepEqual(pick(old.getLead('L2')), { inbox_via: null, dana_hold_until: null, dana_hold_reason: null });
+    assert.deepEqual(pick(old.getLead('L1')), { inbox_via: 'own_number', dana_hold_until: 9000, dana_hold_reason: 'send_failed' }, 'a v7 update keeps the v8 columns');
+    assert.equal(old.getLead('L1').dana_off, 1);
+  } finally {
+    old.close();
+  }
+
+  // Rolling forward again is a no-op, and the v8 ledgers are as v8 left them.
+  const again = openDb(file);
+  try {
+    assert.equal(again.db.prepare('PRAGMA user_version').get().user_version, 8);
+    assert.deepEqual(dumpTables(again.db).owner_notes, before.owner_notes);
+    assert.deepEqual(dumpTables(again.db).viewing_bookings, before.viewing_bookings);
     assert.equal(again.getLead('L2').inbox_via, null);
   } finally {
     again.close();
