@@ -29,6 +29,11 @@
  *     again by its next hand-over that hour. An alert that alert('brain_out') asked for goes even
  *     with no chat to list (the outage's own news); one only a hand-over opened goes only with
  *     chats (its chats purged or out of auto mode: dropped at its hour, never sent empty).
+ *     THE INVARIANT: a brain hand-over is never sent on its own nor drawn with the hand-over
+ *     header. It comes to whatever its alert comes to (sent: merged into it; uncertain, failed,
+ *     dropped or held over the day's 40 alike), a chat that joined between two of the alert's
+ *     attempts too; a stray one (no queued alert for its hour) joins the next open hour's alert,
+ *     or is dropped when none is left, and is logged by count.
  *   - booking `bk:<id>` / `bk-untold:<id>`, stopped `stop:<lead>:<ts>` (auto mode only).
  *   - summary `sum:<day>` / `sumtest:<ts>` (only while owner_as_client or own_inbox is '1';
  *     lib/daily-summary.mjs).
@@ -366,7 +371,8 @@ function createLedgerNotes({
     const brainHours = new Set(queued.filter(isBrainAlert).map((r) => r.meta.hour));
     let at = Infinity;
     for (const r of queued) {
-      // A brain hand-over goes with its hour's alert, whose own time stands for it.
+      // A brain hand-over goes with its hour's alert, whose own time stands for it (a stray one, with
+      // no queued alert, wakes the pass that gives it one: adoptStrays).
       if (isBrainHandover(r) && brainHours.has(r.meta.alertHour)) continue;
       let when;
       try { when = timing(r); } catch { when = { due: r.due_ts, waiting: false }; }
@@ -494,6 +500,29 @@ function createLedgerNotes({
   const effectiveDue = (r) => timing(r).due;
   const isBrainAlert = (r) => r.kind === 'alert' && r.meta.alert === 'brain_out';
   const isBrainHandover = (r) => r.kind === 'handover' && r.meta.kind === 'brain';
+
+  /*
+   * THE INVARIANT (T11): a brain hand-over is never a note of its own. It is a chat its hour's
+   * outage alert lists, so it is never a send candidate and never drawn with the hand-over header
+   * (render), and it comes to whatever that alert comes to: once the alert settles (sent, merged,
+   * uncertain, failed, dropped, or held over the day's 40), every chat still queued for its hour
+   * settles with it (settleBrainGroup: the same status, a sent alert's chats `merged`, the same
+   * send, `into` the alert), however many attempts each chat itself was in. A queued one with no
+   * queued alert for its hour, which no path leaves, is taken in by the next open hour's alert, or
+   * dropped (adoptStrays).
+   */
+  /** The chats still queued for an outage alert's hour. */
+  const brainGroup = (a) => prep("SELECT * FROM owner_notes WHERE status = 'queued' AND kind = 'handover'").all().map(rowOf)
+    .filter((h) => isBrainHandover(h) && h.meta.alertHour === a.meta.hour);
+  /** Inside the caller's transaction: the chats still queued for outage alert `a` come to its final `status`. */
+  function settleBrainGroup(a, status, sid, t, extra = {}) {
+    if (status === 'queued') return;
+    const st = status === 'sent' ? 'merged' : status;
+    for (const h of brainGroup(a)) {
+      prep("UPDATE owner_notes SET status = ?, send_id = ?, meta = ?, updated = ? WHERE note_id = ? AND status = 'queued'")
+        .run(st, sid, JSON.stringify({ ...h.meta, ...extra, into: a.note_id }), t, h.note_id);
+    }
+  }
 
   function lastSendTs() {
     const fromLedger = prep("SELECT MAX(updated) AS t FROM owner_notes WHERE send_id IS NOT NULL OR status = 'uncertain'").get()?.t ?? 0;
@@ -669,7 +698,8 @@ function createLedgerNotes({
   function render(r, t, queued) {
     switch (r.kind) {
       case 'new_client': return renderNewClient(r);
-      case 'handover': return renderHandover(r);
+      // A brain hand-over has no note of its own (the invariant): it is only ever a line of its alert.
+      case 'handover': return isBrainHandover(r) ? null : renderHandover(r);
       case 'booking': return renderBooking(r);
       case 'stopped': return renderStopped(r);
       case 'alert': return renderAlert(r, queued);
@@ -704,6 +734,8 @@ function createLedgerNotes({
         if (r.kind === 'new_client' && r.meta.ev) setReceipt(r.meta.ev, receipt);
         texts.delete(r.note_id);
       }
+      // An outage alert dropped or held over takes the chats still queued for its hour with it.
+      for (const r of rows) if (isBrainAlert(r)) settleBrainGroup(r, status, null, t, extra);
     });
   }
 
@@ -748,6 +780,11 @@ function createLedgerNotes({
     if (outcome !== 'held') lastAttemptAt = Math.max(lastAttemptAt, t2);
     const sendId = typeof res?.sendId === 'string' && res.sendId ? res.sendId : provisional;
     const forms = [];
+    // A chat an outage alert lists comes to what the alert comes to (the invariant above), whatever
+    // its own attempts: its row follows the alert's, which is decided first (members: alert, chats).
+    const groupOf = new Map();
+    for (const p of parts) for (const f of p.folded) groupOf.set(f.note_id, p.row.note_id);
+    const decided = new Map();
     db.transaction(() => {
       for (const m of members) {
         // Purged while the send was out (onPurge): `m` is the copy from before the purge, so it
@@ -768,7 +805,14 @@ function createLedgerNotes({
         let sid = null;
         let due = m.due_ts;
         let receipt = RECEIPT[outcome];
-        if (outcome === 'sent') {
+        const group = decided.get(groupOf.get(m.note_id));
+        if (group) {
+          status = group.status === 'sent' ? 'merged' : group.status;
+          sid = group.sid;
+          due = group.due;
+          if (group.tries === undefined) delete meta.tries; else meta.tries = group.tries;
+          if (status !== 'queued') meta.into = group.id;
+        } else if (outcome === 'sent') {
           status = m.note_id === carrier.note_id ? 'sent' : 'merged';
           if (status === 'merged') meta.into = carrier.note_id;
           sid = sendId;
@@ -786,6 +830,11 @@ function createLedgerNotes({
           .run(status, sid, due, JSON.stringify(meta), t2, m.note_id);
         if (status !== 'queued') texts.delete(m.note_id);
         if (m.kind === 'new_client' && meta.ev) { setReceipt(meta.ev, receipt); forms.push(m); }
+        if (isBrainAlert(m)) {
+          decided.set(m.note_id, { id: m.note_id, status, sid, due, tries: meta.tries });
+          // Any chat of its hour still queued that this send did not carry settles with it too.
+          settleBrainGroup(m, status, sid, t2);
+        }
       }
     });
     const kinds = [...new Set(members.map((m) => m.kind))];
@@ -801,6 +850,36 @@ function createLedgerNotes({
     if (outcome === 'held') hold = { until: t2 + HOLD_MS[res.error], reason: res.error };
   }
 
+  /**
+   * The guard behind the invariant: a queued brain hand-over whose hour has no queued outage alert
+   * (no path leaves one; an older build or a fault might) is never sent on its own. It is listed in
+   * the first open hour's alert from its own hour or this one, whichever is later (openBrainHour,
+   * as handover() does: owner notes are on here, step() dropped everything otherwise), or dropped
+   * when none is left to open. Logged as an error, by count only. True when it changed a row.
+   */
+  function adoptStrays(queued, t) {
+    const open = new Set(queued.filter(isBrainAlert).map((r) => r.meta.hour));
+    const strays = queued.filter((r) => isBrainHandover(r) && !open.has(r.meta.alertHour));
+    if (!strays.length) return false;
+    const hour = Math.floor(t / HOUR_MS);
+    let dropped = 0;
+    for (const h of strays) {
+      const own = Number(h.meta.alertHour);
+      const { alertHour, row } = openBrainHour(Number.isSafeInteger(own) ? Math.max(own, hour) : hour);
+      const due = alertHour <= hour ? t : alertHour * HOUR_MS;
+      openBrainAlert(alertHour, due, latestBrainCause() ?? row?.meta.code);
+      if (byKey(`al:brain_out:${alertHour}`)?.status === 'queued') {
+        prep("UPDATE owner_notes SET due_ts = ?, meta = ?, updated = ? WHERE note_id = ? AND status = 'queued'")
+          .run(Math.trunc(due), JSON.stringify({ ...h.meta, alertHour }), t, h.note_id);
+      } else {
+        settle([h], 'dropped', t);
+        dropped += 1;
+      }
+    }
+    say({ level: 'error', evt: 'notes.brain_orphan', n: strays.length, dropped });
+    return true;
+  }
+
   /** One pass: drop what is off, send at most one message, then stop (the next pass is 25 s away at best). */
   async function step() {
     const t = now();
@@ -809,12 +888,13 @@ function createLedgerNotes({
       if (t < hold.until && !(hold.reason === 'sending_disabled' && sendingOn())) return;
       hold = null;
     }
-    const queued = prep("SELECT * FROM owner_notes WHERE status = 'queued' ORDER BY due_ts, created, rowid").all().map(rowOf);
+    const readQueued = () => prep("SELECT * FROM owner_notes WHERE status = 'queued' ORDER BY due_ts, created, rowid").all().map(rowOf);
+    let queued = readQueued();
     if (!queued.length) return;
-    // A brain hand-over waits for its hour's brain_out alert, which lists it.
-    const brainHours = new Set(queued.filter(isBrainAlert).map((r) => r.meta.hour));
+    if (adoptStrays(queued, t)) queued = readQueued();
+    // A brain hand-over is never a candidate: it goes only in its hour's brain_out alert, which lists it.
     const candidates = queued
-      .filter((r) => !(isBrainHandover(r) && brainHours.has(r.meta.alertHour)))
+      .filter((r) => !isBrainHandover(r))
       .map((r) => {
         try { return { row: r, due: effectiveDue(r) }; } catch { return { row: r, due: r.due_ts }; }
       })
