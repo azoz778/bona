@@ -117,123 +117,19 @@ test("brain stub (DESIGN-brain §3.2): not configured; a turn is 'off', never a 
   assert.equal(fetched, 0);
 });
 
-test('owner-notes stub: only leadEvent does anything; every other kind is a no-op, and the health has nothing queued', async () => {
+test('owner-notes (PR-B2 replaced the stub; test/owner-notes.test.mjs covers the ledger): built bare it has no ledger, sends nothing and has nothing stuck', async () => {
   const sent = [];
   const n = createOwnerNotes({ siteUrl: SITE, sendNote: async (t) => { sent.push(t); return { ok: true }; } });
-  for (const [fn, args] of [['handover', [{ lead_id: 'L-1' }, { kind: 'request_human' }]], ['booking', ['B-1', { told: true }]],
-    ['stopped', [{ lead_id: 'L-1' }, 'stop']], ['alert', ['wa_link_down', {}]], ['mail', [{ id: 'M-1' }]], ['command', ['R-1', '#dana status']],
-    ['onPurge', ['L-1']], ['tick', []]]) {
-    assert.equal(n[fn](...args), undefined, fn);
+  assert.equal(await n.leadEvent({ lead_id: 'L-1' }, { why: 'form', created: true }), undefined);
+  for (const [fn, args] of [['handover', [{ lead_id: 'L-1' }, { kind: 'person' }]], ['booking', ['B-1', { told: true }]],
+    ['stopped', [{ lead_id: 'L-1' }, 'stop']], ['alert', ['breaker', {}]], ['mail', [{ messageId: 'M-1' }]], ['command', ['R-1', '#dana status']]]) {
+    assert.deepEqual(n[fn](...args), { queued: false, reason: 'no_ledger' }, fn);
   }
+  assert.equal(n.onPurge('L-1'), undefined);
+  await n.tick();
   assert.equal(sent.length, 0);
   assert.deepEqual(n.health(), { enabled: true, ok: true });
   assert.equal(FORM_NOTIFY_WAIT_MS, 4000, "today's wait for the form's note");
-});
-
-/** A lead as the store returns it, with what leadNote prints. */
-const LEAD = {
-  lead_id: 'LEAD-20261127-0000aaaa', name: 'Sara Example', phone_e164: '966500000000', interest: 'villa', district: 'Al Rawdah',
-  budget: '3M', listing_id: 'BONA-W003', source: 'form', medium: '(none)', channel: 'form', match_method: 'form', created: NOW,
-};
-
-test("owner-notes stub, why 'form': today's note byte for byte, notify_status sent or uncertain, the request waits at most the limit", async () => {
-  const db = openDb(':memory:');
-  try {
-    db.insertLead({ lead_id: LEAD.lead_id, created: NOW, updated: NOW, channel: 'form', stage: 'new' });
-    const receipt = (id) => db.db.prepare('INSERT INTO enquiry_receipts(event_id,payload_hash,lead_id,created) VALUES(?,?,?,?)').run(id, 'h', LEAD.lead_id, NOW);
-    const status = (id) => db.db.prepare('SELECT notify_status FROM enquiry_receipts WHERE event_id=?').get(id).notify_status;
-    const logs = [];
-    const sent = [];
-    const ok = createOwnerNotes({ db, siteUrl: SITE, log: (e) => logs.push(e), sendNote: async (t) => { sent.push(t); return { ok: true }; } });
-    receipt('ev-ok-0000000001');
-    await ok.leadEvent(LEAD, { why: 'form', created: true, eventId: 'ev-ok-0000000001' });
-    assert.deepEqual(sent, [leadNote(LEAD, { siteUrl: SITE })]);
-    // Pinned literally as well, so a change to leadNote() itself (not only to who calls it) fails here.
-    assert.equal(sent[0], [
-      '*Bona — new enquiry*', 'Name: Sara Example', 'Phone: +966500000000', 'Interest: villa', 'Area: Al Rawdah', 'Budget: 3M',
-      'Property: BONA-W003', 'Source: form / (none) · BONA-W003', 'Channel: form · 2026-09-27T09:06:40.000Z', SITE,
-    ].join('\n'));
-    assert.equal(status('ev-ok-0000000001'), 'sent');
-    // A merge is told too, as today (PR-B2 makes it `skipped`).
-    await ok.leadEvent(LEAD, { why: 'form', created: false, eventId: 'ev-ok-0000000001' });
-    assert.equal(sent.length, 2);
-
-    const failed = createOwnerNotes({ db, siteUrl: SITE, log: (e) => logs.push(e), sendNote: async () => ({ ok: false, error: 'network' }) });
-    receipt('ev-failed-000001');
-    await failed.leadEvent(LEAD, { why: 'form', created: true, eventId: 'ev-failed-000001' });
-    assert.equal(status('ev-failed-000001'), 'uncertain');
-    assert.deepEqual(logs.at(-1), { evt: 'lead.wa_failed', id: LEAD.lead_id, error: 'network' });
-
-    const threw = createOwnerNotes({ db, siteUrl: SITE, log: (e) => logs.push(e), sendNote: async () => { throw new Error('evolution down'); } });
-    receipt('ev-threw-0000001');
-    await threw.leadEvent(LEAD, { why: 'form', created: true, eventId: 'ev-threw-0000001' });
-    assert.equal(status('ev-threw-0000001'), 'uncertain');
-    assert.deepEqual(logs.at(-1), { evt: 'lead.wa_error', id: LEAD.lead_id, error: 'evolution down' });
-
-    const slow = createOwnerNotes({ db, siteUrl: SITE, log: (e) => logs.push(e), formWaitMs: 30, sendNote: () => new Promise(() => {}) });
-    receipt('ev-slow-00000001');
-    const started = Date.now();
-    await slow.leadEvent(LEAD, { why: 'form', created: true, eventId: 'ev-slow-00000001' });
-    assert.ok(Date.now() - started < 2000);
-    assert.equal(status('ev-slow-00000001'), 'uncertain');
-    assert.deepEqual(logs.at(-1), { evt: 'lead.wa_error', id: LEAD.lead_id, error: 'owner notification unconfirmed' });
-    assert.doesNotMatch(JSON.stringify(logs), /Sara|966500000000|Rawdah/, 'never a name, a number or a word of the note');
-  } finally {
-    db.close();
-  }
-});
-
-test("owner-notes stub, why 'wa' and 'concierge': the poller's and the concierge tool's notes, as they send them today", async () => {
-  const logs = [];
-  const sent = [];
-  const n = createOwnerNotes({ siteUrl: SITE, log: (e) => logs.push(e), sendNote: async (t) => { sent.push(t); return { ok: false, error: 'disabled' }; } });
-  await n.leadEvent(LEAD, { why: 'wa', created: false });
-  assert.equal(sent.length, 0, 'the poller tells the owner only about a lead it created');
-  await n.leadEvent(LEAD, { why: 'wa', created: true });
-  assert.deepEqual(sent, [leadNote(LEAD, { siteUrl: SITE })]);
-  assert.deepEqual(logs.at(-1), { level: 'warn', evt: 'wa.note.failed', leadId: LEAD.lead_id, error: 'disabled' });
-  await n.leadEvent(LEAD, { why: 'joined', created: true });
-  assert.equal(sent.length, 2, "an own-number join (PR-A1) is the poller's create until PR-B2");
-  await n.leadEvent(LEAD, { why: 'concierge', created: false });
-  assert.equal(sent.length, 3, 'the concierge tool tells the owner about every saved lead, as today');
-  assert.deepEqual(logs.at(-1), { evt: 'lead.wa_failed', id: LEAD.lead_id, error: 'disabled' });
-  const none = createOwnerNotes({ siteUrl: SITE, sendNote: null });
-  assert.equal(await none.leadEvent(LEAD, { why: 'form', created: true }), undefined, 'no transport, nothing to do');
-});
-
-test("owner-notes stub: one transport, asked once: whatever it answers is the answer (no second way out; the form's note is on today's transport)", async () => {
-  // Rollout decision for PR-F2b (Codex r2 P1 over Codex r1b #1): the stub has no fallback. Its
-  // transport is today's (index.mjs `sendWhatsApp`), so no gate today's note never had stands in
-  // its way, and nothing it refuses may go out another way. PR-B2 (T11) holds a refused note.
-  const db = openDb(':memory:');
-  try {
-    db.insertLead({ lead_id: LEAD.lead_id, created: NOW, updated: NOW, channel: 'form', stage: 'new' });
-    const receipt = (id) => db.db.prepare('INSERT INTO enquiry_receipts(event_id,payload_hash,lead_id,created) VALUES(?,?,?,?)').run(id, 'h', LEAD.lead_id, NOW);
-    const status = (id) => db.db.prepare('SELECT notify_status FROM enquiry_receipts WHERE event_id=?').get(id).notify_status;
-    const text = leadNote(LEAD, { siteUrl: SITE });
-    let seq = 0;
-    for (const why of ['form', 'concierge', 'wa']) {
-      for (const error of ['sending_disabled', 'rate_limited', 'bad_text', 'bad_recipient', 'disabled', 'evolution-not-configured']) {
-        const tried = [];
-        const other = [];
-        const n = createOwnerNotes({
-          db, siteUrl: SITE,
-          sendNote: async (t) => { tried.push(t); return { ok: false, error }; },
-          // The round-1 option: handed in, it is not a transport any more.
-          legacySend: async (t) => { other.push(t); return { ok: true }; },
-        });
-        seq += 1;
-        const eventId = `ev-once-${String(seq).padStart(8, '0')}`;
-        receipt(eventId);
-        await n.leadEvent(LEAD, { why, created: true, eventId });
-        assert.deepEqual(tried, [text], `${why}/${error}: asked once`);
-        assert.deepEqual(other, [], `${why}/${error}: no second transport`);
-        assert.equal(status(eventId), why === 'form' ? 'uncertain' : 'pending', `${why}/${error}: only the form's note writes the receipt`);
-      }
-    }
-  } finally {
-    db.close();
-  }
 });
 
 /* ---------------- createApp builds and injects every seam ---------------- */
@@ -276,6 +172,12 @@ const enquiry = (base, over = {}) => fetch(`${base}/v1/enquiry`, {
   body: JSON.stringify({ form: 'contact', name: 'Sara Example', phone: '0500000000', message: 'Interested in a villa', event_id: 'seams-form-0000001', ...over }),
 });
 
+/**
+ * The form's owner note since PR-B2 (DESIGN §7.2): today's leadNote() lines byte for byte, then the
+ * Lead link (index.mjs hands the notes no publicApi yet, so it is the config default's host).
+ */
+const formNote = (h, leadId) => `${leadNote(h.db.getLead(leadId), { siteUrl: SITE })}\nLead: https://api.bona-real-estate.com/dashboard/leads/${leadId}`;
+
 test('createApp builds every seam module and exposes it; a module handed in is the one it uses', async () => {
   const mine = {
     ownerTest: createOwnerTest(), notes: createOwnerNotes(), viewing: createViewing(), waLink: createWaLink(), pacing: createPacing(),
@@ -314,13 +216,13 @@ test("the form's owner note goes through notes.leadEvent (why 'form', created, t
   }
 });
 
-test("with a sendWhatsApp handed to createApp (the test seam), the form's note is today's text through it, and the receipt says sent", async () => {
+test("with a sendWhatsApp handed to createApp (the test seam), the form's note goes through it (today's lines + the Lead link), and the receipt says sent", async () => {
   const sent = [];
   const h = build({ sendWhatsApp: async (t) => { sent.push(t); return { ok: true }; } });
   try {
     const base = await h.listen();
     const { lead_id: leadId } = await (await enquiry(base)).json();
-    assert.deepEqual(sent, [leadNote(h.db.getLead(leadId), { siteUrl: SITE })]);
+    assert.deepEqual(sent, [formNote(h, leadId)]);
     assert.equal(h.db.db.prepare('SELECT notify_status FROM enquiry_receipts').get().notify_status, 'sent');
   } finally {
     await h.close();
@@ -370,8 +272,8 @@ test("without one, the form's note goes today's way (lib/wa.mjs sendText to BONA
       const base = await h.listen();
       const { lead_id: leadId } = await (await enquiry(base)).json();
       assert.deepEqual(evo.posts().map((p) => [p.url, p.apikey]), [['http://evo.test/message/sendText/abdulaziz-personal', 'k']]);
-      assert.deepEqual(evo.sends(), [{ number: OWNER_DIGITS, text: leadNote(h.db.getLead(leadId), { siteUrl: SITE }) }]);
-      assert.deepEqual(evo.senderCalls(), [], 'not through the one sender (kind note waits for PR-B2)');
+      assert.deepEqual(evo.sends(), [{ number: OWNER_DIGITS, text: formNote(h, leadId) }]);
+      assert.deepEqual(evo.senderCalls(), [], 'not through the one sender (PR-INT moves the note onto kind note)');
       assert.equal(outboxRows(h), 0);
       assert.equal(receiptOf(h, 'seams-form-0000001'), 'sent', "today's rule: a 2xx is sent, with or without a message id");
     } finally {
@@ -397,15 +299,17 @@ test("with BONA_WA_NOTIFY=0 the form's note is today's 'disabled': nothing poste
   });
 });
 
-test("the Sending switch never governed the form's note (13e4954) and still does not: with Sending off it goes today's way, sent", async () => {
-  // PR-B2 (T11) moves it onto the ledger, where Sending off keeps it queued (`pending`).
+test("the Sending switch never governed the form's note (13e4954) and still does not on today's transport: with Sending off it goes, sent", async () => {
+  // The ledger holds a note the transport refuses for Sending off (`pending`; test/owner-notes.test.mjs);
+  // today's transport (lib/wa.mjs) never refuses for it. PR-INT (T14) moves the note onto the one
+  // sender's kind 'note', which does.
   await withTodaysTransport(async (evo) => {
     const h = build({ env: ENV, fetchImpl: evo.senderFetch });
     try {
       const base = await h.listen();
       h.app.team.setSetting('sending_enabled', '0');
       const { lead_id: leadId } = await (await enquiry(base)).json();
-      assert.deepEqual(evo.sends(), [{ number: OWNER_DIGITS, text: leadNote(h.db.getLead(leadId), { siteUrl: SITE }) }]);
+      assert.deepEqual(evo.sends(), [{ number: OWNER_DIGITS, text: formNote(h, leadId) }]);
       assert.deepEqual(evo.senderCalls(), []);
       assert.equal(outboxRows(h), 0);
       assert.equal(receiptOf(h, 'seams-form-0000001'), 'sent');
@@ -415,46 +319,18 @@ test("the Sending switch never governed the form's note (13e4954) and still does
   });
 });
 
-test("the form's note is not on the one sender's note minute: it takes none of the 6, and 6 notes used up do not touch it", async () => {
+test("the form's note is not on the one sender's note minute: 6 notes used up there do not touch it", async () => {
   await withTodaysTransport(async (evo) => {
     const h = build({ env: ENV, fetchImpl: evo.senderFetch });
     try {
       const base = await h.listen();
       const owner = `${OWNER_DIGITS}@s.whatsapp.net`;
-      await (await enquiry(base)).json();
       for (let i = 0; i < 6; i += 1) assert.equal((await h.app.sender.sendTo({ jid: owner, text: `note ${i}`, kind: 'note' })).ok, true, `note ${i}`);
       assert.deepEqual(await h.app.sender.sendTo({ jid: owner, text: 'note 7', kind: 'note' }), { ok: false, error: 'rate_limited' });
-      const { lead_id: leadId } = await (await enquiry(base, { event_id: 'seams-form-0000002' })).json();
-      assert.equal(evo.sends().length, 2, 'both forms, today\'s way');
-      assert.deepEqual(evo.sends().at(-1), { number: OWNER_DIGITS, text: leadNote(h.db.getLead(leadId), { siteUrl: SITE }) });
+      const { lead_id: leadId } = await (await enquiry(base)).json();
+      assert.deepEqual(evo.sends(), [{ number: OWNER_DIGITS, text: formNote(h, leadId) }], "the form's note, today's way");
       assert.equal(evo.senderCalls().length, 6, 'only the six notes sent through the one sender');
       assert.equal(outboxRows(h), 6);
-      assert.equal(receiptOf(h, 'seams-form-0000002'), 'sent');
-    } finally {
-      await h.close();
-    }
-  });
-});
-
-test("a form note over 4096 characters (a lead merged a few times) reaches the owner whole, today's way, as at 13e4954", async () => {
-  // The one sender's 4096-character refusal (Claude r1 P2) is not on this path: PR-B2 meets it.
-  await withTodaysTransport(async (evo) => {
-    const h = build({ env: ENV, fetchImpl: evo.senderFetch });
-    try {
-      const base = await h.listen();
-      // Three earlier forms of 1,500 characters each, already merged into the lead's notes.
-      h.db.insertLead({
-        lead_id: 'LEAD-20261127-0000dddd', created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000000', channel: 'form', stage: 'new',
-        notes: ['a', 'b', 'c'].map((c) => `${c}`.repeat(1500)).join('\n'),
-      });
-      const res = await enquiry(base);
-      assert.equal(res.status, 200);
-      const { lead_id: leadId } = await res.json();
-      assert.equal(leadId, 'LEAD-20261127-0000dddd', 'a merge');
-      const text = leadNote(h.db.getLead(leadId), { siteUrl: SITE });
-      assert.ok(text.length > 4096);
-      assert.deepEqual(evo.sends(), [{ number: OWNER_DIGITS, text }], 'the whole note, as today: nothing cut');
-      assert.equal(outboxRows(h), 0);
       assert.equal(receiptOf(h, 'seams-form-0000001'), 'sent');
     } finally {
       await h.close();
@@ -462,14 +338,35 @@ test("a form note over 4096 characters (a lead merged a few times) reaches the o
   });
 });
 
-test('a sendWhatsApp handed to createApp (the test seam) is the only transport: its refusal is the answer, asked once', async () => {
+test("a merge (the number enquired before) sends the owner no note, and its receipt says skipped (DESIGN §7.2, critic C11)", async () => {
+  await withTodaysTransport(async (evo) => {
+    const h = build({ env: ENV, fetchImpl: evo.senderFetch });
+    try {
+      const base = await h.listen();
+      h.db.insertLead({
+        lead_id: 'LEAD-20261127-0000dddd', created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000000', channel: 'form', stage: 'new',
+      });
+      const res = await enquiry(base);
+      assert.equal(res.status, 200);
+      const { lead_id: leadId } = await res.json();
+      assert.equal(leadId, 'LEAD-20261127-0000dddd', 'a merge');
+      assert.deepEqual(evo.posts(), [], 'no note');
+      assert.equal(outboxRows(h), 0);
+      assert.equal(receiptOf(h, 'seams-form-0000001'), 'skipped');
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+test('a sendWhatsApp handed to createApp (the test seam) is the only transport: a refusal for now is asked once and held (pending), never sent another way', async () => {
   const sent = [];
   const h = build({ env: ENV, sendWhatsApp: async (t) => { sent.push(t); return { ok: false, error: 'rate_limited' }; } });
   try {
     const base = await h.listen();
     await (await enquiry(base)).json();
     assert.equal(sent.length, 1);
-    assert.equal(receiptOf(h, 'seams-form-0000001'), 'uncertain');
+    assert.equal(receiptOf(h, 'seams-form-0000001'), 'pending', 'held by the ledger (PR-B2), sent when the transport takes it');
   } finally {
     await h.close();
   }

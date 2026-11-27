@@ -46,6 +46,23 @@ const ACQUIRED = `COALESCE(match_method, '') NOT IN (${[...OWNER_METHODS].map((m
   return `'${m}'`;
 }).join(', ')})`;
 
+/**
+ * The assistant's hand-over reasons that mean "it could not answer at all" (an outage, a
+ * limit, a message left too long), for the daily summary's "Not answered by the AI" line.
+ */
+export const NOT_ANSWERED_REASONS = Object.freeze(['missed', 'cap_day', 'cap_chat', 'brain', 'brain_out', 'budget', 'retell_error', 'not_configured']);
+
+/** A lead's channel as the daily summary groups it: whatsapp, form, chat, email, phone or other. */
+export function channelBucket(channel) {
+  const c = String(channel ?? '').toLowerCase();
+  if (c === 'whatsapp') return 'whatsapp';
+  if (c === 'form') return 'form';
+  if (c === 'concierge_voice' || c === 'voice' || c === 'call' || c === 'phone') return 'phone';
+  if (c === 'chat' || c === 'concierge_chat') return 'chat';
+  if (c === 'email') return 'email';
+  return 'other';
+}
+
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const round1 = (v) => Math.round(v * 10) / 10;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -545,6 +562,98 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     return out.sort((a, b) => a.ts - b.ts || rank[a.kind] - rank[b.kind]);
   }
 
+  /**
+   * The counts behind the owner's daily WhatsApp summary (DESIGN §7.3, lib/daily-summary.mjs),
+   * over `[from, to)`, plus the viewings booked in `[viewingsFrom, viewingsTo)`. Read-only, like
+   * everything here. Names come back raw: whether one may be printed is the summary's rule, not
+   * this file's.
+   *
+   *   - newClients: leads the business acquired that were created in the window (`ACQUIRED`),
+   *     plus chats that joined the inbox in the window under the own-number rule or as the
+   *     owner's test (a returning lead counts once it joins, G13); by channel (non-zero only),
+   *     and how many of them hold a viewing (`booked` or `done`).
+   *   - waiting: inbox chats flagged for a person right now.
+   *   - ai: the assistant's TURNS in the window (one per chat and `covers_ts`, like
+   *     store.countDanaTurns), its hand-overs, and the median time from the client's message to
+   *     its first bubble.
+   *   - notAnswered: chats it handed over in the window because it could not answer at all (an
+   *     outage, a limit, a message left too long).
+   *   - viewings: booked rows with the lead's name and how it joined.
+   *   - lidOnly (the newest 5) / lidOnlyCount / candidatesWithPhone: the open "Chats to check"
+   *     rows that are not leads, without and with a phone number.
+   *   - oldOutWrote: the owner-notes alerts "a chat you marked Not a client wrote" in the window.
+   *   - heldOver: notes kept back by the 40-a-day limit (owner_notes `merged` with `over`), by kind.
+   * @param {{ from: number, to: number, viewingsFrom?: number, viewingsTo?: number }} o
+   */
+  function ownerSummary({ from, to, viewingsFrom = to, viewingsTo = to } = {}) {
+    const a = num(from);
+    const b = num(to);
+    const fresh = all(`SELECT l.lead_id, l.channel,
+                         EXISTS (SELECT 1 FROM viewing_bookings v WHERE v.lead_id = l.lead_id AND v.status IN ('booked','done')) AS booked
+                       FROM leads l
+                       WHERE (l.created >= ? AND l.created < ? AND ${ACQUIRED})
+                          OR (l.inbox_via IN ('own_number','owner_test') AND l.inbox_since >= ? AND l.inbox_since < ?)`, a, b, a, b);
+    const byChannel = {};
+    for (const r of fresh) {
+      const c = channelBucket(r.channel);
+      byChannel[c] = (byChannel[c] ?? 0) + 1;
+    }
+    // One row per turn: a chat (or a purged chat's jid) and the client message it answered.
+    const turns = all(`SELECT MIN(created) - covers_ts AS d, covers_ts FROM wa_outbox
+                       WHERE sender_kind = 'dana' AND status <> 'failed' AND created >= ? AND created < ?
+                       GROUP BY COALESCE(lead_id, 'jid:' || jid), COALESCE(covers_ts, send_id)`, a, b);
+    const replies = turns.filter((t) => t.covers_ts !== null && num(t.d) >= 0).map((t) => num(t.d));
+    const handovers = num(one(`SELECT COUNT(*) AS n FROM lead_tasks WHERE kind = 'handoff' AND source = 'dana' AND created >= ? AND created < ?`, a, b)?.n);
+    const notAnswered = num(one(`SELECT COUNT(DISTINCT lead_id) AS n FROM lead_tasks
+                                 WHERE kind = 'handoff' AND source = 'dana' AND created >= ? AND created < ?
+                                   AND reason IN (${NOT_ANSWERED_REASONS.map(() => '?').join(',')})`, a, b, ...NOT_ANSWERED_REASONS)?.n);
+    const viewings = all(`SELECT v.booking_id, v.lead_id, v.listing_id, v.start_ts, v.end_ts, l.name, l.inbox_via
+                          FROM viewing_bookings v LEFT JOIN leads l ON l.lead_id = v.lead_id
+                          WHERE v.status = 'booked' AND v.start_ts >= ? AND v.start_ts < ? ORDER BY v.start_ts, v.booking_id`,
+    num(viewingsFrom), num(viewingsTo));
+    // The store's "Chats to check" rule (lib/inbox/store.mjs listCandidates): open, and no lead holds its ids.
+    const notALead = `c.state = 'open' AND NOT EXISTS (
+      SELECT 1 FROM leads l WHERE l.phone_e164 = c.phone_e164 OR l.wa_jid IN (c.jid, c.lid) OR l.wa_lid IN (c.jid, c.lid))`;
+    const lidOnly = all(`SELECT c.name, c.last_ts FROM inbox_candidates c WHERE ${notALead} AND c.phone_e164 IS NULL
+                         ORDER BY c.last_ts DESC, c.rowid DESC LIMIT 5`).map((r) => ({ name: r.name ?? null, last_ts: num(r.last_ts) }));
+    const lidOnlyCount = num(one(`SELECT COUNT(*) AS n FROM inbox_candidates c WHERE ${notALead} AND c.phone_e164 IS NULL`)?.n);
+    const candidatesWithPhone = num(one(`SELECT COUNT(*) AS n FROM inbox_candidates c WHERE ${notALead} AND c.phone_e164 IS NOT NULL`)?.n);
+    const oldOutWrote = num(one(`SELECT COUNT(*) AS n FROM owner_notes
+                                 WHERE kind = 'alert' AND substr(dedupe_key, 1, 17) = 'al:old_out_wrote:' AND created >= ? AND created < ?`, a, b)?.n);
+    // `meta` is JSON written by lib/owner-notes.mjs; a row that is not JSON is simply not held over.
+    const held = all(`SELECT kind, COUNT(*) AS n FROM owner_notes
+                      WHERE status = 'merged' AND (CASE WHEN json_valid(meta) THEN json_extract(meta, '$.over') END) IS NOT NULL
+                        AND updated >= ? AND updated < ? GROUP BY kind ORDER BY kind`, a, b);
+    return {
+      newClients: { total: fresh.length, byChannel, booked: fresh.filter((r) => num(r.booked) === 1).length },
+      waiting: num(one(`SELECT COUNT(*) AS n FROM leads WHERE inbox_state = 'in' AND needs_human = 1`)?.n),
+      ai: { answers: turns.length, handovers, medianReplyMs: median(replies) },
+      notAnswered,
+      viewings: viewings.map((v) => ({ ...v, start_ts: num(v.start_ts), end_ts: num(v.end_ts) })),
+      lidOnly,
+      lidOnlyCount,
+      candidatesWithPhone,
+      oldOutWrote,
+      heldOver: { total: held.reduce((s, r) => s + num(r.n), 0), byKind: Object.fromEntries(held.map((r) => [r.kind, num(r.n)])) },
+    };
+  }
+
+  /**
+   * The mailbox's day for the summary's Email line (Track C; the `mail_seen` table is db v9):
+   * mails listed (never answered) and possible clients received in `[from, to)`. Zeros while the
+   * table does not exist yet.
+   */
+  function mailCounts({ from, to } = {}) {
+    let rows = [];
+    try {
+      rows = all(`SELECT decision, COUNT(*) AS n FROM mail_seen WHERE received_ts >= ? AND received_ts < ? GROUP BY decision`, num(from), num(to));
+    } catch {
+      rows = [];
+    }
+    const of = (d) => num(rows.find((r) => r.decision === d)?.n);
+    return { listed: of('listed'), possible: of('possible_client') };
+  }
+
   /** Everything `GET /v1/admin/stats` answers with. */
   function overview(days = 14) {
     return {
@@ -565,5 +674,5 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     };
   }
 
-  return { overviewDaily, sources, matchQuality, pipeline, responseTimes, listingFunnel, cplByCampaign, roi, leadJourney, overview };
+  return { overviewDaily, sources, matchQuality, pipeline, responseTimes, listingFunnel, cplByCampaign, roi, leadJourney, overview, ownerSummary, mailCounts };
 }

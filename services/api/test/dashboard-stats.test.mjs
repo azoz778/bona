@@ -491,3 +491,49 @@ test('overview() carries every section plus the totals', () => {
   assert.equal(o.response_times.count, 2);
   assert.deepEqual(o.totals, { leads: 4, sessions: 3, events: 12 });
 });
+
+/* ---------------- the owner's daily summary (PLAN T11, DESIGN §7.3): read-only counts ---------------- */
+
+test('ownerSummary(): new clients by channel, waiting chats, the assistant\'s turns and reply times, viewings, lid-only chats', () => {
+  const db = openDb(':memory:');
+  const stats = createStats({ db, now });
+  const from = NOW - DAY_MS;
+  const to = NOW;
+  const put = (id, over) => db.insertLead({
+    lead_id: id, created: NOW - 30 * DAY_MS, updated: NOW - 30 * DAY_MS, phone_e164: `96650000${id.slice(-4)}`, wa_jid: `96650000${id.slice(-4)}@s.whatsapp.net`,
+    channel: 'whatsapp', match_method: 'ref', stage: 'new', inbox_state: 'in', ...over,
+  });
+  put('LEAD-0001', { created: from + 1000, name: 'Sara Example' });
+  put('LEAD-0002', { created: from + 2000, channel: 'form', match_method: 'form' });
+  put('LEAD-0003', { created: from + 3000, channel: 'concierge_chat', match_method: 'concierge' });
+  put('LEAD-0004', { created: from + 4000, match_method: 'owner_outbound' });
+  put('LEAD-0005', { inbox_via: 'own_number', inbox_since: from + 5000 });
+  put('LEAD-0006', { created: to, name: 'Too Late Example' });
+  put('LEAD-0007', { needs_human: 1 });
+  put('LEAD-0008', { needs_human: 1, inbox_state: 'out' });
+  const sends = [['LEAD-0001', from + 10_000, from + 30_000], ['LEAD-0001', from + 10_000, from + 31_000], ['LEAD-0005', from + 50_000, from + 60_000],
+    ['LEAD-0005', to - 1000, to + 1000]];
+  for (const [i, [lead, covers, created]] of sends.entries()) {
+    db.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(`SND-${i}`, lead, 'x@s.whatsapp.net', 't', null, 'dana', 'accepted', null, created, created, null, covers);
+  }
+  db.db.prepare(`INSERT INTO viewing_bookings (booking_id, lead_id, task_id, listing_id, start_ts, end_ts, event_id, status, client_told, created, updated)
+                 VALUES ('BK-1','LEAD-0001',NULL,'BONA-W012',?,?,'ev1','booked',1,?,?)`).run(to + 3_600_000, to + 7_200_000, from, from);
+  db.db.prepare(`INSERT INTO inbox_candidates (cand_id, jid, lid, phone_e164, name, first_ts, last_ts, hits, words, last_dir, state, updated)
+                 VALUES ('CND-1', NULL, '1234@lid', NULL, 'Ahmed Example', ?, ?, 1, 'villa', 'in', 'open', ?)`).run(from + 1, from + 9, from + 9);
+  db.db.prepare(`INSERT INTO inbox_candidates (cand_id, jid, lid, phone_e164, name, first_ts, last_ts, hits, words, last_dir, state, updated)
+                 VALUES ('CND-2', '966500000099@s.whatsapp.net', NULL, '966500000099', 'Omar Example', ?, ?, 1, 'villa', 'in', 'open', ?)`).run(from + 1, from + 8, from + 8);
+  const before = db.db.prepare('SELECT total_changes() AS n').get().n;
+  const s = stats.ownerSummary({ from, to, viewingsFrom: to, viewingsTo: to + 2 * DAY_MS });
+  assert.equal(db.db.prepare('SELECT total_changes() AS n').get().n, before, 'read-only');
+  assert.deepEqual(s.newClients, { total: 4, byChannel: { whatsapp: 2, form: 1, chat: 1 }, booked: 1 });
+  assert.equal(s.waiting, 1);
+  assert.deepEqual(s.ai, { answers: 2, handovers: 0, medianReplyMs: 15_000 });
+  assert.equal(s.notAnswered, 0);
+  assert.deepEqual(s.viewings.map((v) => [v.listing_id, v.name]), [['BONA-W012', 'Sara Example']]);
+  assert.deepEqual(s.lidOnly, [{ name: 'Ahmed Example', last_ts: from + 9 }]);
+  assert.equal(s.candidatesWithPhone, 1);
+  assert.deepEqual(s.heldOver, { total: 0, byKind: {} });
+  assert.equal(s.oldOutWrote, 0);
+  db.close();
+});
