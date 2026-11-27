@@ -3,12 +3,14 @@
  *
  * IMPORTANT: the instance this talks to (`BONA_WA_INSTANCE`: Bona's own WhatsApp since
  * 2026-11-19; before that the owner's personal one, which another agent also uses). This module only ever
- * calls `POST /chat/findMessages/{instance}`. It never sets a webhook, a websocket or
+ * calls three read-only routes: `POST /chat/findMessages/{instance}` for messages, and the two
+ * probes of the identity guard (`GET /instance/fetchInstances`, `POST /chat/whatsappNumbers/{instance}`,
+ * below). It never sets a webhook, a websocket or
  * a rabbitmq consumer — doing so would steal the other agent's events — and it never
  * sends: what the API service sends goes through `lib/wa-send.mjs` (login codes and,
  * from Phase 2, the team's replies) and `lib/wa.mjs` (the owner's note to himself).
  *
- * It asks two kinds of question, both through that one read-only route:
+ * It asks two kinds of question about messages, both through findMessages:
  *   - a time window across every chat (`readWindow`), for the poller;
  *   - one chat (`findMessagesPage` with `where.key.remoteJid` or `where.key.remoteJidAlt`),
  *     for the Bona inbox: a joining chat's history, and the refresh when a thread is
@@ -17,6 +19,9 @@
  *     to a phone number under the phone jid — so the inbox asks for both.
  * Reading is not keeping: the window read sees every chat on the number, and only the
  * callers decide what is stored (the inbox keeps chats in the Bona inbox, nothing else).
+ *
+ * And two about the instance itself, for lib/wa-link.mjs (DESIGN §5.3): which number it is
+ * connected to (`fetchInstance`), and whether WhatsApp answers through it (`whatsappNumbers`).
  *
  * `services/intake/lib/evolution.mjs` talks to the same instance for the brochure
  * daemon. The two are deliberately NOT shared: they are different services with
@@ -762,4 +767,145 @@ export async function readWindow({
 
   await read(gteMs, lteMs, 0);
   return { records, pieces, truncated, missing };
+}
+
+/* ------------------------------------------------------------------ */
+/* The identity guard's two probes (DESIGN §5.3, PR-L; verify/T00.md)  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The failure kinds the probes put on an `EvolutionError` as `code`: a fixed set, so a caller can
+ * log it as it is. An HTTP status that is not one of the named ones, and a 2xx whose answer cannot
+ * be used, are both `bad_response`.
+ */
+const HTTP_CODES = new Map([[401, 'auth'], [403, 'forbidden'], [404, 'not_found']]);
+/** An `EvolutionError` with a `code` and nothing of the answer on it. */
+const probeError = (message, status, code) => Object.assign(new EvolutionError(message, status, null), { code });
+/** The caller's signal (a stopped probe) and the deadline, as one. */
+const deadline = (timeoutMs, signal) => (signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs));
+
+/**
+ * One probe request and its JSON answer (with the 2xx status), or an `EvolutionError` carrying the status and a `code`
+ * (`timeout`, `network`, `auth`, `forbidden`, `not_found`, `bad_response`). Never the body: the
+ * fetchInstances answer holds the instance's own API key, the whatsappNumbers answer echoes the
+ * number asked and may carry a contact's name.
+ *
+ * A redirect is never followed (`redirect: 'error'`, a `network` failure): fetch would carry the
+ * `apikey` header, and the whatsappNumbers body with Bona's number, to whatever host the Location
+ * names, and that host's answer could then pass for the instance's. A 3xx handed back by a fetch
+ * that does not follow is not ok, so it fails as `bad_response`.
+ */
+async function probeJson(url, init, label, { fetchImpl, timeoutMs, signal }) {
+  let res;
+  try {
+    res = await fetchImpl(url, { ...init, redirect: 'error', signal: deadline(timeoutMs, signal) });
+  } catch (err) {
+    const how = failureOf(err);
+    throw probeError(`${label} failed: ${how}`, 0, how);
+  }
+  if (!res.ok) throw probeError(`${label} -> HTTP ${res.status}`, res.status, HTTP_CODES.get(res.status) ?? 'bad_response');
+  let text = '';
+  try {
+    if (typeof res.text === 'function') text = await res.text();
+  } catch (err) {
+    const how = failureOf(err);
+    throw probeError(`${label} failed: ${how}`, res.status, how);
+  }
+  try {
+    return { json: JSON.parse(text), status: res.status };
+  } catch {
+    throw probeError(`${label} -> HTTP ${res.status} but the answer is not JSON`, res.status, 'bad_response');
+  }
+}
+
+/** What 2.3.7 reports as `connectionStatus`; anything else reads as null. */
+const CONNECTION_STATES = new Set(['open', 'connecting', 'close']);
+
+/**
+ * The number an instance is connected to, for the identity guard (DESIGN §5.3, lib/wa-link.mjs):
+ * `GET /instance/fetchInstances?instanceName=<instance>` with the global key. Evolution 2.3.7
+ * answers an array of one instance (verify/T00.md step 2); the connected number is `ownerJid`,
+ * `<digits>@s.whatsapp.net` (its `number` is the pairing number given at create, empty on both
+ * live instances: never read here).
+ *
+ * The entry used is the one whose `name` is `instance`, exactly once: a server that ignored the
+ * filter and listed every instance must not have its first row (the owner's personal WhatsApp,
+ * say) read as this one's. No such entry, two of them, or an answer that is not an array is a
+ * `bad_response` error.
+ *
+ * Only `ownerJid` and `connectionStatus` leave this function. The same entry holds the instance's
+ * own API key (`token`), the profile name and picture (T00 finding 3), so the answer is never
+ * returned, logged or put on an error.
+ *
+ * @param {{ baseUrl: string, apiKey: string, instance: string, fetchImpl?: typeof globalThis.fetch,
+ *           timeoutMs?: number, signal?: AbortSignal|null }} o
+ * @returns {Promise<{ ownerJid: string|null, connectionStatus: 'open'|'connecting'|'close'|null }>}
+ */
+export async function fetchInstance({
+  baseUrl, apiKey, instance, fetchImpl = globalThis.fetch, timeoutMs = 10_000, signal = null,
+} = {}) {
+  if (!baseUrl) throw new TypeError('evolution: baseUrl required');
+  if (typeof instance !== 'string' || !instance) throw new TypeError('evolution: instance required');
+  const root = String(baseUrl).replace(/\/+$/, '');
+  const label = 'GET /instance/fetchInstances';
+  const { json, status } = await probeJson(`${root}/instance/fetchInstances?instanceName=${encodeURIComponent(instance)}`, {
+    method: 'GET',
+    headers: { apikey: apiKey ?? '' },
+  }, label, { fetchImpl, timeoutMs, signal });
+  const named = Array.isArray(json) ? json.filter((row) => isPlainObject(row) && row.name === instance) : [];
+  if (named.length !== 1) throw probeError(`${label} -> HTTP ${status} but the answer does not name the instance once`, status, 'bad_response');
+  const [row] = named;
+  return {
+    ownerJid: typeof row.ownerJid === 'string' && row.ownerJid ? row.ownerJid : null,
+    connectionStatus: CONNECTION_STATES.has(row.connectionStatus) ? row.connectionStatus : null,
+  };
+}
+
+/** A number the link probe may ask about: digits only, as WhatsApp numbers are (never a jid or a lid). */
+const PROBE_NUMBER_RE = /^\d{8,15}$/;
+/** The most numbers one probe asks about; the guard asks about one. */
+const MAX_PROBE_NUMBERS = 10;
+
+/**
+ * Whether WhatsApp answers through the instance, for the link probe (DESIGN §5.3, G3):
+ * `POST /chat/whatsappNumbers/<instance>` `{ numbers }`. Evolution asks WhatsApp's servers over
+ * the instance's own socket, so a logged-out companion answers 400 "Connection Closed" while
+ * findMessages (a read of Evolution's own database) still succeeds. With Evolution's optional
+ * `DATABASE_SAVE_IS_ON_WHATSAPP` cache on (off by default), a cached number is answered from that
+ * database instead, and the probe proves less.
+ *
+ * It asks; it sends no message to anyone. `numbers` are 1 to 10 distinct digit strings of 8 to 15
+ * digits, refused with a TypeError before anything is sent otherwise. The request carries the
+ * `User-Agent: curl/8.5.0` header DESIGN §5.3 names.
+ *
+ * Each entry comes back as `{ digits, exists }`: the digits of the number asked (Evolution's
+ * `number` echo; its `jid` may be a lid), and `exists` true only for a literal `true`. The contact
+ * name Evolution adds is dropped, and nothing of the answer goes on an error (it echoes the
+ * number). A non-array answer is a `bad_response` error.
+ *
+ * @param {{ baseUrl: string, apiKey: string, instance: string, numbers: string[],
+ *           fetchImpl?: typeof globalThis.fetch, timeoutMs?: number, signal?: AbortSignal|null }} o
+ * @returns {Promise<Array<{ digits: string, exists: boolean }>>}
+ */
+export async function whatsappNumbers({
+  baseUrl, apiKey, instance, numbers, fetchImpl = globalThis.fetch, timeoutMs = 10_000, signal = null,
+} = {}) {
+  if (!baseUrl) throw new TypeError('evolution: baseUrl required');
+  if (typeof instance !== 'string' || !instance) throw new TypeError('evolution: instance required');
+  if (!Array.isArray(numbers) || numbers.length < 1 || numbers.length > MAX_PROBE_NUMBERS
+    || !numbers.every((n) => typeof n === 'string' && PROBE_NUMBER_RE.test(n)) || new Set(numbers).size !== numbers.length) {
+    throw new TypeError(`evolution: numbers must be 1 to ${MAX_PROBE_NUMBERS} distinct digit strings`);
+  }
+  const root = String(baseUrl).replace(/\/+$/, '');
+  const route = `/chat/whatsappNumbers/${encodeURIComponent(instance)}`;
+  const { json, status } = await probeJson(`${root}${route}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: apiKey ?? '', 'User-Agent': 'curl/8.5.0' },
+    body: JSON.stringify({ numbers }),
+  }, `POST ${route}`, { fetchImpl, timeoutMs, signal });
+  if (!Array.isArray(json)) throw probeError(`POST ${route} -> HTTP ${status} but the answer is not a list`, status, 'bad_response');
+  return json.filter(isPlainObject).map((row) => ({
+    digits: bareJid(typeof row.number === 'string' && row.number ? row.number : row.jid),
+    exists: row.exists === true,
+  }));
 }
