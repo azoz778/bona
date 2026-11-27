@@ -126,8 +126,38 @@ const errorLabel = (err) => {
     return 'Error';
   }
 };
-/** The kinds of function whose body does not run, or does not finish, when it is called. */
-const NOT_SYNC_FUNCTIONS = new Set(['[object AsyncFunction]', '[object GeneratorFunction]', '[object AsyncGeneratorFunction]']);
+/**
+ * The kinds of function whose body does not run, or does not finish, when it is called, by
+ * tag and by prototype: a tag of its own can hide what a function is from the first check,
+ * and only a swapped prototype as well gets past both (Codex r4). A bound function or a
+ * Proxy around one keeps both, so it is caught too.
+ */
+const NOT_SYNC_TAGS = new Set(['[object AsyncFunction]', '[object GeneratorFunction]', '[object AsyncGeneratorFunction]']);
+const NOT_SYNC_PROTOS = [async function () {}, function* () {}, async function* () {}].map((f) => Object.getPrototypeOf(f));
+const isNotSync = (fn) => NOT_SYNC_TAGS.has(Object.prototype.toString.call(fn))
+  || NOT_SYNC_PROTOS.some((proto) => Object.prototype.isPrototypeOf.call(proto, fn));
+/**
+ * Watch a hook's thenable without trusting its `then` (Codex r4). `then` is the value already
+ * read from it, so it is not read again, and it is called now, as before. A native promise is
+ * what settles: `onRejected` runs at most once, when the thenable rejects, when its `then`
+ * throws before settling it, or when its `then` is itself async and the promise that `then`
+ * hands back rejects (a rejection no one else would ever handle). One that has resolved, or a
+ * second callback, settles nothing more, and a resolution with a promise is followed, all as
+ * the language does it. Never throws, and nothing it is handed ends as an unhandled rejection.
+ */
+function watchThenable(out, then, onRejected) {
+  let reject;
+  let back;
+  const settled = new Promise((resolve, rej) => {
+    reject = rej;
+    back = then.call(out, resolve, rej); // a throw here rejects `settled`, unless it has settled
+  });
+  // Only a genuine promise can reject unhandled; Promise.prototype.then refuses anything else.
+  try { Promise.prototype.then.call(back, undefined, reject); } catch { /* not a promise: nothing to watch */ }
+  settled.then(undefined, (err) => {
+    try { onRejected(err); } catch { /* the log itself failed: nothing left to tell */ }
+  });
+}
 /** After an owner's join, Dana answers the waiting message only when it is this recent (U5). */
 export const MOVE_ANSWER_WINDOW_MS = 6 * 3_600_000;
 /**
@@ -256,11 +286,13 @@ export function readBody(req, maxBytes, { drainTo = 0 } = {}) {
  * simply try again. That holds because `team` and `inbox` are built on this same `db`
  * (index.mjs); the step's audit rows are written once it has committed, best-effort as
  * everywhere (lib/audit.mjs). An async or generator function is refused the same way before it
- * is called, so none of its work starts. A plain function that returns a promise is refused
+ * is called (known by its tag or its prototype), so none of its work starts; one disguised past
+ * both is refused when it returns, a generator by the iterator it hands back (its body has not
+ * run) and an async one by its promise. A plain function that returns a promise is refused
  * too, but only what it wrote before returning goes back: the rollback covers synchronous
  * writes, and refusing the promise cannot cancel work it has already started. Every failure is
  * logged by hook name, target id and a known class or system code only, never with the error's
- * words.
+ * words. Hooks are read inside the guard too, so a getter that throws is a failed hook.
  */
 export function createDashboardRoutes({
   db, cfg = {}, inventory = null, fanout = null, app = null,
@@ -301,7 +333,8 @@ export function createDashboardRoutes({
    * throw or a rejection is logged and swallowed. `self` is the object the hook came from,
    * so a method keeps its `this`. Returns what the hook returned, or undefined when it threw
    * or returned a promise (nothing here waits for one). Its `then` is read once, here, so a
-   * caller never reads the hook's result outside this guard to ask again.
+   * caller never reads the hook's result outside this guard to ask again; and a thenable is
+   * logged at most once, whatever its `then` does (watchThenable).
    */
   function callHook(hook, target, fn, self, args) {
     if (typeof fn !== 'function') return undefined;
@@ -310,12 +343,26 @@ export function createDashboardRoutes({
       if (out === null || (typeof out !== 'object' && typeof out !== 'function')) return out;
       const then = out.then;
       if (typeof then !== 'function') return out;
-      then.call(out, null, (err) => hookFailed(hook, target, err));
+      watchThenable(out, then, (err) => hookFailed(hook, target, err));
       return undefined;
     } catch (err) {
       hookFailed(hook, target, err);
       return undefined;
     }
+  }
+  /**
+   * callHook for the method `name` of `self`, read inside the guard: a getter or a Proxy that
+   * throws when the hook is looked up is a failed hook (logged), never a failed action (Codex r4).
+   */
+  function callMethod(self, name, target, args) {
+    let fn;
+    try {
+      fn = self?.[name];
+    } catch (err) {
+      hookFailed(name, target, err);
+      return undefined;
+    }
+    return callHook(name, target, fn, self, args);
   }
   /**
    * The chat is about to leave the inbox and lose its transcript: the viewing seam marks the
@@ -328,10 +375,13 @@ export function createDashboardRoutes({
    *
    * A hook that is not a plain synchronous function broke the contract, and is refused like a
    * throw (logged as a TypeError). An async or generator function is refused before it is
-   * called, so none of its work starts: an async body would write its marks after the step's
-   * rollback, a generator body never. A plain function that returns a promise is refused once
-   * it has returned, since nothing says it has marked anything; only its synchronous writes go
-   * back, and how the promise settles later is dropped, never an unhandled rejection.
+   * called, by its tag or its prototype, so none of its work starts: an async body would write
+   * its marks after the step's rollback, a generator body never. One disguised past both (its
+   * own tag and a swapped prototype) is refused when it returns: a generator by the iterator it
+   * hands back, whose body has not run, so the purge never goes ahead without its marks. A
+   * function that returns a promise is refused once it has returned, since nothing says it has
+   * marked anything; only its synchronous writes go back, and how the promise settles later is
+   * dropped (watchThenable), never an unhandled rejection.
    */
   function beforeLeadLeaves(leadId) {
     let threw = false;
@@ -340,14 +390,18 @@ export function createDashboardRoutes({
     try {
       const fn = hooks?.onLeadLeaving;
       if (typeof fn !== 'function') return;
-      if (NOT_SYNC_FUNCTIONS.has(Object.prototype.toString.call(fn))) {
+      if (isNotSync(fn)) {
         refuse(new TypeError('onLeadLeaving is not a synchronous function'));
       } else {
         const out = fn.call(hooks, leadId);
-        const then = out !== null && (typeof out === 'object' || typeof out === 'function') ? out.then : undefined;
-        if (typeof then === 'function') {
-          refuse(new TypeError('onLeadLeaving returned a promise'));
-          then.call(out, null, () => {});
+        if (out !== null && (typeof out === 'object' || typeof out === 'function')) {
+          const then = out.then;
+          if (typeof then === 'function') {
+            refuse(new TypeError('onLeadLeaving returned a promise'));
+            watchThenable(out, then, () => {});
+          } else if (typeof out.next === 'function') {
+            refuse(new TypeError('onLeadLeaving returned an iterator'));
+          }
         }
       }
     } catch (err) {
@@ -930,8 +984,9 @@ export function createDashboardRoutes({
       if(!task)throw new RangeError('Task not found');
       audit?.record({userId:me.user_id,action:'lead_task',target:leadId,meta:{taskId:task.task_id,kind:task.kind,status:task.status}});
       // A changed task (not a new one) goes to the viewing seam: a cancelled booked viewing
-      // cancels its calendar event there (DESIGN §8.4, T10). Its failure never fails the save.
-      if(fields.task_id)callHook('onTaskChange',task.task_id,hooks?.onTaskChange,hooks,[task,{status:String(fields.status),dueTs}]);
+      // cancels its calendar event there (DESIGN §8.4, T10). Its failure never fails the save,
+      // not even when looking the hook up throws (callMethod reads it inside the guard).
+      if(fields.task_id)callMethod(hooks,'onTaskChange',task.task_id,[task,{status:String(fields.status),dueTs}]);
       return answer(res,{form,back:back+'?ok=task',status:200,payload:{ok:true,task}});
     }catch{return answer(res,{form,back:back+'?error=bad_task',status:400,payload:{error:'bad_task'}});}
   }

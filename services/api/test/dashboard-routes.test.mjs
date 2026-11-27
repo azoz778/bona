@@ -19,7 +19,7 @@ import { createDashboardRoutes } from '../lib/dashboard/routes.mjs';
 import { createTeam } from '../lib/team.mjs';
 import { createAudit } from '../lib/audit.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
-import { addTask } from '../lib/lead-tasks.mjs';
+import { addTask, tasksForLead } from '../lib/lead-tasks.mjs';
 
 const TOKEN = 'a'.repeat(32);
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
@@ -2020,11 +2020,14 @@ test('an async or generator onLeadLeaving is refused before it is called: none o
 });
 
 test('dash.hook_failed reads an error\'s code and name once each, and an error that throws when read is logged as Error, never a 500 or an unhandled rejection', async () => {
-  let reads = 0;
+  let codeReads = 0;
+  let nameReads = 0;
   const secret = 'cal-secret 966500000000';
   const made = [
-    // SQLITE_BUSY while it is checked, the secret when it is logged: one read decides both.
-    () => { throw Object.defineProperty(new Error('x'), 'code', { get: () => (++reads <= 2 ? 'SQLITE_BUSY' : secret) }); },
+    // A known value on the first read only, the secret on any later one: one read decides and is logged
+    // (Codex r4: counted, so a second read fails here even when it would log a known value).
+    () => { throw Object.defineProperty(new Error('x'), 'code', { get: () => (++codeReads === 1 ? 'SQLITE_BUSY' : secret) }); },
+    () => { throw Object.defineProperty(new Error('x'), 'name', { get: () => (++nameReads === 1 ? 'TypeError' : secret) }); },
     () => { throw Object.defineProperty(new Error('x'), 'code', { get() { throw new Error(secret); } }); },
     () => { throw new Proxy(new Error('x'), { get() { throw new Error(secret); } }); },
     () => Promise.reject(Object.defineProperty(new Error('x'), 'name', { get() { throw new Error(secret); } })),
@@ -2038,9 +2041,145 @@ test('dash.hook_failed reads an error\'s code and name once each, and an error t
     }
     await settle();
     const failed = logs.filter((l) => l.evt === 'dash.hook_failed');
-    assert.deepEqual(failed.map((l) => l.error), ['SQLITE_BUSY', 'Error', 'Error', 'Error']);
+    assert.deepEqual(failed.map((l) => l.error), ['SQLITE_BUSY', 'TypeError', 'Error', 'Error', 'Error']);
+    assert.equal(codeReads, 1, 'the code is read once');
+    assert.equal(nameReads, 1, 'the name is read once');
     assert.doesNotMatch(JSON.stringify(logs), /cal-secret/);
   }, { onSettingChanged: () => made[i++]() });
+});
+
+test('a hook\'s thenable is watched without trusting its `then`: an async `then` that throws is logged once and never an unhandled rejection; one that rejects and then throws is logged once; one that resolves and then throws is no failure; one that resolves with a rejected promise is logged once', async () => {
+  const unhandled = [];
+  const onUnhandled = (err) => unhandled.push(err);
+  process.on('unhandledRejection', onUnhandled);
+  const secret = 'cal-secret 966500000000';
+  const made = [
+    () => ({ async then() { throw new Error(secret); } }),
+    () => ({ then(_ok, fail) { fail(new TypeError('x')); throw new Error(secret); } }),
+    () => ({ then(ok) { ok(1); throw new Error(secret); } }),
+    () => ({ then(ok) { ok(Promise.reject(new RangeError(secret))); } }),
+  ];
+  let i = 0;
+  try {
+    await withTeamRoutes(async ({ postForm, login, logs }) => {
+      const cookie = await login(OWNER_PHONE);
+      for (let k = 0; k < made.length; k += 1) {
+        const res = await postForm('/v1/admin/settings', { _dash: '1', email_replies: k % 2 ? '0' : '1' }, { cookie });
+        assert.equal(res.headers.get('location'), '/dashboard/team?ok=setting', `thenable ${k}`);
+      }
+      await settle();
+      const failed = logs.filter((l) => l.evt === 'dash.hook_failed');
+      assert.deepEqual(failed.map((l) => [l.hook, l.target, l.error]), [
+        ['onSettingChanged', 'email_replies', 'Error'], ['onSettingChanged', 'email_replies', 'TypeError'],
+        ['onSettingChanged', 'email_replies', 'RangeError'],
+      ]);
+      assert.doesNotMatch(JSON.stringify(logs), /cal-secret/);
+    }, { onSettingChanged: () => made[i++]() });
+    await settle();
+    assert.deepEqual(unhandled, [], 'no rejection is left for Node to report');
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});
+
+test('an onLeadLeaving thenable whose async `then` throws is refused once and leaves no unhandled rejection', async () => {
+  const unhandled = [];
+  const onUnhandled = (err) => unhandled.push(err);
+  process.on('unhandledRejection', onUnhandled);
+  let inbox;
+  try {
+    await withTeamRoutes(async ({ db, postForm, login, logs }) => {
+      const cookie = await login(OWNER_PHONE);
+      const leadId = seedLead(db, { phone: '966500000094', inboxState: 'in' });
+      seedMessage(inbox, leadId, 'K-94');
+      const res = await postForm(`/v1/admin/inbox/${leadId}/out`, { _dash: '1' }, { cookie });
+      assert.equal(res.status, 500);
+      await settle();
+      assert.equal(db.getLead(leadId).inbox_state, 'in');
+      assert.equal(inbox.countMessages(leadId), 1);
+      const failed = logs.filter((l) => l.evt === 'dash.hook_failed');
+      assert.deepEqual(failed.map((l) => [l.hook, l.target, l.error]), [['onLeadLeaving', leadId, 'TypeError']]);
+      assert.doesNotMatch(JSON.stringify(logs), /cal-secret/);
+    }, ({ db }) => {
+      inbox = createInboxStore(db);
+      return { inbox, hooks: { onLeadLeaving: () => ({ async then() { throw new Error('cal-secret 966500000094'); } }) } };
+    });
+    await settle();
+    assert.deepEqual(unhandled, [], 'no rejection is left for Node to report');
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});
+
+test('an async or generator onLeadLeaving that carries a tag of its own is still refused: by its prototype before the call, or by the iterator it hands back; the purge never runs without its marks', async () => {
+  let inbox;
+  let store;
+  let ran = 0;
+  const hooks = {};
+  const mark = () => store.setSetting('owner_summary_day', '2026-11-27');
+  // Object.prototype.toString now says "[object Function]" for each (Codex r4).
+  const tagged = (fn) => Object.defineProperty(fn, Symbol.toStringTag, { value: 'Function' });
+  const variants = [
+    tagged(function* onLeadLeaving() { ran += 1; mark(); }),
+    tagged(async function onLeadLeaving() { ran += 1; await null; mark(); }),
+    tagged(async function* onLeadLeaving() { ran += 1; mark(); }),
+    // Its prototype swapped as well, so it is called; a generator's body still has not run, and what it returns is refused.
+    Object.setPrototypeOf(tagged(function* onLeadLeaving() { ran += 1; mark(); }), Function.prototype),
+    Object.setPrototypeOf(tagged(async function* onLeadLeaving() { ran += 1; mark(); }), Function.prototype),
+  ];
+  await withTeamRoutes(async ({ db, team, audit, postForm, login, logs }) => {
+    const cookie = await login(OWNER_PHONE);
+    const leadId = seedLead(db, { phone: '966500000095', inboxState: 'in' });
+    seedMessage(inbox, leadId, 'K-95');
+    const colleague = seedLead(db, { id: 'LEAD-20260908-aaaa0012', phone: '966500000096', inboxState: 'in' });
+    seedMessage(inbox, colleague, 'K-96');
+    const auditBefore = audit.recent(500).length;
+    for (const [k, fn] of variants.entries()) {
+      hooks.onLeadLeaving = fn;
+      const res = await postForm(`/v1/admin/inbox/${leadId}/out`, { _dash: '1' }, { cookie });
+      assert.equal(res.status, 500, `variant ${k}`);
+      await settle();
+      assert.equal(db.getLead(leadId).inbox_state, 'in', `variant ${k}: the chat stays in`);
+      assert.equal(inbox.countMessages(leadId), 1, `variant ${k}: its transcript stays`);
+    }
+    hooks.onLeadLeaving = variants[3];
+    const add = await postForm('/v1/admin/team', { _dash: '1', name: 'Omar', phone: '0500000096', role: 'staff' }, { cookie });
+    assert.equal(add.status, 500);
+    await settle();
+    assert.equal(team.getUserByPhone('966500000096'), null);
+    assert.equal(inbox.countMessages(colleague), 1);
+    assert.equal(ran, 0, 'no body ran');
+    assert.equal(team.getSetting('owner_summary_day'), '', 'and no mark was written after the rollback');
+    assert.equal(audit.recent(500).length, auditBefore);
+    const failed = logs.filter((l) => l.evt === 'dash.hook_failed');
+    assert.deepEqual(failed.map((l) => [l.hook, l.error]), Array(variants.length + 1).fill(['onLeadLeaving', 'TypeError']));
+  }, ({ db, team }) => {
+    inbox = createInboxStore(db);
+    store = team;
+    return { inbox, hooks };
+  });
+});
+
+test('an onTaskChange that throws when it is read is a failed hook, not a failed save: the task is saved, the owner sees ok=task, and it is logged by name', async () => {
+  const secret = 'cal-secret 966500000000';
+  const shapes = [
+    { get onTaskChange() { throw new Error(secret); } },
+    new Proxy({}, { get(_t, key) { if (key === 'onTaskChange') throw new Error(secret); return undefined; } }),
+  ];
+  for (const hooks of shapes) {
+    await withTeamRoutes(async ({ db, postForm, login, logs }) => {
+      const leadId = seedLead(db, { phone: '966500000097', inboxState: 'in' });
+      const task = addTask(db, { leadId, kind: 'viewing', source: 'owner', details: { note: 'x' }, dueTs: Date.UTC(2026, 11, 1, 13, 30), now: Date.UTC(2026, 10, 27) });
+      const cookie = await login(OWNER_PHONE);
+      const res = await postForm(`/v1/admin/leads/${leadId}/task`, { _dash: '1', task_id: task.task_id, status: 'cancelled' }, { cookie });
+      assert.equal(res.headers.get('location'), `/dashboard/leads/${leadId}?ok=task`);
+      assert.equal(tasksForLead(db, leadId).find((t) => t.task_id === task.task_id).status, 'cancelled', 'the change is saved');
+      await settle();
+      const failed = logs.filter((l) => l.evt === 'dash.hook_failed');
+      assert.deepEqual(failed.map((l) => [l.hook, l.target, l.error]), [['onTaskChange', task.task_id, 'Error']]);
+      assert.doesNotMatch(JSON.stringify(logs), /cal-secret/);
+    }, { hooks });
+  }
 });
 
 test('an ops() result is checked for a promise once, inside the guard: a value that throws when read again still opens the Team page', async () => {
