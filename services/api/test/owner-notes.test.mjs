@@ -111,6 +111,16 @@ function addLead(h, over = {}) {
 const receiptFor = (h, ev, leadId) => h.db.db.prepare('INSERT INTO enquiry_receipts(event_id,payload_hash,lead_id,created) VALUES(?,?,?,?)').run(ev, 'h', leadId, NOW);
 const leadLink = (id) => `Lead: ${API}/dashboard/leads/${encodeURIComponent(id)}`;
 const clientSays = (h, lead, key, ts, text) => h.inbox.upsertMessage({ key_id: key, lead_id: lead.lead_id, jid: lead.wa_jid, direction: 'in', sender_kind: 'client', text, ts });
+/**
+ * Awaits `p` with a REF'D timer open: the form wait and the send timeout are unref'd timers, so a
+ * test awaiting them must not lean on whatever handles the runner happens to hold. A promise still
+ * open after `ms` fails the test (it never hangs, and is never cancelled as passed).
+ */
+async function settled(p, label, ms = 5_000) {
+  let guard = null;
+  const late = new Promise((_, reject) => { guard = setTimeout(() => reject(new Error(`${label}: still pending after ${ms} ms`)), ms); });
+  try { return await Promise.race([p, late]); } finally { clearTimeout(guard); }
+}
 /** The assistant's answer, as the one sender leaves it once Evolution took it (`accepted`); `pending` = still in flight. */
 const danaAnswered = (h, lead, sendId, coversTs, status = 'accepted') => h.inbox.insertOutbox({ send_id: sendId, lead_id: lead.lead_id, jid: lead.wa_jid, text: 'Of course.', sender_kind: 'dana', covers_ts: coversTs, status });
 
@@ -862,6 +872,72 @@ test('an AI outage: 20 chats handed over with kind brain in one hour make ONE no
   assert.match(h.sent[1], /Late Example \(WhatsApp\)/);
 });
 
+test("an outage alert for the next hour never goes before its hour: a 10:59 note does not take it along, so a chat handed over at 10:59:30 is still in the 11:00 alert (never a hand-over of its own)", async () => {
+  for (const tickEvery of [0, 5_000]) {
+    const label = `tick every ${tickEvery} ms`;
+    const h = harness({ timers: true });
+    const [early, later, next] = ['Early Example', 'Later Example', 'Next Example'].map((name) => addLead(h, { name }));
+    for (const l of [early, later, next]) h.autoIds.add(l.lead_id);
+    h.notes.alert('brain_out', { code: 'quota' });
+    await h.runUntil(NOW + 58 * MIN, { tickEvery });
+    assert.deepEqual(h.sentAt, [NOW], `${label}: the 10:00 alert went`);
+    assert.equal(h.notes.handover(early, { kind: 'brain' }).queued, true);
+    assert.equal(h.row(`al:brain_out:${Math.floor(NOW / HOUR) + 1}`).status, 'queued', `${label}: 10:58 opens the 11:00 alert`);
+    await h.runUntil(NOW + 59 * MIN, { tickEvery });
+    h.notes.alert('breaker');
+    await h.runUntil(NOW + 59 * MIN + 30_000, { tickEvery });
+    assert.deepEqual(h.sentAt, [NOW, NOW + 59 * MIN], label);
+    assert.doesNotMatch(h.sent[1], /OpenAI|Chats waiting|Early Example/, `${label}: the 10:59 note goes alone`);
+    assert.equal(h.row(`al:brain_out:${Math.floor(NOW / HOUR) + 1}`).status, 'queued', `${label}: the 11:00 alert waits for its hour`);
+    assert.equal(h.notes.handover(later, { kind: 'brain' }).queued, true);
+    await h.runUntil(NOW + HOUR - 1, { tickEvery });
+    assert.equal(h.sent.length, 2, `${label}: nothing before 11:00`);
+    await h.runUntil(NOW + HOUR + 5 * MIN, { tickEvery });
+    assert.deepEqual(h.sentAt, [NOW, NOW + 59 * MIN, NOW + HOUR], `${label}: the next hour's alert at the hour, not earlier`);
+    assert.match(h.sent[2], /^\*Bona — alert\*\nThe AI service \(OpenAI\) is not answering/);
+    assert.match(h.sent[2], /\nChats waiting: 2 → /);
+    assert.match(h.sent[2], /Early Example \(WhatsApp\) · Later Example \(WhatsApp\)/);
+    assert.ok(!h.sent.some((s) => s.includes(HEADERS.handover)), `${label}: no hand-over of its own`);
+    assert.deepEqual(h.rows().filter((r) => r.kind === 'handover').map((r) => r.status), ['merged', 'merged'], label);
+
+    // Just after the 11:00 alert went: the chat waits for 12:00's, never a note of its own.
+    h.at(NOW + HOUR + 5 * MIN + 10_000);
+    assert.equal(h.notes.handover(next, { kind: 'brain' }).queued, true);
+    await h.runUntil(NOW + 2 * HOUR + 5 * MIN, { tickEvery });
+    assert.deepEqual(h.sentAt, [NOW, NOW + 59 * MIN, NOW + HOUR, NOW + 2 * HOUR], label);
+    assert.match(h.sent[3], /\nChats waiting: 1 → /);
+    assert.match(h.sent[3], /Next Example \(WhatsApp\)/);
+    assert.doesNotMatch(h.sent[3], /Early Example|Later Example/);
+    assert.ok(!h.sent.some((s) => s.includes(HEADERS.handover)), label);
+  }
+});
+
+test("a chat handed over for an hour whose outage alert can no longer go (owner notes were off for a moment) waits for the hour after's alert, never a hand-over of its own", async () => {
+  const h = harness();
+  const [early, later] = ['Early Example', 'Later Example'].map((name) => addLead(h, { name }));
+  for (const l of [early, later]) h.autoIds.add(l.lead_id);
+  const hour = Math.floor(NOW / HOUR);
+  h.notes.alert('brain_out', { code: 'quota' });
+  await h.notes.tick();
+  h.at(NOW + 58 * MIN);
+  h.notes.handover(early, { kind: 'brain' });
+  h.team.setSetting('owner_notes', '0');
+  await h.notes.tick();
+  assert.equal(h.row(`al:brain_out:${hour + 1}`).status, 'dropped', 'the 11:00 alert was dropped with the switch');
+  h.team.setSetting('owner_notes', '1');
+  h.at(NOW + 59 * MIN + 30_000);
+  assert.equal(h.notes.handover(later, { kind: 'brain' }).queued, true);
+  assert.equal(h.row(`ho:${later.lead_id}:brain:${hour}`).meta.alertHour, hour + 2);
+  for (const t of [NOW + HOUR, NOW + HOUR + 30 * MIN, NOW + 2 * HOUR - 1]) { h.at(t); await h.notes.tick(); }
+  assert.equal(h.sent.length, 1, 'no hand-over of its own at 11:00');
+  h.at(NOW + 2 * HOUR);
+  await h.notes.tick();
+  assert.equal(h.sent.length, 2);
+  assert.match(h.sent[1], /^\*Bona — alert\*\nThe AI service \(OpenAI\) is not answering/);
+  assert.match(h.sent[1], /Later Example \(WhatsApp\)/);
+  assert.ok(!h.sent.some((s) => s.includes(HEADERS.handover)));
+});
+
 test('mail: sender and subject read at send time (60 chars), what to do, the dashboard link; never stored in the ledger', async () => {
   const h = harness();
   h.notes.mail({ messageId: 'M-0001', what: 'possible_client' });
@@ -966,7 +1042,7 @@ test('a purge while the send is out: whatever WhatsApp answers (ok, unsure, held
     const [out] = h.rows();
     h.notes.onPurge(lead.lead_id);
     release(reply);
-    await request;
+    await settled(request, label);
     const rows = h.rows();
     assert.deepEqual(rows.map((r) => [r.note_id, r.lead_id, r.dedupe_key, r.meta, r.status]),
       [[out.note_id, null, `purged:${out.note_id}`, {}, status]], label);
@@ -991,22 +1067,25 @@ test('a purge while the send is out: whatever WhatsApp answers (ok, unsure, held
   }
 });
 
-test('a purge while the form request still waits: the request does not mark the purged note\'s receipt either', async () => {
+test('a purge while the form request still waits: the request does not mark the purged note\'s receipt either', async (t) => {
+  t.plan(6);
   let release = null;
   const h = harness({ sendNote: () => new Promise((resolve) => { release = resolve; }), extra: { formWaitMs: 30 } });
   const lead = addLead(h, { channel: 'form', match_method: 'form' });
   receiptFor(h, 'ev-waiting-00001', lead.lead_id);
   const request = h.notes.leadEvent(lead, { why: 'form', created: true, eventId: 'ev-waiting-00001' });
   await new Promise((resolve) => setImmediate(resolve));
+  t.assert.strictEqual(typeof release, 'function', 'the send is out');
   h.notes.onPurge(lead.lead_id);
-  await request;
-  assert.equal(h.receipt('ev-waiting-00001'), 'pending');
-  assert.equal(h.logs.some((e) => e.evt === 'lead.wa_error'), false);
+  await settled(request, 'the form request');
+  t.assert.strictEqual(h.receipt('ev-waiting-00001'), 'pending');
+  t.assert.strictEqual(h.logs.some((e) => e.evt === 'lead.wa_error'), false);
   release({ ok: true });
-  await h.notes.tick();
+  await settled(h.notes.tick(), 'the send');
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(h.receipt('ev-waiting-00001'), 'pending');
-  assert.equal(h.rows()[0].status, 'sent');
+  t.assert.strictEqual(h.receipt('ev-waiting-00001'), 'pending');
+  t.assert.strictEqual(h.rows().length, 1);
+  t.assert.strictEqual(h.rows()[0].status, 'sent');
 });
 
 test('health: enabled follows owner_notes; ok is false once a queued note is 15 min overdue; booleans only', async () => {
@@ -1091,21 +1170,22 @@ test('form notes: sent → sent; a definite failure → uncertain (retried once 
   assert.doesNotMatch(JSON.stringify([...ok.logs, ...failed.logs, ...unsure.logs, ...held.logs]), /Sara|9665000001/, 'ids and codes only');
 });
 
-test('the form request waits for the first attempt for at most the limit; a send that answers later still updates the receipt', async () => {
+test('the form request waits for the first attempt for at most the limit; a send that answers later still updates the receipt', async (t) => {
+  t.plan(4);
   let release;
   const slow = new Promise((resolve) => { release = resolve; });
   const h = harness({ sendNote: () => slow, extra: { formWaitMs: 30 } });
   const lead = addLead(h, { channel: 'form', match_method: 'form' });
   receiptFor(h, 'ev-slow-0000001', lead.lead_id);
   const started = Date.now();
-  await h.notes.leadEvent(lead, { why: 'form', created: true, eventId: 'ev-slow-0000001' });
-  assert.ok(Date.now() - started < 2000);
-  assert.equal(h.receipt('ev-slow-0000001'), 'uncertain');
-  assert.deepEqual(h.logs.find((e) => e.evt === 'lead.wa_error'), { evt: 'lead.wa_error', id: lead.lead_id, error: 'owner notification unconfirmed' });
+  await settled(h.notes.leadEvent(lead, { why: 'form', created: true, eventId: 'ev-slow-0000001' }), 'the form request');
+  t.assert.ok(Date.now() - started < 2000);
+  t.assert.strictEqual(h.receipt('ev-slow-0000001'), 'uncertain');
+  t.assert.deepStrictEqual(h.logs.find((e) => e.evt === 'lead.wa_error'), { evt: 'lead.wa_error', id: lead.lead_id, error: 'owner notification unconfirmed' });
   release({ ok: true });
-  await h.notes.tick();
+  await settled(h.notes.tick(), 'the send');
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(h.receipt('ev-slow-0000001'), 'sent');
+  t.assert.strictEqual(h.receipt('ev-slow-0000001'), 'sent');
 });
 
 test('a form note the pacing holds is pending, and goes 25 s after the one before it', async () => {

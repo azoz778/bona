@@ -19,8 +19,9 @@
  *     First message and the AI line, then the Lead link.
  *   - handover `ho:<lead>:<kind>:<10-min bucket>` (auto mode only): the only dedupe, so the same
  *     kind 11 min later alerts again (critic round 2 #11). Kind `brain` (an AI outage) takes an
- *     HOUR bucket and folds into that hour's `brain_out` alert, which lists the chats: one note
- *     an hour however many chats wait.
+ *     HOUR bucket and folds into that hour's `brain_out` alert, which lists the chats (the next
+ *     hour's once this hour's went, and that one never goes before its hour): one note an hour
+ *     however many chats wait.
  *   - booking `bk:<id>` / `bk-untold:<id>`, stopped `stop:<lead>:<ts>` (auto mode only).
  *   - summary `sum:<day>` / `sumtest:<ts>` (only while owner_as_client or own_inbox is '1';
  *     lib/daily-summary.mjs).
@@ -731,6 +732,9 @@ function createLedgerNotes({
       if (c.due > t + MERGE_WINDOW_MS) break;
       // A retry goes when it is due, never earlier along with another send.
       if (isRetry(c.row) && c.due > t) continue;
+      // An outage alert is its hour's one note: never before its hour along with another send,
+      // or a chat handed over later in the hour would find it gone and go alone.
+      if (isBrainAlert(c.row) && c.due > t) continue;
       if (!room(c.row)) {
         if (c.due <= t) over.push(c.row);
         continue;
@@ -825,11 +829,16 @@ function createLedgerNotes({
     if (coversTs !== null && Number.isFinite(Number(coversTs))) meta.covers = Math.trunc(Number(coversTs));
     const t = now();
     if (k === 'brain') {
-      // One note an hour for an outage: this hour's brain_out alert lists the chat, or the next
-      // hour's when this hour's already went.
+      // One note an hour for an outage: the chat is listed in the first hour's brain_out alert,
+      // from this one on, that has not gone yet (sent, out, or dropped: never queued again), so
+      // it is never a hand-over of its own. A later hour's alert never goes before its hour (step).
       const hour = Math.floor(t / HOUR_MS);
-      const current = byKey(`al:brain_out:${hour}`);
-      const alertHour = current && current.status !== 'queued' ? hour + 1 : hour;
+      let alertHour = hour;
+      for (let i = 0; i < 24; i += 1) {
+        const row = byKey(`al:brain_out:${alertHour}`);
+        if (!row || row.status === 'queued') break;
+        alertHour += 1;
+      }
       const due = alertHour === hour ? t : alertHour * HOUR_MS;
       enqueue({ kind: 'alert', key: `al:brain_out:${alertHour}`, due, meta: { alert: 'brain_out', code: 'down', hour: alertHour } });
       return answer(enqueue({ kind: 'handover', leadId: l.lead_id, key: `ho:${l.lead_id}:brain:${hour}`, due, meta: { ...meta, alertHour } }));
