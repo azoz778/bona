@@ -375,13 +375,17 @@ test('/health says whether alerts are configured, and nothing more about them', 
   await withPush(async (h) => {
     const health = await (await fetch(h.base + '/health')).json();
     assert.deepEqual(health.push, { configured: true });
-    assert.deepEqual(health.dana, { configured: false, enabled: false, fundsOut: false }, 'no WhatsApp agent id here: Dana is not configured, and she ships off');
+    assert.deepEqual(health.dana, {
+      configured: false, enabled: false, brainOk: false, brainBackup: false, fundsOut: false, breaker: false, latencyOk: null,
+    }, 'no WhatsApp agent id here: Dana is not configured, and she ships off');
   });
   await withPush({ configured: false }, async (h) => {
     assert.deepEqual((await (await fetch(h.base + '/health')).json()).push, { configured: false });
   });
   await withPush({ config: { waChatAgentId: 'agent_wa' }, appOptions: { danaOnMock: true } }, async (h) => {
-    assert.deepEqual((await (await fetch(h.base + '/health')).json()).dana, { configured: true, enabled: false, fundsOut: false }, 'provisioned, still off');
+    assert.deepEqual((await (await fetch(h.base + '/health')).json()).dana, {
+      configured: true, enabled: false, brainOk: false, brainBackup: false, fundsOut: false, breaker: false, latencyOk: null,
+    }, 'provisioned, still off');
   });
 });
 

@@ -152,6 +152,31 @@ test('with BONA_WA_POLL off there is no poller at all, and nothing reaches Evolu
   });
 });
 
+test('/health carries the DESIGN §5.4 module keys (stub values): booleans and fixed enums only, no digits, none of them deciding ok', async () => {
+  await withServer({}, async ({ call }) => {
+    const res = await call('/health');
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true, 'brainOk false (no brain yet) never marks bona-api down');
+    assert.deepEqual(body.inbox, { rule: 'shared', ownerAsClient: false, identityOk: false });
+    assert.deepEqual(body.wa, { linkOk: true });
+    assert.deepEqual(body.dana, {
+      configured: false, enabled: false, brainOk: false, brainBackup: false, fundsOut: false, breaker: false, latencyOk: null,
+    });
+    assert.deepEqual(body.booking, { enabled: false, gcal: { configured: false, ok: false, lastErrorCode: null } });
+    assert.deepEqual(body.notes, { enabled: true, ok: true });
+    assert.deepEqual(body.mail, { configured: false, ok: false, lastErrorCode: null, replies: false });
+    const ENUMS = new Set(['own', 'shared', 'auth', 'forbidden', 'not_found', 'timeout', 'quota', 'network', 'bad_response']);
+    const leaves = (o, at) => Object.entries(o).flatMap(([k, v]) => (v && typeof v === 'object' ? leaves(v, `${at}.${k}`) : [[`${at}.${k}`, v]]));
+    for (const key of ['inbox', 'wa', 'dana', 'booking', 'notes', 'mail']) {
+      for (const [where, v] of leaves(body[key], key)) {
+        assert.ok(typeof v === 'boolean' || v === null || (typeof v === 'string' && ENUMS.has(v)), `${where} is a boolean, null or a fixed enum`);
+      }
+      assert.doesNotMatch(JSON.stringify(body[key]), /\d/, `${key}: no digits, ever`);
+    }
+  });
+});
+
 /* ---------------- chat ---------------- */
 
 test('POST /v1/chat/session opens a Retell chat and returns a greeting', async () => {
