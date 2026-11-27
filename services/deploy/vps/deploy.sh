@@ -6,7 +6,9 @@
 # Tests failing, or the snapshot failing = the running service is left untouched.
 # The snapshot (db-snapshot.mjs, PR-INFRA 2026-11-27): a VACUUM INTO copy of ~/bona-data/bona.db,
 # 0600 and integrity-checked, in ~/bona-data/release-backups/bona-deploy-<UTC time>.db, taken before
-# the restart because the new code applies its schema migrations at start; the newest 5 are kept.
+# the restart because the new code applies its schema migrations at start; the newest 5 are kept, and
+# every snapshot there older than 30 days (any label, a hand-made pre-v8 copy too) is deleted
+# (--max-age-days 30: the copies hold conversations the live database has deleted since).
 # The units are SYSTEM units (lib.sh: BONA_UNIT_DIR, the userns restriction on Ubuntu 24.04), so
 # every systemctl/journalctl here goes through $VPS_SYSTEMCTL / $VPS_JOURNALCTL (sudo -n …).
 set -euo pipefail
@@ -42,7 +44,7 @@ say "Tests"
 ok "tests green"
 
 say "Snapshot bona.db"
-"$NODE_BIN/node" "$HERE/db-snapshot.mjs" --db "$DATA_DIR/bona.db" --out "$DATA_DIR/release-backups" --label deploy --keep 5 \
+"$NODE_BIN/node" "$HERE/db-snapshot.mjs" --db "$DATA_DIR/bona.db" --out "$DATA_DIR/release-backups" --label deploy --keep 5 --max-age-days 30 \
   || die "database snapshot failed — service NOT restarted (still on $before)"
 
 say "Restart bona-api"

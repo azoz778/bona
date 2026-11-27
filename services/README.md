@@ -496,16 +496,22 @@ guards (PR-INFRA, 2026-11-27).
 `deploy.sh` snapshots `~/bona-data/bona.db` after the tests and before the restart (`db-snapshot.mjs`:
 VACUUM INTO, 0600, integrity-checked, `~/bona-data/release-backups/bona-deploy-<UTC time>.db`, newest 5 kept,
 never the one just made; a file without Bona's schema, such as a zero-byte one, is refused; one run per label
-at a time, `release-backups/.bona-<label>.lock`); a failed snapshot leaves the running service as it is. A copy by
-hand, never pruned:
-`ssh hermes-vps '~/.local/opt/node-v24.19.0-linux-x64/bin/node /opt/bona/services/deploy/vps/db-snapshot.mjs --label pre-v8'`.
-The snapshots are whole copies of bona.db, so every lead and conversation is in them: a deletion request must
-reach `~/bona-data/release-backups` too (delete the person's rows from each copy, or delete the copies and take a
-new one), and a labelled copy such as `pre-v8` is deleted by hand once its migration is verified. The privacy
-notice (`src/data/privacy.json`) does not name these copies yet: the two copies it says the automatic deletion
-does not reach are the WhatsApp gateway and the phones.
+at a time, `release-backups/.bona-<label>.lock`); a failed snapshot leaves the running service as it is. Each
+deploy also deletes every snapshot in `release-backups` older than 30 days, of every label (`--max-age-days 30`,
+judged by the UTC time in its name; other files and sub-folders there are not touched). A copy by hand:
+`ssh hermes-vps '~/.local/opt/node-v24.19.0-linux-x64/bin/node /opt/bona/services/deploy/vps/db-snapshot.mjs --label pre-v8'`;
+its own run deletes nothing, and the first deploy after it is 30 days old deletes it. Nothing deletes a snapshot
+between deploys: when no deploy has run for a while, the copies there can be older than 30 days, so delete them by
+hand (`ls ~/bona-data/release-backups`; the name says when each was made). The snapshots are whole copies of
+bona.db, so every lead and conversation is in them, including conversations the live database has deleted since: a
+deletion request must reach `~/bona-data/release-backups` too (delete the person's rows from each copy, or delete
+the copies and take a new one), and a labelled copy such as `pre-v8` can be deleted by hand sooner, once its
+migration is verified. The privacy notice (`src/data/privacy.json`) does not name these copies yet: the two copies
+it says the automatic deletion does not reach are the WhatsApp gateway and the phones; the sentence on database
+backups kept for up to 30 days comes with PR-D1 (PLAN T15), not with this change.
 
-To restore a snapshot (the last resort, owner OK; on the VPS): stop bona-api (`sudo -n systemctl stop bona-api`),
+To restore a snapshot (the last resort, owner OK; on the VPS; the copies there are the newest 5 deploys and any copy
+by hand, going back at most 30 days before the last deploy): stop bona-api (`sudo -n systemctl stop bona-api`),
 check that nothing else has the database open (`ls -l /proc/[0-9]*/fd 2>/dev/null | grep -F bona-data/bona.db`
 prints nothing), move `~/bona-data/bona.db-wal` and `~/bona-data/bona.db-shm` aside (SQLite replays a WAL left
 beside the restored file onto it, so the restore would quietly not restore), copy the snapshot to

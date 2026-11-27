@@ -1338,9 +1338,10 @@ const TIMER = {
 };
 
 // The deploy's database snapshot (PR-INFRA): the pinned node runs db-snapshot.mjs on ~/bona-data/bona.db after the
-// tests and before the restart, and keeps the newest 5 deploy snapshots.
+// tests and before the restart, keeps the newest 5 deploy snapshots, and deletes every snapshot (any label) older
+// than 30 days (Codex r3 P1: the copies must not outlive the live database's deletions for long).
 const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const SNAPSHOT_CALL = (home) => new RegExp(`^node ${reEsc(VPS)}/db-snapshot\\.mjs --db ${reEsc(home)}/bona-data/bona\\.db --out ${reEsc(home)}/bona-data/release-backups --label deploy --keep 5$`);
+const SNAPSHOT_CALL = (home) => new RegExp(`^node ${reEsc(VPS)}/db-snapshot\\.mjs --db ${reEsc(home)}/bona-data/bona\\.db --out ${reEsc(home)}/bona-data/release-backups --label deploy --keep 5 --max-age-days 30$`);
 
 test('deploy.sh pauses bona-repo-sync.timer (+ its service) around pull/test/snapshot/restart and starts the timer again only if it was active', () => {
   const { home, repo, env, shimLog } = fakeVpsHome();
@@ -1583,12 +1584,123 @@ test('db-snapshot.mjs: refused while a live run of the same label holds the lock
   } finally { db.close(); }
 });
 
+// PR-INFRA fix round 3 (Codex r3 P1): the snapshots are whole copies of bona.db, so a conversation the API deletes stays in
+// them; a count alone kept a copy for as long as deploys stopped, and a pre-v8 copy for ever. --max-age-days N deletes every
+// snapshot in release-backups (every label) whose UTC time in its name is more than N days before the run's clock, never the
+// copy just made, and nothing that is not a snapshot name of this script.
+test('db-snapshot.mjs --max-age-days 30 (an injected clock): every label older than 30 days goes, newer ones and other files stay, the new copy stays', async () => {
+  const { snapshotDb } = await import('../../deploy/vps/db-snapshot.mjs');
+  const { dir, file, db } = liveDb();
+  try {
+    const out = path.join(dir, 'release-backups');
+    mkdirSync(path.join(out, '20261010-property-handoff'), { recursive: true, mode: 0o700 });
+    writeFileSync(path.join(out, '20261010-property-handoff', 'bona-before-v7.db'), 'precedent');
+    const now = new Date('2026-12-31T12:00:00.000Z');
+    const expired = [
+      'bona-pre-v8-20261127T100000Z.db', // the manual copy before v8: 34 days
+      'bona-deploy-20261201T115959Z.db', // 30 days and a second
+      'bona-manual-20251231T120000Z.db', // a year
+      'bona-pre-v9-20261001T000000Z.db', // a label with a digit and a hyphen
+    ];
+    const kept = [
+      'bona-deploy-20261201T120000Z.db', // exactly 30 days: not older than 30 days
+      'bona-pre-v8-20261230T000000Z.db', // a day
+      'bona-deploy-20991101T000000Z.db', // a later time (a clock that went back): not old
+      'bona-deploy-20261341T000000Z.db', // no real UTC time in the name: not judged
+      'bona-deploy-latest.db', 'bona-Deploy-20261001T000000Z.db', 'bona-deploy-20261001T000000Z.db.bak', 'notes.txt',
+      '.bona-deploy-20261001T000000Z.db.123.abc.partial', // another run's temp file
+    ];
+    for (const f of [...expired, ...kept]) writeFileSync(path.join(out, f), 'x', { mode: 0o600 });
+    const r = snapshotDb({ db: file, outDir: out, label: 'deploy', keep: 5, maxAgeDays: 30, now });
+    assert.equal(r.file, path.join(out, 'bona-deploy-20261231T120000Z.db'));
+    const left = readdirSync(out).sort();
+    for (const f of expired) assert.ok(!left.includes(f), `${f} is older than 30 days: deleted\n${left.join('\n')}`);
+    assert.deepEqual([...r.expired].sort(), [...expired].sort(), 'it names what it deleted for age');
+    assert.deepEqual([...r.pruned].sort(), [...expired].sort(), 'nothing else went (5 deploy copies at most)');
+    for (const f of [...kept, 'bona-deploy-20261231T120000Z.db', '20261010-property-handoff']) assert.ok(left.includes(f), `${f} stays\n${left.join('\n')}`);
+    assert.equal(readFileSync(path.join(out, '20261010-property-handoff', 'bona-before-v7.db'), 'utf8'), 'precedent', 'a sub-folder is never entered');
+
+    // the count and the age together: --keep 1 leaves the new copy only of this label; the age pass still spares the new copy
+    const far = new Date('2099-12-31T00:00:00.000Z'); // every other name is older than 30 days by then
+    const r2 = snapshotDb({ db: file, outDir: out, label: 'deploy', keep: 1, maxAgeDays: 30, now: far });
+    const left2 = readdirSync(out).sort();
+    assert.ok(left2.includes('bona-deploy-20991231T000000Z.db'), `the copy just made stays\n${left2.join('\n')}`);
+    assert.deepEqual(left2.filter((f) => /^bona-[a-z0-9-]+-\d{8}T\d{6}Z\.db$/.test(f) && f !== 'bona-deploy-20261341T000000Z.db'), ['bona-deploy-20991231T000000Z.db'], left2.join('\n'));
+    assert.ok(r2.pruned.includes('bona-pre-v8-20261230T000000Z.db') && r2.expired.includes('bona-pre-v8-20261230T000000Z.db'), 'another label goes for age');
+    assert.equal(new Set(r2.pruned).size, r2.pruned.length, 'a file is deleted (and named) once');
+    assert.throws(() => snapshotDb({ db: file, outDir: out, label: 'deploy', maxAgeDays: -1, now: far }), /bad --max-age-days/);
+  } finally { db.close(); }
+});
+
+test('db-snapshot.mjs --max-age-days on the command line: the real clock, "pruned … (older than N days)" printed; 0 or not a number is a usage error', async () => {
+  const { stamp } = await import('../../deploy/vps/db-snapshot.mjs');
+  const { dir, file, db } = liveDb();
+  try {
+    const out = path.join(dir, 'release-backups');
+    mkdirSync(out, { mode: 0o700 });
+    const day = 24 * 3600 * 1000;
+    const old = `bona-pre-v8-${stamp(new Date(Date.now() - 31 * day))}.db`;
+    const young = `bona-pre-v8-${stamp(new Date(Date.now() - 29 * day))}.db`;
+    for (const f of [old, young]) writeFileSync(path.join(out, f), 'x', { mode: 0o600 });
+    const r = snap(['--db', file, '--out', out, '--label', 'deploy', '--keep', '5', '--max-age-days', '30']);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    const left = readdirSync(out);
+    assert.ok(!left.includes(old) && left.includes(young), left.join('\n'));
+    assert.match(r.stdout, new RegExp(`ok pruned ${reEsc(old)} \\(older than 30 days\\)`));
+    assert.equal(left.filter((f) => SNAP_NAME('deploy').test(f)).length, 1, left.join('\n'));
+    for (const v of ['0', '30d', '', '1.5']) {
+      const bad = snap(['--db', file, '--out', out, '--max-age-days', v]);
+      assert.equal(bad.status, 2, `--max-age-days ${JSON.stringify(v)}: ${bad.stdout}${bad.stderr}`);
+      assert.match(bad.stderr, /bad --max-age-days/);
+    }
+    assert.match(readFileSync(SNAP, 'utf8'), /--max-age-days N/, 'the header says what it does');
+  } finally { db.close(); }
+});
+
+// Codex r3 P2: two runs that both found the same stale lock must not both take it over (the second rmSync used to delete the
+// lock the first had just made). A run sets the stale lock aside under a name of its own (an atomic rename), and only when the
+// file it moved is the stale one it read does it go on; when it moved another run's live lock it puts that back and is refused.
+test('db-snapshot.mjs takeLock: two runs taking over one stale lock at once — only one holds it, the other is refused, nothing is left', async () => {
+  const { takeLock } = await import('../../deploy/vps/db-snapshot.mjs');
+  const out = mkdtempSync(path.join(tmpdir(), 'bona-snap-lock-'));
+  const lock = path.join(out, '.bona-deploy.lock');
+  const gone = spawnSync(process.execPath, ['-e', '']).pid; // a run that was killed
+  writeFileSync(lock, `${gone} a-killed-run\n`);
+  let releaseA;
+  // B has read the stale lock and decided to take it over; before it acts, A takes it over (the race)
+  assert.throws(() => takeLock(out, 'deploy', { beforeTakeover: () => { releaseA = takeLock(out, 'deploy'); } }), /another db-snapshot of --label deploy is running/);
+  assert.equal(typeof releaseA, 'function', 'A took the stale lock over');
+  assert.match(readFileSync(lock, 'utf8'), new RegExp(`^${process.pid} [0-9a-f]+\\n$`), 'the lock is A\'s');
+  assert.deepEqual(readdirSync(out), ['.bona-deploy.lock'], 'no temp or set-aside file of B left');
+  releaseA();
+  assert.deepEqual(readdirSync(out), [], 'A released its lock');
+
+  // A took it over and was already done before B acted: B finds no lock to set aside and takes the free one
+  writeFileSync(lock, `${gone} a-killed-run\n`);
+  const releaseB = takeLock(out, 'deploy', { beforeTakeover: () => { takeLock(out, 'deploy')(); } });
+  assert.match(readFileSync(lock, 'utf8'), new RegExp(`^${process.pid} [0-9a-f]+\\n$`));
+  assert.deepEqual(readdirSync(out), ['.bona-deploy.lock']);
+  releaseB();
+  assert.deepEqual(readdirSync(out), []);
+});
+
 test('services/README.md: a deletion request also reaches the snapshots in release-backups, and a labelled copy goes once its migration is verified', () => {
   const readme = readFileSync(path.resolve(VPS, '../../README.md'), 'utf8');
   const at = readme.indexOf('`deploy.sh` snapshots');
   assert.ok(at >= 0, 'the snapshot paragraph');
   const para = readme.slice(at, readme.indexOf('\n\n', at));
   for (const re of [/deletion request/, /release-backups/, /pre-v8/, /verified/, /privacy/]) assert.match(para, re);
+});
+
+test('services/README.md: snapshots are kept at most 30 days (deploy.sh --max-age-days 30, every label, pre-v8 too), what deletes them, and that the privacy line comes with PR-D1', () => {
+  const readme = readFileSync(path.resolve(VPS, '../../README.md'), 'utf8');
+  const at = readme.indexOf('`deploy.sh` snapshots');
+  const para = readme.slice(at, readme.indexOf('\n\n', at));
+  for (const re of [/--max-age-days 30/, /30 days/, /every label/, /pre-v8/, /PR-D1/, /T15/, /between deploys/i]) assert.match(para, re);
+  assert.doesNotMatch(para, /never pruned/, 'a copy by hand expires too');
+  const restore = readme.slice(readme.indexOf('To restore a snapshot'));
+  assert.match(restore.slice(0, restore.indexOf('\n\n')), /at most 30 days/, 'the restore paragraph says how far back a snapshot can go');
+  assert.match(readFileSync(path.join(VPS, 'deploy.sh'), 'utf8'), /older than 30 days/, 'the deploy.sh header says it too');
 });
 
 test('services/README.md says how to restore a snapshot: stop bona-api, move bona.db-wal and bona.db-shm aside, copy, chmod 600, start', () => {
