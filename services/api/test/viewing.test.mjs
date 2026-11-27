@@ -386,6 +386,32 @@ test('a past booked row turns done before the reserve, once its event says it is
   } finally { h.db.close(); }
 });
 
+test('the past booking turns done in the SAME transaction as the reserve: a reserve the start index refuses rolls it back', async () => {
+  const h = setup();
+  try {
+    const lead = h.lead('LEAD-20261201-0000aaaa');
+    const other = h.lead('LEAD-20261201-0000bbbb');
+    const old = insertRow(h.db, { id: 'bk-old', leadId: lead.lead_id, start: R(2026, 11, 30, 10), created: NOW - 5 * DAY });
+    h.gcal.events.set(old, { id: old, status: 'confirmed', start: { dateTime: '2026-11-30T10:00:00+03:00' }, end: { dateTime: '2026-11-30T11:00:00+03:00' } });
+    // Another client's booking stored at the start, and still there in Google: validate passes (no stored time
+    // decides it), the read finds it where it is, and the unique start index refuses the reserve.
+    const theirs = insertRow(h.db, { id: 'bk-theirs', leadId: other.lead_id, start: SLOT_TS });
+    h.gcal.events.set(theirs, { id: theirs, status: 'confirmed', start: { dateTime: '2026-12-06T10:00:00+03:00' }, end: { dateTime: '2026-12-06T11:00:00+03:00' } });
+    assert.equal(h.viewing.validate({ lead, listingId: 'BONA-W901', slotId: SLOT }).ok, true);
+    assert.deepEqual(await h.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT }), { ok: false, reason: 'busy' });
+    const statusOf = (id) => h.rows().find((r) => r.booking_id === id).status;
+    assert.equal(h.gcal.calls.filter((c) => c[0] === 'get' && c[1] === old).length, 1, 'its event was read: it is over');
+    assert.equal(statusOf('bk-old'), 'booked', 'the refused reserve took the done with it');
+    assert.deepEqual(h.rows().map((r) => r.booking_id), ['bk-old', 'bk-theirs'], 'no new row');
+    assert.equal(h.gcal.calls.filter((c) => c[0] === 'insert').length, 0);
+    // Another start: the same transaction turns it done and reserves the new booking.
+    const got = await h.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: '2026-12-06T12:00+03:00' });
+    assert.equal(got.ok, true, JSON.stringify(got));
+    assert.equal(statusOf('bk-old'), 'done');
+    assert.equal(statusOf(got.bookingId), 'booked');
+  } finally { h.db.close(); }
+});
+
 test('a name the client gave in book_viewing is saved on a lead that had none; a lead that already has one keeps it', async () => {
   const h = setup();
   try {
@@ -1005,6 +1031,42 @@ test('a booking the owner moved in Google frees its old start at once: slots off
     assert.equal(h.viewing.validate({ lead: d, listingId: 'BONA-W902', slotId: MON }).reason, 'busy');
     assert.equal(h.viewing.validate({ lead: c, listingId: 'BONA-W902', slotId: '2026-12-08T10:00+03:00' }).reason, 'active_booking', "the hold is its lead's booking");
   } finally { h.db.close(); }
+});
+
+test('a start freed by a CHAIN of owner moves (12:00 → 14:00, then 10:00 → 12:00; and three steps) is offered and books at once: the commit reads every booking along the chain and follows them in the reserve\'s transaction; never two booked rows on one start', async () => {
+  const leads = ['LEAD-20261201-0000aaaa', 'LEAD-20261201-0000bbbb', 'LEAD-20261201-0000cccc'];
+  const at = (hour) => `2026-12-06T${String(hour).padStart(2, '0')}:00`;
+  for (const steps of [2, 3]) {
+    const THU = { start: R(2026, 12, 3, 0), end: R(2026, 12, 4, 0) }; // Thursday is full, so the offer starts on Sunday
+    const gcal = fakeGcal({ busy: () => [THU, ...calendarBusy(gcal)] });
+    const h = setup({ gcal });
+    try {
+      const hours = [10, 12, 14].slice(0, steps);
+      const booked = [];
+      for (const [i, hour] of hours.entries()) {
+        const got = await h.viewing.commitBooking({ lead: h.lead(leads[i]), listingId: 'BONA-W901', slotId: `${at(hour)}+03:00` });
+        assert.equal(got.ok, true, JSON.stringify(got));
+        booked.push(got);
+      }
+      // The owner moves the last one two hours later, then each earlier one onto the start the next one left.
+      for (let i = steps - 1; i >= 0; i -= 1) moveEvent(h, booked[i].eventId, `${at(hours[i] + 2)}:00+03:00`, `${at(hours[i] + 3)}:00+03:00`);
+      const newcomer = h.lead('LEAD-20261201-0000dddd');
+      const offer = await h.viewing.slots({ lead: newcomer, listingId: 'BONA-W902' });
+      assert.equal(offer.slots.map((s) => s.slot_id).includes(SLOT), true, `${steps} steps: Google shows 10:00 free, so it is offered`);
+      const got = await h.viewing.commitBooking({ lead: newcomer, listingId: 'BONA-W902', slotId: SLOT });
+      assert.equal(got.ok, true, `${steps} steps: ${JSON.stringify(got)}`);
+      const rowOf = (id) => h.rows().find((r) => r.booking_id === id);
+      for (const [i, b] of booked.entries()) {
+        const want = R(2026, 12, 6, hours[i] + 2);
+        assert.deepEqual([rowOf(b.bookingId).status, rowOf(b.bookingId).start_ts, rowOf(b.bookingId).end_ts], ['booked', want, want + H], `${steps} steps: row ${i} followed its event`);
+        assert.equal(taskFor(h, b.bookingId).due_ts, want, `${steps} steps: task ${i} follows`);
+      }
+      assert.deepEqual([rowOf(got.bookingId).status, rowOf(got.bookingId).start_ts], ['booked', SLOT_TS]);
+      assert.deepEqual(doubleBooked(h), []);
+      assert.deepEqual(h.logs.filter((l) => l.evt === 'viewing.reconcile_conflict'), []);
+      assert.equal(gcal.calls.filter((c) => c[0] === 'insert').length, steps + 1, 'one event per booking, none refused');
+    } finally { h.db.close(); }
+  }
 });
 
 test('a booking over by its stored times whose event the calendar does not show (the calendar id changed) is never done on that: it stays the lead\'s one booking, health says not_found, and the right calendar again moves it to its real time', async () => {

@@ -26,7 +26,9 @@
  *   - a booking whose event is in Google (it has a task) adds no busy time of its own: freeBusy
  *     shows it where it is now. Only a hold (a commit between its reserve and its task) is local
  *     busy time, and one booking per lead goes by the row's status, not by its stored times;
- *   - the reads of a run are applied in one transaction (apply()), so swaps resolve.
+ *   - the reads of a run are applied in one transaction (apply()), so swaps resolve. A commit reads the
+ *     lead's bookings over by their stored times and the chain of bookings from its start, then applies
+ *     those reads, checks again and reserves in ONE transaction (commit()).
  *
  * The hooks and the purge only write rows, synchronously, inside the caller's transaction; they
  * never call Google (DESIGN §8.4). Google is called from slots, commitBooking, tick and reconcile.
@@ -263,9 +265,11 @@ export function createViewing(deps = {}) {
   };
 
   /**
-   * Step 3: the `booked` row, in one write transaction. The lead's own booking that is over was
-   * settled just before (commit()), from its event: a blind "end_ts < now → done" here would end a
-   * viewing the owner moved later, or a row a restart left untold (DESIGN §8.4).
+   * Step 3: the `booked` row. It runs inside commit()'s write transaction, after the rows the commit
+   * read followed their events there: the lead's own booking that is over turns done in that same
+   * transaction (PLAN T10), from its event, never by a blind "end_ts < now → done" (that would end a
+   * viewing the owner moved later, or a row a restart left untold; DESIGN §8.4). An insert the
+   * unique indexes refuse rolls all of it back.
    */
   function reserve(v, t) {
     return db.transaction(() => {
@@ -310,36 +314,47 @@ export function createViewing(deps = {}) {
     sweepStranded(now());
     const pre = validate(o);
     if (!pre.ok) return pre;
-    // The lead's booking that is over by its stored times: its event says whether it is (moved later = still to come).
-    const s = await settle(now(), pre.leadId);
-    if (s.code) return { ok: false, reason: 'calendar', code: s.code };
-    // Another client's booking stored at this start: its event says whether it is still there. The owner may
-    // have moved it away in Google, which freed the start: the row follows first, or the unique start index
-    // would refuse a time Google shows free. Still there: the index refuses this one ('busy').
-    const there = prep("SELECT * FROM viewing_bookings WHERE status = 'booked' AND task_id IS NOT NULL AND start_ts = ? AND lead_id <> ?")
-      .all(pre.startTs, pre.leadId);
-    if (there.length) {
-      const res = await readEvents('settle', there, now());
+    // The reads first, no write yet (readForCommit()): the lead's booking that is over by its stored times
+    // (its event says whether it is: moved later = still to come), and the chain of bookings from this start,
+    // which the owner may have moved away in Google. A start Google shows free stays refused by the unique
+    // start index until every row along that chain followed its event.
+    const t0 = now();
+    const res = await readForCommit(pre.leadId, pre.startTs, t0);
+    unconfirmed([...res.gone, ...res.unread], t0);
+    if (res.code) {
       apply(res.plans);
-      if (res.code) return { ok: false, reason: 'calendar', code: res.code };
+      return { ok: false, reason: 'calendar', code: res.code };
     }
-    const v = validate(o);
-    if (!v.ok) return v;
-    // Read: any booked row of the lead left is its booking (moved later, or its event missing).
-    if (leadBooked(v.leadId, now(), true)) return { ok: false, reason: 'active_booking' };
-    const lead = db.getLead(v.leadId);
-    const listing = listingFor(v.listingId);
+    // Then ONE write transaction: the rows follow their events (the lead's past booking turns done), the
+    // checks run again on what they now say, and the row is reserved. A reserve the indexes refuse rolls
+    // all of it back ('busy': another booking is still at this start); a check that refuses keeps what
+    // the reads found.
     const t = now();
-    let row;
+    let step = 'follow';
+    let made;
     try {
-      row = reserve(v, t);
+      made = db.transaction(() => {
+        const { stuck } = follow(res.plans);
+        step = 'check';
+        const v = validate(o);
+        if (!v.ok) return { v, stuck };
+        // Read: any booked row of the lead left is its booking (moved later, or its event missing).
+        if (leadBooked(v.leadId, now(), true)) return { v: { ok: false, reason: 'active_booking' }, stuck };
+        step = 'reserve';
+        return { v, stuck, row: reserve(v, t) };
+      }, { immediate: true });
     } catch (err) {
       const msg = String(err?.message ?? '');
-      if (/viewing_bookings\.lead_id/.test(msg)) return { ok: false, reason: 'active_booking' };
-      if (/viewing_bookings\.start_ts/.test(msg)) return { ok: false, reason: 'busy' };
-      log({ level: 'error', evt: 'viewing.reserve_failed', leadId: v.leadId, error: errClass(err) });
+      if (step === 'reserve' && /viewing_bookings\.lead_id/.test(msg)) return { ok: false, reason: 'active_booking' };
+      if (step === 'reserve' && /viewing_bookings\.start_ts/.test(msg)) return { ok: false, reason: 'busy' };
+      log({ level: 'error', evt: `viewing.${step}_failed`, leadId: pre.leadId, error: errClass(err) });
       return { ok: false, reason: 'error' };
     }
+    conflicts(made.stuck);
+    if (!made.row) return made.v;
+    const { v, row } = made;
+    const lead = db.getLead(v.leadId);
+    const listing = listingFor(v.listingId);
     inFlight.add(row.bookingId);
     try {
       return await place(v, o, row, lead, listing, t);
@@ -535,81 +550,94 @@ export function createViewing(deps = {}) {
    * @returns {{ moved: number, done: number, cancelled: number }}
    */
   function apply(plans, judgedGone = []) {
-    const out = { moved: 0, done: 0, cancelled: 0 };
-    if (!plans.length && !judgedGone.length) return out;
-    let stuck = new Set();
+    if (!plans.length && !judgedGone.length) return { moved: 0, done: 0, cancelled: 0 };
+    let did;
     try {
-      db.transaction(() => {
-        const t = now();
-        for (const p of plans) if (p.cancel) out.cancelled += cancelRow(p.r);
-        for (const r of judgedGone) out.cancelled += cancelRow(r);
-        const booked = new Map(prep("SELECT booking_id, task_id, start_ts, end_ts FROM viewing_bookings WHERE status = 'booked'").all()
-          .map((x) => [x.booking_id, x]));
-        // What changes, from the rows as they are now (a purge may have taken one while Google answered).
-        const changes = [];
-        for (const p of plans) {
-          const cur = p.cancel ? null : booked.get(p.r.booking_id);
-          if (!cur) continue;
-          const moved = p.start !== cur.start_ts || p.end !== cur.end_ts;
-          if (moved || p.status === 'done') changes.push({ ...p, cur, moved });
-        }
-        const leaving = new Set(changes.filter((p) => p.status === 'done').map((p) => p.r.booking_id));
-        const relocating = changes.filter((p) => p.status === 'booked' && p.start !== p.cur.start_ts);
-        const relocIds = new Set(relocating.map((p) => p.r.booking_id));
-        // Which relocations can land: a start is kept by every booked row that neither leaves nor moves
-        // off it, and by every row whose move cannot land. Each refusal can free nothing, only keep a
-        // start, so this ends after at most one pass per relocating row.
-        for (;;) {
-          const kept = new Set();
-          for (const [id, x] of booked) if (!leaving.has(id) && (!relocIds.has(id) || stuck.has(id))) kept.add(x.start_ts);
-          const claimed = new Set();
-          const clash = relocating.find((p) => {
-            if (stuck.has(p.r.booking_id)) return false;
-            if (kept.has(p.start) || claimed.has(p.start)) return true;
-            claimed.add(p.start);
-            return false;
-          });
-          if (!clash) break;
-          stuck.add(clash.r.booking_id);
-        }
-        const set = prep("UPDATE viewing_bookings SET start_ts = ?, end_ts = ?, status = ?, updated = ? WHERE booking_id = ? AND status = 'booked'");
-        const go = changes.filter((p) => !stuck.has(p.r.booking_id));
-        // Off their starts first: a done row leaves the start index, a relocating one takes a temporary start.
-        go.forEach((p, i) => {
-          if (p.status === 'done') set.run(p.start, p.end, 'done', t, p.r.booking_id);
-          else if (p.start !== p.cur.start_ts) set.run(-(i + 1), p.cur.end_ts, 'booked', t, p.r.booking_id);
-        });
-        for (const p of go) {
-          if (p.status === 'booked') set.run(p.start, p.end, 'booked', t, p.r.booking_id);
-          if (p.moved && p.cur.task_id) moveBookedViewing(db, { taskId: p.cur.task_id, bookingId: p.r.booking_id, dueTs: p.start, now: t });
-          out[p.moved ? 'moved' : 'done'] += 1;
-        }
-        // To the back of the worker's queue, so a row that cannot follow never holds the others up.
-        for (const id of stuck) prep('UPDATE viewing_bookings SET updated = ? WHERE booking_id = ?').run(t, id);
-      }, { immediate: true });
+      did = db.transaction(() => follow(plans, judgedGone), { immediate: true });
     } catch (err) {
       log({ level: 'error', evt: 'viewing.follow_failed', error: errClass(err) });
       return { moved: 0, done: 0, cancelled: 0 };
     }
-    for (const id of stuck) log({ level: 'warn', evt: 'viewing.reconcile_conflict', bookingId: id });
-    return out;
+    conflicts(did.stuck);
+    return did.out;
+  }
+  const conflicts = (stuck) => { for (const id of stuck) log({ level: 'warn', evt: 'viewing.reconcile_conflict', bookingId: id }); };
+
+  /**
+   * apply()'s writes, inside the caller's transaction (apply()'s own, or a commit's with its reserve).
+   * A write the unique index refuses throws, so the caller's whole transaction rolls back.
+   * @returns {{ out: { moved: number, done: number, cancelled: number }, stuck: Set<string> }}
+   */
+  function follow(plans, judgedGone = []) {
+    const out = { moved: 0, done: 0, cancelled: 0 };
+    const stuck = new Set();
+    const t = now();
+    for (const p of plans) if (p.cancel) out.cancelled += cancelRow(p.r);
+    for (const r of judgedGone) out.cancelled += cancelRow(r);
+    const booked = new Map(prep("SELECT booking_id, task_id, start_ts, end_ts FROM viewing_bookings WHERE status = 'booked'").all()
+      .map((x) => [x.booking_id, x]));
+    // What changes, from the rows as they are now (a purge may have taken one while Google answered).
+    const changes = [];
+    for (const p of plans) {
+      const cur = p.cancel ? null : booked.get(p.r.booking_id);
+      if (!cur) continue;
+      const moved = p.start !== cur.start_ts || p.end !== cur.end_ts;
+      if (moved || p.status === 'done') changes.push({ ...p, cur, moved });
+    }
+    const leaving = new Set(changes.filter((p) => p.status === 'done').map((p) => p.r.booking_id));
+    const relocating = changes.filter((p) => p.status === 'booked' && p.start !== p.cur.start_ts);
+    const relocIds = new Set(relocating.map((p) => p.r.booking_id));
+    // Which relocations can land: a start is kept by every booked row that neither leaves nor moves
+    // off it, and by every row whose move cannot land. Each refusal can free nothing, only keep a
+    // start, so this ends after at most one pass per relocating row.
+    for (;;) {
+      const kept = new Set();
+      for (const [id, x] of booked) if (!leaving.has(id) && (!relocIds.has(id) || stuck.has(id))) kept.add(x.start_ts);
+      const claimed = new Set();
+      const clash = relocating.find((p) => {
+        if (stuck.has(p.r.booking_id)) return false;
+        if (kept.has(p.start) || claimed.has(p.start)) return true;
+        claimed.add(p.start);
+        return false;
+      });
+      if (!clash) break;
+      stuck.add(clash.r.booking_id);
+    }
+    const set = prep("UPDATE viewing_bookings SET start_ts = ?, end_ts = ?, status = ?, updated = ? WHERE booking_id = ? AND status = 'booked'");
+    const go = changes.filter((p) => !stuck.has(p.r.booking_id));
+    // Off their starts first: a done row leaves the start index, a relocating one takes a temporary start.
+    go.forEach((p, i) => {
+      if (p.status === 'done') set.run(p.start, p.end, 'done', t, p.r.booking_id);
+      else if (p.start !== p.cur.start_ts) set.run(-(i + 1), p.cur.end_ts, 'booked', t, p.r.booking_id);
+    });
+    for (const p of go) {
+      if (p.status === 'booked') set.run(p.start, p.end, 'booked', t, p.r.booking_id);
+      if (p.moved && p.cur.task_id) moveBookedViewing(db, { taskId: p.cur.task_id, bookingId: p.r.booking_id, dueTs: p.start, now: t });
+      out[p.moved ? 'moved' : 'done'] += 1;
+    }
+    // To the back of the worker's queue, so a row that cannot follow never holds the others up.
+    for (const id of stuck) prep('UPDATE viewing_bookings SET updated = ? WHERE booking_id = ?').run(t, id);
+    return { out, stuck };
   }
 
   /**
    * Reads each row's event (no write): `plans` for the events found, `gone` for the 404s (for
    * reconcile to judge; settle() never reads one as over), `unread` for an event with no times. A
    * calendar that cannot answer leaves the rest unread, with `code`. Rows a commit in this process
-   * holds are skipped.
+   * holds are skipped. `probe: false` only for a further read in a run whose access probe passed.
    */
-  async function readEvents(op, rows, t) {
-    const res = { checked: 0, found: 0, plans: [], gone: [], unread: [], code: null, stopped: false };
+  async function readEvents(op, rows, t, { probe = true } = {}) {
+    const res = { checked: 0, found: 0, plans: [], gone: [], unread: [], code: null, stopped: false, probed: false };
     const todo = rows.filter((r) => !inFlight.has(r.booking_id));
     if (!todo.length) return res;
     // A calendar the robot cannot see any more answers 404 for every event too: no 404 is read before this.
-    const probe = await gcal.access();
-    if (!probe.ok) {
-      log({ level: 'warn', evt: `viewing.${op}_stopped`, code: probe.code });
-      return { ...res, code: probe.code, stopped: true };
+    if (probe) {
+      const p = await gcal.access();
+      if (!p.ok) {
+        log({ level: 'warn', evt: `viewing.${op}_stopped`, code: p.code });
+        return { ...res, code: p.code, stopped: true };
+      }
+      res.probed = true;
     }
     for (const r of todo) {
       res.checked += 1;
@@ -656,6 +684,47 @@ export function createViewing(deps = {}) {
     const did = apply(res.plans);
     unconfirmed([...res.gone, ...res.unread], t);
     return { checked: res.checked, ...did, code: res.code };
+  }
+
+  /**
+   * What a commit reads before its reserve (no write; commit() applies it with the reserve): the lead's
+   * bookings over by their stored times, as settle() reads them, and the chain from the requested start.
+   * That is the row stored at the start, then, when its event moved, the row stored where the event is
+   * now, and so on. The owner moved 12:00 to 14:00, then 10:00 to 12:00: Google shows 10:00 free, and the
+   * 10:00 row can take 12:00 only in the same transaction as the 12:00 row takes 14:00. One access probe
+   * for the run, at most WORKER_BATCH chain rows; a calendar that cannot answer stops it with `code`.
+   */
+  async function readForCommit(leadId, startTs, t) {
+    const own = prep("SELECT * FROM viewing_bookings WHERE status = 'booked' AND task_id IS NOT NULL AND end_ts < ? AND lead_id = ? ORDER BY end_ts, booking_id").all(t, String(leadId));
+    const seen = new Set(own.map((r) => r.booking_id));
+    const storedAt = prep("SELECT * FROM viewing_bookings WHERE status = 'booked' AND task_id IS NOT NULL AND start_ts = ? ORDER BY booking_id");
+    let budget = WORKER_BATCH;
+    const rowsAt = (starts) => {
+      const out = [];
+      for (const s of starts) {
+        for (const r of storedAt.all(s)) {
+          if (seen.has(r.booking_id) || budget <= 0) continue;
+          seen.add(r.booking_id);
+          budget -= 1;
+          out.push(r);
+        }
+      }
+      return out;
+    };
+    const res = { plans: [], gone: [], unread: [], code: null };
+    let batch = [...own, ...rowsAt([startTs])];
+    let probe = true;
+    while (batch.length) {
+      const got = await readEvents('settle', batch, t, { probe });
+      if (got.probed) probe = false;
+      res.plans.push(...got.plans);
+      res.gone.push(...got.gone);
+      res.unread.push(...got.unread);
+      if (got.code) { res.code = got.code; break; }
+      // Where the events are now: the rows stored there follow in the same transaction.
+      batch = rowsAt(got.plans.filter((p) => p.status === 'booked' && p.start !== p.r.start_ts).map((p) => p.start));
+    }
+    return res;
   }
 
   /**

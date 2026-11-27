@@ -218,6 +218,9 @@ test('holidays: "Public holiday" blocks, "Observance" does not, an allow-listed 
   assert.equal(isBlockingHoliday({ summary: 'Ramadan begins (tentative)', description: 'Observance' }), false);
   assert.equal(isBlockingHoliday({ summary: 'Flag Day', description: 'Observance' }), false);
   assert.equal(isBlockingHoliday({ summary: 'Muharram (Muslim New Year) (tentative)', description: 'Observance' }), false);
+  // The feed's label wins over the title: an observance never blocks, even under an allow-listed summary.
+  assert.equal(isBlockingHoliday({ summary: 'Founding Day (tentative)', description: 'Observance' }), false);
+  assert.equal(isBlockingHoliday({ summary: 'Eid al-Fitr', description: 'Observance\nTo hide observances, go to Google Calendar Settings' }), false);
   for (const s of ['Eid al-Fitr (tentative)', 'Eid al-Adha Holiday (tentative)', 'Arafat Day (tentative)', 'Saudi National Day', 'Founding Day']) {
     assert.equal(isBlockingHoliday({ summary: s }), true, s);
   }
@@ -229,6 +232,7 @@ test('holidays: "Public holiday" blocks, "Observance" does not, an allow-listed 
         items: [
           holidayItem('2026-12-06', 'Founding Day', 'Public holiday'),
           holidayItem('2026-12-08', 'Ramadan begins (tentative)', 'Observance'),
+          holidayItem('2026-12-09', 'Arafat Day (tentative)', 'Observance'),
           holidayItem('2026-12-10', 'Eid al-Fitr Holiday (tentative)', undefined, { end: { date: '2026-12-12' } }),
         ],
       }),

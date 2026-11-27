@@ -116,11 +116,16 @@ export function bookingEvent({ eventId, leadId, bookingId, listingId, title, hom
   };
 }
 
-/** True for a holiday-feed event that blocks its day(s). */
+/**
+ * True for a holiday-feed event that blocks its day(s) (DESIGN §8.1). The feed's label (the first
+ * line of the description) wins over the title: "Public holiday" blocks, "Observance" never does,
+ * even under an allow-listed summary. With any other label, or none, the summary allow-list decides.
+ */
 export function isBlockingHoliday(event) {
   if (!event || event.status === 'cancelled') return false;
   const first = String(event.description ?? '').split('\n')[0].trim();
   if (/^public holiday\b/i.test(first)) return true;
+  if (/^observance\b/i.test(first)) return false;
   return HOLIDAY_SUMMARY_RE.test(String(event.summary ?? ''));
 }
 
