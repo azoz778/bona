@@ -45,8 +45,10 @@
  * back. While any booking or queued deletion was made in another calendar, nothing is offered or
  * booked either (reason 'calendar_mismatch'): that calendar's busy time is not the owner's, and a
  * client's name and phone never go to it. In the calendar an event was made in, a 404 after the access
- * probe passed is the owner deleting it: reconcile cancels the row and its task. Ids written before
- * carry no calendar and keep the earlier rule (a 404 counts only when the run found other events).
+ * probe passed is the owner deleting it: reconcile cancels the row and its task, and so does a commit
+ * for the rows it reads (before their moves, so a start the deleted booking kept is free at once). Ids
+ * written before carry no calendar and keep the earlier rule (a 404 counts only when a reconcile run
+ * found other events; a commit never reads it as a deletion).
  *
  * For PR-INT (index.mjs): pass `inventory` (the shared one; without it no listing is bookable),
  * and `fetchImpl` for the tests' fake fetch.
@@ -365,9 +367,13 @@ export function createViewing(deps = {}) {
     // start index until every row along that chain followed its event.
     const t0 = now();
     const res = await readForCommit(pre.leadId, pre.startTs, t0);
-    unconfirmed([...res.gone, ...res.unread], t0);
+    // A 404 read after the run's access probe passed, for an event made in this calendar, is the owner
+    // deleting it (reconcile's rule): follow() cancels that row before the moves, so a start it kept is
+    // free for the row the owner moved onto it. An id that records no calendar keeps its row until reconcile.
+    const judged = res.gone.filter((r) => res.probed && madeHere(r.event_id));
+    unconfirmed([...res.gone.filter((r) => !judged.includes(r)), ...res.unread], t0);
     if (res.code) {
-      apply(res.plans);
+      apply(res.plans, judged);
       return { ok: false, reason: 'calendar', code: res.code };
     }
     // Then ONE write transaction: the rows follow their events (the lead's past booking turns done), the
@@ -382,7 +388,7 @@ export function createViewing(deps = {}) {
     let made;
     try {
       made = db.transaction(() => {
-        const { stuck } = follow(res.plans);
+        const { stuck } = follow(res.plans, judged);
         step = 'check';
         const v = validate(again);
         if (!v.ok) return { v, stuck };
@@ -756,8 +762,9 @@ export function createViewing(deps = {}) {
    * bookings over by their stored times, as settle() reads them, and the chain from the requested start.
    * That is the row stored at the start, then, when its event moved, the row stored where the event is
    * now, and so on. The owner moved 12:00 to 14:00, then 10:00 to 12:00: Google shows 10:00 free, and the
-   * 10:00 row can take 12:00 only in the same transaction as the 12:00 row takes 14:00. One access probe
-   * for the run, at most WORKER_BATCH chain rows; a calendar that cannot answer stops it with `code`.
+   * 10:00 row can take 12:00 only in the same transaction as the 12:00 row takes 14:00 (or is cancelled:
+   * the owner deleted it, a 404 in its own calendar, commit()). One access probe for the run (`probed`
+   * once it passed), at most WORKER_BATCH chain rows; a calendar that cannot answer stops it with `code`.
    */
   async function readForCommit(leadId, startTs, t) {
     const own = prep("SELECT * FROM viewing_bookings WHERE status = 'booked' AND task_id IS NOT NULL AND end_ts < ? AND lead_id = ? ORDER BY end_ts, booking_id").all(t, String(leadId));
@@ -776,12 +783,12 @@ export function createViewing(deps = {}) {
       }
       return out;
     };
-    const res = { plans: [], gone: [], unread: [], code: null };
+    const res = { plans: [], gone: [], unread: [], code: null, probed: false };
     let batch = [...own, ...rowsAt([startTs])];
     let probe = true;
     while (batch.length) {
       const got = await readEvents('settle', batch, t, { probe });
-      if (got.probed) probe = false;
+      if (got.probed) { probe = false; res.probed = true; }
       res.plans.push(...got.plans);
       res.gone.push(...got.gone);
       res.unread.push(...got.unread);

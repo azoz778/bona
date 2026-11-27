@@ -1471,6 +1471,94 @@ test('a start freed by a CHAIN of owner moves (12:00 → 14:00, then 10:00 → 1
   }
 });
 
+test('a start freed by an owner DELETE and a move (12:00 deleted, Google 404; then 10:00 → 12:00), or by a delete alone, books at once: in the calendar the event was made in, the commit reads the 404 as reconcile does and cancels that row before the moves, in the reserve\'s transaction', async () => {
+  const THU = { start: R(2026, 12, 3, 0), end: R(2026, 12, 4, 0) }; // Thursday is full, so the offer starts on Sunday
+  const gcal = Object.assign(fakeGcal({ busy: () => [THU, ...calendarBusy(gcal)] }), { calendarTag: calendarTag('calendar-a@example.com') });
+  const clock = { t: NOW };
+  const h = setup({ gcal, clock });
+  try {
+    const rowOf = (id) => h.rows().find((r) => r.booking_id === id);
+    const ten = await h.viewing.commitBooking({ lead: h.lead('LEAD-20261201-0000aaaa'), listingId: 'BONA-W901', slotId: SLOT });
+    const noon = await h.viewing.commitBooking({ lead: h.lead('LEAD-20261201-0000bbbb'), listingId: 'BONA-W901', slotId: '2026-12-06T12:00+03:00' });
+    assert.equal(ten.ok && noon.ok, true);
+    assert.deepEqual(await h.viewing.reconcile(), { checked: 2, moved: 0, cancelled: 0, held: 0 }, 'the morning reconcile');
+    // The owner deletes the 12:00 viewing (Google answers 404 for it), then moves the 10:00 one to 12:00.
+    gcal.events.delete(noon.eventId);
+    moveEvent(h, ten.eventId, '2026-12-06T12:00:00+03:00', '2026-12-06T13:00:00+03:00');
+    const newcomer = h.lead('LEAD-20261201-0000cccc');
+    const offer = await h.viewing.slots({ lead: newcomer, listingId: 'BONA-W902' });
+    assert.equal(offer.slots.map((s) => s.slot_id).includes(SLOT), true, 'Google shows 10:00 free, so it is offered');
+    const got = await h.viewing.commitBooking({ lead: newcomer, listingId: 'BONA-W902', slotId: SLOT });
+    assert.equal(got.ok, true, JSON.stringify(got));
+    assert.equal(rowOf(noon.bookingId).status, 'cancelled', 'the deleted booking is cancelled');
+    assert.equal(taskFor(h, noon.bookingId).status, 'cancelled', 'and its task');
+    assert.deepEqual([rowOf(ten.bookingId).status, rowOf(ten.bookingId).start_ts, rowOf(ten.bookingId).end_ts], ['booked', R(2026, 12, 6, 12), R(2026, 12, 6, 13)]);
+    assert.equal(taskFor(h, ten.bookingId).due_ts, R(2026, 12, 6, 12), "the moved booking's task follows");
+    assert.deepEqual([rowOf(got.bookingId).status, rowOf(got.bookingId).start_ts], ['booked', SLOT_TS]);
+    assert.deepEqual(doubleBooked(h), []);
+    assert.deepEqual(h.logs.filter((l) => l.evt === 'viewing.reconcile_conflict' || l.evt === 'viewing.event_missing'), []);
+    assert.equal(gcal.calls.filter((c) => c[0] === 'insert').length, 3, 'one event per booking, none refused');
+    assert.deepEqual(h.viewing.health(), { enabled: true, gcal: { configured: true, ok: true, lastErrorCode: null } });
+
+    // A delete alone: the owner deletes the 10:00 viewing just booked, and the next client books 10:00 at once.
+    gcal.events.delete(got.eventId);
+    const again = await h.viewing.commitBooking({ lead: h.lead('LEAD-20261201-0000dddd'), listingId: 'BONA-W902', slotId: SLOT });
+    assert.equal(again.ok, true, JSON.stringify(again));
+    assert.equal(rowOf(got.bookingId).status, 'cancelled');
+    assert.equal(taskFor(h, got.bookingId).status, 'cancelled');
+    assert.deepEqual(doubleBooked(h), []);
+
+    // A calendar the robot cannot manage answers 404 for every event too: no 404 is read before the probe passes.
+    gcal.events.delete(again.eventId);
+    gcal.fail.access = 'not_found';
+    assert.deepEqual(await h.viewing.commitBooking({ lead: h.lead('LEAD-20261201-0000eeee'), listingId: 'BONA-W902', slotId: SLOT }),
+      { ok: false, reason: 'calendar', code: 'not_found' });
+    assert.equal(rowOf(again.bookingId).status, 'booked');
+    assert.equal(taskFor(h, again.bookingId).status, 'confirmed');
+    delete gcal.fail.access;
+
+    // The lead's own booking, over by its stored times, that the owner deleted (404 in its own calendar): the
+    // commit reads it as reconcile does, so it is cancelled and the client books again (never done on a 404).
+    clock.t = R(2026, 12, 7, 9);
+    gcal.events.delete(ten.eventId);
+    const later = await h.viewing.commitBooking({ lead: h.db.getLead('LEAD-20261201-0000aaaa'), listingId: 'BONA-W901', slotId: '2026-12-09T10:00+03:00' });
+    assert.equal(later.ok, true, JSON.stringify(later));
+    assert.equal(rowOf(ten.bookingId).status, 'cancelled');
+    assert.equal(taskFor(h, ten.bookingId).status, 'cancelled');
+    assert.equal(h.logs.some((l) => l.evt === 'viewing.event_missing' && l.bookingId === ten.bookingId), false);
+    assert.deepEqual(doubleBooked(h), []);
+  } finally { h.db.close(); }
+});
+
+test('the same DELETE and move with bookings whose ids record no calendar (written before ids did): the commit cancels nothing on a 404 and answers busy, as before; the next reconcile settles it and the start books', async () => {
+  const THU = { start: R(2026, 12, 3, 0), end: R(2026, 12, 4, 0) };
+  const gcal = fakeGcal({ busy: () => [THU, ...calendarBusy(gcal)] });
+  const h = setup({ gcal });
+  try {
+    const rowOf = (id) => h.rows().find((r) => r.booking_id === id);
+    const ten = await h.viewing.commitBooking({ lead: h.lead('LEAD-20261201-0000aaaa'), listingId: 'BONA-W901', slotId: SLOT });
+    const noon = await h.viewing.commitBooking({ lead: h.lead('LEAD-20261201-0000bbbb'), listingId: 'BONA-W901', slotId: '2026-12-06T12:00+03:00' });
+    assert.equal(ten.ok && noon.ok, true);
+    assert.equal(calendarTagOf(ten.eventId), null);
+    assert.equal(calendarTagOf(noon.eventId), null);
+    gcal.events.delete(noon.eventId);
+    moveEvent(h, ten.eventId, '2026-12-06T12:00:00+03:00', '2026-12-06T13:00:00+03:00');
+    const newcomer = h.lead('LEAD-20261201-0000cccc');
+    assert.deepEqual(await h.viewing.commitBooking({ lead: newcomer, listingId: 'BONA-W902', slotId: SLOT }), { ok: false, reason: 'busy' });
+    assert.deepEqual([rowOf(noon.bookingId).status, rowOf(noon.bookingId).start_ts], ['booked', R(2026, 12, 6, 12)], 'no 404 of an id with no calendar cancels at commit');
+    assert.equal(taskFor(h, noon.bookingId).status, 'confirmed');
+    assert.deepEqual([rowOf(ten.bookingId).status, rowOf(ten.bookingId).start_ts], ['booked', SLOT_TS]);
+    assert.equal(gcal.calls.filter((c) => c[0] === 'insert').length, 2, 'nothing inserted');
+    // The reconcile found the other event here, so it reads the 404 as a deletion: the start is free again.
+    assert.deepEqual(await h.viewing.reconcile(), { checked: 2, moved: 1, cancelled: 1, held: 0 });
+    const got = await h.viewing.commitBooking({ lead: newcomer, listingId: 'BONA-W902', slotId: SLOT });
+    assert.equal(got.ok, true, JSON.stringify(got));
+    assert.equal(rowOf(noon.bookingId).status, 'cancelled');
+    assert.deepEqual([rowOf(ten.bookingId).status, rowOf(ten.bookingId).start_ts], ['booked', R(2026, 12, 6, 12)]);
+    assert.deepEqual(doubleBooked(h), []);
+  } finally { h.db.close(); }
+});
+
 test('a booking over by its stored times whose event the calendar does not show (the calendar id changed) is never done on that: it stays the lead\'s one booking, health says not_found, and the right calendar again moves it to its real time', async () => {
   const WED = '2026-12-09T10:00+03:00';
   const clock = { t: NOW };
