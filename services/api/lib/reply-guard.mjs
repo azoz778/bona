@@ -39,7 +39,7 @@ const currencyOf = (s) => {
 
 const SCALE_WORDS = [
   [1e9, String.raw`billions?|bn|مليارات|مليار`],
-  [1e6, String.raw`millions?|mln|mn|مليونين|ملايين|مليوناً|مليونا|مليون`],
+  [1e6, String.raw`millions?|mln|mn|(?-i:MM)|مليونين|ملايين|مليوناً|مليونا|مليون`], // "MM" in upper case only ("10mm" is millimetres)
   [1e3, String.raw`thousands?|ألفين|الفين|آلاف|الاف|ألوف|ألفاً|ألف|الف`],
 ];
 const SCALE = SCALE_WORDS.map(([, re]) => re).join('|');
@@ -49,15 +49,18 @@ const scaleOf = (s) => {
 };
 
 /**
- * One number as written: digits with `,` or `.` between groups. Which separator is which is
- * decided in `readNumber`, so "2,5", "2.950.000" and "6,700,000.00" are each one token.
+ * One number as written: digits with `,` or `.` between groups (`prepare` has turned "٬", "،" and "'"
+ * into ","). Which separator is which is decided in `readNumber`, so "2,5", "2.950.000" and
+ * "6,700,000.00" are each one token.
  */
 const NUM = String.raw`\d+(?:[.,]\d+)*`;
-// currency? number attached-k/m? scale-word? currency?  After a colon only the two-digit minutes or
-// seconds of a time ("10:30", "10:30:00") are skipped; "Price:2,950,000" and "B08-19:3,100,000" are amounts.
+/** A short scale ("1.2 م", "3.1 ملي", "3 mil", "500 K"): a scale only next to a currency; alone "م" is metres ("شارع 15م"). */
+const SHORT_SCALE = String.raw`ملي|م|mil|k`;
+// currency? number attached-k/m? scale-word-or-short-scale? currency?  After a colon only the two-digit minutes
+// or seconds of a time ("10:30", "10:30:00") are skipped; "Price:2,950,000" and "B08-19:3,100,000" are amounts.
 const AMOUNT_RE = new RegExp(
   String.raw`(?<![A-Za-z])(?<cur1>${CUR})?\s{0,2}(?<![\d.,])(?!(?<=\d:)\d{2}(?!\d|[.,]\d))(?<num>${NUM})(?![\d])(?<att>[km](?![\p{L}\d]))?` +
-  String.raw`(?:\s{0,2}(?<word>${SCALE})(?![\p{L}]))?(?:\s{0,2}(?<cur2>${CUR})(?![\p{L}]))?`,
+  String.raw`(?:\s{0,2}(?<word>${SCALE})(?![\p{L}])|\s{0,2}(?<short>${SHORT_SCALE})(?![\p{L}\d]))?(?:\s{0,2}(?<cur2>${CUR})(?![\p{L}]))?`,
   'dgiu',
 );
 /** A million/billion word no amount above used: "مليون", "مليونين", "a million", "بثلاثة ملايين". */
@@ -93,11 +96,19 @@ const URL_RE = /https?:\/\/[^\s<>"'`]+/giu;
 const UNIT_RE = /(?<![A-Za-z0-9])B\d{2}-\d{2}(?![0-9])/gi;
 const PROPERTY_PATH_RE = /\/(?:ar\/)?properties\/([a-z0-9][a-z0-9-]*)/gi;
 
-/** "2 950 000" (a space, NBSP or narrow NBSP between groups of three) is one number. */
-const joinSpacedGroups = (s) => s.replace(/(?<![\d.,])\d{1,3}(?:[   ]\d{3})+(?!\d)/g, (m) => m.replace(/[   ]/g, ''));
+/**
+ * "2 950 000" (a space, NBSP or narrow NBSP between groups of three) is one number. The run is taken whole or
+ * not at all; it never starts inside a word or an id ("W014 750 000", "BONA-035 750 000", "B08-19 750 000")
+ * and never ends inside a comma or dot number ("Floor 2 750,000"); a decimal tail stays ("2 950 000.00").
+ */
+const SPACED_GROUPS_RE = /(?<![\p{L}\d.,]|\p{L}\d*-)(?=(\d{1,3}(?:[ \u00A0\u202F]\d{3})+))\1(?!\d|[.,]\d{3}(?!\d))/gu;
+const joinSpacedGroups = (s) => s.replace(SPACED_GROUPS_RE, (m) => m.replace(/[ \u00A0\u202F]/g, ''));
 
 function prepare(text) {
-  return joinSpacedGroups(toAsciiDigits(String(text ?? '')).replace(URL_RE, ' '));
+  const s = toAsciiDigits(String(text ?? '')).replace(URL_RE, ' ')
+    .replace(/(?<=\d)،(?=\d)/g, ',') // the Arabic comma of a phone keyboard: "2،800،000", "2،5 مليون"
+    .replace(/(?<=\d)['’](?=\d{3}(?!\d))/g, ','); // "3'100'000"; never feet and inches (5'11")
+  return joinSpacedGroups(s);
 }
 
 /**
@@ -152,7 +163,7 @@ export function findAmounts(text) {
   /** Where the scale words an amount used start: the word passes below skip only those. */
   const used = new Set();
   for (const m of s.matchAll(AMOUNT_RE)) {
-    const { cur1, num, att, word, cur2 } = m.groups;
+    const { cur1, num, att, word, short, cur2 } = m.groups;
     const [numStart, numEnd] = m.indices.groups.num;
     const use = () => { if (word) used.add(m.indices.groups.word[0]); };
     const before = s[numStart - 1] ?? '';
@@ -176,13 +187,14 @@ export function findAmounts(text) {
       continue;
     }
     const bare = !/[,.]/.test(num);
-    let scale = word ? scaleOf(word) : 1;
+    const shortScale = short && currency ? (short.toLowerCase() === 'k' ? 1e3 : 1e6) : 0; // "1.2 م ريال"; "15 م" is metres
+    let scale = word ? scaleOf(word) : shortScale || 1;
     if (att) {
       if (att.toLowerCase() === 'k') scale = 1e3;
       else if (value < 100 || currency) scale = 1e6;
       else continue; // "500m from the beach": metres
     }
-    if (!word && !att) scale = rangeScale(value, after); // "between 2 and 3 million": the 2 is 2,000,000
+    if (!word && !att && !shortScale) scale = rangeScale(value, after); // "between 2 and 3 million": the 2 is 2,000,000
     if (bare && !currency && scale === 1 && (num.length >= 9 || /^0\d/.test(num))) continue; // a phone, an ID or a licence number
     if (!Number.isFinite(value) || value <= 0) { use(); continue; }
     const raw = Math.round(value * scale);
@@ -195,13 +207,17 @@ export function findAmounts(text) {
     if (used.has(at) || AREA_AFTER_RE.test(s.slice(end))) continue;
     const w = m.groups.word.toLowerCase();
     let raw = null;
-    // After a digit no amount used ("+5 مليون"), or next to a half or a quarter ("مليون ونص", "نص مليون",
-    // "half a million"), the word alone says nothing of the value.
-    const fraction = FRACTION_BEFORE_RE.test(s.slice(Math.max(0, m.index - 24), m.index)) || FRACTION_AFTER_RE.test(s.slice(end));
+    // After a digit no amount used ("+5 مليون"), a spelled-out number ("تلاتة مليون", "twenty one million"), or
+    // next to a half or a quarter ("مليون ونص", "نص مليون", "half a million"), the word alone says nothing of the value.
+    const lead = s.slice(Math.max(0, m.index - 24), m.index);
+    const fraction = FRACTION_BEFORE_RE.test(lead) || FRACTION_AFTER_RE.test(s.slice(end));
     if (!fraction && !DIGIT_BEFORE_RE.test(s.slice(Math.max(0, m.index - 6), m.index))) {
-      if (w === 'مليون') raw = 1e6;
-      else if (w === 'مليونين') raw = 2e6;
-      else if (w === 'million' && /(?:^|\s)(?:a|one)\s+$/i.test(s.slice(Math.max(0, m.index - 5), m.index))) raw = 1e6;
+      if (w === 'مليون' || w === 'مليونين') {
+        if (!NUMBER_WORD_BEFORE_RE.test(lead)) raw = w === 'مليون' ? 1e6 : 2e6;
+      } else if (w === 'million') {
+        const one = /(?:^|\s)(?:a|one)\s+$/i.exec(lead);
+        if (one && !NUMBER_WORD_BEFORE_RE.test(lead.slice(0, one.index + 1))) raw = 1e6;
+      }
     }
     out.push({ raw, sar: raw, currency: null, at });
   }
@@ -242,15 +258,25 @@ function leaves(result) {
   return { strings, numbers };
 }
 
-/** What a reply may quote: amounts, unit refs and property slugs. */
+/**
+ * What a reply may quote: amounts, unit refs and property slugs. `amounts` holds keys: `sar:<SAR value>` for
+ * every allowed amount, `<CUR>:<figure>` for one written with a currency, and `raw:<figure>` for every figure.
+ * A figure with no currency (a JSON number too) counts as SAR, as `findAmounts` reads it.
+ */
 export function allowedFrom({ toolResults = [], earlierReplies = [] } = {}) {
   const amounts = new Set();
   const units = new Set();
   const slugs = new Set();
-  const addAmounts = (s) => { for (const a of findAmounts(s)) if (a.raw !== null) { amounts.add(a.raw); amounts.add(a.sar); } };
+  const addAmounts = (s) => {
+    for (const a of findAmounts(s)) {
+      if (a.raw === null) continue;
+      amounts.add(`sar:${a.sar}`).add(`raw:${a.raw}`);
+      if (a.currency) amounts.add(`${a.currency}:${a.raw}`);
+    }
+  };
   for (const r of Array.isArray(toolResults) ? toolResults : []) {
     const { strings, numbers } = leaves(r);
-    for (const n of numbers) amounts.add(Math.round(n));
+    for (const n of numbers) amounts.add(`sar:${Math.round(n)}`).add(`raw:${Math.round(n)}`);
     for (const s of strings) {
       addAmounts(s);
       for (const u of unitRefs(s)) units.add(u);
@@ -267,13 +293,17 @@ export function allowedFrom({ toolResults = [], earlierReplies = [] } = {}) {
 /**
  * @param {unknown} text  the reply the model wrote
  * @param {{ toolResults?: string[], earlierReplies?: string[] }} [ctx]
- * @returns {{ ok: boolean, hits: { kind: 'amount'|'unit'|'link' }[] }}  at most one hit per kind
+ * @returns {{ ok: boolean, hits: { kind: 'amount'|'unit'|'link' }[] }}  at most one hit per kind.
+ *   An amount written with a currency passes on the same SAR value or the same figure in that currency
+ *   ("$750,000" is a hit when the tool said SAR 750,000); a bare figure passes on the same figure.
  */
 export function checkReply(text, ctx = {}) {
   if (typeof text !== 'string' || !text.trim()) return { ok: true, hits: [] };
   const allowed = allowedFrom(ctx ?? {});
   const hits = [];
-  if (findAmounts(text).some((a) => a.raw === null || !(allowed.amounts.has(a.raw) || allowed.amounts.has(a.sar)))) hits.push({ kind: 'amount' });
+  const allowedAmount = (a) => a.raw !== null
+    && (allowed.amounts.has(`sar:${a.sar}`) || allowed.amounts.has(a.currency ? `${a.currency}:${a.raw}` : `raw:${a.raw}`));
+  if (!findAmounts(text).every(allowedAmount)) hits.push({ kind: 'amount' });
   if (unitRefs(text).some((u) => !allowed.units.has(u))) hits.push({ kind: 'unit' });
   if (propertySlugs(text).some((slug) => !allowed.slugs.has(slug))) hits.push({ kind: 'link' });
   return { ok: hits.length === 0, hits };

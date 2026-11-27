@@ -165,3 +165,78 @@ test('the repair note is the design text; a booking claim is recognised for the 
   for (const s of ['Your viewing is booked for Sunday.', 'It is confirmed.', 'تم الحجز', 'تم تأكيد موعدك', 'حجزت لك الموعد']) assert.equal(claimsBooking(s), true, s);
   for (const s of ['I can help you book a viewing.', 'The team will confirm the time.', 'نقدر نرتب لك معاينة', '']) assert.equal(claimsBooking(s), false, s);
 });
+
+test('a price right after a listing id or a unit reference and one space ("BONA-935 750,000 ر.س") is an amount; spaced groups never reach across an id or into a comma number', () => {
+  for (const [s, raws] of [
+    ['BONA-935 750,000 ر.س', [750_000]], ['BONA-W912 150,000 SAR', [150_000]], ['W914 750 000 ريال', [750_000]], ['BONA-W912 150 000 SAR', [150_000]],
+    ['B08-19 750,000 ر.س', [750_000]], ['B08-19 750 000', [750_000]], ['Floor 2 750,000', [750_000]], ['Villa A1 750,000 SAR', [750_000]],
+    ['BONA-935 ٧٥٠٬٠٠٠ ر.س', [750_000]], ['2 950 000 SAR', [2_950_000]], ['2 950 000.00 SAR', [2_950_000]], ['2 950 000,00 €', [2_950_000]],
+    ['2 900 000-3 100 000 SAR', [2_900_000, 3_100_000]],
+  ]) assert.deepEqual(amounts(s), raws, s);
+  const tools = [JSON.stringify({ results: [
+    { id: 'BONA-935', price_en: 'SAR 750,000', price_ar: '750,000 ر.س' }, { id: 'BONA-936', price_en: 'SAR 2,950,000', price_ar: '2,950,000 ر.س' },
+  ] })];
+  for (const text of ['BONA-935 650,000 ر.س', 'BONA-W912 150,000 SAR', 'W914 750 000 ريال', 'Floor 2 750,000', 'BONA-935 ٦٥٠٬٠٠٠ ر.س']) {
+    assert.deepEqual(checkReply(text, { toolResults: [] }), { ok: false, hits: [{ kind: 'amount' }] }, `${text} (no tool)`);
+    if (!text.includes('750')) assert.deepEqual(checkReply(text, { toolResults: tools }), { ok: false, hits: [{ kind: 'amount' }] }, `${text} (another price)`);
+  }
+  for (const text of ['BONA-935 750,000 ر.س', 'BONA-936 2,950,000 ر.س', 'BONA-935 750 000 ريال']) {
+    assert.deepEqual(checkReply(text, { toolResults: tools }), { ok: true, hits: [] }, `${text} (the tool's own price)`);
+  }
+  const units = [JSON.stringify({ results: [{ ref: 'B08-19', price_en: 'SAR 708,164', price_ar: '708,164 ر.س' }] })];
+  assert.deepEqual(checkReply('B08-19 750,000 ر.س', { toolResults: units }), { ok: false, hits: [{ kind: 'amount' }] }, 'a unit ref then a price no tool returned');
+  assert.deepEqual(checkReply('B08-19 708,164 ر.س', { toolResults: units }), { ok: true, hits: [] });
+});
+
+test('the Arabic comma (U+060C) between digits groups thousands like ","', () => {
+  for (const [s, raw] of [
+    ['2،800،000 ريال', 2_800_000], ['السعر النهائي ٢،٨٠٠،٠٠٠ ريال', 2_800_000], ['بسعر 2،800،000', 2_800_000], ['SAR 2،800،000', 2_800_000],
+    ['٢،٥ مليون', 2_500_000], ['تمام، ٢،٥٠٠،٠٠٠ ضمن المتاح', 2_500_000],
+  ]) assert.deepEqual(amounts(s), [raw], s);
+  for (const s of ['الأدوار 1،2،3', 'تمام، 3 غرف']) assert.deepEqual(findAmounts(s), [], s);
+  const beds = [JSON.stringify({ results: [{ beds: 2, price_en: 'SAR 2,950,000', price_ar: '2,950,000 ر.س' }] })];
+  for (const text of ['السعر النهائي ٢،٨٠٠،٠٠٠ ريال', 'تمام، ٢،٥٠٠،٠٠٠', 'SAR 2،800،000', 'تمام، السعر ٢،٨٠٠،٠٠٠ ريال']) {
+    assert.deepEqual(checkReply(text, { toolResults: [] }).hits, [{ kind: 'amount' }], `${text} (no tool)`);
+    assert.deepEqual(checkReply(text, { toolResults: beds }).hits, [{ kind: 'amount' }], `${text} (another price; beds: 2)`);
+  }
+  assert.deepEqual(checkReply('2،950،000 ريال', { toolResults: beds }), { ok: true, hits: [] });
+});
+
+test('a spelled-out number before a million word ("تلاتة مليون", "twenty one million") is an amount of unknown value', () => {
+  for (const s of ['سعرها تلاتة مليون', 'خمسة مليون ريال', 'ثلاثة مليون', 'بخمسة مليون', 'مية مليون', 'twenty one million', 'three million']) {
+    assert.deepEqual(amounts(s), [null], s);
+  }
+  for (const [s, raw] of [['مليون', 1_000_000], ['سعرها مليون ريال', 1_000_000], ['مليونين', 2_000_000], ['a million', 1_000_000], ['one million', 1_000_000]]) {
+    assert.deepEqual(amounts(s), [raw], s);
+  }
+  const oneMillion = [JSON.stringify({ results: [{ price_en: 'SAR 1,000,000', price_ar: '1,000,000 ر.س' }] })];
+  assert.deepEqual(checkReply('سعرها تلاتة مليون', { toolResults: oneMillion }).hits, [{ kind: 'amount' }]);
+  assert.equal(checkReply('سعرها مليون ريال', { toolResults: oneMillion }).ok, true);
+});
+
+test('"MM", an apostrophe thousands separator, and a short scale ("م", "ملي", "mil", "K") right before a currency are read as amounts', () => {
+  for (const [s, raw] of [
+    ['3.1MM', 3_100_000], ['3.1 MM SAR', 3_100_000], ["3'100'000 SAR", 3_100_000], ['3’100’000 SAR', 3_100_000], ['1.2 م ريال', 1_200_000],
+    ['1.2م ريال', 1_200_000], ['3.1 ملي ريال', 3_100_000], ['3 mil SAR', 3_000_000], ['500 K SAR', 500_000],
+  ]) assert.deepEqual(amounts(s), [raw], s);
+  // A bare "م" is metres ("شارع 15م", "على بعد 500 م"); "mm" in lower case is millimetres; feet and inches are not grouped.
+  for (const s of ['على شارع 15م', 'على بعد 500 م من البحر', 'زجاج 10mm', `5'11"`, 'شارعين 20م و 15م']) assert.deepEqual(findAmounts(s), [], s);
+  const tools = [JSON.stringify({ results: [{ price_en: 'SAR 2,950,000', price_ar: '2,950,000 ر.س' }] })];
+  for (const text of ['3.1MM', '3.1 MM SAR', "3'100'000 SAR", '3’100’000 SAR', '1.2 م ريال', '3.1 ملي ريال', '3 mil SAR', '500 K SAR']) {
+    assert.deepEqual(checkReply(text, { toolResults: tools }).hits, [{ kind: 'amount' }], text);
+  }
+  assert.equal(checkReply("2'950'000 SAR", { toolResults: tools }).ok, true);
+});
+
+test('a reply that names a currency must match the tool in that currency or in SAR value; a bare figure matches the raw number', () => {
+  const usd = [JSON.stringify({ results: [{ price_en: 'USD 500,000', price_ar: '500,000 دولار' }] })];
+  for (const text of ['السعر 500,000 ريال', 'SAR 500,000', '500,000 درهم']) assert.deepEqual(checkReply(text, { toolResults: usd }).hits, [{ kind: 'amount' }], text);
+  for (const text of ['$500,000', '500,000 دولار', 'USD 500,000', 'It is 500,000.', 'SAR 1,875,000']) assert.deepEqual(checkReply(text, { toolResults: usd }), { ok: true, hits: [] }, text);
+  const sar = [JSON.stringify({ results: [{ price_en: 'SAR 750,000', price_ar: '750,000 ر.س' }] })];
+  for (const text of ['$750,000', '750,000 USD', 'AED 750,000', '€750,000']) assert.deepEqual(checkReply(text, { toolResults: sar }).hits, [{ kind: 'amount' }], text);
+  for (const text of ['SAR 750,000', '750,000 ريال', '750 ألف ريال', 'It is 750,000.']) assert.deepEqual(checkReply(text, { toolResults: sar }), { ok: true, hits: [] }, text);
+  const cash = [JSON.stringify({ results: [{ ref: 'B08-19', price_cash: 2_950_000 }] })];
+  assert.equal(checkReply('B08-19 is 2,950,000 riyals.', { toolResults: cash }).ok, true, 'a JSON number counts as SAR');
+  assert.equal(checkReply('B08-19 is $2,950,000.', { toolResults: cash }).ok, false);
+  assert.equal(checkReply('And the second one is $1,200,000.', { toolResults: [], earlierReplies: ['The second one is SAR 1,200,000.'] }).ok, false, 'an earlier reply keeps its currency');
+});
