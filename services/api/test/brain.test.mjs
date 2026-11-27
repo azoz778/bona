@@ -517,6 +517,56 @@ test('after a restart with the brain_out marker, one turn is the trial: turns me
   assert.equal((await brain.turn(turnArgs())).ok, true);
 });
 
+/* Codex r6 P1: a turn already in flight when another turn opens the outage. */
+test('an outage opened while another turn is in flight: that turn sends no further request (it ends with the out code), and its end neither restarts nor clears the 10 minutes', { timeout: 5_000 }, async () => {
+  const bRound1 = held(toolCalls(['search_properties', { query: 'villa' }]));
+  const h = harness({ script: [bRound1.step, QUOTA, reply('Back.')] });
+  const b = h.brain.turn(turnArgs({ leadId: LEAD2 }));
+  await untilCalls(h, 1);
+  assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'quota' }, 'turn A opens the outage');
+  assert.equal(h.calls.length, 2);
+  h.advance(30_000); // inside B's 40 s
+  bRound1.open();
+  assert.deepEqual(await b, { ok: false, code: 'quota' }, 'turn B takes the outage path: its next round is never sent');
+  assert.equal(h.calls.length, 2, 'no paid request during the hold');
+  assert.equal(h.ran.length, 1, 'B ran the tool its already-sent request asked for (tools only read)');
+  assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'quota' }, 'a third turn during the hold: the outage path, no call');
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.alerts.length, 1, 'one alert for the outage');
+  assert.equal(h.team.getSetting('brain_out'), String(T0));
+  h.advance(10 * MIN - 30_000 + 1);
+  assert.equal((await h.brain.turn(turnArgs())).ok, true, 'ten minutes after A\'s quota answer the next turn is the trial: B\'s end did not restart them');
+  assert.equal(h.calls.length, 3);
+  assert.equal(h.team.getSetting('brain_out'), '');
+});
+
+test('a success from a request sent before the outage opened (a turn or a classification) does not clear it: only the trial ends an outage, and the trial\'s own later rounds go out', { timeout: 5_000 }, async () => {
+  const bAnswer = held(reply('We have villas in Obhur.'));
+  const mailAnswer = held(reply('{"class":"client","wants":"x"}'));
+  const h = harness({ promptDir: promptDirWithClassifier(), script: [bAnswer.step, mailAnswer.step, QUOTA, toolCalls(['search_properties', { query: 'villa' }]), reply('Back.')] });
+  const b = h.brain.turn(turnArgs({ leadId: LEAD2 }));
+  const mail = h.brain.classify(MAIL);
+  await untilCalls(h, 2);
+  assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'quota' }, 'turn A opens the outage');
+  bAnswer.open();
+  assert.equal((await b).ok, true, 'B\'s answer came back from a request sent before the outage: it is still B\'s answer');
+  mailAnswer.open();
+  assert.deepEqual(await mail, { class: 'client', wants: 'x' });
+  assert.equal(h.team.getSetting('brain_out'), String(T0), 'the marker stays');
+  assert.equal(h.brain.ops().out, true);
+  assert.equal(h.brain.health().ok, false);
+  assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'quota' }, 'a third turn during the hold gets the outage path, no call');
+  assert.deepEqual(await h.brain.classify(MAIL), { error: 'quota' }, 'so does a classification');
+  assert.equal(h.calls.length, 3);
+  h.advance(10 * MIN + 1);
+  const r = await h.brain.turn(turnArgs());
+  assert.equal(r.ok, true, 'the trial');
+  assert.equal(r.rounds, 2, 'the trial owns the outage gate: its second round goes out');
+  assert.equal(h.calls.length, 5);
+  assert.equal(h.team.getSetting('brain_out'), '', 'the trial\'s success ends the outage');
+  assert.equal(h.brain.ops().out, false);
+});
+
 test('a rate limit: one retry when retry-after is at most 3 s, else the backup model; 3 in 5 min put the main model in a 60 s cooldown', async () => {
   const short = harness({ script: [http(429, { error: { type: 'rate_limit_exceeded' } }, { 'retry-after': '1' }), reply('Ok.')] });
   const a = await short.brain.turn(turnArgs());

@@ -14,13 +14,16 @@
  *   3. Email addresses → `[email]`; a Saudi IBAN → `[iban]`: `SA` (any case) and 22 digits, with
  *      up to 3 spaces, dashes, dots, slashes or underscores before and between any of them
  *      ("SA 0000…", "sa00-0000-…", "SA00.0000.…").
- *   4. Runs of digit groups joined by spaces, `-`, `.`, `(` or `)` (never a comma, so "2,950,000"
+ *   4. Runs of digit groups joined by 1-3 spaces, `-`, `.`, `(` or `)` (never a comma, so "2,950,000"
  *      stays a price, and never into or out of a date, so "2026-11-29 10:30" and "29/11/2026 10:30"
  *      stay dates) are read as one number; when that number has a phone shape (+966 / 00966 / 966 /
  *      05 / 5 + 8 digits, a 10-digit local number, any `+`/`00` run of 9-15 digits) it becomes
  *      `[phone]`, and a 10-digit run starting 1 or 2 (a Saudi ID or Iqama) becomes `[id-number]`.
- *      Groups split by `/` or `_` join too, but only into a `[phone]` ("050/000/0000"), so
- *      "2026/2027 12" is never read as an ID.
+ *      Groups split by `/` or `_`, by a `+`, or by any run of up to 6 of these separators (format
+ *      marks are not there at all, step 2) join too, but only into a `[phone]` ("050/000/0000",
+ *      "(050) - 000 - 0000", "+ 44 (113) - 000 - 0000"), so "2026/2027 12" is never read as an ID
+ *      and a wide run never makes an ID, an account number or a range. A `+` counts for the number
+ *      when it sits in the separator run just before its first group ("+ (44) ...").
  *   5. Any other run of 12 or more digits (joined the same way, `/` and `_` included) could be a
  *      bank account, an IBAN without its `SA` or a card number: `[account-number]`. The one shape
  *      left alone is a budget range: two amounts of 4-9 digits on one dash or slash, each written
@@ -35,6 +38,10 @@ const IBAN_RE = /(?<![A-Za-z0-9])SA(?:[\s._/-]{0,3}\d){22}(?!\d)/gi;
 /** What may sit between two digit groups of one number (in the probe): 1-3 of these. `/` and `_` only ever join into a phone. */
 const GAP_RE = /^[\s\-.()/_]{1,3}$/;
 const SOFT_GAP_RE = /[/_]/;
+/** A gap only a phone may cross: any run of up to 6 separators, `+` included ("(050) - 000 - 0000"). */
+const PHONE_GAP_RE = /^[\s\-.()/_+]{1,6}$/;
+const PHONE_SEP_RE = /^[\s\-.()/_+]$/;
+const PHONE_GAP_MAX = 6;
 const MAX_DIGITS = 15;
 /** A run of this many digits or more that is not a phone or an ID: an account or a card number. */
 const ACCOUNT_DIGITS = 12;
@@ -162,38 +169,51 @@ function numberCuts(s) {
     // group that can be one counts: exactly 3 digits after a comma (1-3 before one, below).
     const before = s[groups[i].start - 1];
     if (groups[i].date || (before === ',' && /\d/.test(s[groups[i].start - 2] ?? '') && groups[i].digits.length === 3)) { i += 1; continue; }
-    const plus = before === '+' || (before === '(' && s[groups[i].start - 2] === '+');
+    // A `+` in the separator run just before the group ("+966", "(+966)", "+ (44)"), never one before an earlier number's end.
+    const floor = Math.max(i > 0 ? groups[i - 1].end : 0, cuts.length ? cuts.at(-1).end : 0, groups[i].start - PHONE_GAP_MAX);
+    let plusAt = -1;
+    for (let k = groups[i].start - 1; k >= floor && PHONE_SEP_RE.test(s[k]); k -= 1) if (s[k] === '+') plusAt = k;
+    const plus = plusAt >= 0;
+    // The 3-digit tail of an amount no mask took ("2.950.000", "500 000") never starts a run across a wide gap:
+    // "2.950.000  -  3.100.000" is two amounts, never "000" plus "3100000".
+    const prevEnd = i > 0 ? groups[i - 1].end : -1;
+    const tail = i > 0 && groups[i].digits.length === 3 && groups[i].start === prevEnd + 1 && (before === ' ' || before === '.')
+      && !(cuts.length && cuts.at(-1).end >= prevEnd);
     let digits = '';
     let soft = false;
     let best = null;
     const gaps = [];
-    let last = i;
+    // Past a gap only a phone may cross (`wide`), the run is read for a phone only: the account rule reads it up to `acctLast`.
+    let wide = false;
+    let acctLast = i;
+    let acctDigits = 0;
     for (let j = i; j < groups.length; j += 1) {
       if (j > i) {
         const gap = s.slice(groups[j - 1].end, groups[j].start);
-        if (groups[j].date || !GAP_RE.test(gap)) break;
+        if (groups[j].date || !PHONE_GAP_RE.test(gap)) break;
+        if (!GAP_RE.test(gap)) { if (tail) break; wide = true; }
         gaps.push(gap);
-        if (SOFT_GAP_RE.test(gap)) soft = true;
+        if (wide || SOFT_GAP_RE.test(gap)) soft = true;
       }
       digits += groups[j].digits;
-      last = j;
-      // Too long for a phone: with one found, the run ends here (the rest is read on its own); without, it goes on for the account rule.
-      if (digits.length > MAX_DIGITS + 2) { if (best) break; continue; }
+      if (!wide) { acctLast = j; acctDigits = digits.length; }
+      // Too long for a phone: with one found (or past a wide gap), the run ends here (the rest is read on its own); without, it goes on for the account rule.
+      if (digits.length > MAX_DIGITS + 2) { if (best || wide) break; continue; }
       const after = s[groups[j].end];
       const glued = !plus && !digits.startsWith('00') && groups[j].digits.length <= 3 && after === ',' && /\d/.test(s[groups[j].end + 1] ?? '');
       const mask = glued ? null : maskFor(digits, plus);
       if (mask && (!soft || mask === '[phone]')) best = { j, mask };
     }
-    if (!best && digits.length >= ACCOUNT_DIGITS) {
+    if (!best && acctDigits >= ACCOUNT_DIGITS) {
       // A range is left as written; its second amount is then read on its own (it may still be a phone).
-      const second = rangeSplit(groups.slice(i, last + 1), gaps);
+      const second = rangeSplit(groups.slice(i, acctLast + 1), gaps.slice(0, acctLast - i));
       if (second) { i += second; continue; }
-      best = { j: last, mask: '[account-number]' };
+      best = { j: acctLast, mask: '[account-number]' };
     }
     if (!best) { i += 1; continue; }
     let start = groups[i].start;
-    if (s[start - 1] === '(') start -= 1;
-    if (s[start - 1] === '+') start -= 1;
+    if (plus) start = plusAt;
+    else if (s[start - 1] === '(') start -= 1;
     if (s[start - 1] === '(' && s[start] === '+') start -= 1;
     let end = groups[best.j].end;
     if (s[end] === ')' && s.slice(start, end).includes('(')) end += 1;

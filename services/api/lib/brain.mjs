@@ -43,8 +43,12 @@
  * State (§4.1): quota/auth → `out` for 10 min (no call; then one half-open trial, a turn or a
  * classification, while the others get the out code with no call until it answers; the free
  * GET /v1/models probe clears `auth` early), with the restart-safe `brain_out` marker and one
- * `brain_out` alert. After a restart with the marker set, the next turn is the trial at once, but
- * `health().ok` stays false until a turn or a classification works: the marker is a bare instant
+ * `brain_out` alert. The out gate is checked before every paid request, as the runaway stops
+ * are: a turn already in flight when another caller opens the outage sends no further round,
+ * backup or repair (it ends with the out code and leaves the out state as it is), and only the
+ * trial's success ends an outage (an answer to a request sent before it opened proves nothing).
+ * After a restart with the marker set, the next turn is the trial at once, but `health().ok`
+ * stays false until a turn or a classification works: the marker is a bare instant
  * (team.mjs), so it cannot say whether the outage was `auth` (a probe would prove the fix) or
  * `quota` (a probe proves nothing), and a key swap plus restart (§2.3) stays red until a client
  * writes (T14/T18: the Kuma "Bona AI" monitor). 3 rate limits in 5 min → the main model cools
@@ -291,6 +295,22 @@ export function createBrain(deps = {}) {
     if (state.outCode === null || (t >= state.outUntil && !state.outTrial)) return null;
     return state.outCode === 'restored' ? 'down' : state.outCode;
   }
+  /**
+   * The out gate before one paid request (`call`): null when there is no outage or this caller holds the trial
+   * (`ctx.outTrial`), else the code to stop with. A caller that passed runTurn's or classify's gate before the
+   * outage opened holds no trial, so its next request is never sent.
+   */
+  function outGate(ctx) {
+    if (state.outCode === null || ownsOutTrial(ctx.outTrial)) return null;
+    return state.outCode === 'restored' ? 'down' : state.outCode;
+  }
+  function ownsOutTrial(token) {
+    return Boolean(token) && state.outTrial === token;
+  }
+  /** A success ends the outage only from the trial; with no outage it clears a stray marker, as before. */
+  function clearOutAfter(token) {
+    if (state.outCode === null || ownsOutTrial(token)) clearOut();
+  }
   /** Past the gate while `out`: this caller is the trial. Its token, freed with `freeOutTrial` when the caller ends. */
   function takeOutTrial() {
     if (state.outCode === null) return null;
@@ -369,12 +389,16 @@ export function createBrain(deps = {}) {
   /**
    * One paid request. A runaway stop is checked before it is sent and again after its response is
    * counted: a request that crosses a stop answers `budget` (its alert goes out now), so the turn
-   * stops at once and never sends the next round, the backup or the repair. With a `slot` ('answer'
-   * or 'repair') every request sent takes one from the turn's allowance (`ctx.allow[slot]`), whatever
-   * comes back; a rate-limit retry only when one is left.
+   * stops at once and never sends the next round, the backup or the repair. The out gate is checked
+   * before it is sent too (`outGate`): an outage opened by another caller meanwhile answers its out
+   * code, marked `gated` (nothing was sent, nothing learnt), so the turn ends on the outage path.
+   * With a `slot` ('answer' or 'repair') every request sent takes one from the turn's allowance
+   * (`ctx.allow[slot]`), whatever comes back; a rate-limit retry only when one is left.
    */
   async function call(model, ctx, messages, toolChoice, acc, { retried = false, noRetry = false, slot = null } = {}) {
     if (overBudget()) return fail('budget');
+    const held = outGate(ctx);
+    if (held) return { ...fail(held), gated: true };
     const left = ctx.deadline - now();
     if (left <= 0) return fail('timeout');
     if (slot) ctx.allow[slot] -= 1;
@@ -556,12 +580,12 @@ export function createBrain(deps = {}) {
     if (code === 'down' || code === 'timeout') b.openUntil = now() + limits.breakerOpenMs;
     else { b.open = false; b.fails = []; }
   }
-  /** After a turn that called a model: the out state, the breaker, the bug count. */
-  function settle(code, wasTrial) {
+  /** After a turn that called a model: the out state (cleared only by the out trial, `outTrial`), the breaker, the bug count. */
+  function settle(code, wasTrial, outTrial) {
     const t = now();
     const b = state.breaker;
     if (code === null) {
-      clearOut();
+      clearOutAfter(outTrial);
       if (b.open || wasTrial) { b.open = false; b.fails = []; }
       b.trial = false;
       return;
@@ -638,7 +662,7 @@ export function createBrain(deps = {}) {
     }
     const outTrial = takeOutTrial();
     try {
-      return await modelTurn(input, { route, language, system, leadId, logLead, started, end, wasTrial: trial !== null });
+      return await modelTurn(input, { route, language, system, leadId, logLead, started, end, wasTrial: trial !== null, outTrial });
     } finally {
       // A throw before settle() (a bug of ours, never the provider) frees the trial, so the next
       // turn is the trial again instead of `down` with no call until a restart.
@@ -649,7 +673,7 @@ export function createBrain(deps = {}) {
   }
 
   /** The part of a turn that may call a model, once runTurn's gates passed. */
-  async function modelTurn(input, { route, language, system, leadId, logLead, started, end, wasTrial }) {
+  async function modelTurn(input, { route, language, system, leadId, logLead, started, end, wasTrial, outTrial }) {
     const answerBackup = backupMode === 'answer' && Boolean(models.backup) && models.backup !== models.main;
     const startOnBackup = inCooldown(started);
     if (startOnBackup && !answerBackup) return end(fail('rate'));
@@ -657,7 +681,7 @@ export function createBrain(deps = {}) {
     const turnMs = Number.isFinite(input.deadlineMs) && input.deadlineMs > 0 ? Math.min(input.deadlineMs, limits.turnMs) : limits.turnMs;
     const offeredTools = toolsFor(route, Array.isArray(input.toolNames) ? input.toolNames : undefined);
     const ctx = {
-      route, language, leadId, logLead,
+      route, language, leadId, logLead, outTrial,
       deadline: started + turnMs,
       // The per-turn caps (§2.4), shared by the main attempt and the backup restart.
       allow: { answer: limits.answerCalls, repair: limits.repairCalls, tools: limits.tools },
@@ -679,17 +703,19 @@ export function createBrain(deps = {}) {
     let backup = startOnBackup;
     let res = await attempt(model, ctx, acc);
     // The backup restart gets what is left of the turn: the time, the answer and repair calls, the tools.
-    if (!res.ok && BACKUP_CODES.has(res.code) && !backup && answerBackup && ctx.deadline - now() >= limits.backupMinMs && ctx.allow.answer > 0) {
+    if (!res.ok && !res.gated && BACKUP_CODES.has(res.code) && !backup && answerBackup && ctx.deadline - now() >= limits.backupMinMs && ctx.allow.answer > 0) {
       if (res.code === 'bad_response') noteBug();
       model = models.backup;
       backup = true;
       res = await attempt(model, ctx, acc);
     }
     if (!res.ok) {
-      settle(res.code, wasTrial);
+      // Stopped by the out gate (another caller opened the outage): no request was sent, so the out state, the
+      // breaker and the bug count stay as they are (runTurn's finally frees a breaker trial).
+      if (!res.gated) settle(res.code, wasTrial, outTrial);
       return end(fail(res.code));
     }
-    settle(null, wasTrial);
+    settle(null, wasTrial, outTrial);
     state.lastTurnBackup = backup;
     return end({
       ok: true, model, backup, rounds: res.rounds, ms: now() - started, usd: acc.micro / 1e6, usage: acc.usage,
@@ -732,20 +758,21 @@ export function createBrain(deps = {}) {
       const masked = (v) => minimise(String(v ?? ''));
       const user = minimise(`From: ${oneLine(masked(input.fromName), 80)} (${oneLine(masked(input.fromDomain), 120)})\nSubject: ${oneLine(masked(input.subject), 200)}\n\n${clipChars(masked(input.text ?? input.text600), 600)}`);
       const ctx = {
-        route: 'classify', tools: [], cacheKey: 'bona-classify-v1', responseFormat: CLASSIFY_FORMAT, deadline: t + limits.callMs,
+        route: 'classify', tools: [], cacheKey: 'bona-classify-v1', responseFormat: CLASSIFY_FORMAT, deadline: t + limits.callMs, outTrial,
         safetyId: typeof input.senderKey === 'string' && input.senderKey ? safetyIdentifier(`mail:${input.senderKey.toLowerCase()}`) : undefined,
       };
       const res = await call(models.classify, ctx, [{ role: 'system', content: prompts.classify.trim() }, { role: 'user', content: user }], undefined, null, { noRetry: true });
-      trialCode = res.ok ? null : res.code;
+      trialCode = res.gated ? undefined : res.ok ? null : res.code;
       if (!res.ok) {
-        if (OUT_CODES.has(res.code)) enterOut(res.code);
+        if (OUT_CODES.has(res.code) && !res.gated) enterOut(res.code);
         return { error: res.code };
       }
       if (res.refusal) return { error: 'refusal' };
       let parsed = null;
       try { parsed = JSON.parse(res.text); } catch { parsed = null; }
       if (!parsed || !CLASSES.has(parsed.class) || typeof parsed.wants !== 'string') return { error: 'bad_response' };
-      if (state.outCode !== null) clearOut();
+      // Only the out trial's answer ends an outage; one to a request sent before it opened proves nothing.
+      if (state.outCode !== null) clearOutAfter(outTrial);
       return { class: parsed.class, wants: oneLine(parsed.wants, 120) };
     } catch {
       return { error: 'bad_response' };

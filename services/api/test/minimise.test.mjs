@@ -210,3 +210,100 @@ test('readable (the reply guard\'s reading) folds every digit, reads every space
   assert.equal(readable('8\uFE0F5\u0301,000 ريالاً'), '85,000 ريالاً', 'a mark on a digit goes');
   assert.equal(readable(null), '');
 });
+
+/* Codex r6 P0: a separator run longer than 3 characters (") - ") split one phone into short groups that no mask knew. */
+test('a phone whose groups sit across any run of up to 6 separators (spaces, dashes, dots, slashes, underscores, parentheses, "+", format marks) is masked', () => {
+  for (const [input, want] of [
+    ['(050) - 000 - 0000', '[phone]'],
+    ['call (050) - 000 - 0000 please', 'call [phone] please'],
+    ['( 050 ) - 000 - 0000', '( [phone]'],
+    ['0500000000 050  -  000  -  0001', '[phone] [phone]'],
+    ['050  -  000  -  0000', '[phone]'],
+    ['050 -- 000 -- 0000', '[phone]'],
+    ['050 .-. 000 . 0000', '[phone]'],
+    ['+966 (50) - 000 - 0000', '[phone]'],
+    ['+ 966 ( 50 ) - 000 - 0000', '[phone]'],
+    ['+ 44 (113) - 000 - 0000', '[phone]'],
+    ['050 + 000 + 0000', '[phone]'],
+    ['(050)​ - ‎000⁠ - 0000', '[phone]'],
+    ['(٠٥٠) – ٠٠٠ – ٠٠٠٠', '[phone]'],
+  ]) assert.equal(minimise(input), want, hex(input));
+});
+
+test('a wide separator run joins only into a phone: an ID, an account number or a budget range across one is never made of it', () => {
+  for (const s of ['2.950.000  -  3.100.000', '2.012.000  -  3.100.000', '2.950.050  -  3.100.000', '2 950 050  -  3 100 000', 'budget 2950000  -  3100000', '1000  -  000  -  001', 'from 2,950,000  -  3,100,000', '2950000 + 50000 fees',
+    'SAR 12 500 000 ( 3 bedrooms )']) {
+    assert.equal(minimise(s), s, s);
+  }
+  assert.equal(minimise('card 1111 2222 3333 4444  -  0500000000'), 'card [account-number]  -  [phone]');
+  assert.equal(minimise('call 0500000000  -  12 bedrooms'), 'call [phone]  -  12 bedrooms', 'a count after a phone stays');
+});
+
+/** A small deterministic PRNG (mulberry32), so the property test reads the same formats on every run. */
+function prng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+test('property: hundreds of formats of real-shaped synthetic phones (random groups, separator runs of 0-6, parentheses, format marks) leave no 7-digit run of the number', () => {
+  const rand = prng(20261127);
+  const pick = (list) => list[Math.floor(rand() * list.length)];
+  // Example numbers only (+966 50 000 0000 style; no "19"/"20" inside, so no grouping of them is a date).
+  const NUMBERS = [
+    ['', '0500000000'], ['', '0551234567'], ['', '500000000'], ['', '966500000000'], ['', '00966500000000'], ['', '0130000000'],
+    ['', '0140000000'], ['+', '966500000000'], ['+', '966551234567'], ['+', '966130000000'], ['+', '441130000000'],
+  ];
+  const SEP = [' ', ' ', ' ', ' ', '　', '-', '-', '–', '‑', '−', '－', '.', '/', '_', '(', ')', '+'];
+  const MARKS = ['​', '‎', '‏', '⁠', '﻿', '؜'];
+  const run = (n) => {
+    let out = '';
+    for (let k = 0; k < n; k += 1) out += pick(SEP);
+    for (let m = Math.floor(rand() * 3); m > 0; m -= 1) {
+      const at = Math.floor(rand() * (out.length + 1));
+      out = out.slice(0, at) + pick(MARKS) + out.slice(at);
+    }
+    return out;
+  };
+  let cases = 0;
+  for (const [plus, digits] of NUMBERS) {
+    for (let f = 0; f < 50; f += 1) {
+      const groups = [];
+      let cur = '';
+      for (const d of digits) {
+        if (cur && rand() < 0.35) { groups.push(cur); cur = ''; }
+        cur += d;
+      }
+      groups.push(cur);
+      const wrap = groups.map(() => rand() < 0.25);
+      let text = '';
+      groups.forEach((g, k) => {
+        if (k > 0) {
+          // The whole gap, wrapping parentheses included, is 0-6 separator characters.
+          const parens = Number(wrap[k - 1]) + Number(wrap[k]);
+          text += run(Math.floor(rand() * (7 - parens)));
+        }
+        text += wrap[k] ? `(${g})` : g;
+      });
+      if (plus) text = pick(['+', '+', '(+', '+(', '+ ', '+ (']) + (text.startsWith('(') && rand() < 0.5 ? text.slice(1) : text);
+      const input = `call ${text} please`;
+      const out = minimise(input);
+      for (let k = 0; k + 7 <= digits.length; k += 1) assert.ok(!out.replace(/\D/g, '').includes(digits.slice(k, k + 7)), `${hex(input)} -> ${out}`);
+      assert.doesNotMatch(out, /\d/, `${hex(input)} -> ${out}`);
+      cases += 1;
+    }
+  }
+  assert.ok(cases >= 500, `${cases} formats`);
+  // The negative set: prices, dates, times, counts and ranges stay exactly as written.
+  for (const s of ['SAR 2,950,000', 'from 2,950,000 to 3,100,000', '2026-11-29 10:30', '29/11/2026', 'Sun 29 Nov 2026 10:30', '10:00 - 19:00',
+    '10:00–19:00', '3 bedrooms 2 baths', '4 bedrooms, 3 baths', '2 - 3 bedrooms', 'budget 2950000 - 3100000', '2.950.000 - 3.100.000',
+    'budget 950.000 - 1.200.000 riyals', '2.950.000  -  3.100.000', 'sizes 300 - 450 - 600 sqm', '(2) - (3) - (4) bedrooms', 'plot 1,200 sqm (30 x 40)',
+    'BONA-W012', 'B08 - 19', 'floor 3 / 12', '12,500 m²']) {
+    assert.equal(minimise(s), s, s);
+  }
+});
