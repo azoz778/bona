@@ -304,7 +304,7 @@ Full FAQ: https://bona-real-estate.com/faq/ · Arabic: https://bona-real-estate.
 
 ## Privacy (summary)
 
-What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-11-27): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 57 626 7694.
+What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-11-27): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: Bona keeps first-party records of visits and enquiries made on the site; the optional analytics and advertising tags (Google Analytics 4, Meta Pixel and TikTok Pixel) load only with consent, and so does a first-party bona_id cookie; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 57 626 7694.
 
 ## Listings (53 live)
 
@@ -1728,4 +1728,4 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 
 ## How to enquire
 
-WhatsApp +966 57 626 7694 (https://wa.me/966576267694) with the property ID, or use the contact page https://bona-real-estate.com/contact/. Replies in English or Arabic during office hours.
+WhatsApp +966 57 626 7694 (https://wa.me/966576267694) with the property ID, or use the contact page https://bona-real-estate.com/contact/. Bona’s AI assistant answers on WhatsApp at any hour, in Arabic or English, and says that it is an AI; our team replies Sunday – Thursday, 10:00 – 19:00 (Saudi time).

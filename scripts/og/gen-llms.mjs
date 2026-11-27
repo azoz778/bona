@@ -225,10 +225,16 @@ Full FAQ: ${abs('/faq/')} · Arabic: ${abs('/ar/faq/')}
 `
   : '';
 
+/* The summary says what privacy.json "What this site collects" says: first-party records of visits and
+   enquiries, and the optional tags (only those site.json configures) plus the bona_id cookie only with
+   consent. It once said "sets no cookies" and "analytics currently disabled", which the policy contradicts. */
+const OPTIONAL_TAGS = [['ga4', 'Google Analytics 4'], ['metaPixel', 'Meta Pixel'], ['tiktokPixel', 'TikTok Pixel'], ['snapPixel', 'Snap Pixel']];
+const optionalTags = OPTIONAL_TAGS.filter(([key]) => site.analytics?.[key]).map(([, name]) => name);
+const listOf = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 const privacySection = privacy
   ? `## Privacy (summary)
 
-${privacy.intro?.en || ''} Full policy (updated ${privacy.updated}): ${abs('/privacy/')} · Arabic: ${abs('/ar/privacy/')}. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp ${site.whatsapp.display}.
+${privacy.intro?.en || ''} Full policy (updated ${privacy.updated}): ${abs('/privacy/')} · Arabic: ${abs('/ar/privacy/')}. In short: Bona keeps first-party records of visits and enquiries made on the site; ${optionalTags.length ? `the optional analytics and advertising tags (${listOf(optionalTags)}) load only with consent, and so does a first-party bona_id cookie` : 'no optional analytics or advertising tag is configured'}; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp ${site.whatsapp.display}.
 `
   : '';
 
@@ -285,7 +291,7 @@ Grouped by kind: ${byKind(live).map((k) => `${k.label} ${k.items.length}`).join(
 ${byKind(live).map((k) => `## ${k.label} (${k.items.length})${k.path ? ` — ${abs(k.path)}` : ''}\n\n${k.items.map(listingBlock).join('\n')}`).join('\n')}
 ## How to enquire
 
-WhatsApp ${site.whatsapp.display} (${wa}) with the property ID, or use the contact page ${abs('/contact/')}. Replies in English or Arabic during office hours.
+WhatsApp ${site.whatsapp.display} (${wa}) with the property ID, or use the contact page ${abs('/contact/')}. Bona’s AI assistant answers on WhatsApp at any hour, in Arabic or English, and says that it is an AI; our team replies ${site.hours.en} (Saudi time).
 `;
 
 fs.writeFileSync(path.join(root, 'public/llms.txt'), short);

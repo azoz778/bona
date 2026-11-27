@@ -1,0 +1,78 @@
+/**
+ * The knowledge file answer engines read (and, until D3, the website concierge's knowledge base), checked over
+ * the BUILT site: dist/llms-full.txt, which scripts/og/gen-llms.mjs writes into public/ before the build. A
+ * listing's coordinates say whether they are its own pin or a district centre, the privacy summary agrees with
+ * the policy (src/data/privacy.json), and the enquiry line says who answers on WhatsApp and when, as the FAQ does.
+ *
+ *   node scripts/og/gen-llms.mjs && npm run build && node --test test/llms-knowledge.test.mjs   (or: npm run test:dist)
+ */
+import { readFileSync, existsSync } from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const dist = path.join(root, 'dist');
+const file = path.join(dist, 'llms-full.txt');
+assert.ok(existsSync(file), `dist/llms-full.txt is missing — run gen-llms and \`npm run build\` first (looked in ${dist})`);
+const full = readFileSync(file, 'utf8');
+const read = (rel) => JSON.parse(readFileSync(path.join(root, rel), 'utf8'));
+const listings = read('src/data/listings.json');
+const site = read('src/data/site.json');
+const faq = read('src/data/faq.json');
+
+const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** A listing's block, from its ID line to the next heading; null when the file leaves the listing out. */
+function blockOf(l) {
+  const m = new RegExp(`\\n- ID: ${escape(l.id)}(?: \\(|\\n)`).exec(full);
+  if (!m) return null;
+  const end = full.indexOf('\n### ', m.index + 1);
+  return full.slice(m.index, end < 0 ? undefined : end);
+}
+/** One `## ` section of the file, heading included. */
+function sectionOf(heading) {
+  const at = full.indexOf(`\n## ${heading}`);
+  assert.ok(at >= 0, `llms-full.txt has no “## ${heading}” section`);
+  const end = full.indexOf('\n## ', at + 1);
+  return full.slice(at + 1, end < 0 ? undefined : end);
+}
+
+test('a listing’s coordinates say whether they are its own pin or a district centre (mapPrecision)', () => {
+  // mapPrecision 'exact' is the developer's or the register's own pin; anything else is a district centroid
+  // the build filled in, and a knowledge file must not hand that out as the home's location.
+  for (const l of listings) {
+    const block = blockOf(l);
+    if (!block) { assert.equal(l.status, 'sold', `${l.id} is missing from llms-full.txt`); continue; }
+    const lines = block.split('\n').filter((x) => x.startsWith('- Coordinates'));
+    if (!(l.map && typeof l.map.lat === 'number' && typeof l.map.lng === 'number')) {
+      assert.deepEqual(lines, [], `${l.id}: no map, so no coordinates`);
+      continue;
+    }
+    const kind = l.mapPrecision === 'exact' ? 'exact pin' : 'approximate, district centre';
+    assert.deepEqual(lines, [`- Coordinates (${kind}): ${l.map.lat}, ${l.map.lng}`], `${l.id} (mapPrecision ${l.mapPrecision ?? 'unset'})`);
+  }
+  assert.doesNotMatch(full, /^- Coordinates: /m, 'every coordinates line says which kind it is');
+});
+
+test('the privacy summary agrees with the policy: first-party records of visits and enquiries, and the optional tags and cookie only with consent', () => {
+  const summary = sectionOf('Privacy (summary)');
+  // What the summary said before D1, and the policy does not (privacy.json what-this-site-collects).
+  for (const gone of [/sets no cookies/, /nothing is stored by the site/, /currently disabled/]) assert.doesNotMatch(summary, gone);
+  assert.match(summary, /Bona keeps first-party records of visits and enquiries made on the site/);
+  assert.match(summary, /load only with consent, and so does a first-party bona_id cookie/);
+  // The tags it names are the ones the site is configured with (site.json analytics), no more and no fewer.
+  const TAGS = { ga4: 'Google Analytics 4', metaPixel: 'Meta Pixel', tiktokPixel: 'TikTok Pixel', snapPixel: 'Snap Pixel' };
+  for (const [key, name] of Object.entries(TAGS)) {
+    assert.equal(summary.includes(name), Boolean(site.analytics?.[key]), `${name}: site.json analytics.${key} is ${site.analytics?.[key] ? 'set' : 'not set'}`);
+  }
+  assert.ok(summary.includes(`via WhatsApp ${site.whatsapp.display}`), 'the rights are used on WhatsApp');
+});
+
+test('the enquiry line says who answers on WhatsApp and when, as the FAQ does (D1)', () => {
+  const how = sectionOf('How to enquire');
+  assert.doesNotMatch(how, /during office hours/, 'the AI assistant answers at any hour');
+  assert.ok(how.includes(`Bona’s AI assistant answers on WhatsApp at any hour, in Arabic or English, and says that it is an AI; our team replies ${site.hours.en} (Saudi time).`), how);
+  const contact = faq.items.find((x) => x.id === 'contact');
+  assert.match(contact.a.en[0], /Bona’s AI assistant answers there at any hour, in Arabic or English, and says that it is an AI/, 'the FAQ says the same');
+});

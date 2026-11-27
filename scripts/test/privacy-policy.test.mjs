@@ -13,7 +13,10 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const read = (rel) => JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), 'utf8'));
 const policy = read('../../src/data/privacy.json');
@@ -23,6 +26,12 @@ const faq = read('../../src/data/faq.json');
 // conversations section: the old first two paragraphs, word for word (DESIGN §13.2, PR-D1r).
 const rollback = read('../../services/deploy/vps/rollback/privacy-shared-number.json');
 const today = () => new Date().toISOString().slice(0, 10);
+const plusDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+// The day D1 merged, written once. Its Changes line (EN and AR) carries this date, the version dates at
+// the top of privacy.json and faq.json are on or after it, and the line stays for 30 days from it. The
+// branch carries a placeholder: at the go-live rebase this constant, both `updated` fields and both
+// Changes lines move to the merge day in one commit (PLAN §3 step 9b).
+const D1_RELEASED = '2026-11-27';
 const section = (id) => policy.sections.find((s) => s.id === id);
 const body = (s, locale) => s.body[locale].join(' ');
 
@@ -188,7 +197,7 @@ test('the AI assistant paragraph (D1): no name, OpenAI, the hand-over, the 24 ho
   assert.match(body(concierge, 'en'), /The website concierge is not a person/);
   assert.match(body(concierge, 'ar'), /ومساعدة الموقع الذكية ليست شخصاً/);
   assert.doesNotMatch(body(concierge, 'en'), /Use WhatsApp instead if you do not want to use the AI concierge\./);
-  assert.ok(policy.updated >= '2026-11-27', 'the page date moves with D1');
+  assert.ok(policy.updated >= D1_RELEASED, 'the page date moves with D1');
 });
 
 test('Bona’s own number (D1): every one-to-one chat is an enquiry except the team’s and not-a-client chats; a chat with a hidden number is not stored', () => {
@@ -206,6 +215,11 @@ test('Bona’s own number (D1): every one-to-one chat is an enquiry except the t
   assert.match(ar, /وإذا لم يُظهر لنا واتساب رقم الهاتف الذي تصدر منه محادثةٌ ما، فلا نحتفظ بتلك المحادثة ولا تردّ عليها مساعدة بونا الذكية/);
   assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة فيها، ليردّ عليها مالك بونا بنفسه؛ وإذا حدّد أنها لا تخص عميلاً لبونا، لا نحتفظ إلا بتلك المعرّفات، مدةً أقصاها سنة/);
   // The property-word exception belongs to the shared rule: it left the page and waits in the rollback text.
+  // Decision (review of PR #87, round 1): Bona's own number keeps no property-word record at all, not even
+  // while `#dana live off` (own_inbox '0') brings the shared rule's joins back. While the instance is
+  // verified as Bona's own number (ownNumberOk), the poller stores no inbox_candidates row for a chat with a
+  // phone and deletes the ones already there (PLAN T06, T07; DESIGN §3.1). Such rows exist only on the
+  // personal number, whose page is the rollback text (PR-D1r), so this paragraph needs no copy here.
   assert.ok(!s.body.en.some((p) => p.startsWith('There is one narrow exception')), 'en: the exception is gone');
   assert.ok(!s.body.ar.some((p) => p.startsWith('وهناك استثناء محدود')), 'ar: the exception is gone');
   assert.doesNotMatch(body(s, 'en'), /the next paragraph describes the one narrow exception/);
@@ -232,7 +246,8 @@ test('viewing-bookings comes right after the AI phone assistant: what is booked,
   assert.match(en, /Bona’s viewing calendar is a Google Calendar of the owner of Bona, provided by Google, which may process it outside Saudi Arabia under its own terms\. A booking puts in it the time of the viewing, the home, your name and phone number, and a link to your enquiry in our private dashboard; it sends no invitation to you or to anyone else\./);
   assert.match(en, /A request to delete your enquiry covers its calendar entries too\./);
   assert.match(ar, /وتقويم معاينات بونا تقويمٌ في Google لمالك بونا، تقدّمه Google وقد تعالجه خارج المملكة وفق شروطها\./);
-  assert.match(ar, /ولا يُرسل أي دعوة إليك أو إلى غيرك\./);
+  // The Arabic is the authoritative text, so it lists the same entry contents as the English, word for word.
+  assert.match(ar, /ويُدرج الحجز فيه وقت المعاينة والعقار واسمك ورقم هاتفك ورابطاً لاستفسارك في لوحتنا الخاصة، ولا يُرسل أي دعوة إليك أو إلى غيرك\./);
   assert.match(ar, /ويشمل طلب حذف استفسارك حذف مواعيده من التقويم أيضاً\./);
 });
 
@@ -275,7 +290,7 @@ test('the rest of D1: who we are, legal basis, retention, transfers, your rights
 
 // The 26 November line stays word for word until its 30 days are up (2026-12-26); it is pinned by its
 // SHA-256, because it names the number it replaced and no new copy of that number is written here.
-// The D1 line is dated the day D1 merges, so its 30 days run from its own date.
+// The D1 line is dated D1_RELEASED, the day D1 merges, so its 30 days run from that date.
 const NOV26_SHA256 = {
   en: '6c826d4ba29bc06bb8f2bacf18fe31b4182cf6e1f321bb545ad4a9108b9f67c0',
   ar: '3f82c03dc52eebb3405005a319892310da090f1e77a6f451a0456b38ee726faa',
@@ -295,6 +310,56 @@ const isoOf = (m, locale) => {
   assert.ok(month > 0, `${locale}: ${m[2]} is no month name`);
   return `${m[3]}-${String(month).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
 };
+/** “4 December 2026” / “4 ديسمبر 2026” for 2026-12-04: how a Changes line writes its date. */
+const writtenDate = (iso, locale) => `${Number(iso.slice(8, 10))} ${MONTHS[locale][Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;
+
+/**
+ * The D1 Changes line of policy `p`, checked as of the day `on`. Its 30 days run from D1_RELEASED, not
+ * from whatever the text says: until they are up the line must be there in both languages, dated
+ * D1_RELEASED, and a rewrite its pattern no longer finds counts as a missing line. Once they are up it
+ * may come out (`undefined`).
+ */
+function checkD1Line(p, on) {
+  const changes = p.sections.find((x) => x.id === 'changes');
+  const en = changes.body.en.find((x) => D1_LINE.en.test(x));
+  const ar = changes.body.ar.find((x) => D1_LINE.ar.test(x));
+  const until = plusDays(D1_RELEASED, 30);
+  if (on >= until && !en && !ar) return undefined;
+  assert.ok(en && ar, `the D1 line in each language (due until ${until})`);
+  assert.equal(isoOf(en.match(D1_LINE.en), 'en'), D1_RELEASED, 'en: the D1 line carries the D1 date (D1_RELEASED)');
+  assert.equal(isoOf(ar.match(D1_LINE.ar), 'ar'), D1_RELEASED, 'ar: the D1 line carries the D1 date (D1_RELEASED)');
+  assert.ok(p.updated >= D1_RELEASED, 'the version date at the top moved with it');
+  return { en, ar };
+}
+
+test('the D1 Changes line stays its 30 days from D1_RELEASED, whatever day D1 merges (the check itself)', () => {
+  const edit = (fn) => {
+    const p = structuredClone(policy);
+    const changes = p.sections.find((x) => x.id === 'changes');
+    for (const locale of ['en', 'ar']) changes.body[locale] = fn(changes.body[locale], locale);
+    return p;
+  };
+  const lastDay = plusDays(D1_RELEASED, 29);
+  assert.equal(plusDays('2026-12-04', 30), '2027-01-03');
+  assert.equal(writtenDate('2026-12-04', 'en'), '4 December 2026');
+  assert.equal(writtenDate('2026-12-04', 'ar'), '4 ديسمبر 2026');
+  assert.ok(checkD1Line(policy, lastDay), 'the page as it is passes on its last day');
+  // Both lines removed a day early: red, even past the old fixed cutoff of 27 December.
+  const removed = edit((paras, locale) => paras.filter((x) => !D1_LINE[locale].test(x)));
+  assert.throws(() => checkD1Line(removed, lastDay), /the D1 line in each language/);
+  assert.equal(checkD1Line(removed, plusDays(D1_RELEASED, 30)), undefined, 'gone once its 30 days are up');
+  // A rewrite of both opening sentences is a missing line, not a pass.
+  const rewritten = edit((paras, locale) => paras.map((x) => (D1_LINE[locale].test(x)
+    ? x.replace(locale === 'en' ? 'now answers every enquiry chat' : 'تردّ على كل محادثة استفسار', locale === 'en' ? 'answers' : 'تردّ')
+    : x)));
+  assert.throws(() => checkD1Line(rewritten, lastDay), /the D1 line in each language/);
+  // A line dated another day than D1_RELEASED (the date moved without the constant, or the reverse).
+  const later = plusDays(D1_RELEASED, 7);
+  const moved = edit((paras, locale) => paras.map((x) => (D1_LINE[locale].test(x)
+    ? x.replace(writtenDate(D1_RELEASED, locale), writtenDate(later, locale))
+    : x)));
+  assert.throws(() => checkD1Line(moved, lastDay), /carries the D1 date/);
+});
 
 test('Changes (D1): the September and October lines are gone, the 26 November line stays word for word, and the D1 line says what changed, in both languages (30 days)', () => {
   const changes = section('changes');
@@ -302,15 +367,9 @@ test('Changes (D1): the September and October lines are gone, the 26 November li
   for (const start of ['30 سبتمبر 2026:', '1 أكتوبر 2026:']) assert.ok(!changes.body.ar.some((p) => p.startsWith(start)), `ar still has a ${start} line`);
   const nov26 = today() < '2026-12-26';
   if (nov26) for (const locale of ['en', 'ar']) assert.equal(changes.body[locale].filter((p) => isNov26(locale, p)).length, 1, `${locale}: the 26 November line, word for word`);
-  const en = changes.body.en.find((p) => D1_LINE.en.test(p));
-  const ar = changes.body.ar.find((p) => D1_LINE.ar.test(p));
-  // D1 merges on 27 November at the earliest, so before 27 December its line must be there.
-  if (!en && !ar && today() >= '2026-12-27') return;
-  assert.ok(en && ar, 'the D1 line in each language');
-  const date = isoOf(en.match(D1_LINE.en), 'en');
-  assert.equal(isoOf(ar.match(D1_LINE.ar), 'ar'), date, 'the same date in both languages');
-  assert.ok(date >= '2026-11-27', 'dated the day D1 merges');
-  assert.ok(policy.updated >= date, 'the version date at the top moved with it');
+  const d1 = checkD1Line(policy, today());
+  if (!d1) return;
+  const { en, ar } = d1;
   if (nov26) for (const [locale, line] of [['en', en], ['ar', ar]]) {
     assert.equal(changes.body[locale].indexOf(line), changes.body[locale].findIndex((p) => isNov26(locale, p)) + 1, `${locale}: right after the 26 November line`);
   }
@@ -323,22 +382,54 @@ test('Changes (D1): the September and October lines are gone, the 26 November li
 
 // The AI providers the brain may call (services/api/lib/brain/providers.mjs, PR-BR) are pinned, and
 // each one is named on the page before the code may call it: adding a provider is a privacy release
-// first (brain/DESIGN-brain §2.1, §11.3). Until PR-BR merges, the list is the pinned one of the design.
+// first (brain/DESIGN-brain §2.1, §11.3). Until PR-BR creates lib/brain/, the list is the pinned one of
+// the design. Once that directory exists, providers.mjs must be in it and export PROVIDERS as the
+// design pins it, an array of provider ids such as ['openai']: a moved or renamed module, or another
+// shape, fails here rather than letting the check fall back to the pinned list for good.
 const PROVIDER_NAMES = Object.freeze({ openai: 'OpenAI' });
-async function brainProviders() {
-  const file = new URL('../../services/api/lib/brain/providers.mjs', import.meta.url);
-  if (!fs.existsSync(file)) return ['openai'];
-  const { PROVIDERS } = await import(file.href);
-  assert.ok(PROVIDERS, 'providers.mjs exports PROVIDERS');
-  const list = Array.isArray(PROVIDERS) ? PROVIDERS : Object.keys(PROVIDERS);
-  return list.map((p) => String(typeof p === 'string' ? p : p?.id ?? p?.name).toLowerCase());
+const BRAIN_DIR = new URL('../../services/api/lib/brain/', import.meta.url);
+/** PROVIDERS as DESIGN-brain §2.1 pins it: a non-empty array of lower-case provider ids. */
+function providerIds(list) {
+  assert.ok(Array.isArray(list) && list.length > 0, `PROVIDERS is a non-empty array of provider ids, not ${JSON.stringify(list)}`);
+  for (const id of list) assert.ok(typeof id === 'string' && /^[a-z][a-z0-9-]*$/.test(id), `PROVIDERS entry ${JSON.stringify(id)} is no provider id`);
+  return [...list];
 }
+async function brainProviders(dir = BRAIN_DIR) {
+  if (!fs.existsSync(dir)) return ['openai'];
+  const file = new URL('providers.mjs', dir);
+  assert.ok(fs.existsSync(file), `providers.mjs not found in ${fileURLToPath(dir)}: the provider cross-check reads PROVIDERS from it`);
+  const { PROVIDERS } = await import(file.href);
+  return providerIds(PROVIDERS);
+}
+
+test('the provider cross-check reads PROVIDERS as the design pins it, and fails closed once lib/brain/ exists (the check itself)', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-providers-'));
+  try {
+    let n = 0;
+    /** A lib/brain/ of its own for each case: an imported module is cached by its URL. */
+    const brainWith = (source) => {
+      const dir = path.join(tmp, `brain-${n += 1}`);
+      fs.mkdirSync(dir);
+      if (source !== null) fs.writeFileSync(path.join(dir, 'providers.mjs'), source);
+      return pathToFileURL(`${dir}/`);
+    };
+    assert.deepEqual(await brainProviders(pathToFileURL(`${tmp}/absent/`)), ['openai'], 'no lib/brain/ yet: the pinned list');
+    await assert.rejects(brainProviders(brainWith(null)), /providers\.mjs not found/, 'lib/brain/ without providers.mjs');
+    assert.deepEqual(await brainProviders(brainWith("export const PROVIDERS = Object.freeze(['openai']);\n")), ['openai']);
+    for (const bad of ["{ openai: 'anthropic' }", "[{ id: 'openai' }]", "['OpenAI']", '[]', "'openai'"]) {
+      await assert.rejects(brainProviders(brainWith(`export const PROVIDERS = ${bad};\n`)), /PROVIDERS/, bad);
+    }
+    await assert.rejects(brainProviders(brainWith('export const OTHER = 1;\n')), /PROVIDERS is a non-empty array/, 'no PROVIDERS export');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
 
 test('every AI provider the assistant may call is named where the page says who gets the chat; no other AI vendor is named; Retell only where it still runs (D1)', async () => {
   const providers = await brainProviders();
   assert.ok(providers.length > 0, 'the brain names at least one provider');
   for (const id of providers) {
-    const name = PROVIDER_NAMES[id];
+    const name = Object.hasOwn(PROVIDER_NAMES, id) ? PROVIDER_NAMES[id] : undefined;
     assert.ok(name, `${id}: name this provider on the privacy page (WhatsApp paragraph and sharing, EN and AR) before the code may call it`);
     for (const locale of ['en', 'ar']) {
       assert.ok(aiParagraph(locale)?.includes(name), `${locale}: the WhatsApp paragraph names ${name}`);
@@ -353,7 +444,12 @@ test('every AI provider the assistant may call is named where the page says who 
   }
   for (const locale of ['en', 'ar']) {
     const sharing = section('sharing').body[locale].filter((p) => p.includes('Retell'));
-    assert.deepEqual(sharing, [providersParagraph(locale)], `${locale}: sharing names Retell once, for the website concierge`);
+    assert.deepEqual(sharing, [providersParagraph(locale)], `${locale}: sharing names Retell in the providers paragraph only`);
+    // Once, and in its concierge clause: a second Retell claim added to the same paragraph fails too.
+    assert.equal(body(section('sharing'), locale).match(/Retell/g)?.length, 1, `${locale}: sharing names Retell once`);
+    assert.ok(providersParagraph(locale).includes(locale === 'en'
+      ? 'Retell and its AI service providers for the website concierge;'
+      : 'وRetell ومزوّدي خدمات الذكاء الاصطناعي لديها لمساعدة الموقع الذكية،'), `${locale}: Retell, for the website concierge`);
   }
   assert.doesNotMatch(policy.contact.en + policy.contact.ar + JSON.stringify(faq), /Retell/);
 });
@@ -402,7 +498,7 @@ test('the personal-number rollback page (PR-D1r) needs no D1 revert: the old sha
 
 test('the FAQ (D1): 14 questions or more; a viewing is booked on WhatsApp for homes in Jeddah; who answers there; how to reach a person', () => {
   assert.ok(faq.items.length >= 14, `${faq.items.length} questions`);
-  assert.ok(faq.updated >= '2026-11-27', 'the FAQ date moves with D1');
+  assert.ok(faq.updated >= D1_RELEASED, 'the FAQ date moves with D1');
   const item = (id) => faq.items.find((x) => x.id === id);
   for (const id of ['contact', 'viewing', 'whatsapp-assistant', 'speak-to-a-person']) {
     assert.ok(item(id), id);
@@ -461,8 +557,24 @@ test('the site copy around the assistant (D1): nameless, it answers at any hour,
 });
 
 // The shared rule (the owner's personal number) keeps a short record of chats that use a property
-// word. Bona's own number does not (D1), so that text left the page; it waits, word for word, in the
-// rollback json (DESIGN §13.2, PR-D1r), and these asserts pin it there.
+// word. Bona's own number does not (D1; and, by the round-1 decision above, not while own_inbox is off
+// either), so that text left the page; it waits, word for word, in the rollback json (DESIGN §13.2,
+// PR-D1r), and these asserts pin it there.
+// The rollback paragraphs are the section's first two as published before D1 (13e4954), byte for byte:
+// any edit, such as another lookback than 30 days, is a new privacy text and fails here first. Pinned by
+// SHA-256 like the 26 November line, so this file holds no second copy of them.
+const SHARED_NUMBER_SHA256 = {
+  en: ['0b2f4130a36840b08af4c3c01b09a39ca308f37812aad7dd54bbdee1cbfe97f5', 'ed761efe51b8c1f0a28c72a8b008348f17b42251e984ac5634563dfbf4a21d15'],
+  ar: ['1ccfe08448445ba4e01c945217e4ae9eeeaa52adc1379c816c3677d382cb49a1', '29d857e9a58e5ef02b5f4fcca7b0a4de6d513fc120746d0d4803c94b3b657411'],
+};
+test('the shared-number text (rollback) is the text published before D1, word for word, in both languages', () => {
+  for (const locale of ['en', 'ar']) {
+    assert.deepEqual(rollback.body[locale].map(sha256), SHARED_NUMBER_SHA256[locale], `${locale}: whatsapp-conversations [0] and [1] as of 13e4954`);
+  }
+  assert.match(rollback.body.en[0], /up to 30 days before it became an enquiry/);
+  assert.match(rollback.body.ar[0], /خلال مدة أقصاها ثلاثون يوماً قبل أن تصبح استفساراً/);
+});
+
 test('the shared-number text (rollback) names the chats kept only to be checked: what is kept, for how long, and that the conversation is not (D17)', () => {
   const s = rollback;
   assert.ok(s?.body, 'the rollback text is missing');
