@@ -219,6 +219,11 @@ test('Bona’s own number (D1): every one-to-one chat is an enquiry except the t
   assert.match(en, /until 30 days after the last one, so that the owner of Bona can answer it himself; if he marks it as not a Bona client, only those ids are kept, for up to a year/);
   assert.match(ar, /وإذا لم يُظهر لنا واتساب رقم الهاتف الذي تصدر منه محادثةٌ ما، فلا نحتفظ بتلك المحادثة ولا تردّ عليها مساعدة بونا الذكية/);
   assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة فيها، ليردّ عليها مالك بونا بنفسه؛ وإذا حدّد أنها لا تخص عميلاً لبونا، لا نحتفظ إلا بتلك المعرّفات، مدةً أقصاها سنة/);
+  // A "Not a client" on a chat that never became an enquiry, with its number shown (review of PR #87, round 3):
+  // the dismissed inbox_candidates row keeps that number and the chat's ids for a year (DISMISSED_KEEP_MS), and
+  // when the chat writes again it is not stored and the owner's alert row records the day (DESIGN §3.1, PLAN T06 test 16).
+  assert.ok(en.endsWith(' If the owner of Bona marks a chat as not a Bona client before it becomes an enquiry, we keep only its number and the ids WhatsApp gives the chat, for up to a year, so that it is not treated as an enquiry; if it writes to us again, its messages are not stored, and we record with those ids only the day it wrote, so that he is told.'), en);
+  assert.ok(ar.endsWith(' وإذا حدّد مالك بونا، قبل أن تصبح محادثةٌ ما استفساراً، أنها لا تخص عميلاً لبونا، لا نحتفظ إلا برقمها ومعرّفات واتساب للمحادثة، مدةً أقصاها سنة، حتى لا تُعامَل بوصفها استفساراً؛ وإذا وردت منها رسائل بعد ذلك، فلا نحتفظ بها، ولا نسجّل مع تلك المعرّفات إلا يوم ورودها، ليعلم مالك بونا بذلك.'), ar);
   // The property-word exception belongs to the shared rule: it left the page and waits in the rollback text.
   // Decision (review of PR #87, rounds 1 and 2): Bona's own number keeps no property-word record at all, not
   // even while `#dana live off` (own_inbox '0') brings the shared rule's joins back, or while the identity
@@ -280,6 +285,9 @@ test('the rest of D1: who we are, legal basis, retention, transfers, your rights
   const retention = section('retention');
   assert.match(retention.body.en[2], /A viewing booked by our AI assistant stays in Bona’s viewing calendar as the record of that viewing, and is deleted with your enquiry if you ask us to delete it\./);
   assert.match(retention.body.ar[2], /يبقى موعد المعاينة الذي تحجزه مساعدتنا الذكية في تقويم معاينات بونا بوصفه سجلاً لتلك المعاينة/);
+  // deploy.sh snapshots the database before every restart and deletes a snapshot after at most 30 days (PR-INFRA).
+  assert.ok(retention.body.en[2].endsWith(' Before each update of our systems we keep a backup copy of our records for up to 30 days, after which it is deleted; a conversation you ask us to delete can therefore remain in a backup for up to 30 days.'), retention.body.en[2]);
+  assert.ok(retention.body.ar[2].endsWith(' ونحتفظ قبل كل تحديث لأنظمتنا بنسخة احتياطية من سجلاتنا مدةً أقصاها ثلاثون يوماً، ثم تُحذف؛ لذا قد تبقى المحادثة التي تطلب حذفها في نسخة احتياطية مدةً تصل إلى ثلاثين يوماً.'), retention.body.ar[2]);
   assert.match(body(section('international-transfers'), 'en'), /Bona’s hosting, messaging, calendar, analytics, advertising-measurement, tour and AI providers may process data outside Saudi Arabia\./);
   assert.match(body(section('international-transfers'), 'ar'), /قد يعالج مزوّدو الاستضافة والمراسلة والتقويم والتحليلات/);
   const rights = section('your-rights');
@@ -330,15 +338,16 @@ const writtenDate = (iso, locale) => `${Number(iso.slice(8, 10))} ${MONTHS[local
  * The D1 Changes line of policy `p`, checked as of the day `on`. Its 30 days run from D1_RELEASED, not
  * from whatever the text says: until they are up the line must be there in both languages, dated
  * D1_RELEASED, and a rewrite its pattern no longer finds counts as a missing line. Once they are up it
- * may come out (`undefined`).
+ * may come out (`undefined`). It is one line per language: a second copy fails, at any date.
  */
 function checkD1Line(p, on) {
   const changes = p.sections.find((x) => x.id === 'changes');
-  const en = changes.body.en.find((x) => D1_LINE.en.test(x));
-  const ar = changes.body.ar.find((x) => D1_LINE.ar.test(x));
+  const lines = (locale) => changes.body[locale].filter((x) => D1_LINE[locale].test(x));
+  const [ens, ars] = [lines('en'), lines('ar')];
   const until = plusDays(D1_RELEASED, 30);
-  if (on >= until && !en && !ar) return undefined;
-  assert.ok(en && ar, `the D1 line in each language (due until ${until})`);
+  if (on >= until && !ens.length && !ars.length) return undefined;
+  assert.ok(ens.length === 1 && ars.length === 1, `the D1 line in each language, once (due until ${until}; en ${ens.length}, ar ${ars.length})`);
+  const [[en], [ar]] = [ens, ars];
   assert.equal(isoOf(en.match(D1_LINE.en), 'en'), D1_RELEASED, 'en: the D1 line carries the D1 date (D1_RELEASED)');
   assert.equal(isoOf(ar.match(D1_LINE.ar), 'ar'), D1_RELEASED, 'ar: the D1 line carries the D1 date (D1_RELEASED)');
   assert.ok(p.updated >= D1_RELEASED, 'the version date at the top moved with it');
@@ -397,6 +406,11 @@ test('the D1 Changes line stays its 30 days from D1_RELEASED, whatever day D1 me
     ? x.replace(writtenDate(D1_RELEASED, locale), writtenDate(later, locale))
     : x)));
   assert.throws(() => checkD1Line(moved, lastDay), /carries the D1 date/);
+  // The D1 line twice in one language is one line too many, not a pass (review of PR #87, round 3).
+  for (const locale of ['en', 'ar']) {
+    const twice = edit((paras, l) => (l === locale ? [...paras, paras.find((x) => D1_LINE[l].test(x))] : paras));
+    assert.throws(() => checkD1Line(twice, lastDay), /the D1 line in each language, once/, `${locale}: the D1 line twice`);
+  }
 });
 
 test('Changes (D1): the September and October lines are gone, the 26 November line stays word for word, and the D1 line says what changed, in both languages (30 days)', () => {
@@ -489,6 +503,8 @@ function checkRetell(p) {
     const concierge = sec('ai-concierge');
     assert.equal(body(concierge, locale).match(/Retell/g)?.length, 1, `${locale}: ai-concierge names Retell once`);
     assert.ok(concierge.body[locale][0].startsWith(CONCIERGE_RETELL[locale]), `${locale}: ai-concierge names Retell in its opening sentence about the website concierge`);
+    // At most once in all of Changes: two D1-shaped lines would each pass the per-line checks below.
+    assert.ok((body(sec('changes'), locale).match(/Retell/g)?.length ?? 0) <= 1, `${locale}: Changes names Retell more than once`);
     for (const para of sec('changes').body[locale].filter((x) => x.includes('Retell'))) {
       assert.ok(D1_LINE[locale].test(para), `${locale}: Changes names Retell outside the D1 line: ${para.slice(0, 80)}`);
       assert.equal(para.match(/Retell/g).length, 1, `${locale}: the D1 line names Retell once`);
@@ -560,6 +576,17 @@ test('the Retell and no-name checks catch a Retell claim added to the concierge 
       const p = edited(id, locale, (paras) => paras.map((x, i) => (i === paras.length - 1 ? x + claim[locale] : x)));
       assert.throws(() => checkRetell(p), /names Retell/, `${locale}: a Retell claim added to ${id}`);
     }
+  }
+  // The D1 line twice in one language names Retell twice in Changes: each copy alone looks right, the two do
+  // not (review of PR #87, round 3). On a fixture line, so the case still runs once the live line is out.
+  for (const locale of ['en', 'ar']) {
+    const p = withD1Line(policy);
+    const changes = p.sections.find((x) => x.id === 'changes');
+    const at = changes.body[locale].findIndex((x) => D1_LINE[locale].test(x));
+    changes.body[locale][at] = `${writtenDate(D1_RELEASED, locale)}: ${D1_OPENING[locale]} ${D1_RETELL[locale]}.`;
+    checkRetell(p);
+    changes.body[locale].push(changes.body[locale][at]);
+    assert.throws(() => checkRetell(p), /names Retell/, `${locale}: the D1 line twice`);
   }
   // The 26 November line names the old assistant; it is allowed in Changes, in its own language, and nowhere else.
   for (const locale of ['en', 'ar']) {
@@ -678,6 +705,10 @@ test('the site copy around the assistant (D1): nameless, it answers at any hour,
   const contact = read('../../marketing/page-meta.json')['/contact/'].description;
   assert.ok(contact.en.includes(`Bona’s AI assistant answers WhatsApp at any hour; our team replies ${site.hours.en}.`), contact.en);
   assert.ok(contact.ar.includes('تردّ مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، على واتساب في أي وقت، ويردّ فريقنا من الأحد إلى الخميس'), contact.ar);
+  // The Arabic hours are site.json's too, not only the weekdays (review of PR #87, round 3).
+  const [, opens, closes] = /(\d{2}:\d{2}) – (\d{2}:\d{2})/.exec(site.hours.en) ?? [];
+  assert.ok(opens && site.hours.ar.includes(`${opens} – ${closes}`), 'site.json: the same hours in both languages');
+  assert.ok(contact.ar.includes(`ويردّ فريقنا من الأحد إلى الخميس، ${opens}–${closes}.`), contact.ar);
   assert.doesNotMatch(contact.en, /WhatsApp or by phone, Sunday to Thursday/);
 });
 
