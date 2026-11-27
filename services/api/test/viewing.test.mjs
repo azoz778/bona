@@ -14,7 +14,7 @@ import { createAudit } from '../lib/audit.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
 import { createDashboardRoutes } from '../lib/dashboard/routes.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
-import { calendarTagOf, createGcal, TOKEN_URL } from '../lib/gcal.mjs';
+import { calendarTag, calendarTagOf, createGcal, eventIdFor, TOKEN_URL } from '../lib/gcal.mjs';
 import { DAY_CAP, confirmationText, createViewing } from '../lib/viewing.mjs';
 import { addTask, ensureHandoff, tasksForLead } from '../lib/lead-tasks.mjs';
 
@@ -960,7 +960,7 @@ test('Not a client, or a number put on the never list, BEFORE the reserve (the c
   } finally { e.db.close(); }
 });
 
-test('a restart on another WRITABLE calendar id: a queued deletion waits (a 404 there is no "already gone"), reconcile cancels none of its bookings, health says not_found; the right calendar back, the event goes', async () => {
+test('a restart on another WRITABLE calendar id: no slots and no booking there (calendar_mismatch), a queued deletion waits (a 404 there is no "already gone"), reconcile cancels none of its bookings, health says not_found; the right calendar back, the event goes and booking works again', async () => {
   const CAL2 = 'other-calendar@example.com';
   const cals = new Map([[CAL, new Map()], [CAL2, new Map()]]);
   const deletes = [];
@@ -1026,33 +1026,142 @@ test('a restart on another WRITABLE calendar id: a queued deletion waits (a 404 
     assert.equal(statusOf('bk-old'), 'cancelled', 'no calendar recorded: as before');
     assert.ok(h.logs.some((l) => l.evt === 'viewing.cancel_retry' && l.bookingId === ga.bookingId && l.code === 'not_found'));
     assert.deepEqual(wrong.health(), { enabled: true, gcal: { configured: true, ok: false, lastErrorCode: 'not_found' } });
-    // A booking made on this calendar is found, so reconcile reads 404s as deleted; B's was made elsewhere: not B's.
+    // No booking on this calendar while it is not the one the bookings were made in: its busy time is not the
+    // owner's, and a client's name and phone must not land there. Nothing is asked of it, nothing is sent.
     const c = h.lead('LEAD-20261201-0000cccc');
-    const gc = await wrong.commitBooking({ lead: c, listingId: 'BONA-W903', slotId: '2026-12-08T10:00+03:00' });
-    assert.equal(gc.ok, true, JSON.stringify(gc));
-    assert.equal(cals.get(CAL2).has(gc.eventId), true);
-    assert.deepEqual(await wrong.reconcile(), { checked: 2, moved: 0, cancelled: 0, held: 0 });
+    const askC = { lead: c, listingId: 'BONA-W903', slotId: '2026-12-08T10:00+03:00' };
+    const rowsBefore = h.rows().length;
+    assert.deepEqual(await wrong.slots({ lead: c, listingId: 'BONA-W903' }), { bookable: false, reason: 'calendar_mismatch' });
+    assert.deepEqual(wrong.validate(askC), { ok: false, reason: 'calendar_mismatch' });
+    assert.deepEqual(await wrong.commitBooking(askC), { ok: false, reason: 'calendar_mismatch' });
+    assert.equal(cals.get(CAL2).size, 0, 'no event in the replacement calendar');
+    assert.equal(h.rows().length, rowsBefore, 'no row');
+    // Reconcile on it finds none of the bookings' events: B's 404 is no deletion (made elsewhere), the run is held.
+    assert.deepEqual(await wrong.reconcile(), { checked: 1, moved: 0, cancelled: 0, held: 1 });
     assert.equal(statusOf(gb.bookingId), 'booked');
     assert.equal(taskOf(b.lead_id), 'confirmed');
     // A deletion of this calendar's own event still goes through.
-    wrong.cancelForLead(c.lead_id);
+    const ownId = eventIdFor('LEAD-20261201-0000dddd', R(2026, 12, 9, 10), 0, gcalFor(CAL2).calendarTag);
+    cals.get(CAL2).set(ownId, { id: ownId, status: 'confirmed' });
+    insertRow(h.db, { id: 'bk-own2', leadId: 'LEAD-20261201-0000dddd', start: R(2026, 12, 9, 10), status: 'cancel_pending', eventId: ownId });
     await wrong.tick();
-    assert.equal(statusOf(gc.bookingId), 'cancelled');
-    assert.equal(cals.get(CAL2).has(gc.eventId), false);
+    assert.equal(statusOf('bk-own2'), 'cancelled');
+    assert.equal(cals.get(CAL2).has(ownId), false);
     assert.equal(statusOf(ga.bookingId), 'cancel_pending', 'retried, and still waiting');
+    assert.deepEqual(await wrong.commitBooking(askC), { ok: false, reason: 'calendar_mismatch' }, "B's booking is still the other calendar's");
 
-    // The right calendar back: A's event goes, and health clears.
+    // The right calendar back: A's event goes, health clears, and booking works again (on the right calendar).
     const right = restart(CAL);
     await right.tick();
     assert.equal(statusOf(ga.bookingId), 'cancelled');
     assert.equal(cals.get(CAL).has(ga.eventId), false);
     assert.deepEqual(right.health(), { enabled: true, gcal: { configured: true, ok: true, lastErrorCode: null } });
+    assert.equal((await right.slots({ lead: c, listingId: 'BONA-W903' })).bookable, true);
+    const gc = await right.commitBooking(askC);
+    assert.equal(gc.ok, true, JSON.stringify(gc));
+    assert.equal(cals.get(CAL).has(gc.eventId), true);
+    assert.equal(cals.get(CAL2).size, 0);
     // In its own calendar a 404 is "already gone": the owner deleted B's event himself.
     cals.get(CAL).delete(gb.eventId);
     right.cancelForLead(b.lead_id);
     await right.tick();
     assert.equal(statusOf(gb.bookingId), 'cancelled');
     assert.doesNotMatch(JSON.stringify(h.logs), /Sara|9665|owner-calendar|other-calendar|robot/, 'logs carry ids and codes only');
+  } finally { h.db.close(); }
+});
+
+test('a booking or a queued deletion made in another calendar than the one configured stops booking (calendar_mismatch): slots, validate and commitBooking refuse before any call to Google; past and finished rows from it do not; the right calendar back, booking works again', async () => {
+  const clock = { t: NOW };
+  const calA = Object.assign(fakeGcal(), { calendarTag: calendarTag('calendar-a@example.com') });
+  const calB = Object.assign(fakeGcal(), { calendarTag: calendarTag('calendar-b@example.com') });
+  const h = setup({ gcal: calA, clock });
+  const restart = (gcal) => createViewing({
+    db: h.db, cfg: { siteUrl: SITE, publicApi: API_BASE }, team: h.team, ownerTest: { autoMode: () => true }, inventory, gcal,
+    now: () => clock.t, log: (o) => h.logs.push(o),
+  });
+  try {
+    const statusOf = (id) => h.rows().find((r) => r.booking_id === id).status;
+    const a = h.lead('LEAD-20261201-0000aaaa');
+    const c = h.lead('LEAD-20261201-0000cccc');
+    const ga = await h.viewing.commitBooking({ lead: a, listingId: 'BONA-W901', slotId: SLOT });
+    assert.equal(ga.ok, true, JSON.stringify(ga));
+    assert.equal(calendarTagOf(ga.eventId), calA.calendarTag);
+    const ask = { lead: c, listingId: 'BONA-W902', slotId: '2026-12-07T12:00+03:00' };
+
+    // A restart on calendar B while A's booking (calendar A) is active.
+    const wrong = restart(calB);
+    assert.deepEqual(await wrong.slots({ lead: c, listingId: 'BONA-W902' }), { bookable: false, reason: 'calendar_mismatch' });
+    assert.deepEqual(wrong.validate(ask), { ok: false, reason: 'calendar_mismatch' });
+    assert.deepEqual(await wrong.commitBooking(ask), { ok: false, reason: 'calendar_mismatch' });
+    assert.deepEqual(calB.calls, [], 'nothing asked of calendar B, nothing sent to it');
+    assert.equal(h.rows().length, 1);
+    // A queued deletion of calendar A's event keeps it too: that calendar is still the owner's.
+    assert.equal(h.viewing.cancelForLead(a.lead_id), 1);
+    assert.equal(statusOf(ga.bookingId), 'cancel_pending');
+    assert.deepEqual(await wrong.commitBooking(ask), { ok: false, reason: 'calendar_mismatch' });
+    assert.deepEqual(calB.calls, []);
+    assert.equal(wrong.health().gcal.lastErrorCode, 'not_found');
+
+    // Calendar A back: the worker deletes A's event, and booking works again. Rows of another calendar that are
+    // over (done) or cancelled are no booking and no deletion: they never stop it.
+    const right = restart(calA);
+    const elsewhere = calB.calendarTag;
+    insertRow(h.db, { id: 'bk-done-b', leadId: 'LEAD-OLD-1', start: NOW - 3 * DAY, status: 'done', eventId: eventIdFor('LEAD-OLD-1', NOW - 3 * DAY, 0, elsewhere) });
+    insertRow(h.db, { id: 'bk-gone-b', leadId: 'LEAD-OLD-2', start: NOW - 2 * DAY, status: 'cancelled', eventId: eventIdFor('LEAD-OLD-2', NOW - 2 * DAY, 0, elsewhere) });
+    await right.tick();
+    assert.equal(statusOf(ga.bookingId), 'cancelled');
+    assert.equal(right.health().gcal.lastErrorCode, null);
+    assert.equal((await right.slots({ lead: c, listingId: 'BONA-W902' })).bookable, true);
+    const gc = await right.commitBooking(ask);
+    assert.equal(gc.ok, true, JSON.stringify(gc));
+    assert.equal(calA.events.has(gc.eventId), true);
+    assert.deepEqual(calB.calls, []);
+  } finally { h.db.close(); }
+});
+
+test('reconcile: a 404 for the ONLY booking, whose id records this calendar (and the access probe passed), is the owner deleting it: the row and its task are cancelled and the client can book again; an id written before (no calendar) is still held', async () => {
+  const clock = { t: NOW };
+  const gcal = Object.assign(fakeGcal(), { calendarTag: calendarTag('calendar-a@example.com') });
+  const h = setup({ gcal, clock });
+  try {
+    const statusOf = (id) => h.rows().find((r) => r.booking_id === id).status;
+    const taskOf = (bookingId) => tasksForLead(h.db, h.rows().find((r) => r.booking_id === bookingId).lead_id)
+      .find((t) => t.details?.booking_id === bookingId);
+    const a = h.lead('LEAD-20261201-0000aaaa');
+    const first = await h.viewing.commitBooking({ lead: a, listingId: 'BONA-W901', slotId: SLOT });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.equal(calendarTagOf(first.eventId), gcal.calendarTag);
+    // The owner deletes the only booking: Google answers 404 (or 410) for it.
+    gcal.events.delete(first.eventId);
+    assert.deepEqual(await h.viewing.reconcile(), { checked: 1, moved: 0, cancelled: 1, held: 0 });
+    assert.equal(statusOf(first.bookingId), 'cancelled');
+    assert.equal(taskOf(first.bookingId).status, 'cancelled');
+    assert.deepEqual(h.viewing.health(), { enabled: true, gcal: { configured: true, ok: true, lastErrorCode: null } });
+    assert.equal(h.logs.some((l) => l.evt === 'viewing.reconcile_held'), false);
+    // The client can book again.
+    const again = await h.viewing.commitBooking({ lead: a, listingId: 'BONA-W901', slotId: SLOT });
+    assert.equal(again.ok, true, JSON.stringify(again));
+    assert.notEqual(again.eventId, first.eventId);
+
+    // A calendar the robot cannot manage answers 404 for every event too: no 404 is read before the probe passes.
+    gcal.events.delete(again.eventId);
+    gcal.fail.access = 'not_found';
+    assert.deepEqual(await h.viewing.reconcile(), { checked: 0, moved: 0, cancelled: 0, held: 0 });
+    assert.equal(statusOf(again.bookingId), 'booked');
+    delete gcal.fail.access;
+    // With a booking whose id records no calendar (written before ids did), and none of the run's events found:
+    // this calendar's 404 is a deletion, the older one is held.
+    const legacy = insertRow(h.db, { id: 'bk-legacy', leadId: 'LEAD-20261201-0000eeee', start: R(2026, 12, 9, 10) });
+    assert.equal(calendarTagOf(legacy), null);
+    assert.deepEqual(await h.viewing.reconcile(), { checked: 2, moved: 0, cancelled: 1, held: 1 });
+    assert.equal(statusOf(again.bookingId), 'cancelled');
+    assert.equal(taskOf(again.bookingId).status, 'cancelled');
+    assert.equal(statusOf('bk-legacy'), 'booked');
+    assert.equal(h.viewing.health().gcal.lastErrorCode, 'not_found');
+    // The older booking alone: still held, as before.
+    assert.deepEqual(await h.viewing.reconcile(), { checked: 1, moved: 0, cancelled: 0, held: 1 });
+    assert.equal(statusOf('bk-legacy'), 'booked');
+    assert.equal(h.viewing.health().gcal.lastErrorCode, 'not_found');
   } finally { h.db.close(); }
 });
 

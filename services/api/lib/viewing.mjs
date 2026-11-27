@@ -42,7 +42,11 @@
  * Each event id records the calendar it was made in (gcal calendarTag). A 404 from another calendar
  * id (a restart on the wrong BONA_GCAL_CALENDAR_ID, even one the robot can write to) never cancels a
  * row or finishes a deletion: the row waits, and health says not_found until the right calendar is
- * back. Ids written before carry no calendar and keep the earlier rule.
+ * back. While any booking or queued deletion was made in another calendar, nothing is offered or
+ * booked either (reason 'calendar_mismatch'): that calendar's busy time is not the owner's, and a
+ * client's name and phone never go to it. In the calendar an event was made in, a 404 after the access
+ * probe passed is the owner deleting it: reconcile cancels the row and its task. Ids written before
+ * carry no calendar and keep the earlier rule (a 404 counts only when the run found other events).
  *
  * For PR-INT (index.mjs): pass `inventory` (the shared one; without it no listing is bookable),
  * and `fetchImpl` for the tests' fake fetch.
@@ -126,7 +130,8 @@ const errClass = (err) => (err && typeof err === 'object' && typeof err.name ===
  * @property {boolean} configured  a calendar is set up (and a database to keep bookings in)
  * @property {(o: { lead?: object, leadId?: string, listingId: string }) => Promise<object>} slots
  *   `{ bookable: true, timezone, slots: [{ slot_id, label_ar, label_en }] }`, or `{ bookable: false, reason?, code? }`
- *   (no reason when booking is off, as the stub answered)
+ *   (no reason when booking is off, as the stub answered; 'calendar_mismatch' while a booking or a queued deletion
+ *   was made in another calendar than the one configured)
  * @property {(o: { lead?: object, leadId?: string, listingId: string, slotId: string, name?: string }) => object} validate
  *   `{ ok: true, leadId, listingId, slotId, startTs, endTs, name }` or `{ ok: false, reason, needName? }`; writes nothing
  * @property {(o: { lead?: object, leadId?: string, listingId: string, slotId: string, name?: string, language?: 'ar'|'en' }) => Promise<object>} commitBooking
@@ -139,7 +144,8 @@ const errClass = (err) => (err && typeof err === 'object' && typeof err.name ===
  * @property {(leadId: string) => void} onPurge
  * @property {() => Promise<object>|undefined} tick  undefined when there is no calendar
  * @property {() => Promise<{ checked: number, moved: number, cancelled: number, held: number }>} reconcile
- *   `held` counts the 404s left alone because the run found none of its events in the calendar
+ *   `held` counts the 404s left alone because the run found none of its events in the calendar (ids that record
+ *   no calendar, or another one); a 404 of an event this calendar made is a deletion, never held
  * @property {() => { enabled: boolean, gcal: { configured: boolean, ok: boolean, lastErrorCode: string|null } }} health
  */
 
@@ -189,6 +195,16 @@ export function createViewing(deps = {}) {
     const tag = calendarTagOf(eventId);
     return tag !== null && tag !== (gcal?.calendarTag ?? null);
   };
+  /** The event was made in the calendar configured now (its id says so). */
+  const madeHere = (eventId) => calendarTagOf(eventId) !== null && !madeElsewhere(eventId);
+  /**
+   * A booking or a queued deletion whose event was made in another calendar than the one configured now
+   * (a restart on another BONA_GCAL_CALENDAR_ID). Until it is resolved (the right calendar back), nothing is
+   * offered or booked: this calendar's busy time is not the owner's, and the client's name and phone must
+   * not land in it. Health says not_found meanwhile.
+   */
+  const calendarMismatch = () => prep("SELECT event_id FROM viewing_bookings WHERE status IN ('booked','cancel_pending')").all()
+    .some((r) => madeElsewhere(r.event_id));
   /**
    * Booked rows over by their stored times whose event no read confirmed (a 404/410, or an event
    * with no times): never done on that, since the owner may have moved it later in a calendar the
@@ -222,6 +238,7 @@ export function createViewing(deps = {}) {
   function precheck(lead, listingId, t, settled = false) {
     const g = gate(lead);
     if (g) return g;
+    if (calendarMismatch()) return 'calendar_mismatch';
     if (!bookableListing(listingFor(listingId))) return 'listing';
     if (leadBooked(lead.lead_id, t, settled)) return 'active_booking';
     if (bookedToday(t) >= DAY_CAP) return 'day_cap';
@@ -234,6 +251,8 @@ export function createViewing(deps = {}) {
     const lead = leadOf(o);
     const g = gate(lead);
     if (g) return { ok: false, reason: g };
+    // Before anything is read or sent (commit() runs this first, and again inside the reserve's transaction).
+    if (calendarMismatch()) return { ok: false, reason: 'calendar_mismatch' };
     const listing = listingFor(o.listingId);
     if (!bookableListing(listing)) return { ok: false, reason: 'listing' };
     const startTs = parseSlotId(o.slotId);
@@ -776,10 +795,13 @@ export function createViewing(deps = {}) {
   /**
    * The calendar is the source of truth: a moved event moves the booking and its task; a deleted one
    * (Google's get returns it with status 'cancelled') cancels them. A 404 means the event is not in
-   * this calendar: read as deleted only when the same run found other bookings' events there. When
+   * this calendar. For an event made in this calendar (its id records it) whose access probe passed,
+   * that is the owner deleting it: cancelled, the only booking too, so the client can book again. Never
+   * for an event made in another calendar (health says not_found). An id written before records no
+   * calendar: its 404 reads as deleted only when the same run found other bookings' events there; when
    * none was found (another calendar id, say), the run is held: nothing changes, and health says
-   * not_found until a reconcile finds the events again. Every booking with a task is read, over by
-   * its stored times or not.
+   * not_found until a reconcile finds the events again. Every booking with a task is read, over by its
+   * stored times or not.
    */
   async function reconcile() {
     const out = { checked: 0, moved: 0, cancelled: 0, held: 0 };
@@ -794,20 +816,24 @@ export function createViewing(deps = {}) {
       return out;
     }
     const res = await readEvents('reconcile', rows, t);
-    // Every time update of the run, and the 404s judged deleted, in one transaction (apply()). Never the
+    // Every time update of the run, and the 404s judged deleted, in one transaction (apply()). A 404 is read
+    // only after the run's access probe passed (readEvents()). In the calendar the event was made in, it is a
+    // deletion; an id that records no calendar counts only when the run found other events here. Never the
     // 404 of an event made in another calendar: this one cannot show it (health says not_found).
-    const elsewhere = res.gone.filter((r) => madeElsewhere(r.event_id));
-    const judged = res.found > 0 ? res.gone.filter((r) => !elsewhere.includes(r)) : [];
+    const judged = res.gone.filter((r) => res.probed && (madeHere(r.event_id) || (res.found > 0 && calendarTagOf(r.event_id) === null)));
+    const left = res.gone.filter((r) => !judged.includes(r));
     const did = apply(res.plans, judged);
     Object.assign(out, { checked: res.checked, moved: did.moved, cancelled: did.cancelled });
     if (res.found > 0) {
       held = null;
-    } else if (res.gone.length && !res.stopped) {
+    } else if (left.length && !res.stopped) {
       held = 'not_found';
-      out.held = res.gone.length;
-      log({ level: 'warn', evt: 'viewing.reconcile_held', gone: res.gone.length });
+      out.held = left.length;
+      log({ level: 'warn', evt: 'viewing.reconcile_held', gone: left.length });
+    } else if (judged.length && !res.stopped) {
+      held = null; // the calendar answered for each of the run's events: deletions, none missing
     }
-    unconfirmed(res.found > 0 ? [...res.unread, ...elsewhere] : [...res.gone, ...res.unread], t);
+    unconfirmed([...left, ...res.unread], t);
     log({ evt: 'viewing.reconciled', ...out });
     return out;
   }
@@ -817,7 +843,7 @@ export function createViewing(deps = {}) {
     const g = gcal.health?.() ?? {};
     for (const id of missing) if (!prep("SELECT 1 FROM viewing_bookings WHERE booking_id = ? AND status = 'booked'").get(id)) missing.delete(id);
     // A booking or a queued deletion whose event was made in another calendar than the one configured now.
-    const elsewhere = prep("SELECT event_id FROM viewing_bookings WHERE status IN ('booked','cancel_pending')").all().some((r) => madeElsewhere(r.event_id));
+    const elsewhere = calendarMismatch();
     // The client's own failure first; else a held reconcile, or a booking whose event is missing (the calendar
     // answers, without our events, or it is another calendar).
     const own = held ?? (missing.size || elsewhere ? 'not_found' : null);
