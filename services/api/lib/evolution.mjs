@@ -789,11 +789,16 @@ const deadline = (timeoutMs, signal) => (signal ? AbortSignal.any([signal, Abort
  * (`timeout`, `network`, `auth`, `forbidden`, `not_found`, `bad_response`). Never the body: the
  * fetchInstances answer holds the instance's own API key, the whatsappNumbers answer echoes the
  * number asked and may carry a contact's name.
+ *
+ * A redirect is never followed (`redirect: 'error'`, a `network` failure): fetch would carry the
+ * `apikey` header, and the whatsappNumbers body with Bona's number, to whatever host the Location
+ * names, and that host's answer could then pass for the instance's. A 3xx handed back by a fetch
+ * that does not follow is not ok, so it fails as `bad_response`.
  */
 async function probeJson(url, init, label, { fetchImpl, timeoutMs, signal }) {
   let res;
   try {
-    res = await fetchImpl(url, { ...init, signal: deadline(timeoutMs, signal) });
+    res = await fetchImpl(url, { ...init, redirect: 'error', signal: deadline(timeoutMs, signal) });
   } catch (err) {
     const how = failureOf(err);
     throw probeError(`${label} failed: ${how}`, 0, how);

@@ -1,10 +1,12 @@
 /**
  * The Evolution read client. The real API is never contacted: every test drives a
- * stub `fetch`. Response shapes are the ones the live instance `abdulaziz-personal`
+ * stub `fetch`, except the redirect test, which uses the real fetch between two
+ * servers on 127.0.0.1. Response shapes are the ones the live instance `abdulaziz-personal`
  * answered with on 2026-09-05 (see services/intake/test/evolution.test.mjs).
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import {
   EvolutionError, MAX_PAGES, MAX_SPLIT_DEPTH, PAGE_SIZE, bareJid, contextOf, fetchInstance, fetchWindow,
   findMessagesPage, findMessagesWindow, isNoise, mediaOf, normaliseRecord, oldestFirst,
@@ -1342,7 +1344,10 @@ function probeRecorder(responses) {
   const calls = [];
   let i = 0;
   const fetchImpl = async (url, init = {}) => {
-    calls.push({ url, method: init.method ?? 'GET', headers: init.headers ?? {}, body: init.body === undefined ? undefined : JSON.parse(init.body), signal: init.signal });
+    calls.push({
+      url, method: init.method ?? 'GET', headers: init.headers ?? {}, body: init.body === undefined ? undefined : JSON.parse(init.body),
+      signal: init.signal, redirect: init.redirect,
+    });
     const r = responses[Math.min(i, responses.length - 1)];
     i += 1;
     if (r.throw) throw Object.assign(new Error('boom'), { name: r.throw });
@@ -1492,6 +1497,61 @@ test('whatsappNumbers: a closed connection (400), any other HTTP error, a non-ar
       assert.doesNotMatch(String(err.message), /966/);
       return true;
     });
+  }
+});
+
+test('fetchInstance and whatsappNumbers never follow a redirect: each request says so, and a 3xx handed back is a failure', async () => {
+  const id = probeRecorder([{ status: 200, body: [instanceRow()] }]);
+  await fetchInstance({ ...PROBE, fetchImpl: id.fetchImpl });
+  assert.equal(id.calls[0].redirect, 'error', 'the apikey header is never carried to a redirect target');
+  const ln = probeRecorder([{ status: 200, body: [{ jid: `${OWN_DIGITS}@s.whatsapp.net`, exists: true, number: OWN_DIGITS }] }]);
+  await whatsappNumbers({ ...PROBE, numbers: [OWN_DIGITS], fetchImpl: ln.fetchImpl });
+  assert.equal(ln.calls[0].redirect, 'error', 'neither the apikey header nor the number is carried to a redirect target');
+  for (const status of [301, 302, 307, 308]) {
+    const answer = { status, body: '' };
+    await assert.rejects(fetchInstance({ ...PROBE, fetchImpl: probeRecorder([answer]).fetchImpl }),
+      (err) => err instanceof EvolutionError && err.status === status && err.code === 'bad_response', `fetchInstance ${status}`);
+    await assert.rejects(whatsappNumbers({ ...PROBE, numbers: [OWN_DIGITS], fetchImpl: probeRecorder([answer]).fetchImpl }),
+      (err) => err instanceof EvolutionError && err.status === status && err.code === 'bad_response', `whatsappNumbers ${status}`);
+  }
+});
+
+/**
+ * Two HTTP servers on this machine (no network beyond it): `from` answers every request with a 307
+ * to `to`, another origin, which records whatever reaches it and would answer as Evolution does.
+ */
+async function redirectPair() {
+  const reached = [];
+  const to = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      reached.push({ method: req.method, url: req.url, apikey: req.headers.apikey ?? null, body });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(req.url.startsWith('/instance/') ? [instanceRow()] : [{ jid: `${OWN_DIGITS}@s.whatsapp.net`, exists: true, number: OWN_DIGITS }]));
+    });
+  });
+  await new Promise((r) => to.listen(0, '127.0.0.1', r));
+  const target = `http://127.0.0.1:${to.address().port}`;
+  const from = http.createServer((req, res) => {
+    req.resume();
+    res.writeHead(307, { location: `${target}${req.url}` });
+    res.end();
+  });
+  await new Promise((r) => from.listen(0, '127.0.0.1', r));
+  const close = () => Promise.all([from, to].map((s) => new Promise((r) => { s.closeAllConnections(); s.close(r); })));
+  return { baseUrl: `http://127.0.0.1:${from.address().port}/`, reached, close };
+}
+
+test('a 307 to another origin with the real fetch: both probes fail, and the target never sees the apikey or the number', async () => {
+  const pair = await redirectPair();
+  try {
+    const opts = { ...PROBE, baseUrl: pair.baseUrl, fetchImpl: globalThis.fetch, timeoutMs: 5_000 };
+    await assert.rejects(fetchInstance(opts), (err) => err instanceof EvolutionError && err.code === 'network');
+    await assert.rejects(whatsappNumbers({ ...opts, numbers: [OWN_DIGITS] }), (err) => err instanceof EvolutionError && err.code === 'network');
+    assert.deepEqual(pair.reached, [], 'nothing reaches the redirect target: no key, no number, no answer that could pass for the instance');
+  } finally {
+    await pair.close();
   }
 });
 

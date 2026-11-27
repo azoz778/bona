@@ -216,32 +216,90 @@ test("ownerJid digits equal to BONA_WA_INSTANCE_JID's → true; different → fa
   assert.deepEqual(s.pushes, ['identity_mismatch', 'identity_mismatch']);
 });
 
-test('a mismatch closes the guard at once: a link probe that stalls in the same round does not keep it open', async () => {
+test("the identity answer lands before the link probe: Bona's number back opens the guard while a stalled link probe is still out", async () => {
   const s = scene();
+  s.evo.state.ownerJid = `${OWNER}@s.whatsapp.net`;
   s.link.start();
   await s.settle();
-  assert.equal(s.link.identityOk(), true);
+  assert.equal(s.link.identityOk(), false);
   let release;
   s.evo.state.linkHold = new Promise((r) => { release = r; });
-  s.evo.state.ownerJid = `${OWNER}@s.whatsapp.net`;
+  s.evo.state.ownerJid = `${OWN}@s.whatsapp.net`;
   const [timer] = s.pending();
   timer.fired = true;
   s.tick(timer.ms);
   timer.fn();
-  for (let i = 0; i < 50 && s.evo.linkCalls().length < 2; i += 1) await new Promise((r) => setImmediate(r));
-  assert.equal(s.evo.linkCalls().length, 2, 'the link probe is out, and stalls');
-  assert.equal(s.link.identityOk(), false, 'Evolution has answered with another number: false now, not when the link probe is done');
-  assert.deepEqual(s.link.health(), { linkOk: true, identityOk: false });
-  assert.deepEqual(s.pushes, ['identity_mismatch'], 'the owner hears it at once');
-  assert.equal(s.evo.beats().at(-1), 'down:identity_mismatch', 'and so does Kuma');
+  for (let i = 0; i < 50 && s.evo.linkCalls().length < 1; i += 1) await new Promise((r) => setImmediate(r));
+  assert.equal(s.evo.linkCalls().length, 1, 'the link probe is out, and stalls');
+  assert.equal(s.link.identityOk(), true, 'Evolution has answered with Bona\'s number: true now, not when the link probe is done');
   const beats = s.evo.kumaCalls().length;
   release();
   s.evo.state.linkHold = null;
   await s.settle();
-  assert.equal(s.link.identityOk(), false);
-  assert.equal(s.evo.kumaCalls().length, beats, 'still one Kuma beat a round');
-  assert.deepEqual(s.pushes, ['identity_mismatch']);
+  assert.equal(s.evo.kumaCalls().length, beats + 1, 'one Kuma beat a round, once the round is done');
+  assert.equal(s.evo.beats().at(-1), 'up:ok');
   assert.equal(s.pending().length, 1, 'the next probe is armed');
+});
+
+/* ---------------- an instance on another number is asked nothing more (WhatsApp safety) ---------------- */
+
+test('while the instance holds another number, no link probe goes through it: the link keeps its value, Kuma hears the mismatch', async () => {
+  const s = scene();
+  s.link.start();
+  await s.settle();
+  await s.fire();
+  assert.equal(s.link.linkStable(), true);
+  const asked = s.evo.linkCalls().length;
+  // Re-paired to another number (perhaps the owner's own WhatsApp): the round asks the identity and stops there.
+  s.evo.state.ownerJid = `${OWNER}@s.whatsapp.net`;
+  await s.fire();
+  assert.equal(s.link.identityOk(), false);
+  assert.equal(s.evo.linkCalls().length, asked, 'no POST /chat/whatsappNumbers through an instance on another number');
+  assert.equal(s.link.linkOk(), true, 'linkOk keeps its value');
+  assert.equal(s.link.linkStable(), false, 'no probe watched the link: the stable count starts again');
+  assert.deepEqual(s.pushes, ['identity_mismatch']);
+  assert.equal(s.evo.beats().at(-1), 'down:identity_mismatch');
+  assert.equal(s.pending().length, 1, 'the round is done and the next one armed');
+  // Still that number, then identity errors past 30 min: the last answer is still another number, so nothing is asked.
+  await s.fire();
+  s.evo.state.identity = 'network';
+  for (let i = 0; i < 4; i += 1) await s.fire();
+  assert.equal(s.evo.linkCalls().length, asked, 'no link probe until the identity matches again');
+  assert.deepEqual(s.evo.beats().slice(-5), Array(5).fill('down:identity_mismatch'), 'one Kuma beat a round, all of them DOWN');
+  assert.deepEqual(s.pushes, ['identity_mismatch'], 'one alert for the incident');
+  // Bona's number again: the link probe comes back in the same round.
+  s.evo.state.identity = 'ok';
+  s.evo.state.ownerJid = `${OWN}@s.whatsapp.net`;
+  await s.fire();
+  assert.equal(s.link.identityOk(), true);
+  assert.equal(s.evo.linkCalls().length, asked + 1);
+  assert.equal(s.evo.beats().at(-1), 'up:ok');
+  assert.equal(s.link.linkStable(), false, 'one good probe since');
+  await s.fire();
+  assert.equal(s.link.linkStable(), true, 'two good probes, 10 min apart');
+
+  // A link already down stays down through the mismatch: no probe, no second web push, Kuma hears the mismatch.
+  const t = scene();
+  t.link.start();
+  await t.settle();
+  t.evo.state.link = 'closed';
+  await t.fire();
+  await t.fire();
+  assert.equal(t.link.linkOk(), false);
+  const before = t.evo.linkCalls().length;
+  t.evo.state.ownerJid = `${OWNER}@s.whatsapp.net`;
+  t.evo.state.link = 'ok';
+  await t.fire();
+  await t.fire();
+  assert.equal(t.evo.linkCalls().length, before, 'nothing asked through it');
+  assert.equal(t.link.linkOk(), false, 'linkOk keeps its value: the link would answer now, but nobody asked');
+  assert.deepEqual(t.pushes, ['wa_link_down', 'identity_mismatch']);
+  assert.deepEqual(t.evo.beats().slice(-2), ['down:identity_mismatch', 'down:identity_mismatch']);
+  t.evo.state.ownerJid = `${OWN}@s.whatsapp.net`;
+  await t.fire();
+  assert.equal(t.link.linkOk(), true, 'the first probe after the match finds the link up');
+  assert.equal(t.evo.beats().at(-1), 'up:ok');
+  assert.deepEqual(t.pushes, ['wa_link_down', 'identity_mismatch']);
 });
 
 test('a mismatch, the identity check passing again, and the link going down are logged as events without a number', async () => {
@@ -499,16 +557,69 @@ test("a start after a stop forgets the last answer: false until this run's first
   assert.equal(s.link.identityOk(), true, 'a fresh check opens it');
 });
 
+test("a start after a stop forgets the good-probe streak: linkStable needs two good probes of this run that span 10 minutes", async () => {
+  const s = scene();
+  s.link.start();
+  await s.settle();
+  await s.fire();
+  assert.equal(s.link.linkStable(), true, 'two good probes, 10 min apart');
+  s.link.stop();
+  assert.equal(s.link.linkStable(), true, 'stopped: what is known stays readable');
+  // While it was stopped, WhatsApp may have dropped and come back: nothing watched it.
+  let release;
+  s.evo.state.hold = new Promise((r) => { release = r; });
+  s.link.start();
+  assert.equal(s.link.linkStable(), false, "the previous run's streak is not this run's");
+  release();
+  s.evo.state.hold = null;
+  await s.settle();
+  assert.equal(s.link.linkOk(), true);
+  assert.equal(s.link.linkStable(), false, 'one good probe of this run, right after the restart (DESIGN §6.4)');
+  await s.fire();
+  assert.equal(s.link.linkStable(), true, 'two good probes of this run, 10 min apart');
+});
+
+test('a start after a stop also forgets the failed-check count and the alerted mismatch: each run counts and alerts on its own', async () => {
+  const s = scene();
+  s.evo.state.identity = 'network';
+  s.link.start();
+  await s.settle();
+  await s.fire();
+  assert.equal(s.evo.beats().at(-1), 'down:identity_unknown', 'two failed checks in a row');
+  s.link.stop();
+  s.link.start();
+  await s.settle();
+  assert.equal(s.evo.beats().at(-1), 'up:identity_pending', "one failed check of this run: the last run's failures do not count");
+  await s.fire();
+  assert.equal(s.evo.beats().at(-1), 'down:identity_unknown', 'two of this run');
+
+  s.evo.state.identity = 'ok';
+  s.evo.state.ownerJid = `${OWNER}@s.whatsapp.net`;
+  await s.fire();
+  assert.deepEqual(s.pushes, ['identity_mismatch']);
+  await s.fire();
+  assert.deepEqual(s.pushes, ['identity_mismatch'], 'one alert per incident within a run');
+  s.link.stop();
+  s.link.start();
+  await s.settle();
+  assert.equal(s.link.identityOk(), false);
+  assert.deepEqual(s.pushes, ['identity_mismatch', 'identity_mismatch'], 'a new run alerts on its own first mismatch');
+  assert.equal(s.evo.beats().at(-1), 'down:identity_mismatch');
+});
+
 test('health() is booleans only; nothing in it, the log or a Kuma push carries a number, a key or the push token', async () => {
   const s = scene();
   s.link.start();
   await s.settle();
   s.evo.state.link = 'closed';
-  s.evo.state.ownerJid = `${OWNER}@s.whatsapp.net`;
   await s.fire();
+  await s.fire();
+  s.evo.state.ownerJid = `${OWNER}@s.whatsapp.net`;
   await s.fire();
   s.evo.state.identity = 'http';
   await s.fire();
+  assert.ok(s.logs.some((l) => l.evt === 'wa.link.probe_failed' && l.probe === 'link'), 'a failed link probe was logged');
+  for (const c of [...s.evo.identityCalls(), ...s.evo.linkCalls()]) assert.equal(c.redirect, 'error', `${c.method} ${c.path}: a redirect is never followed`);
   const h = s.link.health();
   assert.deepEqual(Object.keys(h).sort(), ['identityOk', 'linkOk']);
   assert.ok(Object.values(h).every((v) => typeof v === 'boolean'));
@@ -590,7 +701,8 @@ test('linkStable: true only once two good probes in a row span 10 minutes; a fai
   assert.equal(s.link.linkStable(), true);
   s.evo.state.ownerJid = `${OWNER}@s.whatsapp.net`;
   await s.fire();
-  assert.equal(s.link.linkStable(), true, 'the link is the link: identity has its own answer');
+  assert.equal(s.link.linkOk(), true, 'a round on another number leaves linkOk as it was');
+  assert.equal(s.link.linkStable(), false, 'but it probes no link, so the stable count starts again');
 });
 
 /* ---------------- robustness ---------------- */
@@ -602,9 +714,11 @@ test('an alerts or a logger that throws changes nothing: the state is kept, the 
   });
   s.link.start();
   await s.settle();
-  s.evo.state.ownerJid = `${OWNER}@s.whatsapp.net`;
   s.evo.state.link = 'closed';
   await s.fire();
+  await s.fire();
+  assert.equal(s.link.linkOk(), false);
+  s.evo.state.ownerJid = `${OWNER}@s.whatsapp.net`;
   await s.fire();
   assert.equal(s.link.identityOk(), false);
   assert.equal(s.link.linkOk(), false);
