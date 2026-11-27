@@ -1,7 +1,9 @@
 /**
  * The owner's notes ledger (PLAN T11 tests 1-9, 12, 13; DESIGN §7.1-7.2; DESIGN-brain §4.2, §10).
  * A fake transport or the real one sender (lib/wa-send.mjs, kind 'note') over a fake fetch, and a
- * fake clock: nothing leaves the process, and no timer runs (each test ticks by hand).
+ * fake clock: nothing leaves the process. Most tests tick by hand; the scheduler tests run the
+ * module's own timers (and, where said, PR-INT's 5 s tick) on the fake clock.
+ * The ledger is opt-in (`ledger: true`, which PR-INT passes); without it the module is today's path.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,11 +28,12 @@ const OWNER_JID = `${OWNER_DIGITS}@s.whatsapp.net`;
 const ENV = { EVOLUTION_API_URL: 'http://evo.test/', EVOLUTION_API_KEY: 'k', BONA_WA_INSTANCE: 'bona-test', BONA_OWNER_JID: OWNER_JID };
 
 /**
- * @param {{ auto?: string[], env?: object|null, sendNote?: Function|null, inventory?: object|null, extra?: object }} [o]
+ * @param {{ auto?: string[], env?: object|null, sendNote?: Function|null, inventory?: object|null, timers?: boolean, extra?: object }} [o]
  *   `env` set = the real one sender as the transport (what PR-INT wires); otherwise a fake that
- *   answers from `answers` (ok when empty).
+ *   answers from `answers` (ok when empty). `timers` = the module's own timers on the fake clock,
+ *   run by `runUntil` (no timer otherwise: each test ticks by hand).
  */
-function harness({ auto = [], env = null, sendNote = null, inventory = null, extra = {} } = {}) {
+function harness({ auto = [], env = null, sendNote = null, inventory = null, timers = false, extra = {} } = {}) {
   const db = openDb(':memory:');
   let clock = NOW;
   const now = () => clock;
@@ -40,6 +43,7 @@ function harness({ auto = [], env = null, sendNote = null, inventory = null, ext
   const autoIds = new Set(auto);
   const ownerTest = { autoMode: (lead) => Boolean(lead && autoIds.has(lead.lead_id)), active: () => false };
   const sent = [];
+  const sentAt = [];
   const answers = [];
   const evo = [];
   let transport = sendNote;
@@ -50,15 +54,40 @@ function harness({ auto = [], env = null, sendNote = null, inventory = null, ext
       return { ok: true, status: 201, text: async () => JSON.stringify({ key: { id: `KEY-${evo.length}` } }) };
     };
     sender = createSender({ env, team, inbox, db, fetchImpl, now });
-    transport = async (text) => { sent.push(text); return sender.sendTo({ jid: OWNER_JID, text, kind: 'note' }); };
+    transport = async (text) => { sent.push(text); sentAt.push(clock); return sender.sendTo({ jid: OWNER_JID, text, kind: 'note' }); };
   } else if (!transport) {
-    transport = async (text) => { sent.push(text); return answers.length ? answers.shift() : { ok: true }; };
+    transport = async (text) => { sent.push(text); sentAt.push(clock); return answers.length ? answers.shift() : { ok: true }; };
   }
+  const armed = [];
+  const scheduler = timers
+    ? { setTimer: (fn, ms) => { const t = { fn, ms, at: clock + ms, cleared: false, fired: false }; armed.push(t); return t; }, clearTimer: (t) => { if (t) t.cleared = true; } }
+    : { setTimer: null };
   const logs = [];
-  const deps = { db, siteUrl: SITE, publicApi: API, sendNote: transport, team, inbox, ownerTest, inventory, now, log: (e) => logs.push(e), setTimer: null, ...extra };
+  const deps = { ledger: true, db, siteUrl: SITE, publicApi: API, sendNote: transport, team, inbox, ownerTest, inventory, now, log: (e) => logs.push(e), ...scheduler, ...extra };
   const notes = createOwnerNotes(deps);
+  /**
+   * The module's own timers, in time order, up to `until` (the clock jumps to each), and with
+   * `tickEvery` also PR-INT's tick (lib T14: every 5 s) in between.
+   */
+  async function runUntil(until, { tickEvery = 0 } = {}) {
+    let ext = tickEvery ? clock + tickEvery : Infinity;
+    for (;;) {
+      const next = armed.filter((t) => !t.cleared && !t.fired).sort((a, b) => a.at - b.at)[0];
+      const at = Math.min(next?.at ?? Infinity, ext);
+      if (at > until) break;
+      clock = Math.max(clock, at);
+      if (next && next.at === at) {
+        next.fired = true;
+        await next.fn();
+      } else {
+        ext += tickEvery;
+        await notes.tick();
+      }
+    }
+    clock = Math.max(clock, until);
+  }
   return {
-    db, team, inbox, notes, sent, answers, evo, logs, sender, autoIds, deps,
+    db, team, inbox, notes, sent, sentAt, answers, evo, logs, sender, autoIds, deps, armed, runUntil,
     at: (ms) => { clock = ms; }, now,
     rows: () => db.db.prepare('SELECT * FROM owner_notes ORDER BY created, rowid').all().map((r) => ({ ...r, meta: JSON.parse(r.meta ?? '{}') })),
     row: (key) => { const r = db.db.prepare('SELECT * FROM owner_notes WHERE dedupe_key = ?').get(key); return r ? { ...r, meta: JSON.parse(r.meta ?? '{}') } : null; },
@@ -82,7 +111,8 @@ function addLead(h, over = {}) {
 const receiptFor = (h, ev, leadId) => h.db.db.prepare('INSERT INTO enquiry_receipts(event_id,payload_hash,lead_id,created) VALUES(?,?,?,?)').run(ev, 'h', leadId, NOW);
 const leadLink = (id) => `Lead: ${API}/dashboard/leads/${encodeURIComponent(id)}`;
 const clientSays = (h, lead, key, ts, text) => h.inbox.upsertMessage({ key_id: key, lead_id: lead.lead_id, jid: lead.wa_jid, direction: 'in', sender_kind: 'client', text, ts });
-const danaAnswered = (h, lead, sendId, coversTs) => h.inbox.insertOutbox({ send_id: sendId, lead_id: lead.lead_id, jid: lead.wa_jid, text: 'Of course.', sender_kind: 'dana', covers_ts: coversTs });
+/** The assistant's answer, as the one sender leaves it once Evolution took it (`accepted`); `pending` = still in flight. */
+const danaAnswered = (h, lead, sendId, coversTs, status = 'accepted') => h.inbox.insertOutbox({ send_id: sendId, lead_id: lead.lead_id, jid: lead.wa_jid, text: 'Of course.', sender_kind: 'dana', covers_ts: coversTs, status });
 
 /* ---------------- 1. the ledger ---------------- */
 
@@ -101,8 +131,8 @@ test('the constants are the design\'s numbers', () => {
   for (const header of Object.values(HEADERS)) assert.match(header, ownNote);
 });
 
-test('ledger: the same key twice is one row; a WhatsApp new client is due at min(first answer + 20 s, first message + 3 min)', async () => {
-  const h = harness();
+test('ledger: the same key twice is one row; a WhatsApp new client is due at min(first answer + 20 s, first message + 3 min), and the module\'s own timer sends it then', async () => {
+  const h = harness({ timers: true });
   const a = addLead(h, { name: 'Sara Example' });
   const b = addLead(h, { name: 'Omar Example' });
   await h.notes.leadEvent(a, { why: 'wa', created: true, ts: NOW });
@@ -113,28 +143,57 @@ test('ledger: the same key twice is one row; a WhatsApp new client is due at min
   assert.equal(h.row(`new:${a.lead_id}`).status, 'queued');
   assert.equal(h.sent.length, 0, 'nothing goes at once');
 
-  h.at(NOW + 30_000);
+  await h.runUntil(NOW + 30_000);
   danaAnswered(h, a, 'SND-ANSWER-A', NOW);
-  h.at(NOW + 49_999);
-  await h.notes.tick();
-  assert.equal(h.sent.length, 0, 'answered at +30 s: due at +50 s, not before');
-  h.at(NOW + 50_000);
-  await h.notes.tick();
-  assert.equal(h.sent.length, 1);
+  await h.runUntil(NOW + 10 * MIN);
+  assert.deepEqual(h.sentAt, [NOW + 50_000, NOW + 3 * MIN], 'answered at +30 s: at +50 s; never answered: at first message + 3 min');
   assert.match(h.sent[0], /Name: Sara Example/);
   assert.doesNotMatch(h.sent[0], /Omar Example/, 'the other is due at +3 min, outside the 2-min merge window');
-
-  h.at(NOW + 3 * MIN - 1);
-  await h.notes.tick();
-  assert.equal(h.sent.length, 1);
-  h.at(NOW + 3 * MIN);
-  await h.notes.tick();
-  assert.equal(h.sent.length, 2, 'no answer: at first message + 3 min');
   assert.match(h.sent[1], /Name: Omar Example/);
   await h.notes.leadEvent(a, { why: 'wa', created: true, ts: NOW });
-  h.at(NOW + 10 * MIN);
-  await h.notes.tick();
+  await h.runUntil(NOW + 20 * MIN);
   assert.equal(h.sent.length, 2, 'a sent key is never queued again');
+});
+
+test('the scheduler wakes at the real due time: answered at +5 s, the note goes at +25 s (not at the stored +3-min deadline)', async () => {
+  const h = harness({ timers: true });
+  const lead = addLead(h, { name: 'Sara Example' });
+  clientSays(h, lead, 'IN-T-0001', NOW, 'Hello');
+  await h.notes.leadEvent(lead, { why: 'wa', created: true, ts: NOW });
+  await h.runUntil(NOW + 5_000);
+  danaAnswered(h, lead, 'SND-T-0001', NOW);
+  await h.runUntil(NOW + 10 * MIN);
+  assert.deepEqual(h.sentAt, [NOW + 25_000]);
+});
+
+test('a definite failure is retried once, exactly 2 min later, even when an answer had brought the note forward (with PR-INT\'s 5 s tick too)', async () => {
+  for (const tickEvery of [0, 5_000]) {
+    const h = harness({ timers: true });
+    const lead = addLead(h, { name: 'Sara Example' });
+    clientSays(h, lead, `IN-R-${tickEvery}`, NOW, 'Hello');
+    h.answers.push({ ok: false, error: 'disabled' });
+    await h.notes.leadEvent(lead, { why: 'wa', created: true, ts: NOW });
+    await h.runUntil(NOW + 5_000, { tickEvery });
+    danaAnswered(h, lead, `SND-R-${tickEvery}`, NOW);
+    await h.runUntil(NOW + 30 * MIN, { tickEvery });
+    assert.deepEqual(h.sentAt, [NOW + 25_000, NOW + 25_000 + 2 * MIN], `tick every ${tickEvery} ms`);
+    assert.equal(h.row(`new:${lead.lead_id}`).status, 'sent');
+  }
+});
+
+test('an answer still in flight (a pending outbox row) is not an answer: the note waits for first message + 3 min, and does not say it was answered', async () => {
+  for (const tickEvery of [0, 5_000]) {
+    const h = harness({ timers: true });
+    const lead = addLead(h, { name: 'Sara Example' });
+    h.autoIds.add(lead.lead_id);
+    clientSays(h, lead, `IN-P-${tickEvery}`, NOW, 'Hello');
+    await h.notes.leadEvent(lead, { why: 'wa', created: true, ts: NOW });
+    await h.runUntil(NOW + 5_000, { tickEvery });
+    danaAnswered(h, lead, `SND-P-${tickEvery}`, NOW, 'pending');
+    await h.runUntil(NOW + 10 * MIN, { tickEvery });
+    assert.deepEqual(h.sentAt, [NOW + 3 * MIN], `tick every ${tickEvery} ms`);
+    assert.match(h.sent[0], /\nAI: not answered: not yet\n/);
+  }
 });
 
 /* ---------------- 2. merging and pacing ---------------- */
@@ -210,37 +269,73 @@ test('pacing: at least 25 s between two sends, restart-safe (the gap is read fro
   assert.equal(h.sent.length, 2);
 });
 
-test('at most 40 sends a day: the overflow is held for the summary (merged, never sent); summary and command replies still go', async () => {
-  const h = harness();
-  h.team.setSetting('owner_as_client', '1');
-  for (let i = 0; i < MAX_PER_DAY; i += 1) {
-    h.at(NOW + i * MIN_GAP_MS);
-    h.notes.alert('old_out_wrote', { candId: `CND-${String(i).padStart(4, '0')}` });
+/** `n` alerts, one per 25 s from `from`, each ticked: every one is its own send. */
+async function alertsEvery25s(h, n, from, tag) {
+  for (let i = 0; i < n; i += 1) {
+    h.at(from + i * MIN_GAP_MS);
+    h.notes.alert('old_out_wrote', { candId: `CND-${tag}-${String(i).padStart(4, '0')}` });
     await h.notes.tick();
   }
+}
+const overRows = (h) => h.rows().filter((r) => r.meta.over);
+
+test('at most 40 sends a day, the summary one of them: after the day\'s summary, 39 more; then nothing, not a command reply or a test summary either', async () => {
+  const h = harness();
+  h.team.setSetting('owner_as_client', '1');
+  assert.equal(h.notes.summary({ day: '2026-11-29' }).queued, true);
+  await h.notes.tick();
+  assert.match(h.sent[0], /^\*Bona — daily summary\*/);
+  await alertsEvery25s(h, MAX_PER_DAY - 1, NOW + MIN_GAP_MS, 'A');
   assert.equal(h.sent.length, MAX_PER_DAY);
   h.at(NOW + MAX_PER_DAY * MIN_GAP_MS);
   h.notes.alert('old_out_wrote', { candId: 'CND-OVER' });
-  await h.notes.tick();
-  assert.equal(h.sent.length, MAX_PER_DAY, 'the 41st is not sent');
-  const over = h.rows().find((r) => r.meta.candId === 'CND-OVER');
-  assert.equal(over.status, 'merged');
-  assert.ok(over.meta.over, 'held for the summary');
-  assert.equal(over.send_id, null);
   h.notes.command('REC-0001', '*Bona — test mode* ON');
+  h.notes.summary({ test: true, ts: h.now() });
   await h.notes.tick();
-  assert.equal(h.sent.length, MAX_PER_DAY + 1, 'a command reply is not counted out');
-  assert.equal(h.sent.at(-1), '*Bona — test mode* ON');
+  h.at(NOW + (MAX_PER_DAY + 1) * MIN_GAP_MS);
+  await h.notes.tick();
+  assert.equal(h.sent.length, MAX_PER_DAY, 'the 41st send never goes');
+  assert.deepEqual(overRows(h).map((r) => [r.kind, r.status, r.send_id]).sort(), [['alert', 'merged', null], ['command', 'merged', null], ['summary', 'merged', null]]);
+  assert.ok(overRows(h).every((r) => r.meta.over === '2026-11-29'), 'held for the summary');
+  // A new Riyadh day starts a new count.
+  h.at(Date.UTC(2026, 10, 29, 21, 0, 0));
+  h.notes.alert('breaker');
+  await h.notes.tick();
+  assert.equal(h.sent.length, MAX_PER_DAY + 1);
 });
 
-test('while no summary can carry the overflow (switches off, before go-live), the 40-a-day limit holds nothing back', async () => {
+test("before the day's summary has gone, one of the 40 is kept for it: 39 other sends, then the summary is the 40th", async () => {
   const h = harness();
-  for (let i = 0; i <= MAX_PER_DAY; i += 1) {
-    h.at(NOW + i * MIN_GAP_MS);
-    h.notes.alert('old_out_wrote', { candId: `CND-${String(i).padStart(4, '0')}` });
-    await h.notes.tick();
-  }
-  assert.equal(h.sent.length, MAX_PER_DAY + 1, 'nothing is lost into a summary that is not sent');
+  h.team.setSetting('owner_as_client', '1');
+  await alertsEvery25s(h, MAX_PER_DAY, NOW, 'B');
+  assert.equal(h.sent.length, MAX_PER_DAY - 1, 'the 40th other note is held');
+  assert.equal(overRows(h).length, 1);
+  h.at(NOW + MAX_PER_DAY * MIN_GAP_MS);
+  h.notes.summary({ day: '2026-11-29' });
+  await h.notes.tick();
+  assert.equal(h.sent.length, MAX_PER_DAY);
+  assert.match(h.sent.at(-1), /^\*Bona — daily summary\*/);
+  h.at(NOW + (MAX_PER_DAY + 1) * MIN_GAP_MS);
+  h.notes.alert('breaker');
+  await h.notes.tick();
+  assert.equal(h.sent.length, MAX_PER_DAY);
+});
+
+test('with no summary on (before go-live) the limit holds all the same: the 41st note is held, never sent; a held form note says so on its receipt', async () => {
+  const h = harness();
+  await alertsEvery25s(h, MAX_PER_DAY, NOW, 'C');
+  assert.equal(h.sent.length, MAX_PER_DAY);
+  h.at(NOW + MAX_PER_DAY * MIN_GAP_MS);
+  h.notes.alert('old_out_wrote', { candId: 'CND-OVER' });
+  h.notes.command('REC-0002', '*Bona — test mode* OFF');
+  const lead = addLead(h, { channel: 'form', match_method: 'form' });
+  receiptFor(h, 'ev-over-0000001', lead.lead_id);
+  await h.notes.leadEvent(lead, { why: 'form', created: true, eventId: 'ev-over-0000001' });
+  h.at(NOW + (MAX_PER_DAY + 1) * MIN_GAP_MS);
+  await h.notes.tick();
+  assert.equal(h.sent.length, MAX_PER_DAY, 'nothing over 40');
+  assert.deepEqual(overRows(h).map((r) => r.kind).sort(), ['alert', 'command', 'new_client']);
+  assert.equal(h.receipt('ev-over-0000001'), 'over', 'held over the limit, not dropped');
 });
 
 /* ---------------- 3. switches ---------------- */
@@ -374,6 +469,10 @@ test('a note that cannot be drawn is dropped (and logged by kind); the notes beh
   await h.notes.tick();
   assert.equal(h.sent.length, 1);
   assert.match(h.sent[0], /^\*Bona — alert\*\n/);
+  // The summary goes on its own, so it is drawn at the next pass, and dropped there.
+  h.at(NOW + MIN_GAP_MS);
+  await h.notes.tick();
+  assert.equal(h.sent.length, 1);
   assert.equal(h.row('sum:2026-11-29').status, 'dropped');
   assert.ok(h.logs.some((e) => e.evt === 'notes.render_failed' && e.kind === 'summary'));
   assert.doesNotMatch(JSON.stringify(h.logs), /listings unreadable|Sara/);
@@ -736,7 +835,7 @@ test('purge: the onPurge subscription deletes the lead\'s rows, inside the purge
   let notes = null;
   const inbox = createInboxStore(db, { now: () => NOW, onPurge: (leadId) => notes.onPurge(leadId) });
   const team = createTeam(db, { now: () => NOW });
-  notes = createOwnerNotes({ db, siteUrl: SITE, publicApi: API, sendNote: async () => ({ ok: true }), team, inbox, ownerTest: { autoMode: () => true }, now: () => NOW, setTimer: null });
+  notes = createOwnerNotes({ ledger: true, db, siteUrl: SITE, publicApi: API, sendNote: async () => ({ ok: true }), team, inbox, ownerTest: { autoMode: () => true }, now: () => NOW, setTimer: null });
   db.insertLead({ lead_id: 'LEAD-P1', created: NOW, updated: NOW, phone_e164: '966500000021', wa_jid: '966500000021@s.whatsapp.net', name: 'Sara Example', channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
   db.insertLead({ lead_id: 'LEAD-P2', created: NOW, updated: NOW, phone_e164: '966500000022', wa_jid: '966500000022@s.whatsapp.net', name: 'Omar Example', channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
   await notes.leadEvent(db.getLead('LEAD-P1'), { why: 'wa', created: true, ts: NOW });
@@ -886,23 +985,160 @@ test('recoverPendingNotifications leaves a receipt whose note is still queued pe
   assert.equal(h.receipt('ev-orphan-00001'), 'uncertain');
 });
 
+test('recoverPendingNotifications matches a queued note by its EVENT: a second form receipt of the same lead does not stay pending', async () => {
+  const h = harness({ env: ENV });
+  const lead = addLead(h, { channel: 'form', match_method: 'form' });
+  receiptFor(h, 'ev-first-000001', lead.lead_id);
+  receiptFor(h, 'ev-second-00001', lead.lead_id);
+  h.team.setSetting('sending_enabled', '0');
+  await h.notes.leadEvent(lead, { why: 'form', created: true, eventId: 'ev-first-000001' });
+  // The second form (a merge) died before leadEvent marked its receipt skipped: it is still pending.
+  assert.equal(h.receipt('ev-second-00001'), 'pending');
+  assert.equal(recoverPendingNotifications(h.db).enquiries, 1);
+  assert.equal(h.receipt('ev-first-000001'), 'pending', 'its own note is still queued');
+  assert.equal(h.receipt('ev-second-00001'), 'uncertain', 'no note of its own: recovered, never pending for ever');
+  h.team.setSetting('sending_enabled', '1');
+  h.at(NOW + MIN);
+  await h.notes.tick();
+  assert.equal(h.receipt('ev-first-000001'), 'sent');
+  assert.equal(h.receipt('ev-second-00001'), 'uncertain');
+});
+
+/* ---------------- one message per summary ---------------- */
+
+test('a summary goes as its own message: never inside another note, nor another note inside it', async () => {
+  const h = harness();
+  h.team.setSetting('owner_as_client', '1');
+  h.notes.alert('breaker');
+  h.notes.summary({ day: '2026-11-29' });
+  h.notes.alert('brain_bug');
+  await h.notes.tick();
+  assert.equal(h.sent.length, 1);
+  assert.match(h.sent[0], /^\*Bona — alert\*\n.*3 of its messages failed/s);
+  assert.match(h.sent[0], /3 or more unusable answers/, 'the two alerts merge');
+  assert.doesNotMatch(h.sent[0], /daily summary/);
+  h.at(NOW + MIN_GAP_MS);
+  await h.notes.tick();
+  assert.match(h.sent[1], /^\*Bona — daily summary\*/);
+  assert.doesNotMatch(h.sent[1], /\n\n/);
+
+  const first = harness();
+  first.team.setSetting('owner_as_client', '1');
+  first.notes.summary({ day: '2026-11-29' });
+  first.notes.alert('breaker');
+  await first.notes.tick();
+  assert.equal(first.sent.length, 1);
+  assert.match(first.sent[0], /^\*Bona — daily summary\*/);
+  assert.doesNotMatch(first.sent[0], /\*Bona — alert\*/);
+  first.at(NOW + MIN_GAP_MS);
+  await first.notes.tick();
+  assert.match(first.sent[1], /^\*Bona — alert\*/);
+});
+
 /* ---------------- the timer (no T14 needed for a held note to go) ---------------- */
 
-test('the module wakes itself for its next due note (one timer, unref-able), and stop() clears it', async () => {
-  const armed = [];
-  const h = harness({ extra: { setTimer: (fn, ms) => { const t = { fn, ms, cleared: false }; armed.push(t); return t; }, clearTimer: (t) => { t.cleared = true; } } });
-  const lead = addLead(h);
-  await h.notes.leadEvent(lead, { why: 'wa', created: true, ts: NOW });
-  assert.equal(armed.length, 1);
-  assert.equal(armed[0].ms, 60_000, 'at most a minute ahead, so a clock change is caught');
-  h.at(NOW + 3 * MIN);
-  await armed[0].fn();
-  assert.equal(h.sent.length, 1, 'the timer sent it');
+test('the module wakes itself for its next due note (one timer, at most a minute ahead), and stop() clears it', async () => {
+  const h = harness({ timers: true });
+  const lead = addLead(h, { channel: 'email', match_method: 'email' });
+  await h.notes.leadEvent(lead, { why: 'email', created: true, ts: NOW });
+  assert.deepEqual(h.armed.map((t) => t.ms), [60_000], 'at most a minute ahead, so a clock change is caught');
+  await h.runUntil(NOW + 5 * MIN);
+  assert.deepEqual(h.sentAt, [NOW + 3 * MIN], 'the timer sent it');
   h.notes.alert('breaker');
-  const last = armed.at(-1);
+  const last = h.armed.at(-1);
   h.notes.stop();
   assert.equal(last.cleared, true);
   h.notes.alert('brain_bug');
   await h.notes.tick();
   assert.equal(h.sent.length, 1, 'stopped: nothing goes');
+});
+
+test('a WhatsApp client still waiting for an answer is looked at every 5 s (so an answer is seen in time), and no faster', async () => {
+  const h = harness({ timers: true });
+  const lead = addLead(h);
+  await h.notes.leadEvent(lead, { why: 'wa', created: true, ts: NOW });
+  assert.deepEqual(h.armed.filter((t) => !t.cleared).map((t) => t.at - NOW), [5_000]);
+  await h.runUntil(NOW + 3 * MIN);
+  assert.ok(h.armed.length <= 3 * 60 / 5 + 2, String(h.armed.length));
+  assert.deepEqual(h.sentAt, [NOW + 3 * MIN]);
+});
+
+test('a pass that throws still re-arms the timer for the notes behind it', async () => {
+  const calls = [];
+  let h = null;
+  h = harness({ timers: true, sendNote: async () => { calls.push(h.now()); return { get ok() { throw new Error('a broken answer'); } }; } });
+  h.notes.alert('breaker');
+  const lead = addLead(h, { channel: 'email', match_method: 'email' });
+  await h.notes.leadEvent(lead, { why: 'email', created: true, ts: NOW });
+  await h.runUntil(NOW + 10 * MIN);
+  assert.deepEqual(calls, [NOW, NOW + 3 * MIN], 'the email note still went at +3 min');
+  assert.ok(h.logs.some((e) => e.evt === 'notes.tick_failed'));
+  assert.equal(h.row('al:breaker:' + Math.floor(NOW / HOUR)).status, 'uncertain', 'the broken send is never retried');
+});
+
+/* ---------------- without `ledger: true`: today's path (INERT until PR-INT opts in) ---------------- */
+
+test("without ledger: true (index.mjs today) it is today's path: every form note at once, byte for byte; no queue, no timer, no restart pick-up", async () => {
+  const db = openDb(':memory:');
+  try {
+    let clock = NOW;
+    const team = createTeam(db, { now: () => clock });
+    // The switches never governed today's note, and still do not on this path.
+    team.setSetting('owner_notes', '0');
+    team.setSetting('sending_enabled', '0');
+    // A row a ledger process left queued: today's path neither sends it nor wakes for it.
+    db.db.prepare(`INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, meta, created, updated)
+                   VALUES ('NOTE-LEFT', 'alert', NULL, 'al:breaker:1', ?, 'queued', '{"alert":"breaker"}', ?, ?)`).run(NOW - HOUR, NOW - HOUR, NOW - HOUR);
+    const armed = [];
+    const sent = [];
+    const answers = [];
+    const logs = [];
+    const notes = createOwnerNotes({
+      db, siteUrl: SITE, publicApi: API, team, ownerTest: { autoMode: () => true }, now: () => clock, log: (e) => logs.push(e),
+      setTimer: (fn, ms) => { armed.push(ms); return {}; }, clearTimer: () => {},
+      sendNote: async (t) => { sent.push([t, clock]); return answers.length ? answers.shift() : { ok: true }; },
+    });
+    assert.deepEqual(armed, [], 'no restart pick-up');
+    const lead = (id, phone) => {
+      db.insertLead({ lead_id: id, created: NOW, updated: NOW, phone_e164: phone, name: 'Sara Example', channel: 'form', match_method: 'form', stage: 'new' });
+      return db.getLead(id);
+    };
+    const receipt = (ev, leadId) => db.db.prepare('INSERT INTO enquiry_receipts(event_id,payload_hash,lead_id,created) VALUES(?,?,?,?)').run(ev, 'h', leadId, clock);
+    const status = (ev) => db.db.prepare('SELECT notify_status FROM enquiry_receipts WHERE event_id = ?').get(ev).notify_status;
+    const a = lead('LEAD-20261129-legacy01', '966500000031');
+    const b = lead('LEAD-20261129-legacy02', '966500000032');
+    receipt('ev-legacy-00001', a.lead_id);
+    await notes.leadEvent(a, { why: 'form', created: true, eventId: 'ev-legacy-00001' });
+    clock = NOW + 10_000;
+    receipt('ev-legacy-00002', b.lead_id);
+    await notes.leadEvent(b, { why: 'form', created: true, eventId: 'ev-legacy-00002' });
+    assert.deepEqual(sent, [[leadNote(a, { siteUrl: SITE }), NOW], [leadNote(b, { siteUrl: SITE }), NOW + 10_000]],
+      'both at once, 10 s apart, today\'s text (no Lead line)');
+    assert.equal(status('ev-legacy-00001'), 'sent');
+    assert.equal(status('ev-legacy-00002'), 'sent');
+    // A merge is told too, and a refusal is the answer, asked once: as today.
+    receipt('ev-legacy-00003', a.lead_id);
+    answers.push({ ok: false, error: 'rate_limited' });
+    await notes.leadEvent(a, { why: 'form', created: false, eventId: 'ev-legacy-00003' });
+    assert.equal(sent.length, 3);
+    assert.equal(status('ev-legacy-00003'), 'uncertain');
+    assert.deepEqual(logs.at(-1), { evt: 'lead.wa_failed', id: a.lead_id, error: 'rate_limited' });
+    // Nothing else exists on this path: no ledger row, no tick, no other kind.
+    assert.deepEqual(db.db.prepare('SELECT note_id, status FROM owner_notes').all().map((r) => ({ ...r })), [{ note_id: 'NOTE-LEFT', status: 'queued' }]);
+    assert.equal(await notes.tick(), undefined);
+    for (const [fn, args] of [['handover', [a, { kind: 'person' }]], ['booking', ['BK-1', { told: true }]], ['stopped', [a, 'stop']],
+      ['alert', ['breaker', {}]], ['mail', [{ messageId: 'M-1' }]], ['command', ['R-1', '#dana status']], ['onPurge', [a.lead_id]]]) {
+      assert.equal(notes[fn](...args), undefined, fn);
+    }
+    assert.equal(typeof notes.summary, 'undefined', 'no summary on this path: createDailySummary refuses it, loudly');
+    clock = NOW + DAY;
+    await notes.tick();
+    assert.equal(sent.length, 3);
+    assert.deepEqual(armed, []);
+    assert.deepEqual(notes.health(), { enabled: true, ok: true });
+    // ledger: true is the switch PR-INT turns: the same second form 10 s later is then held for the 25 s gap
+    // (test 'a form note the pacing holds is pending, and goes 25 s after the one before it').
+  } finally {
+    db.close();
+  }
 });

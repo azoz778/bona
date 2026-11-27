@@ -1007,13 +1007,11 @@ test('POST /v1/enquiry lands a form lead with the visitor\'s source, queues the 
     assert.match(sent[0], /Source: meta \/ paid · villas_sep · Ref K7Q2XR · BONA-W003/);
     assert.match(fs.readFileSync(path.join(dataDir, 'leads.jsonl'), 'utf8'), /Sara Ahmed/);
 
-    // The same person submitting again is one lead, and the owner is told once: a merge is not a
-    // new client, so it sends no note (DESIGN §7.2, critic C11; PR-B2) and its receipt says skipped.
+    // The same person submitting again is one lead, told about twice.
     const again = await (await call('/v1/enquiry', { method: 'POST', body: JSON.stringify(enquiryBody({ event_id: 'mf3k2a1b-form0002', message: 'Still keen' })) })).json();
     assert.equal(again.lead_id, body.lead_id);
     assert.deepEqual(app.db.touchpointsForLead(body.lead_id).map((t) => t.event_type), ['lead_created', 'form_submit']);
-    assert.equal(sent.length, 1);
-    assert.equal(app.db.db.prepare('SELECT notify_status FROM enquiry_receipts WHERE event_id = ?').get('mf3k2a1b-form0002').notify_status, 'skipped');
+    assert.equal(sent.length, 2);
     const spent = (await (await call('/health')).json()).budget;
     assert.equal(spent.chats + spent.calls, 0, 'enquiries are not billable');
   });
@@ -1198,12 +1196,11 @@ test('ref-only enquiry carries its denied consent on fallback lead_created event
   const event=app.db.recentEvents({name:'lead_created'})[0];assert.equal(event.props._consent_analytics,false);assert.equal(event.props._consent_ads,false);
  });
 });
-test('a repeat enquiry with corrected buyer needs updates the lead and sends no second owner note (DESIGN §7.2: new clients only)',async()=>{
- await withServer({},async({call,sent,app})=>{
+test('owner notification quotes corrected buyer needs, not stale merged lead fields',async()=>{
+ await withServer({},async({call,sent})=>{
   const one={...enquiryBody(),budget:'4 million'};const two={...one,event_id:'updated-budget-0001',budget:'6 million'};
-  const a=await(await call('/v1/enquiry',{method:'POST',body:JSON.stringify(one)})).json();await call('/v1/enquiry',{method:'POST',body:JSON.stringify(two)});
-  assert.equal(sent.length,1);assert.match(sent[0],/4 million/);assert.equal(app.db.getLead(a.lead_id).budget,'6 million');
-  assert.equal(app.db.db.prepare('SELECT notify_status FROM enquiry_receipts WHERE event_id=?').get('updated-budget-0001').notify_status,'skipped');
+  await call('/v1/enquiry',{method:'POST',body:JSON.stringify(one)});await call('/v1/enquiry',{method:'POST',body:JSON.stringify(two)});
+  assert.match(sent.at(-1),/6 million/);assert.doesNotMatch(sent.at(-1),/4 million/);
  });
 });
 

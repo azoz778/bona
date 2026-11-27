@@ -18,14 +18,17 @@ export function saveEnquiryReceipt(db, q, leadId, now) {
 
 /**
  * At start-up, before anything is sent: a receipt still `pending` lost its owner note with the
- * last process (it may or may not have gone), so it becomes `uncertain` — unless the note is still
- * queued in the owner-notes ledger (DESIGN §7.1, critic round 2 #17b: Sending off or the pacing
- * held it); that one goes later and moves its receipt on itself.
+ * last process (it may or may not have gone), so it becomes `uncertain` — unless ITS note (the
+ * ledger row whose meta names this receipt's event) is still queued in the owner-notes ledger
+ * (DESIGN §7.1, critic round 2 #17b: Sending off or the pacing held it); that one goes later and
+ * moves its receipt on itself. Matched by event, not by lead: another form of the same lead has
+ * no note of its own and is recovered like any other.
  */
 export function recoverPendingNotifications(db) {
  return db.transaction(() => ({
   enquiries: db.db.prepare(`UPDATE enquiry_receipts SET notify_status='uncertain' WHERE notify_status='pending'
-    AND NOT EXISTS (SELECT 1 FROM owner_notes n WHERE n.kind='new_client' AND n.status='queued' AND n.lead_id=enquiry_receipts.lead_id)`).run().changes,
+    AND NOT EXISTS (SELECT 1 FROM owner_notes n WHERE n.kind='new_client' AND n.status='queued' AND n.lead_id=enquiry_receipts.lead_id
+      AND (CASE WHEN json_valid(n.meta) THEN json_extract(n.meta,'$.ev') END)=enquiry_receipts.event_id)`).run().changes,
   handoffs: db.db.prepare("UPDATE lead_tasks SET telegram_status='uncertain' WHERE telegram_status='pending'").run().changes,
  }));
 }

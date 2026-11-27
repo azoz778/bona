@@ -31,7 +31,7 @@ function harness({ clock: start = MON_0800, settings = {}, brain = null, waLink 
   const ownerTest = { autoMode: () => false, active: () => team.ownerAsClientEnabled() };
   const sent = [];
   const deps = {
-    db, siteUrl: SITE, publicApi: API, team, inbox, ownerTest, brain, waLink, viewing, mail, now, setTimer: null,
+    ledger: true, db, siteUrl: SITE, publicApi: API, team, inbox, ownerTest, brain, waLink, viewing, mail, now, setTimer: null,
     sendNote: async (t) => { sent.push(t); return { ok: true }; },
   };
   const notes = createOwnerNotes(deps);
@@ -114,6 +114,25 @@ test('down at 08:00 and started at 10:00 → it sends; started at 13:00 → fold
   await one.notes.tick();
   assert.match(one.sent[0], /^\*Bona — daily summary\* · Tue 1 Dec · covers 2 days\n/);
   assert.equal(one.rows().length, 1, 'exactly one summary for the two days');
+});
+
+test('the first summary ever (no marker yet): down at 08:00 and started at 10:00 → it sends; started at 13:00 → folded into the next day ("covers 2 days")', async () => {
+  const ten = harness({ clock: riyadh(2026, 11, 30, 10), settings: { owner_as_client: '1' } });
+  assert.deepEqual(ten.summary.minute(), { sent: true, days: 1 });
+
+  const one = harness({ clock: riyadh(2026, 11, 30, 13), settings: { owner_as_client: '1' } });
+  assert.deepEqual(one.summary.minute(), { sent: false, reason: 'late' });
+  one.at(riyadh(2026, 11, 30, 18));
+  assert.deepEqual(one.summary.minute(), { sent: false, reason: 'late' });
+  one.at(riyadh(2026, 12, 1, 7, 59));
+  assert.deepEqual(one.summary.minute(), { sent: false, reason: 'early' });
+  one.at(riyadh(2026, 12, 1, 8));
+  assert.deepEqual(one.summary.minute(), { sent: true, days: 2 });
+  await one.notes.tick();
+  assert.match(one.sent[0], /^\*Bona — daily summary\* · Tue 1 Dec · covers 2 days\n/);
+  assert.equal(one.rows().length, 1, 'exactly one summary for the two days');
+  one.at(riyadh(2026, 12, 2, 8));
+  assert.deepEqual(one.summary.minute(), { sent: true, days: 1 }, 'then one day each');
 });
 
 test('#dana summary → a TEST summary now, and the day marker is left alone', async () => {
@@ -206,7 +225,9 @@ test('owner_as_client on, own_inbox off: the summary names the test lead and nob
   h.summary.minute();
   await h.notes.tick();
   const text = h.sent[0];
-  assert.match(text, /\nViewings today: 12:00 Owner Test Example \(W012\) · 16:00 a client \(W003\) \| tomorrow: 10:00 a client \(W007\)\n/);
+  assert.match(text, /\nViewings today: 12:00 Owner Test Example \(W012\) · 1 other client \| tomorrow: 1 client\n/,
+    "another client's viewing is a count: no time, no listing");
+  assert.doesNotMatch(text, /16:00|W003|W007|10:00/);
   assert.match(text, /\nChats to check: 1 without a phone number\n/);
   assert.match(text, /\nNew clients: 2 \(WhatsApp 2\)/);
   assert.doesNotMatch(text, /Sara|Ali Example|Ahmed/);
@@ -247,9 +268,10 @@ test('notes held over the day\'s limit, and old Not-a-client chats that wrote, a
   put('new:A', 'new_client', 'merged', { over: '2026-11-29' }, sun);
   put('ho:B:offer:1', 'handover', 'merged', { over: '2026-11-29' }, sun);
   put('ho:C:offer:1', 'handover', 'merged', { into: 'NOTE-x' }, sun);
+  put('cmd:REC-1', 'command', 'merged', { over: '2026-11-29' }, sun);
   put('al:old_out_wrote:LEAD-1:2026-11-29', 'alert', 'sent', { code: 'old_out_wrote' }, sun);
   put('al:old_out_wrote:CND-1:2026-11-28', 'alert', 'sent', { code: 'old_out_wrote' }, riyadh(2026, 11, 28, 21));
   const text = renderSummary(h.deps, { day: '2026-11-30', days: 1 }, MON_0800);
-  assert.match(text, /\nNotes over the day's limit: 2 \(new clients 1 · hand-overs 1\)(\n|$)/);
+  assert.match(text, /\nNotes over the day's limit: 3 \(new clients 1 · hand-overs 1 · command replies 1\)(\n|$)/);
   assert.ok(text.split('\n').includes(`Marked Not a client, wrote again: 1 → ${API}/dashboard/inbox?tab=unsure`));
 });

@@ -6,14 +6,16 @@
  *     08:00 Riyadh, when `owner_summary_day` is not today, it queues the day's summary in the
  *     owner-notes ledger AND sets the marker in the same transaction, so a restart never sends a
  *     second one. A process that was down at 08:00 catches up on start until 12:00; after that
- *     the day is folded into the next day's summary ("covers 2 days"). Exactly one a day.
+ *     the day is folded into the next day's summary ("covers 2 days"), the first summary ever
+ *     included. Exactly one a day.
  *   - `renderSummary(deps, meta, at)`: the text, built when the note is SENT (lib/owner-notes.mjs
  *     renders every note at send time; nothing of it is stored), from the read-only counts in
  *     lib/dashboard/stats.mjs `ownerSummary`.
  *
  * Same-release rule (DESIGN §2, §7.1, critic round 2 #8): a summary is made only while
  * `owner_as_client` or `own_inbox` is '1'. While `own_inbox` is '0' it names nobody except the
- * owner's own test lead (`inbox_via` 'owner_test'); every other line is a count. There is no cost
+ * owner's own test lead (`inbox_via` 'owner_test'); every other line is a count (another client's
+ * viewing included: no time, no listing). There is no cost
  * line (the month alerts cover money) and no email line until a mailbox is configured.
  *
  * The small text helpers the notes share (one line, names, Riyadh clock and day labels,
@@ -36,8 +38,9 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** The summary's channel order and words (stats.mjs `channelBucket`). */
 const CHANNELS = [['whatsapp', 'WhatsApp'], ['email', 'email'], ['form', 'website form'], ['chat', 'website chat'], ['phone', 'phone'], ['other', 'other']];
-/** The note kinds a held-over line counts, in order, with their words. */
-const HELD_KINDS = [['new_client', 'new clients'], ['handover', 'hand-overs'], ['booking', 'bookings'], ['stopped', 'stops'], ['alert', 'alerts'], ['mail', 'emails']];
+/** The note kinds a held-over line counts, in order, with their words (every kind is under the limit). */
+const HELD_KINDS = [['new_client', 'new clients'], ['handover', 'hand-overs'], ['booking', 'bookings'], ['stopped', 'stops'], ['alert', 'alerts'], ['mail', 'emails'],
+  ['command', 'command replies'], ['summary', 'summaries']];
 
 /* ---------------- shared text helpers ---------------- */
 
@@ -159,7 +162,15 @@ export function renderSummary(deps = {}, meta = {}, at = Date.now()) {
   lines.push(`Waiting for you: ${s.waiting}${s.waiting ? ` → ${waitingLink}` : ''}`);
 
   const tomorrowStart = todayStart + DAY_MS;
-  const viewingList = (rows) => rows.map((v) => `${clockLabel(v.start_ts, off)} ${nameOf(v)} (${oneLine(String(v.listing_id ?? '').replace(/^BONA-/i, ''), 20)})`).join(' · ') || 'none';
+  // Before go-live (own_inbox '0') only the owner's own test lead is shown; every other viewing
+  // is a count, with no time and no listing (DESIGN §7.3; PLAN T11 test 12).
+  const viewingList = (rows) => {
+    const shown = rows.filter((v) => named || v.inbox_via === 'owner_test');
+    const parts = shown.map((v) => `${clockLabel(v.start_ts, off)} ${nameOf(v)} (${oneLine(String(v.listing_id ?? '').replace(/^BONA-/i, ''), 20)})`);
+    const hidden = rows.length - shown.length;
+    if (hidden) parts.push(parts.length ? plural(hidden, 'other client', 'other clients') : plural(hidden, 'client', 'clients'));
+    return parts.join(' · ') || 'none';
+  };
   lines.push(`Viewings today: ${viewingList(s.viewings.filter((v) => v.start_ts < tomorrowStart))} | tomorrow: ${viewingList(s.viewings.filter((v) => v.start_ts >= tomorrowStart))}`);
 
   const ai = s.ai;
@@ -221,8 +232,13 @@ export function createDailySummary({ db, team, notes, now = () => Date.now(), lo
     const marker = String(team.getSetting('owner_summary_day') ?? '');
     if (marker === today) return { sent: false, reason: 'done' };
     if (!summaryOn(team)) return { sent: false, reason: 'off' };
-    // Started too late for today's: tomorrow's covers both days (the marker stays behind).
-    if (hour >= CATCH_UP_BEFORE_HOUR) return { sent: false, reason: 'late' };
+    // Started too late for today's: tomorrow's covers both days (the marker stays behind). With
+    // no marker yet (the first summary ever), it is set to yesterday, so that tomorrow's still
+    // counts today's missed window ("covers 2 days") instead of dropping it.
+    if (hour >= CATCH_UP_BEFORE_HOUR) {
+      if (!DAY_RE.test(marker)) team.setSetting('owner_summary_day', dayKey(dayStart(today, off) - DAY_MS, off), { by: 'system' });
+      return { sent: false, reason: 'late' };
+    }
     const days = coveredDays(marker, today, off);
     return db.transaction(() => {
       const queued = notes.summary({ day: today, days });

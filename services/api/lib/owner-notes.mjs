@@ -36,32 +36,46 @@
  *
  * Sending (DESIGN §7.1):
  *   - everything due within 2 min goes as ONE message (at most 3,500 characters; what does not
- *     fit waits for the next send): the first row `sent`, the others `merged` into it;
+ *     fit waits for the next send): the first row `sent`, the others `merged` into it. A summary
+ *     always goes on its own (nothing joins it, and it joins nothing);
  *   - at least 25 s between two sends, read back from the ledger so a restart cannot skip it;
- *   - at most 40 sends a (Riyadh) day while a summary is on to carry the rest: the overflow is
- *     kept for the summary (`merged`, `over`), except the summary itself and a command reply;
+ *   - at most 40 sends a (Riyadh) day, every kind counted, the summary included: the overflow is
+ *     kept for the summary (`merged`, `over`). While summaries are on and the day's 08:00 summary
+ *     has not gone yet, one of the 40 is kept for it, so the note that carries the overflow is
+ *     never itself held back (DESIGN §7.3: exactly one a day) and the total stays at 40;
  *   - each send's rows are marked `uncertain` BEFORE the call: a process that dies mid-send
  *     leaves them so, and they are never sent again. The answer then decides: ok → sent; the
  *     Sending switch off or the note's minute used up → back to queued, held (30 s / 15 s, or
  *     at once when Sending is back on), sent later, nothing lost; an answer that may have gone
  *     (timeout, 5xx, a throw, no ack) → uncertain, never retried; any other refusal (BONA_WA_NOTIFY
- *     =0, Evolution not configured, a 4xx) → retried once after 2 min, then failed;
+ *     =0, Evolution not configured, a 4xx) → retried once, 2 min after the failure (never sooner:
+ *     an answer no longer brings it forward, and no earlier send takes it along), then failed;
  *   - the `owner_notes` switch '0' drops new and queued notes.
  * Form enquiries (critic round 2 #17b): the form path's note is due at once and the request
  * awaits the first attempt for up to 4 s, as before; `enquiry_receipts.notify_status` follows the
  * ledger: held → pending, sent → sent, failed or uncertain → uncertain (a later send moves it on),
- * dropped → dropped, a merge → skipped. enquiry-receipt.mjs leaves a receipt whose note is still
- * queued alone at start-up.
+ * dropped → dropped, held over the day's limit → over, a merge → skipped. enquiry-receipt.mjs
+ * leaves a receipt whose own note (by its event id) is still queued alone at start-up.
  *
  * The transport is the injected `sendNote(text)` → `{ ok, error?, uncertain?, sendId? }`. index.mjs
  * hands in today's (lib/wa.mjs sendText to the owner's chat); PR-INT (T14) moves it onto the one
  * sender's kind 'note' (lib/wa-send.mjs: the owner's jid only, its own `note:to:` limit, an outbox
  * row without text or lead), whose refusals this file already holds or retries as above.
  *
- * The module wakes itself for its next due note (one unref'd timer, at most a minute ahead), so a
- * held or delayed note goes out without PR-INT's tick; PR-INT's 5 s tick is welcome (one run at a
- * time). Nothing here logs a note's text, a name or a number: ids and codes only. A purge deletes
- * a lead's rows through the store's `onPurge` seam (rows only, never the network).
+ * The module wakes itself when its next note is really due (one unref'd timer, at most a minute
+ * ahead): the answer-adjusted time, the 25 s gap and a hold taken into account, and every 5 s
+ * while a WhatsApp client's note waits for the assistant's first answer, so an answer is seen in
+ * time. Only an answer WhatsApp took (outbox `accepted`) counts; one still in flight does not.
+ * A pass that throws still re-arms the timer. PR-INT's 5 s tick is welcome (one run at a time).
+ * Nothing here logs a note's text, a name or a number: ids and codes only. A purge deletes a
+ * lead's rows through the store's `onPurge` seam (rows only, never the network).
+ *
+ * INERT until PR-INT (PLAN §0, the INERT rule; Codex r1 P0 on PR-B2): all of the above runs only
+ * when the caller opts in with `createOwnerNotes({ ledger: true, … })`, which PR-INT (T14, the
+ * owner of index.mjs) passes. Without it the module is today's path, kept byte for byte below
+ * (`createTodaysNotes`, the PR-F2b stub): the form's note sent at once through the given
+ * `sendNote`, merges told too, the receipt `sent` or `uncertain`; no queue, no timer, no pick-up
+ * at start, no switch; every other kind a no-op.
  */
 import { leadNote } from './leads.mjs';
 import { randomId } from './store.mjs';
@@ -92,6 +106,8 @@ export const STUCK_MS = 15 * 60_000;
 export const HANDOVER_BUCKET_MS = 10 * 60_000;
 /** A transport that has not answered by then is taken as uncertain (its rows are never sent again). */
 export const SEND_TIMEOUT_MS = 30_000;
+/** How often the module looks for the assistant's first answer while a WhatsApp client's note waits for one. */
+export const ANSWER_POLL_MS = 5_000;
 
 const HOUR_MS = 3_600_000;
 const HOLD_MS = { sending_disabled: 30_000, rate_limited: 15_000 };
@@ -168,8 +184,6 @@ const MAIL_WHAT = Object.freeze({
 const CHANNEL_WORDS = Object.freeze({
   whatsapp: 'WhatsApp', form: 'website form', concierge_chat: 'website chat', chat: 'website chat', concierge_voice: 'phone', voice: 'phone', email: 'email',
 });
-/** Not held back by the 40-a-day limit. */
-const CAP_EXEMPT = new Set(['summary', 'command']);
 const WHYS = new Set(['form', 'concierge', 'wa', 'joined', 'email']);
 /** Due at once (a person filled in a form or a chat on the site). */
 const QUICK_WHYS = new Set(['form', 'concierge']);
@@ -228,14 +242,20 @@ const errMessage = (err) => {
  */
 
 /**
- * @param {{ db?: object|null, siteUrl?: string, publicApi?: string,
+ * `ledger: true` (PR-INT) is the ledger described above; anything else is today's path.
+ * @param {{ ledger?: boolean, db?: object|null, siteUrl?: string, publicApi?: string,
  *           sendNote?: ((text: string) => Promise<{ ok?: boolean, error?: string, uncertain?: boolean, sendId?: string }>)|null,
  *           team?: object|null, ownerTest?: object|null, inventory?: object|null, brain?: object|null, viewing?: object|null,
  *           waLink?: object|null, mail?: object|null, log?: Function, now?: () => number, formWaitMs?: number,
  *           tzOffsetMs?: number, setTimer?: Function|null, clearTimer?: Function }} [o]
  * @returns {OwnerNotes}
  */
-export function createOwnerNotes({
+export function createOwnerNotes(o = {}) {
+  return o?.ledger === true ? createLedgerNotes(o) : createTodaysNotes(o ?? {});
+}
+
+/** The ledger (DESIGN §7.1-7.2): what PR-INT turns on with `ledger: true`. */
+function createLedgerNotes({
   db = null, siteUrl, publicApi = DEFAULT_PUBLIC_API, sendNote = null, team = null, ownerTest = null,
   inventory = null, brain = null, viewing = null, waLink = null, mail = null,
   log = () => {}, now = () => Date.now(), formWaitMs = FORM_NOTIFY_WAIT_MS, tzOffsetMs = TZ_OFFSET_MS,
@@ -307,13 +327,34 @@ export function createOwnerNotes({
     timerAt = t + delay;
     timer = setTimer(() => { timer = null; timerAt = Infinity; return tick(); }, delay);
   }
-  function armNext() {
-    if (!db || halted) return;
-    const next = prep("SELECT MIN(due_ts) AS d FROM owner_notes WHERE status = 'queued'").get()?.d;
-    if (!Number.isFinite(next)) return;
-    let at = Math.max(next, lastSendTs() + MIN_GAP_MS);
+  /**
+   * When to look next: the earliest real due time of a queued note (an answer brings a WhatsApp
+   * client's forward), or 5 s ahead while one still waits for its answer; never inside the 25 s
+   * gap or a hold. Infinity when nothing is queued.
+   */
+  function wakeAt(t) {
+    const queued = prep("SELECT * FROM owner_notes WHERE status = 'queued'").all().map(rowOf);
+    const brainHours = new Set(queued.filter(isBrainAlert).map((r) => r.meta.hour));
+    let at = Infinity;
+    for (const r of queued) {
+      // A brain hand-over goes with its hour's alert, whose own time stands for it.
+      if (isBrainHandover(r) && brainHours.has(r.meta.alertHour)) continue;
+      let when;
+      try { when = timing(r); } catch { when = { due: r.due_ts, waiting: false }; }
+      at = Math.min(at, when.due);
+      if (when.waiting && when.due > t) at = Math.min(at, t + ANSWER_POLL_MS);
+    }
+    if (!Number.isFinite(at)) return Infinity;
+    at = Math.max(at, lastSendTs() + MIN_GAP_MS);
     if (hold) at = Math.max(at, hold.until);
-    arm(at, 1000);
+    return at;
+  }
+  /** `dueFloorMs`: how long a note already due waits (after a pass: a second, never a busy loop). */
+  function armNext(dueFloorMs = 1000) {
+    if (!db || halted || !setTimer) return;
+    const t = now();
+    const at = wakeAt(t);
+    if (Number.isFinite(at)) arm(at, at > t ? 0 : dueFloorMs);
   }
 
   /* ---------------- the ledger ---------------- */
@@ -326,12 +367,13 @@ export function createOwnerNotes({
                       VALUES (?,?,?,?,?,?,NULL,?,?,?) ON CONFLICT(dedupe_key) DO NOTHING`)
       .run(id, kind, leadId, key, Math.trunc(due), status, JSON.stringify(meta), t, t);
     const inserted = ins.changes === 1;
-    if (inserted && status === 'queued') arm(due);
+    if (inserted && status === 'queued') armNext(0);
     return { inserted, noteId: inserted ? id : null, status: inserted ? status : 'exists' };
   }
 
+  // Only an answer WhatsApp took: a `pending` row is still in flight (and may yet fail).
   const firstAnswerSince = (leadId, since) => prep(`SELECT MIN(created) AS t FROM wa_outbox
-      WHERE lead_id = ? AND sender_kind = 'dana' AND status <> 'failed' AND created >= ?`).get(String(leadId), Math.trunc(since))?.t ?? null;
+      WHERE lead_id = ? AND sender_kind = 'dana' AND status = 'accepted' AND created >= ?`).get(String(leadId), Math.trunc(since))?.t ?? null;
   const firstClientMessage = (leadId, since) => prep(`SELECT text, media_type, ts FROM wa_messages
       WHERE lead_id = ? AND direction = 'in' AND ts >= ? ORDER BY ts ASC, rowid ASC LIMIT 1`).get(String(leadId), Math.trunc(since)) ?? null;
   const lastClientMessage = (leadId, upTo) => (Number.isFinite(upTo)
@@ -342,14 +384,21 @@ export function createOwnerNotes({
     return text ? `"${text}"` : (oneLine(m?.media_type, 20) || '[message]');
   };
 
-  /** When a queued row is due: a WhatsApp client's note comes forward to its first answer + 20 s. */
-  function effectiveDue(r) {
-    if (r.kind === 'new_client' && r.lead_id && ANSWERED_WHYS.has(r.meta.why)) {
+  /** A retry after a definite failure: due exactly at its stored time (DESIGN §7.1, 2 min after). */
+  const isRetry = (r) => Number(r.meta.tries) >= 1;
+  /**
+   * When a queued row is due, and whether it still waits for an answer: a WhatsApp client's note
+   * comes forward to the assistant's first answer + 20 s (never a retry's).
+   */
+  function timing(r) {
+    if (r.kind === 'new_client' && r.lead_id && ANSWERED_WHYS.has(r.meta.why) && !isRetry(r)) {
       const answered = firstAnswerSince(r.lead_id, Number.isFinite(r.meta.ts) ? r.meta.ts : r.created);
-      if (Number.isFinite(answered)) return Math.min(r.due_ts, answered + ANSWER_GRACE_MS);
+      if (Number.isFinite(answered)) return { due: Math.min(r.due_ts, answered + ANSWER_GRACE_MS), waiting: false };
+      return { due: r.due_ts, waiting: true };
     }
-    return r.due_ts;
+    return { due: r.due_ts, waiting: false };
   }
+  const effectiveDue = (r) => timing(r).due;
   const isBrainAlert = (r) => r.kind === 'alert' && r.meta.alert === 'brain_out';
   const isBrainHandover = (r) => r.kind === 'handover' && r.meta.kind === 'brain';
 
@@ -359,6 +408,9 @@ export function createOwnerNotes({
   }
   const sendsToday = (t) => prep('SELECT COUNT(DISTINCT send_id) AS n FROM owner_notes WHERE send_id IS NOT NULL AND updated >= ?')
     .get(dayStart(dayKey(t, off), off))?.n ?? 0;
+  /** Today's 08:00 summary has been tried (or settled): no slot is kept for it any more. */
+  const daySummaryDone = (t) => Boolean(prep("SELECT 1 FROM owner_notes WHERE dedupe_key = ? AND status <> 'queued'").get(`sum:${dayKey(t, off)}`));
+  const isDaySummary = (r) => r.kind === 'summary' && !r.meta.test;
 
   /* ---------------- rendering (at send time) ---------------- */
 
@@ -519,14 +571,17 @@ export function createOwnerNotes({
   }
   const RECEIPT = { sent: 'sent', held: 'pending', uncertain: 'uncertain', failed: 'uncertain', dropped: 'dropped' };
 
-  /** Rows that will not be sent: dropped (no longer sendable) or held over for the summary. */
-  function settle(rows, status, t, extra = {}) {
+  /**
+   * Rows that will not be sent: dropped (no longer sendable; receipt `dropped`) or held over the
+   * day's limit for the summary (`merged` + `over`; receipt `over`).
+   */
+  function settle(rows, status, t, extra = {}, receipt = 'dropped') {
     if (!rows.length) return;
     db.transaction(() => {
       for (const r of rows) {
         prep('UPDATE owner_notes SET status = ?, meta = ?, updated = ? WHERE note_id = ? AND status = ?')
           .run(status, JSON.stringify({ ...r.meta, ...extra }), t, r.note_id, 'queued');
-        if (r.kind === 'new_client' && r.meta.ev) setReceipt(r.meta.ev, 'dropped');
+        if (r.kind === 'new_client' && r.meta.ev) setReceipt(r.meta.ev, receipt);
         texts.delete(r.note_id);
       }
     });
@@ -629,19 +684,26 @@ export function createOwnerNotes({
     if (!candidates.some((c) => c.due <= t)) return;
     const last = lastSendTs();
     if (t - last < MIN_GAP_MS) return;
-    // The overflow goes into the summary, so the limit holds notes back only while there is one
-    // to carry them (before go-live, with the summary off, nothing is lost into it).
-    const capped = summaryOn(team) && sendsToday(t) >= MAX_PER_DAY;
+    // At most 40 sends a day, every kind counted (DESIGN §7.1; PLAN T11 test 2). The overflow is
+    // held for the summary, so while summaries are on and today's has not gone yet, one of the 40
+    // is kept for it (DESIGN §7.3, exactly one a day): the others get 39 until it went.
+    const sends = sendsToday(t);
+    const kept = summaryOn(team) && !daySummaryDone(t) ? 1 : 0;
+    const room = (r) => sends < MAX_PER_DAY - (isDaySummary(r) ? 0 : kept);
     const parts = [];
     const dropped = [];
     const over = [];
     let size = 0;
     for (const c of candidates) {
       if (c.due > t + MERGE_WINDOW_MS) break;
-      if (capped && !CAP_EXEMPT.has(c.row.kind)) {
+      // A retry goes when it is due, never earlier along with another send.
+      if (isRetry(c.row) && c.due > t) continue;
+      if (!room(c.row)) {
         if (c.due <= t) over.push(c.row);
         continue;
       }
+      // A summary is a message of its own: it goes first and alone, or waits for the next pass.
+      if (c.row.kind === 'summary' && (parts.length || c.due > t)) continue;
       let out = null;
       try {
         out = render(c.row, t, queued);
@@ -655,9 +717,10 @@ export function createOwnerNotes({
       if (parts.length && size + extra > MAX_NOTE_CHARS) break;
       parts.push({ row: c.row, due: c.due, text: out.text, folded: out.folded ?? [] });
       size += extra;
+      if (c.row.kind === 'summary') break;
     }
     settle(dropped, 'dropped', t);
-    settle(over, 'merged', t, { over: dayKey(t, off) });
+    settle(over, 'merged', t, { over: dayKey(t, off) }, 'over');
     if (!parts.some((p) => p.due <= t)) return;
     await sendBatch(parts, t);
   }
@@ -672,10 +735,11 @@ export function createOwnerNotes({
           again = false;
           await step();
         } while (again && !halted);
-        armNext();
       } catch (err) {
         say({ level: 'error', evt: 'notes.tick_failed', error: errName(err) });
       } finally {
+        // Re-armed whatever the pass did, so a throw never leaves the notes behind it asleep.
+        try { armNext(); } catch (err) { say({ level: 'error', evt: 'notes.arm_failed', error: errName(err) }); }
         running = null;
       }
     })();
@@ -859,11 +923,97 @@ export function createOwnerNotes({
 
   // A note left queued by the last process (a retry, a held one) is picked up without waiting for a new one.
   if (db && setTimer) {
-    try {
-      const next = prep("SELECT MIN(due_ts) AS d FROM owner_notes WHERE status = 'queued'").get()?.d;
-      if (Number.isFinite(next)) arm(next, 1000);
-    } catch { /* no ledger to read: nothing to pick up */ }
+    try { armNext(); } catch { /* no ledger to read: nothing to pick up */ }
   }
 
   return { leadEvent, handover, booking, stopped, alert, mail: mailNote, command, summary, onPurge, tick, stop, health };
+}
+
+/**
+ * Today's path, the PR-F2b stub byte for byte (PLAN §0, the INERT rule): what createOwnerNotes
+ * gives without `ledger: true`, which is what index.mjs builds until PR-INT (T14) opts in.
+ *
+ * Today the owner hears about one thing only: a new enquiry, as `leadNote()`'s text, sent
+ * straight away. Three places send it, each its own way, and `leadEvent` keeps each one byte
+ * for byte, chosen by `why`:
+ *
+ *   - 'form' (index.mjs, the site's forms): every accepted enquiry, created or merged. The
+ *     request waits for the send for up to 4 s; `enquiry_receipts.notify_status` becomes
+ *     'sent' on an ok answer and 'uncertain' otherwise (a failure, a throw, or no answer in
+ *     time). Logged `lead.wa_failed` / `lead.wa_error`.
+ *   - 'concierge' (tools.mjs create_lead): every saved lead, created or merged. Logged
+ *     `lead.wa_failed` / `lead.wa_error`.
+ *   - anything else, 'wa' (wa-poller.mjs, a WhatsApp lead) and 'joined' (the own-number join,
+ *     PR-A1) included: only a lead that was just created. Logged `wa.note.failed` (warn).
+ *
+ * `sendNote(text)` is the transport, and the only one; its answer `{ ok, error? }` stands:
+ * nothing here tries a second way, holds, queues or retries. No Sending or owner_notes switch,
+ * no per-minute limit, no length cap and no outbox row, as today. Every other method is a
+ * no-op, and there is no `summary` (createDailySummary refuses this object, loudly).
+ */
+function createTodaysNotes({
+  db = null, siteUrl, sendNote = null, log = () => {}, formWaitMs = FORM_NOTIFY_WAIT_MS,
+} = {}) {
+  const setStatus = (status, eventId) => {
+    if (db && eventId) db.db.prepare('UPDATE enquiry_receipts SET notify_status=? WHERE event_id=?').run(status, eventId);
+  };
+
+  /** index.mjs:781-792 at 13e4954, moved here unchanged. */
+  async function formNote(lead, eventId) {
+    try {
+      let timer;
+      const res = await Promise.race([
+        sendNote(leadNote(lead, { siteUrl })),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('owner notification unconfirmed')), formWaitMs); }),
+      ]).finally(() => clearTimeout(timer));
+      setStatus(res?.ok ? 'sent' : 'uncertain', eventId);
+      if (!res?.ok) log({ evt: 'lead.wa_failed', id: lead.lead_id, error: res?.error ?? 'unknown' });
+    } catch (err) {
+      setStatus('uncertain', eventId);
+      log({ evt: 'lead.wa_error', id: lead.lead_id, error: String(err?.message ?? err) });
+    }
+  }
+
+  /** tools.mjs:256-263 at 13e4954 (create_lead). */
+  async function conciergeNote(lead) {
+    try {
+      const res = await sendNote(leadNote(lead, { siteUrl }));
+      if (!res?.ok) log({ evt: 'lead.wa_failed', id: lead.lead_id, error: res?.error ?? 'unknown' });
+    } catch (err) {
+      log({ evt: 'lead.wa_error', id: lead.lead_id, error: String(err?.message ?? err) });
+    }
+  }
+
+  /** wa-poller.mjs:608-615 at 13e4954 (a lead the poller created). */
+  async function whatsappNote(lead) {
+    try {
+      const res = await sendNote(leadNote(lead, { siteUrl }));
+      if (res && res.ok === false) log({ level: 'warn', evt: 'wa.note.failed', leadId: lead.lead_id, error: res.error ?? 'unknown' });
+    } catch (err) {
+      log({ level: 'warn', evt: 'wa.note.failed', leadId: lead.lead_id, error: String(err?.message ?? err) });
+    }
+  }
+
+  async function leadEvent(lead, { why, created = false, eventId = null } = {}) {
+    if (!lead || !sendNote) return;
+    if (why === 'form') return formNote(lead, eventId);
+    if (why === 'concierge') return conciergeNote(lead);
+    if (created) return whatsappNote(lead);
+  }
+
+  const nothing = () => {};
+  return {
+    leadEvent,
+    handover: nothing,
+    booking: nothing,
+    stopped: nothing,
+    alert: nothing,
+    mail: nothing,
+    command: nothing,
+    onPurge: nothing,
+    tick: nothing,
+    stop: nothing,
+    // Today's new-enquiry note goes at once, with no queue behind it: nothing can be stuck.
+    health: () => ({ enabled: true, ok: true }),
+  };
 }
