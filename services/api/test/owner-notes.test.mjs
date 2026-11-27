@@ -436,6 +436,48 @@ test('Sending off: the note stays queued (no outbox row, no call) and goes once 
   assert.equal(h.row(`new:${lead.lead_id}`).send_id, row.send_id, 'the ledger names the outbox row');
 });
 
+test("Sending off after the day's 40 sends: a new form note stays queued with its receipt pending, never settled into the overflow; Sending back on the next day → it goes, the same day → the overflow", async () => {
+  for (const back of ['next day', 'same day']) {
+    const calls = [];
+    let h = null;
+    // As the one sender answers (lib/wa-send.mjs): Sending off → `sending_disabled`.
+    h = harness({ sendNote: async (text) => { calls.push(text); return h.team.sendingEnabled() ? { ok: true } : { ok: false, error: 'sending_disabled' }; } });
+    for (let i = 0; i < MAX_PER_DAY; i += 1) {
+      h.at(NOW + i * MIN_GAP_MS);
+      h.notes.alert('old_out_wrote', { candId: `CND-SO-${String(i).padStart(4, '0')}` });
+      await h.notes.tick();
+    }
+    assert.equal(calls.length, MAX_PER_DAY, back);
+    h.team.setSetting('sending_enabled', '0');
+    const lead = addLead(h, { channel: 'form', match_method: 'form' });
+    receiptFor(h, 'ev-off-over-01', lead.lead_id);
+    h.at(NOW + MAX_PER_DAY * MIN_GAP_MS);
+    await settled(h.notes.leadEvent(lead, { why: 'form', created: true, eventId: 'ev-off-over-01' }), back);
+    for (const t of [NOW + (MAX_PER_DAY + 1) * MIN_GAP_MS, NOW + 2 * HOUR]) { h.at(t); await h.notes.tick(); }
+    const held = h.row(`new:${lead.lead_id}`);
+    assert.equal(held.status, 'queued', `${back}: held while Sending is off`);
+    assert.equal(held.meta.over, undefined, `${back}: not settled into the overflow`);
+    assert.equal(h.receipt('ev-off-over-01'), 'pending', back);
+    assert.equal(calls.length, MAX_PER_DAY, back);
+    h.team.setSetting('sending_enabled', '1');
+    if (back === 'next day') {
+      h.at(Date.UTC(2026, 10, 29, 21, 0, 0)); // 00:00 Riyadh, a new day's 40
+      await h.notes.tick();
+      assert.equal(calls.length, MAX_PER_DAY + 1, back);
+      assert.match(calls.at(-1), /^\*Bona — new enquiry\*/, back);
+      assert.equal(h.row(`new:${lead.lead_id}`).status, 'sent', back);
+      assert.equal(h.receipt('ev-off-over-01'), 'sent', back);
+    } else {
+      h.at(NOW + 3 * HOUR);
+      await h.notes.tick();
+      assert.equal(calls.length, MAX_PER_DAY, `${back}: still over today's 40`);
+      const over = h.row(`new:${lead.lead_id}`);
+      assert.deepEqual([over.status, over.meta.over], ['merged', '2026-11-29'], back);
+      assert.equal(h.receipt('ev-off-over-01'), 'over', back);
+    }
+  }
+});
+
 test('owner_notes 0: a new note is dropped at once, and a queued one at the next tick; health says not enabled', async () => {
   const h = harness();
   const a = addLead(h);
@@ -1142,6 +1184,94 @@ test("an outage alert's sentence is the outage's latest cause, chosen when it go
     assert.match(h.sent[0], SAYS.down);
     assert.match(h.sent[0], /One Example \(WhatsApp\)/);
   }
+});
+
+test("a brain hand-over of a chat already handed over this hour (a duplicate) opens no later hour's alert: after the 10:00 alert listed it, nothing goes at 11:00", async () => {
+  for (const before of ['sent', 'queued']) {
+    const h = harness();
+    const one = addLead(h, { name: 'One Example' });
+    h.autoIds.add(one.lead_id);
+    const hour = Math.floor(NOW / HOUR);
+    h.notes.alert('brain_out', { code: 'quota' });
+    assert.equal(h.notes.handover(one, { kind: 'brain' }).queued, true);
+    if (before === 'sent') {
+      await h.notes.tick();
+      assert.equal(h.sent.length, 1);
+      assert.match(h.sent[0], /One Example \(WhatsApp\)/);
+    }
+    h.at(NOW + 10 * MIN);
+    assert.deepEqual(h.notes.handover(one, { kind: 'brain' }), { queued: false, reason: 'duplicate' }, before);
+    assert.equal(h.row(`al:brain_out:${hour + 1}`), null, `${before}: a duplicate opens no 11:00 alert`);
+    assert.equal(h.rows().filter((r) => r.kind === 'handover').length, 1, before);
+    for (const t of [NOW + 10 * MIN + MIN_GAP_MS, NOW + HOUR, NOW + HOUR + 30 * MIN, NOW + 2 * HOUR]) { h.at(t); await h.notes.tick(); }
+    assert.equal(h.sent.length, 1, `${before}: one note, nothing at 11:00`);
+    assert.match(h.sent[0], /\nChats waiting: 1 → /, before);
+    assert.deepEqual(h.rows().filter((r) => r.status === 'queued'), [], before);
+  }
+});
+
+test("an outage alert a hand-over opened goes only with chats: its chat purged or out of auto mode before its hour → dropped at its hour, never sent empty; one alert() asked for goes on its own", async () => {
+  for (const gone of ['purged', 'not auto']) {
+    const h = harness();
+    const one = addLead(h, { name: 'One Example' });
+    h.autoIds.add(one.lead_id);
+    const hour = Math.floor(NOW / HOUR);
+    h.notes.alert('brain_out', { code: 'quota' });
+    await h.notes.tick();
+    assert.equal(h.sent.length, 1, `${gone}: the outage's own alert goes with no chat waiting yet`);
+    assert.match(h.sent[0], /^\*Bona — alert\*\nOpenAI credit ran out\./);
+    assert.doesNotMatch(h.sent[0], /Chats waiting/);
+    h.at(NOW + 30 * MIN);
+    assert.equal(h.notes.handover(one, { kind: 'brain' }).queued, true);
+    assert.equal(h.row(`al:brain_out:${hour + 1}`).status, 'queued');
+    h.at(NOW + 40 * MIN);
+    if (gone === 'purged') h.notes.onPurge(one.lead_id);
+    else h.autoIds.delete(one.lead_id);
+    h.at(NOW + HOUR);
+    await h.notes.tick();
+    assert.equal(h.sent.length, 1, `${gone}: the 11:00 alert has no chat to list, so it does not go`);
+    assert.equal(h.row(`al:brain_out:${hour + 1}`).status, 'dropped', gone);
+    assert.deepEqual(h.rows().filter((r) => r.status === 'queued'), [], gone);
+    for (const t of [NOW + HOUR + MIN, NOW + HOUR + 30 * MIN]) { h.at(t); await h.notes.tick(); }
+    assert.equal(h.sent.length, 1, `${gone}: nothing later either`);
+
+    // The same hour, a new chat: the dropped 11:00-hour alert is queued again and lists it.
+    const two = addLead(h, { name: 'Two Example' });
+    h.autoIds.add(two.lead_id);
+    h.at(NOW + HOUR + 50 * MIN);
+    assert.equal(h.notes.handover(two, { kind: 'brain' }).queued, true);
+    assert.equal(h.row(`ho:${two.lead_id}:brain:${hour + 1}`).meta.alertHour, hour + 1, `${gone}: a dropped alert never counts as gone`);
+    await h.notes.tick();
+    assert.equal(h.sent.length, 2, gone);
+    assert.match(h.sent[1], /^\*Bona — alert\*\nOpenAI credit ran out\./, gone);
+    assert.match(h.sent[1], /\nChats waiting: 1 → /, gone);
+    assert.match(h.sent[1], /Two Example \(WhatsApp\)/, gone);
+    assert.doesNotMatch(h.sent[1], /One Example/, gone);
+  }
+});
+
+test("a chat whose brain hand-over was dropped while owner notes were off is listed when it is handed over again in that hour once they are on (queued again), so the hour's alert never goes without it", async () => {
+  const h = harness();
+  const one = addLead(h, { name: 'One Example' });
+  h.autoIds.add(one.lead_id);
+  const hour = Math.floor(NOW / HOUR);
+  h.team.setSetting('owner_notes', '0');
+  assert.deepEqual(h.notes.alert('brain_out', { code: 'quota' }), { queued: false, reason: 'dropped' });
+  assert.deepEqual(h.notes.handover(one, { kind: 'brain' }), { queued: false, reason: 'dropped' });
+  h.team.setSetting('owner_notes', '1');
+  h.at(NOW + 20 * MIN);
+  assert.deepEqual(h.notes.alert('brain_out', { code: 'quota' }), { queued: true });
+  assert.deepEqual(h.notes.handover(one, { kind: 'brain' }), { queued: true }, 'the dropped hand-over is queued again');
+  assert.equal(h.row(`ho:${one.lead_id}:brain:${hour}`).status, 'queued');
+  assert.deepEqual(h.notes.handover(one, { kind: 'brain' }), { queued: false, reason: 'duplicate' }, 'once');
+  await h.notes.tick();
+  assert.equal(h.sent.length, 1);
+  assert.match(h.sent[0], /^\*Bona — alert\*\nOpenAI credit ran out\./);
+  assert.match(h.sent[0], /\nChats waiting: 1 → /);
+  assert.match(h.sent[0], /One Example \(WhatsApp\)/);
+  assert.equal(h.row(`ho:${one.lead_id}:brain:${hour}`).status, 'merged');
+  assert.equal(h.rows().filter((r) => r.kind === 'handover').length, 1, 'one row per chat and hour');
+  assert.ok(!h.sent.some((s) => s.includes(HEADERS.handover)));
 });
 
 test('mail: sender and subject read at send time (60 chars), what to do, the dashboard link; never stored in the ledger', async () => {

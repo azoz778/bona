@@ -24,7 +24,11 @@
  *     however many chats wait. Its sentence is chosen when it goes, from the outage's LATEST
  *     cause (below, `brain_out:cause`), and the row then keeps the code it went with. An outage
  *     alert dropped while owner notes were off is queued again by the next hand-over or alert once
- *     they are on; with notes off a brain hand-over opens no alert.
+ *     they are on; with notes off a brain hand-over opens no alert. A chat already handed over in
+ *     the hour (a duplicate) opens none either; its row dropped while notes were off is queued
+ *     again by its next hand-over that hour. An alert that alert('brain_out') asked for goes even
+ *     with no chat to list (the outage's own news); one only a hand-over opened goes only with
+ *     chats (its chats purged or out of auto mode: dropped at its hour, never sent empty).
  *   - booking `bk:<id>` / `bk-untold:<id>`, stopped `stop:<lead>:<ts>` (auto mode only).
  *   - summary `sum:<day>` / `sumtest:<ts>` (only while owner_as_client or own_inbox is '1';
  *     lib/daily-summary.mjs).
@@ -49,7 +53,9 @@
  *   - at least 25 s between two sends, read back from the ledger so a restart cannot skip it;
  *   - at most 40 sends a (Riyadh) day, every kind counted, the summary included, a send that may
  *     have gone too (a restart mid-call), and a purged lead's (onPurge below): the overflow is
- *     kept for the summary (`merged`, `over`). While summaries are on and the day's 08:00 summary
+ *     kept for the summary (`merged`, `over`), but never while Sending is off (nothing goes then,
+ *     so a note stays queued and held, and the day it goes in decides once Sending is back on).
+ *     While summaries are on and the day's 08:00 summary
  *     has not gone yet, one of the 40 is kept for it, so the note that carries the overflow is
  *     never itself held back (DESIGN §7.3: exactly one a day) and the total stays at 40;
  *   - each send's rows are marked `uncertain`, with the send's id, BEFORE the call: a process that dies mid-send
@@ -312,6 +318,11 @@ function createLedgerNotes({
   const sendingOn = () => {
     try { return team?.sendingEnabled?.() === true; } catch { return false; }
   };
+  /** The Sending switch is known to be off (a team that cannot tell is not "off": the transport decides). */
+  const sendingOff = () => {
+    if (typeof team?.sendingEnabled !== 'function') return false;
+    try { return team.sendingEnabled() !== true; } catch { return false; }
+  };
   const auto = (lead) => {
     try { return Boolean(lead) && ownerTest?.autoMode?.(lead) === true; } catch { return false; }
   };
@@ -424,20 +435,29 @@ function createLedgerNotes({
    * Hour `alertHour`'s brain_out alert, due at `due`, with the cause `code` (only a fallback: the
    * sentence is the latest cause when it goes): a new row, or a dropped one queued again (owner
    * notes are on). A queued one or one that went is left as it is. True when this call queued it.
+   * `asked`: alert('brain_out') asked for this hour's alert (meta `asked`), which then goes even
+   * with no chat to list (the outage's own news); one only a hand-over opened goes only with chats
+   * (renderAlert). An alert() of the hour whose alert a hand-over already queued marks it so.
    */
-  function openBrainAlert(alertHour, due, code) {
+  function openBrainAlert(alertHour, due, code, asked = false) {
     if (!notesOn()) return false;
     const t = now();
+    const key = `al:brain_out:${alertHour}`;
     const id = `NOTE-${t.toString(36)}-${randomId(6)}`;
-    const meta = JSON.stringify({ alert: 'brain_out', code: brainCode(code), hour: alertHour });
+    const meta = JSON.stringify({ alert: 'brain_out', code: brainCode(code), hour: alertHour, ...(asked ? { asked: 1 } : {}) });
     const r = prep(`INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, send_id, meta, created, updated)
                     VALUES (?, 'alert', NULL, ?, ?, 'queued', NULL, ?, ?, ?)
                     ON CONFLICT(dedupe_key) DO UPDATE SET status = 'queued', due_ts = excluded.due_ts, meta = excluded.meta, updated = excluded.updated
                     WHERE owner_notes.status = 'dropped' AND owner_notes.send_id IS NULL`)
-      .run(id, `al:brain_out:${alertHour}`, Math.trunc(due), meta, t, t);
-    if (r.changes !== 1) return false;
-    armNext(0);
-    return true;
+      .run(id, key, Math.trunc(due), meta, t, t);
+    if (r.changes === 1) { armNext(0); return true; }
+    if (asked) {
+      const row = byKey(key);
+      if (row?.status === 'queued' && !row.meta.asked) {
+        prep("UPDATE owner_notes SET meta = ? WHERE note_id = ? AND status = 'queued'").run(JSON.stringify({ ...row.meta, asked: 1 }), row.note_id);
+      }
+    }
+    return false;
   }
 
   // Only an answer WhatsApp took: a `pending` row is still in flight (and may yet fail). Its time is
@@ -597,6 +617,10 @@ function createLedgerNotes({
         lines.push(`Chats waiting: ${chats.length} → ${link('/dashboard/inbox?filter=needs_human')}`);
         const more = chats.length - MAX_LISTED_CHATS;
         lines.push(`${chats.slice(0, MAX_LISTED_CHATS).join(' · ')}${more > 0 ? ` · and ${more} more` : ''}`);
+      } else if (!r.meta.asked) {
+        // Opened by a hand-over only, and its chats are gone (purged, out of auto mode): nothing to
+        // say, so it is dropped, never sent empty (a later chat this hour queues it again).
+        return { none: true, drop };
       }
     }
     if (r.meta.alert === 'old_out_wrote') lines.push(`Chats to check: ${link('/dashboard/inbox?tab=unsure')}`);
@@ -812,7 +836,7 @@ function createLedgerNotes({
         // One note that cannot be drawn must not hold back every note behind it.
         say({ level: 'error', evt: 'notes.render_failed', kind: c.row.kind, error: errName(err) });
       }
-      if (!out) { dropped.push(c.row); continue; }
+      if (!out || out.none) { dropped.push(c.row, ...(out?.drop ?? [])); continue; }
       dropped.push(...(out.drop ?? []));
       const extra = (parts.length ? 2 : 0) + out.text.length;
       if (parts.length && size + extra > MAX_NOTE_CHARS) break;
@@ -822,8 +846,21 @@ function createLedgerNotes({
       if (c.row.kind === 'summary') break;
     }
     settle(dropped, 'dropped', t);
-    settle(over, 'merged', t, { over: dayKey(t, off) }, 'over');
-    if (!parts.some((p) => p.due <= t)) return;
+    const sending = parts.some((p) => p.due <= t);
+    // While Sending is off nothing goes, so nothing goes over the day's 40 either: a note over the
+    // limit stays queued (a form's receipt `pending`) and the day it goes in decides once Sending is
+    // back on (DESIGN §7.1; T11 test 3). With nothing else to send it is held as the transport holds
+    // one (30 s, or at once when Sending is back on); otherwise the transport's answer holds.
+    if (over.length && sendingOff()) {
+      if (!sending) {
+        hold = { until: t + HOLD_MS.sending_disabled, reason: 'sending_disabled' };
+        say({ level: 'warn', evt: 'notes.held', kinds: [...new Set(over.map((r) => r.kind))], n: over.length, error: 'sending_disabled' });
+        return;
+      }
+    } else {
+      settle(over, 'merged', t, { over: dayKey(t, off) }, 'over');
+    }
+    if (!sending) return;
     await sendBatch(parts, t);
   }
 
@@ -899,14 +936,28 @@ function createLedgerNotes({
       // own. A later hour's alert never goes before its hour (step); its sentence is the
       // outage's latest cause when it goes (renderAlert), however many hours on.
       // Owner notes off: only the hand-over, dropped; no hour's alert is opened or stepped past.
+      // The chat's dedupe key is checked first: a chat already handed over this hour (listed, or
+      // waiting to be) opens no alert; only a new row, or one dropped while owner notes were off
+      // (never sent, queued again now that they are on), opens or queues its hour's alert.
       const hour = Math.floor(t / HOUR_MS);
-      if (!notesOn()) {
-        return answer(enqueue({ kind: 'handover', leadId: l.lead_id, key: `ho:${l.lead_id}:brain:${hour}`, due: t, meta: { ...meta, alertHour: hour } }));
-      }
+      const key = `ho:${l.lead_id}:brain:${hour}`;
+      if (!notesOn()) return answer(enqueue({ kind: 'handover', leadId: l.lead_id, key, due: t, meta: { ...meta, alertHour: hour } }));
+      const seen = byKey(key);
+      if (seen && !(seen.status === 'dropped' && seen.send_id === null)) return { queued: false, reason: 'duplicate' };
       const { alertHour, row } = openBrainHour(hour);
       const due = alertHour === hour ? t : alertHour * HOUR_MS;
+      const hoMeta = { ...meta, alertHour };
+      if (seen) {
+        const up = prep("UPDATE owner_notes SET status = 'queued', due_ts = ?, meta = ?, updated = ? WHERE note_id = ? AND status = 'dropped' AND send_id IS NULL")
+          .run(Math.trunc(due), JSON.stringify(hoMeta), t, seen.note_id);
+        if (up.changes !== 1) return { queued: false, reason: 'duplicate' };
+      } else {
+        const r = enqueue({ kind: 'handover', leadId: l.lead_id, key, due, meta: hoMeta });
+        if (!(r.inserted && r.status === 'queued')) return answer(r);
+      }
       openBrainAlert(alertHour, due, latestBrainCause() ?? row?.meta.code);
-      return answer(enqueue({ kind: 'handover', leadId: l.lead_id, key: `ho:${l.lead_id}:brain:${hour}`, due, meta: { ...meta, alertHour } }));
+      armNext(0);
+      return { queued: true };
     }
     return answer(enqueue({ kind: 'handover', leadId: l.lead_id, key: `ho:${l.lead_id}:${k}:${Math.floor(t / HANDOVER_BUCKET_MS)}`, due: t, meta }));
   }
@@ -962,7 +1013,7 @@ function createLedgerNotes({
       // Otherwise (queued already, or gone, with the next hour's opened by a hand-over or not
       // yet) a duplicate: the recorded cause is what a note not gone yet will say.
       const { alertHour } = openBrainHour(hour);
-      if (alertHour === hour && openBrainAlert(hour, t, why)) return { queued: true };
+      if (alertHour === hour && openBrainAlert(hour, t, why, true)) return { queued: true };
       return { queued: false, reason: 'duplicate' };
     }
     const out = { alert: c };
