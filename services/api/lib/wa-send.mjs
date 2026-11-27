@@ -66,7 +66,9 @@
  * submit of it gets the first one's answer back — an `uncertain` one included.
  *
  * The owner's new-lead note to his own chat stays in lib/wa.mjs: that one is a message to
- * himself.
+ * himself. PR-F2b adds the 'note' kind but leaves that note where it is; PR-B2 (T11) moves it
+ * onto this kind together with the notes ledger, which holds a note this gate refuses for now.
+ * Until then no production caller sends a 'note'.
  */
 import { createLimiter } from './ratelimit.mjs';
 import { waConfig } from './wa.mjs';

@@ -305,18 +305,15 @@ export function createApp(options = {}) {
   // The owner's test switch and the per-lead auto mode (DESIGN §2, §3.2, PR-A2). Stub: no test,
   // no own-number rule, no auto mode — today's behaviour wherever it is read.
   const ownerTest = options.ownerTest ?? createOwnerTest({ cfg, team, wa, link: waLink, log, now: clock });
-  // The owner's notes (DESIGN §7, PR-B2). Their transport: the `sendWhatsApp` handed to
-  // createApp when there is one (the test seam), else the one sender's kind 'note' to the
-  // owner's own jid — outside the shared budget, its own per-recipient limit, its outbox row
-  // without text (lib/wa-send.mjs). Stub: today's new-enquiry note, sent at once.
-  const sendNote = options.sendWhatsApp ?? ((text) => sender.sendTo({ jid: `${ownerDigits}@s.whatsapp.net`, text, kind: 'note' }));
-  // Today's transport (lib/wa.mjs, the owner's chat only), for the stub alone: a note the one
-  // sender refused before writing a row for a gate today's note never had (the Sending switch,
-  // the note's minute, its length) goes that way, since only PR-B2's ledger can hold it for
-  // later. With a test seam there is one transport and no second try.
-  const legacySend = options.sendWhatsApp ? null : (text) => sendText(text, { env: cfg.env, fetchImpl });
+  // The owner's notes (DESIGN §7, PR-B2). Stub: today's new-enquiry note, sent at once, through
+  // today's transport, `sendWhatsApp` (the one handed to createApp, else lib/wa.mjs to the
+  // owner's chat), exactly as the form path sent it at 13e4954: PR-F2b is inert for that note.
+  // For T11: moving it onto the one sender's kind 'note' (lib/wa-send.mjs; the owner's jid only,
+  // its own `note:to:` limit, an outbox row without text) is PR-B2's change, together with the
+  // ledger that holds a note the Sending switch or the note's minute refuses for now. Until then
+  // no production caller sends kind 'note'.
   const notes = options.notes ?? createOwnerNotes({
-    db, siteUrl: cfg.siteUrl, sendNote, legacySend, team, inbox: inboxStore, ownerTest, log, now: clock,
+    db, siteUrl: cfg.siteUrl, sendNote: sendWhatsApp, team, inbox: inboxStore, ownerTest, log, now: clock,
   });
   // Viewing bookings (DESIGN §8, PR-B1). Stub: nothing bookable, every hook a no-op.
   const viewing = options.viewing ?? createViewing({ db, cfg, team, ownerTest, notes, log, now: clock });
@@ -889,8 +886,8 @@ export function createApp(options = {}) {
     const {lead,created} = result;
     log({ evt: 'enquiry', leadId: lead.lead_id, created, form: q.form, source: lead.source, listingId: lead.listing_id });
 
-    // The owner's note (DESIGN §7.1): the notes module sends it and records the receipt's
-    // notify_status; the request waits for the first attempt for up to 4 s, as before.
+    // The owner's note (DESIGN §7.1): the notes module sends it through today's transport and
+    // records the receipt's notify_status; the request waits for it for up to 4 s, as before.
     await notes.leadEvent(lead, { why: 'form', created, eventId: q.event_id });
     await notifyHandoff(lead.lead_id);
     return { lead_id: lead.lead_id };

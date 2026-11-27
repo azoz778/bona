@@ -1049,10 +1049,10 @@ instance's own number stays out of the shared minute and day budget; Dana's answ
 team reply into the owner's own chat (his test chat) count like any client's. A note goes to
 the owner's jid alone (anyone else is `bad_recipient`), pays its own 6 a minute (a separate
 limiter key from Dana's sends into that chat), and its outbox row keeps the message id but no
-text and no lead. Until the notes ledger (PR-B2) can hold a note for later, a lead note this
-gate refuses before writing a row (the Sending switch, its own minute, over 4,096 characters)
-goes the old way instead (`lib/wa.mjs`, to the owner's chat only), so an accepted form never
-loses its note. The form
+text and no lead. No production caller sends a note yet: the site form's new-enquiry note
+still goes the way it always has (`lib/wa.mjs`, to the owner's chat only), outside this gate
+(no Sending switch, no per-minute limit, no outbox row), until the notes ledger (PR-B2) moves
+it onto this kind and holds a note the gate refuses for now. The reply form
 carries a random `send_id`, and its outbox row is written before the HTTP call, so a double
 submit gets the first answer back, never a second message. A reply is `accepted` only when
 Evolution answers with a `key.id`. A timeout, a network error other than a refused
