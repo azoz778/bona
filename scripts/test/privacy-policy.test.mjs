@@ -71,8 +71,12 @@ test('the WhatsApp conversations section says what is stored, who reads it, for 
   assert.match(en, /five years after its last message/);
   assert.match(en, /deleted automatically/);
   // The copies bona.db retention does not govern are named, not hidden, and the one Bona
-  // runs itself (Evolution, on its own server) is not passed off as WhatsApp's.
-  assert.match(en, /does not reach two other copies/);
+  // runs itself (Evolution, on its own server) is not passed off as WhatsApp's. Since D1 the
+  // pre-update backups are the third (review of PR #87, round 4): time-limited, and the
+  // paragraph sends the reader to the retention sentence that gives their limit.
+  assert.match(en, /does not reach three other copies/);
+  assert.doesNotMatch(en, /two other copies/);
+  assert.match(en, /and a backup copy of our records can still hold the conversation for up to 30 days after it is deleted \(see “How long we keep it” below\)\./);
   assert.match(en, /the WhatsApp gateway server that Bona runs for this number keeps its own copy/);
   assert.doesNotMatch(en, /WhatsApp service our number runs on/);
   assert.match(en, /on our phones, in WhatsApp, under WhatsApp’s own terms/);
@@ -87,7 +91,9 @@ test('the WhatsApp conversations section says what is stored, who reads it, for 
   assert.match(ar, /لوحة خاصة/);
   assert.match(ar, /خمس سنوات/);
   assert.match(ar, /تلقائي/);
-  assert.match(ar, /ولا يشمل هذا الحذف التلقائي نسختين أخريين/);
+  assert.match(ar, /ولا يشمل هذا الحذف التلقائي ثلاث نسخ أخرى/);
+  assert.doesNotMatch(ar, /نسختين أخريين/);
+  assert.match(ar, /وقد تبقى أيضاً في نسخة احتياطية من سجلاتنا مدةً تصل إلى ثلاثين يوماً بعد حذفها \(انظر «مدة الاحتفاظ بالبيانات» أدناه\)\./);
   assert.match(ar, /فخادم بوابة واتساب الذي تشغّله بونا لهذا الرقم يحتفظ بنسخته الخاصة/);
   assert.doesNotMatch(ar, /خدمة واتساب التي يعمل عليها رقمنا/);
   assert.match(ar, /على هواتفنا داخل واتساب، وفق شروط واتساب/);
@@ -219,11 +225,26 @@ test('Bona’s own number (D1): every one-to-one chat is an enquiry except the t
   assert.match(en, /until 30 days after the last one, so that the owner of Bona can answer it himself; if he marks it as not a Bona client, only those ids are kept, for up to a year/);
   assert.match(ar, /وإذا لم يُظهر لنا واتساب رقم الهاتف الذي تصدر منه محادثةٌ ما، فلا نحتفظ بتلك المحادثة ولا تردّ عليها مساعدة بونا الذكية/);
   assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة فيها، ليردّ عليها مالك بونا بنفسه؛ وإذا حدّد أنها لا تخص عميلاً لبونا، لا نحتفظ إلا بتلك المعرّفات، مدةً أقصاها سنة/);
-  // A "Not a client" on a chat that never became an enquiry, with its number shown (review of PR #87, round 3):
-  // the dismissed inbox_candidates row keeps that number and the chat's ids for a year (DISMISSED_KEEP_MS), and
-  // when the chat writes again it is not stored and the owner's alert row records the day (DESIGN §3.1, PLAN T06 test 16).
-  assert.ok(en.endsWith(' If the owner of Bona marks a chat as not a Bona client before it becomes an enquiry, we keep only its number and the ids WhatsApp gives the chat, for up to a year, so that it is not treated as an enquiry; if it writes to us again, its messages are not stored, and we record with those ids only the day it wrote, so that he is told.'), en);
-  assert.ok(ar.endsWith(' وإذا حدّد مالك بونا، قبل أن تصبح محادثةٌ ما استفساراً، أنها لا تخص عميلاً لبونا، لا نحتفظ إلا برقمها ومعرّفات واتساب للمحادثة، مدةً أقصاها سنة، حتى لا تُعامَل بوصفها استفساراً؛ وإذا وردت منها رسائل بعد ذلك، فلا نحتفظ بها، ولا نسجّل مع تلك المعرّفات إلا يوم ورودها، ليعلم مالك بونا بذلك.'), ar);
+  // A "Not a client" on a chat that never became an enquiry, with its number shown (review of PR #87, rounds 3
+  // and 4): the dismissed inbox_candidates row keeps that number and the chat's ids for a year
+  // (DISMISSED_KEEP_MS), and a later message is not stored. Only a row dismissed before the move to Bona's own
+  // number (BONA_WA_LINKED_AT, 26 Nov 2026 05:25 +03:00) gets the owner's old_out_wrote alert when the chat
+  // writes again; that owner_notes row keeps the candidate's id, the code and the time, never the text
+  // (DESIGN §3.1, §7.2; PLAN T06 test 16). A row dismissed after the move stays silent, with no alert row, and
+  // a hidden-number chat's row keeps its ids only (the sentence before this one): lid-only rows exist only
+  // under Bona's own number, so every one of them is dismissed after the move.
+  assert.ok(en.endsWith(' If the owner of Bona marks a chat as not a Bona client before it becomes an enquiry, and WhatsApp shows us its number, we keep only that number and the ids WhatsApp gives the chat, for up to a year, so that it is not treated as an enquiry; if it writes to us again, its messages are not stored. If he marked it before Bona’s WhatsApp moved to this number on 26 November 2026, we also keep a record that it wrote and when, linked to that number and those ids, so that he is told.'), en);
+  assert.ok(ar.endsWith(' وإذا حدّد مالك بونا أن محادثةً لا تخص عميلاً لبونا قبل أن تصبح استفساراً، وكان واتساب يُظهر لنا رقمها، لا نحتفظ إلا بذلك الرقم ومعرّفات واتساب للمحادثة، مدةً أقصاها سنة، حتى لا تُعامَل بوصفها استفساراً؛ وإذا وردت منها رسائل بعد ذلك، فلا نحتفظ بها. وإن كان قد حدّد ذلك قبل انتقال واتساب بونا إلى هذا الرقم في 26 نوفمبر 2026، احتفظنا كذلك بسجلّ مرتبط بذلك الرقم وتلك المعرّفات يبيّن أنها راسلتنا ومتى، ليعلم مالك بونا بذلك.'), ar);
+  // The return-contact record is promised once, only for a mark made before the move, and as what that row
+  // keeps (that it wrote, and when), not as "only the day".
+  for (const [locale, text, alert, moved] of [
+    ['en', en, /we also keep a record that it wrote and when/g, 'If he marked it before Bona’s WhatsApp moved to this number on 26 November 2026, we also keep a record'],
+    ['ar', ar, /احتفظنا كذلك بسجلّ/g, 'وإن كان قد حدّد ذلك قبل انتقال واتساب بونا إلى هذا الرقم في 26 نوفمبر 2026، احتفظنا كذلك بسجلّ'],
+  ]) {
+    assert.equal(text.match(alert)?.length, 1, `${locale}: one return-contact record`);
+    assert.ok(text.includes(moved), `${locale}: the record is only for a mark made before the move`);
+    assert.doesNotMatch(text, locale === 'en' ? /only the day it wrote/ : /إلا يوم ورودها/, `${locale}: the record keeps the time, not only the day`);
+  }
   // The property-word exception belongs to the shared rule: it left the page and waits in the rollback text.
   // Decision (review of PR #87, rounds 1 and 2): Bona's own number keeps no property-word record at all, not
   // even while `#dana live off` (own_inbox '0') brings the shared rule's joins back, or while the identity
@@ -285,7 +306,9 @@ test('the rest of D1: who we are, legal basis, retention, transfers, your rights
   const retention = section('retention');
   assert.match(retention.body.en[2], /A viewing booked by our AI assistant stays in Bona’s viewing calendar as the record of that viewing, and is deleted with your enquiry if you ask us to delete it\./);
   assert.match(retention.body.ar[2], /يبقى موعد المعاينة الذي تحجزه مساعدتنا الذكية في تقويم معاينات بونا بوصفه سجلاً لتلك المعاينة/);
-  // deploy.sh snapshots the database before every restart and deletes a snapshot after at most 30 days (PR-INFRA).
+  // deploy.sh snapshots the database before every restart and, when it runs, deletes snapshots older than 30 days
+  // (PR-INFRA); bona-api's daily upkeep deletes them at 29 days, so a once-a-day run never lets one pass 30 (PLAN
+  // T14, deployed before D1). The sentence promises only that limit, no schedule (review of PR #87, round 4).
   assert.ok(retention.body.en[2].endsWith(' Before each update of our systems we keep a backup copy of our records for up to 30 days, after which it is deleted; a conversation you ask us to delete can therefore remain in a backup for up to 30 days.'), retention.body.en[2]);
   assert.ok(retention.body.ar[2].endsWith(' ونحتفظ قبل كل تحديث لأنظمتنا بنسخة احتياطية من سجلاتنا مدةً أقصاها ثلاثون يوماً، ثم تُحذف؛ لذا قد تبقى المحادثة التي تطلب حذفها في نسخة احتياطية مدةً تصل إلى ثلاثين يوماً.'), retention.body.ar[2]);
   assert.match(body(section('international-transfers'), 'en'), /Bona’s hosting, messaging, calendar, analytics, advertising-measurement, tour and AI providers may process data outside Saudi Arabia\./);
