@@ -736,3 +736,22 @@ test("an owner note coming back in a chat is refused by its outbox key, sent or 
   assertClean(h.logs);
   h.s.close();
 });
+
+test('a note record that also names an excluded number (the owner\'s own chat, filed as received) is refused by its key first: the lid-only row learns nothing', () => {
+  // The exclusion branch learns the excluded number onto a lid-only row (it then excludes itself
+  // and leaves the inbox at the daily sweep). For a note's own copy that lesson would be ours,
+  // not the chat's, so the key is looked up before that branch runs.
+  const h = harness({ lead: { phone_e164: null, wa_jid: null } });
+  h.team.addNever({ phone: PHONE, note: 'stands in for the owner' });
+  const note = '*Bona — new enquiry*\nName: Sara\nPhone: +966500000002';
+  h.inbox.insertOutbox({ send_id: 'SND-note-2', jid: PHONE_JID, sender_kind: 'note' });
+  h.inbox.updateOutbox('SND-note-2', { status: 'accepted', key_id: 'NOTE-2' });
+  assert.deepEqual(h.ingest(h.lead(), rec({ id: 'NOTE-2', text: note })), { stored: false, reason: 'note' });
+  assert.deepEqual([h.lead().phone_e164, h.lead().wa_jid, h.lead().wa_lid], [null, null, LID], 'no number learned from our own note');
+  assert.equal(h.inbox.hasMessages(LEAD_ID), false);
+  // The same record without a note row behind it is the excluded number's: the row learns it, as before.
+  assert.deepEqual(h.ingest(h.lead(), rec({ id: 'IN-EXCL', text: TEXT })), { stored: false, reason: 'excluded' });
+  assert.deepEqual([h.lead().phone_e164, h.lead().wa_jid], [PHONE, PHONE_JID]);
+  assertClean(h.logs);
+  h.s.close();
+});

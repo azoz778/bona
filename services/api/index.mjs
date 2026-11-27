@@ -310,7 +310,14 @@ export function createApp(options = {}) {
   // owner's own jid — outside the shared budget, its own per-recipient limit, its outbox row
   // without text (lib/wa-send.mjs). Stub: today's new-enquiry note, sent at once.
   const sendNote = options.sendWhatsApp ?? ((text) => sender.sendTo({ jid: `${ownerDigits}@s.whatsapp.net`, text, kind: 'note' }));
-  const notes = options.notes ?? createOwnerNotes({ db, siteUrl: cfg.siteUrl, sendNote, team, inbox: inboxStore, ownerTest, log, now: clock });
+  // Today's transport (lib/wa.mjs, the owner's chat only), for the stub alone: a note the one
+  // sender refused before writing a row for a gate today's note never had (the Sending switch,
+  // the note's minute, its length) goes that way, since only PR-B2's ledger can hold it for
+  // later. With a test seam there is one transport and no second try.
+  const legacySend = options.sendWhatsApp ? null : (text) => sendText(text, { env: cfg.env, fetchImpl });
+  const notes = options.notes ?? createOwnerNotes({
+    db, siteUrl: cfg.siteUrl, sendNote, legacySend, team, inbox: inboxStore, ownerTest, log, now: clock,
+  });
   // Viewing bookings (DESIGN §8, PR-B1). Stub: nothing bookable, every hook a no-op.
   const viewing = options.viewing ?? createViewing({ db, cfg, team, ownerTest, notes, log, now: clock });
   // Each subscribes by its `onPurge(leadId)` (PR-B1: the lead's booked rows to cancel_pending;
@@ -641,8 +648,16 @@ export function createApp(options = {}) {
     const fanoutCounts = () => { try { return db.fanoutCounts(); } catch { return { pending: 0, sent: 0, failed: 0, skipped: 0 }; } };
     // Each seam module's own health (DESIGN §5.4), read so that /health only ever carries
     // booleans and fixed enums: a module that throws, or answers anything else, reads as
-    // false / null rather than taking the report down or leaking its text.
-    const read = (fn) => { try { return fn() ?? {}; } catch { return {}; } };
+    // false / null rather than taking the report down or leaking its text. health() is
+    // synchronous: a promise is no answer (it reads as {}), and one that rejects is caught here
+    // rather than left to take the process down as an unhandled rejection.
+    const read = (fn) => {
+      try {
+        const got = fn();
+        if (got && typeof got.then === 'function') { Promise.resolve(got).catch(() => {}); return {}; }
+        return got ?? {};
+      } catch { return {}; }
+    };
     const yes = (v) => v === true;
     const code = (v) => (HEALTH_ERROR_CODES.has(v) ? v : null);
     const owner = read(() => ownerTest.health());

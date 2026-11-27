@@ -1397,18 +1397,26 @@ test('a note is outside the shared budget and pays its own per-recipient limit',
 test("notes and Dana's sends to the owner use separate limiter keys: 6 notes do not make the next Dana send rate_limited (critic round 2 #9)", async () => {
   const h = harness();
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: `note ${i}`, kind: 'note' })).ok, true);
+  // The notes' own minute really is used up (the clock is frozen)...
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'note 7', kind: 'note' }), { ok: false, error: 'rate_limited' });
+  // ...and Dana's next send into the owner's chat goes all the same.
   const id = danaOwnerRow(h, 1);
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'Dana 1', kind: 'dana', leadId: 'LEAD-O', sendId: id })).ok, true);
-  // And the other way round: Dana's own per-recipient limit is hers alone.
-  for (let n = 2; n <= PER_RECIPIENT_PER_MIN; n += 1) {
-    const more = danaOwnerRow(h, n);
-    assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: `Dana ${n}`, kind: 'dana', leadId: 'LEAD-O', sendId: more })).ok, true);
-  }
-  const over = danaOwnerRow(h, 99);
-  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'Dana 99', kind: 'dana', leadId: 'LEAD-O', sendId: over }), { ok: false, error: 'rate_limited', sendId: over });
-  h.tick(60_000);
-  assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'next minute', kind: 'note' })).ok, true);
   h.s.close();
+
+  // And the other way round, in a minute of its own: Dana uses up HER per-recipient limit
+  // into the owner's chat first, and a note in that same frozen minute still goes.
+  const r = harness();
+  for (let n = 1; n <= PER_RECIPIENT_PER_MIN; n += 1) {
+    const more = danaOwnerRow(r, n);
+    assert.equal((await r.sender.sendTo({ jid: OWNER_JID, text: `Dana ${n}`, kind: 'dana', leadId: 'LEAD-O', sendId: more })).ok, true);
+  }
+  const over = danaOwnerRow(r, 99);
+  assert.deepEqual(await r.sender.sendTo({ jid: OWNER_JID, text: 'Dana 99', kind: 'dana', leadId: 'LEAD-O', sendId: over }), { ok: false, error: 'rate_limited', sendId: over });
+  const calls = r.calls.length;
+  assert.equal((await r.sender.sendTo({ jid: OWNER_JID, text: 'same minute', kind: 'note' })).ok, true, "Dana's full minute is not the note's");
+  assert.equal(r.calls.length, calls + 1);
+  r.s.close();
 });
 
 test("Dana to the owner's jid is counted in the day budget, and her row is counted once", async () => {

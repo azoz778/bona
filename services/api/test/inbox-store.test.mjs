@@ -1432,6 +1432,17 @@ test("a 'note' outbox row stores no text, whatever the caller passes (a note abo
   s.close();
 });
 
+test("a 'note' outbox row belongs to no chat, even when the caller names a real client's lead", () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  const rev = s.getLead('L-1').chat_rev;
+  const { row: r } = inbox.insertOutbox({ send_id: 'SND-note-lead', lead_id: 'L-1', jid: OWNER_JID, text: '*Bona — new enquiry*\nName: Sara', sender_kind: 'note' });
+  assert.deepEqual([r.lead_id, r.text], [null, null], "a note about client L-1 is never in L-1's outbox");
+  assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM wa_outbox WHERE lead_id = 'L-1'").get().n, 0);
+  assert.equal(s.getLead('L-1').chat_rev, rev, "the client's chat does not move");
+  s.close();
+});
+
 test('pruneCodeRows also prunes note rows older than the cutoff, and keeps a younger one', () => {
   const { s, inbox, at } = harness();
   at(NOW - 3 * DAY);
@@ -1481,6 +1492,28 @@ test('countDanaTurns counts distinct turns (covers_ts) per chat and in all, neve
   assert.equal(inbox.countDanaTurns({ sinceTs: T - DAY }), 4);
   assert.equal(inbox.countDanaSends({ leadId: 'LEAD-A', sinceTs: T - 3_600_000 }), 3, 'the per-send count is unchanged');
   assert.throws(() => inbox.countDanaTurns({ sinceTs: undefined }), RangeError, 'a cap read never fails open');
+  s.close();
+});
+
+test("countDanaTurns: a purged chat's stubs stay their own chat's turns (by their jid), and a row without covers_ts is a turn of its own", () => {
+  const { s, inbox } = harness();
+  const T = 1_790_600_000_000;
+  const row = (send_id, lead_id, jid, covers, created) => s.db.prepare(
+    "INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, covers_ts) VALUES (?,?,?,NULL,NULL,'dana','accepted',NULL,?,?,?)",
+  ).run(send_id, lead_id, jid, created, created, covers);
+  const P = '966500000041@s.whatsapp.net';
+  const Q = '966500000042@s.whatsapp.net';
+  // Two purged chats (lead_id NULL), each answered for a message of the same second: two turns,
+  // and P's turn in two bubbles is still one.
+  row('P1a', null, P, T - 60_000, T - 50_000);
+  row('P1b', null, P, T - 60_000, T - 45_000);
+  row('Q1', null, Q, T - 60_000, T - 40_000);
+  // Two rows of one chat with no covers_ts (written before the column): nothing groups them, so
+  // each is a turn, never one for the pair, never none (a cap read must not fail open).
+  row('C1', 'LEAD-C', '966500000043@s.whatsapp.net', null, T - 30_000);
+  row('C2', 'LEAD-C', '966500000043@s.whatsapp.net', null, T - 20_000);
+  assert.equal(inbox.countDanaTurns({ sinceTs: T - 3_600_000 }), 4);
+  assert.equal(inbox.countDanaTurns({ leadId: 'LEAD-C', sinceTs: T - 3_600_000 }), 2);
   s.close();
 });
 

@@ -245,7 +245,9 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
    * Written before the HTTP call, so a send that dies half-way still counts against the
    * day cap and can still be matched to the message it became. A `send_id` already there
    * is left exactly as it is: a double submit gets the row the first submit made. A new
-   * staff or Dana row of a chat moves that chat's revision on (`revision`).
+   * staff or Dana row of a chat moves that chat's revision on (`revision`). An owner note's
+   * row belongs to no chat whatever the caller passes (DESIGN §7.1): a note about client X
+   * never sits under X.
    *
    * @returns {{ inserted: boolean, row: object }}
    */
@@ -256,7 +258,7 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
     if (!OUTBOX_STATUSES.includes(status)) throw new RangeError(`unknown outbox status ${status}`);
     const t = now();
     const stored = TEXTLESS_KINDS.has(sender_kind) ? null : capText(text);
-    const chatId = str(lead_id);
+    const chatId = sender_kind === 'note' ? null : str(lead_id);
     return transaction(() => {
       const { changes } = prep(`INSERT OR IGNORE INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts)
                                 VALUES (?,?,?,?,?,?,?,NULL,?,?,NULL,?)`)
@@ -567,12 +569,18 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
    * with every row of that turn): distinct per chat, so two chats answered for a message of
    * the same second are two turns. Counted from the outbox like `countDanaSends`, so a
    * restart cannot hand out a fresh window; a `failed` row sent nothing. A purged chat's
-   * stubs (no lead) still count, one turn per `covers_ts`.
+   * stubs (no lead) still count, each chat's apart: the stub keeps its jid, which stands in for
+   * the lead it lost, so two purged chats answered in the same second stay two turns. A row
+   * with no `covers_ts` (written before the column) has nothing to group it by: it is a turn of
+   * its own, so the count can run high there but never low.
    */
   function countDanaTurns({ leadId = null, sinceTs } = {}) {
     // A cap read must never fail open.
     if (!hasNumber(sinceTs)) throw new RangeError('sinceTs is required');
-    return prep(`SELECT COUNT(*) AS n FROM (SELECT DISTINCT lead_id, covers_ts FROM wa_outbox
+    return prep(`SELECT COUNT(*) AS n FROM (
+                   SELECT DISTINCT COALESCE(lead_id, 'jid:' || jid) AS chat, covers_ts,
+                          CASE WHEN covers_ts IS NULL THEN send_id END AS lone
+                   FROM wa_outbox
                    WHERE sender_kind = 'dana' AND status <> 'failed' AND created >= ? AND (? IS NULL OR lead_id = ?))`)
       .get(toTs(sinceTs), str(leadId), str(leadId)).n;
   }

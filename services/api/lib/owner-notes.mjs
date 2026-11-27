@@ -22,12 +22,26 @@
  *
  * `sendNote(text)` is the transport (index.mjs: the `sendWhatsApp` given to createApp when there
  * is one, else the one sender's kind 'note' to the owner's own jid). It answers `{ ok, error? }`.
+ * `legacySend(text)` is today's transport (lib/wa.mjs `sendText`, to the owner's chat and only
+ * there), for the stub alone: a note the one sender refuses for a gate today's note never had
+ * goes that way instead (`PRE_SEND_GATES`), because nothing here could send it later. PR-B2's
+ * ledger keeps such a note queued and ignores `legacySend`.
  * Nothing here logs a note's text, a name or a number: ids and error codes only.
  */
 import { leadNote } from './leads.mjs';
 
 /** How long the form request waits for its note (today's index.mjs value). */
 export const FORM_NOTIFY_WAIT_MS = 4000;
+
+/**
+ * What the one sender refuses before it writes any outbox row or calls WhatsApp, for a gate
+ * today's note never had (Codex r1b P1, Claude r1 A): the Sending switch, the note's own
+ * per-minute limit, the 4096-character cap, and an owner jid it cannot read as a phone jid
+ * (today's transport trims and sends it). Without the ledger such a note would be lost for
+ * good, so the stub sends it today's way. BONA_WA_NOTIFY=0 (`disabled`) and a missing
+ * Evolution are gates today's transport has too: their answer stands.
+ */
+const PRE_SEND_GATES = new Set(['sending_disabled', 'rate_limited', 'bad_text', 'bad_recipient']);
 
 /**
  * @typedef {object} OwnerNotes
@@ -44,21 +58,33 @@ export const FORM_NOTIFY_WAIT_MS = 4000;
  */
 
 /**
- * @param {{ db?: object|null, siteUrl?: string, sendNote?: ((text: string) => Promise<{ ok?: boolean, error?: string }>)|null,
- *           log?: Function, formWaitMs?: number }} [o]
+ * @param {{ db?: object|null, siteUrl?: string, sendNote?: ((text: string) => Promise<{ ok?: boolean, error?: string, sendId?: string }>)|null,
+ *           legacySend?: ((text: string) => Promise<{ ok?: boolean, error?: string }>)|null, log?: Function, formWaitMs?: number }} [o]
  * @returns {OwnerNotes}
  */
-export function createOwnerNotes({ db = null, siteUrl, sendNote = null, log = () => {}, formWaitMs = FORM_NOTIFY_WAIT_MS } = {}) {
+export function createOwnerNotes({
+  db = null, siteUrl, sendNote = null, legacySend = null, log = () => {}, formWaitMs = FORM_NOTIFY_WAIT_MS,
+} = {}) {
   const setStatus = (status, eventId) => {
     if (db && eventId) db.db.prepare('UPDATE enquiry_receipts SET notify_status=? WHERE event_id=?').run(status, eventId);
   };
 
-  /** index.mjs:781-792 at 13e4954, moved here unchanged. */
+  /**
+   * One note out. An answer without a `sendId` means the one sender wrote no row and posted
+   * nothing, so the fallback can never be a second message; one with a row stands as it is.
+   */
+  async function send(text) {
+    const res = await sendNote(text);
+    if (legacySend && res?.ok === false && !res.sendId && PRE_SEND_GATES.has(res.error)) return legacySend(text);
+    return res;
+  }
+
+  /** index.mjs:781-792 at 13e4954, moved here unchanged (through `send`). */
   async function formNote(lead, eventId) {
     try {
       let timer;
       const res = await Promise.race([
-        sendNote(leadNote(lead, { siteUrl })),
+        send(leadNote(lead, { siteUrl })),
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('owner notification unconfirmed')), formWaitMs); }),
       ]).finally(() => clearTimeout(timer));
       setStatus(res?.ok ? 'sent' : 'uncertain', eventId);
@@ -72,7 +98,7 @@ export function createOwnerNotes({ db = null, siteUrl, sendNote = null, log = ()
   /** tools.mjs:256-263 at 13e4954 (create_lead). */
   async function conciergeNote(lead) {
     try {
-      const res = await sendNote(leadNote(lead, { siteUrl }));
+      const res = await send(leadNote(lead, { siteUrl }));
       if (!res?.ok) log({ evt: 'lead.wa_failed', id: lead.lead_id, error: res?.error ?? 'unknown' });
     } catch (err) {
       log({ evt: 'lead.wa_error', id: lead.lead_id, error: String(err?.message ?? err) });
@@ -82,7 +108,7 @@ export function createOwnerNotes({ db = null, siteUrl, sendNote = null, log = ()
   /** wa-poller.mjs:608-615 at 13e4954 (a lead the poller created). */
   async function whatsappNote(lead) {
     try {
-      const res = await sendNote(leadNote(lead, { siteUrl }));
+      const res = await send(leadNote(lead, { siteUrl }));
       if (res && res.ok === false) log({ level: 'warn', evt: 'wa.note.failed', leadId: lead.lead_id, error: res.error ?? 'unknown' });
     } catch (err) {
       log({ level: 'warn', evt: 'wa.note.failed', leadId: lead.lead_id, error: String(err?.message ?? err) });

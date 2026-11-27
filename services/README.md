@@ -1043,8 +1043,16 @@ a chat known only by its `@lid` is refused (`lid_only`) and answered from the ph
 `lid` digits are not a phone number. Every reply passes the gate the login codes pass
 (`lib/wa-send.mjs`): the Sending switch, `BONA_WA_NOTIFY` not `0` (§4; a login code does
 not need it), 20 a minute overall, 6 a minute per recipient, 30 a minute per person, and
-500 a day — counted from `wa_outbox` over a rolling 24 h (messages to the owner's chat and
-to the instance's own number do not count), so a restart does not reset it. The form
+500 a day — counted from `wa_outbox` over a rolling 24 h, so a restart does not reset it.
+Only a login code or an owner note (kind `note`, below) to the owner's chat or to the
+instance's own number stays out of the shared minute and day budget; Dana's answers and a
+team reply into the owner's own chat (his test chat) count like any client's. A note goes to
+the owner's jid alone (anyone else is `bad_recipient`), pays its own 6 a minute (a separate
+limiter key from Dana's sends into that chat), and its outbox row keeps the message id but no
+text and no lead. Until the notes ledger (PR-B2) can hold a note for later, a lead note this
+gate refuses before writing a row (the Sending switch, its own minute, over 4,096 characters)
+goes the old way instead (`lib/wa.mjs`, to the owner's chat only), so an accepted form never
+loses its note. The form
 carries a random `send_id`, and its outbox row is written before the HTTP call, so a double
 submit gets the first answer back, never a second message. A reply is `accepted` only when
 Evolution answers with a `key.id`. A timeout, a network error other than a refused
