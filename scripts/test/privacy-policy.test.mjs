@@ -25,7 +25,12 @@ const faq = read('../../src/data/faq.json');
 // The text a rollback to the shared number (the owner's personal number) puts back in the WhatsApp
 // conversations section: the old first two paragraphs, word for word (DESIGN §13.2, PR-D1r).
 const rollback = read('../../services/deploy/vps/rollback/privacy-shared-number.json');
-const today = () => new Date().toISOString().slice(0, 10);
+/**
+ * The calendar day at `ms` in Riyadh (+03:00 all year, no DST): the day the page's readers count a dated
+ * line's 30 days in. Every live check of a dated Changes line asks for it by this day, not by the UTC one.
+ */
+const riyadhDay = (ms = Date.now()) => new Date(ms + 3 * 3_600_000).toISOString().slice(0, 10);
+const today = () => riyadhDay();
 const plusDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 // The day D1 merged, written once. Its Changes line (EN and AR) carries this date, the version dates at
 // the top of privacy.json and faq.json are on or after it, and the line stays for 30 days from it. The
@@ -215,11 +220,13 @@ test('Bona’s own number (D1): every one-to-one chat is an enquiry except the t
   assert.match(ar, /وإذا لم يُظهر لنا واتساب رقم الهاتف الذي تصدر منه محادثةٌ ما، فلا نحتفظ بتلك المحادثة ولا تردّ عليها مساعدة بونا الذكية/);
   assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة فيها، ليردّ عليها مالك بونا بنفسه؛ وإذا حدّد أنها لا تخص عميلاً لبونا، لا نحتفظ إلا بتلك المعرّفات، مدةً أقصاها سنة/);
   // The property-word exception belongs to the shared rule: it left the page and waits in the rollback text.
-  // Decision (review of PR #87, round 1): Bona's own number keeps no property-word record at all, not even
-  // while `#dana live off` (own_inbox '0') brings the shared rule's joins back. While the instance is
-  // verified as Bona's own number (ownNumberOk), the poller stores no inbox_candidates row for a chat with a
-  // phone and deletes the ones already there (PLAN T06, T07; DESIGN §3.1). Such rows exist only on the
-  // personal number, whose page is the rollback text (PR-D1r), so this paragraph needs no copy here.
+  // Decision (review of PR #87, rounds 1 and 2): Bona's own number keeps no property-word record at all, not
+  // even while `#dana live off` (own_inbox '0') brings the shared rule's joins back, or while the identity
+  // check has not passed yet. While the configured number is Bona's own (ownNumberFrom 'instance'), the poller
+  // stores no inbox_candidates row for a chat with a phone and deletes the open ones already there; a "Not a
+  // client" on Chats to check keeps only its ids, and that chat is not stored or answered (PLAN T06 tests
+  // 15-16, T07 tests 15-16; DESIGN §3.1). Property-word rows exist only on the personal number, whose page is
+  // the rollback text (PR-D1r), so this paragraph needs no copy here.
   assert.ok(!s.body.en.some((p) => p.startsWith('There is one narrow exception')), 'en: the exception is gone');
   assert.ok(!s.body.ar.some((p) => p.startsWith('وهناك استثناء محدود')), 'ar: the exception is gone');
   assert.doesNotMatch(body(s, 'en'), /the next paragraph describes the one narrow exception/);
@@ -297,9 +304,15 @@ const NOV26_SHA256 = {
 };
 const sha256 = (text) => crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 const isNov26 = (locale, text) => sha256(text) === NOV26_SHA256[locale];
+/** How the D1 line opens, after its date. */
+const D1_OPENING = {
+  en: 'Bona’s AI assistant now answers every enquiry chat on Bona’s WhatsApp number at any hour;',
+  ar: 'أصبحت مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، تردّ على كل محادثة استفسار على رقم واتساب بونا في أي وقت،',
+};
+const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const D1_LINE = {
-  en: /^(\d{1,2}) (\S+) (\d{4}): Bona’s AI assistant now answers every enquiry chat on Bona’s WhatsApp number at any hour;/,
-  ar: /^(\d{1,2}) (\S+) (\d{4}): أصبحت مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، تردّ على كل محادثة استفسار على رقم واتساب بونا في أي وقت،/,
+  en: new RegExp(`^(\\d{1,2}) (\\S+) (\\d{4}): ${reEscape(D1_OPENING.en)}`),
+  ar: new RegExp(`^(\\d{1,2}) (\\S+) (\\d{4}): ${reEscape(D1_OPENING.ar)}`),
 };
 const MONTHS = {
   en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
@@ -332,9 +345,26 @@ function checkD1Line(p, on) {
   return { en, ar };
 }
 
+/**
+ * A copy of policy `p` whose Changes carries one D1 line in each language, dated D1_RELEASED, in place of
+ * whatever D1 lines `p` has. The check's own test runs on it, so it does not lean on the live line, which
+ * comes out once its 30 days are up (and on the PR that takes it out, this test stays green).
+ */
+function withD1Line(p) {
+  const copy = structuredClone(p);
+  const changes = copy.sections.find((x) => x.id === 'changes');
+  for (const locale of ['en', 'ar']) {
+    changes.body[locale] = [...changes.body[locale].filter((x) => !D1_LINE[locale].test(x)),
+      `${writtenDate(D1_RELEASED, locale)}: ${D1_OPENING[locale]} (fixture)`];
+  }
+  if (copy.updated < D1_RELEASED) copy.updated = D1_RELEASED;
+  return copy;
+}
+
 test('the D1 Changes line stays its 30 days from D1_RELEASED, whatever day D1 merges (the check itself)', () => {
+  const fixture = withD1Line(policy);
   const edit = (fn) => {
-    const p = structuredClone(policy);
+    const p = structuredClone(fixture);
     const changes = p.sections.find((x) => x.id === 'changes');
     for (const locale of ['en', 'ar']) changes.body[locale] = fn(changes.body[locale], locale);
     return p;
@@ -343,7 +373,15 @@ test('the D1 Changes line stays its 30 days from D1_RELEASED, whatever day D1 me
   assert.equal(plusDays('2026-12-04', 30), '2027-01-03');
   assert.equal(writtenDate('2026-12-04', 'en'), '4 December 2026');
   assert.equal(writtenDate('2026-12-04', 'ar'), '4 ديسمبر 2026');
-  assert.ok(checkD1Line(policy, lastDay), 'the page as it is passes on its last day');
+  // The live checks count days in Riyadh: at 00:30 there on 3 January it is still 2 January in UTC.
+  assert.equal(riyadhDay(Date.parse('2027-01-02T21:30:00Z')), '2027-01-03');
+  assert.equal(riyadhDay(Date.parse('2027-01-02T20:59:59Z')), '2027-01-02');
+  assert.ok(checkD1Line(fixture, lastDay), 'a page with the D1 line passes on its last day');
+  // The fixture does not depend on the live page still having the line.
+  const live = structuredClone(policy);
+  const liveChanges = live.sections.find((x) => x.id === 'changes');
+  for (const locale of ['en', 'ar']) liveChanges.body[locale] = liveChanges.body[locale].filter((x) => !D1_LINE[locale].test(x));
+  assert.ok(checkD1Line(withD1Line(live), lastDay), 'the fixture also comes from a page whose D1 line is gone');
   // Both lines removed a day early: red, even past the old fixed cutoff of 27 December.
   const removed = edit((paras, locale) => paras.filter((x) => !D1_LINE[locale].test(x)));
   assert.throws(() => checkD1Line(removed, lastDay), /the D1 line in each language/);
@@ -425,6 +463,72 @@ test('the provider cross-check reads PROVIDERS as the design pins it, and fails 
   }
 });
 
+/** AI vendors the page must never name: none of them gets a Bona chat (brain/DESIGN-brain §2.1). */
+const EXCLUDED_VENDORS = [/deepseek/i, /\bxAI\b/i, /\bgrok\b/i, /\banthropic\b/i];
+
+/** The concierge section's opening sentence: the one place in it that names Retell. */
+const CONCIERGE_RETELL = {
+  en: 'Our website’s AI concierge sends your messages or voice, page context and language through Bona’s service to Retell and the AI providers used for the conversation.',
+  ar: 'ترسل مساعدة الموقع الذكية رسائلك أو صوتك وسياق الصفحة ولغتك عبر خدمة بونا إلى Retell ومزوّدي الذكاء الاصطناعي المستخدمين في المحادثة.',
+};
+/** The D1 line's clause that names Retell, as history. */
+const D1_RETELL = { en: 'its replies are now produced with OpenAI instead of Retell', ar: 'وصارت ردودها تُعدّ باستخدام OpenAI بدلاً من Retell' };
+
+/**
+ * Where privacy.json `p` may name Retell, which still runs the website concierge until D3 (PLAN T28): the
+ * concierge section's opening sentence and the sharing clause, each once and about the website concierge, and
+ * in Changes the D1 line's "instead of Retell", once. A Retell claim added anywhere else, or a second one in
+ * those sections (such as "Retell also produces the WhatsApp replies"), fails.
+ */
+function checkRetell(p) {
+  const sec = (id) => p.sections.find((x) => x.id === id);
+  for (const s of p.sections) {
+    if (!['ai-concierge', 'sharing', 'changes'].includes(s.id)) assert.doesNotMatch(JSON.stringify(s), /Retell/, `${s.id} names Retell`);
+  }
+  for (const locale of ['en', 'ar']) {
+    const concierge = sec('ai-concierge');
+    assert.equal(body(concierge, locale).match(/Retell/g)?.length, 1, `${locale}: ai-concierge names Retell once`);
+    assert.ok(concierge.body[locale][0].startsWith(CONCIERGE_RETELL[locale]), `${locale}: ai-concierge names Retell in its opening sentence about the website concierge`);
+    for (const para of sec('changes').body[locale].filter((x) => x.includes('Retell'))) {
+      assert.ok(D1_LINE[locale].test(para), `${locale}: Changes names Retell outside the D1 line: ${para.slice(0, 80)}`);
+      assert.equal(para.match(/Retell/g).length, 1, `${locale}: the D1 line names Retell once`);
+      assert.ok(para.includes(D1_RETELL[locale]), `${locale}: the D1 line names Retell only as what OpenAI replaced`);
+    }
+  }
+  for (const locale of ['en', 'ar']) {
+    const providers = sec('sharing').body[locale].find((x) => x.startsWith(
+      locale === 'en' ? 'Service providers include' : 'تشمل الجهات المقدّمة للخدمة'));
+    const sharing = sec('sharing').body[locale].filter((x) => x.includes('Retell'));
+    assert.deepEqual(sharing, [providers], `${locale}: sharing names Retell in the providers paragraph only`);
+    // Once, and in its concierge clause: a second Retell claim added to the same paragraph fails too.
+    assert.equal(body(sec('sharing'), locale).match(/Retell/g)?.length, 1, `${locale}: sharing names Retell once`);
+    assert.ok(providers.includes(locale === 'en'
+      ? 'Retell and its AI service providers for the website concierge;'
+      : 'وRetell ومزوّدي خدمات الذكاء الاصطناعي لديها لمساعدة الموقع الذكية،'), `${locale}: Retell, for the website concierge`);
+  }
+  assert.doesNotMatch(p.contact.en + p.contact.ar, /Retell/);
+}
+
+/** Every string in a JSON value, with where it sits: [['sections[3].body.en[0]', '…'], …]. */
+const stringsOf = (x, where = '') => typeof x === 'string' ? [[where, x]]
+  : Array.isArray(x) ? x.flatMap((v, i) => stringsOf(v, `${where}[${i}]`))
+  : x && typeof x === 'object' ? Object.entries(x).flatMap(([k, v]) => stringsOf(v, where ? `${where}.${k}` : k))
+  : [];
+
+/**
+ * privacy.json `p` names the assistant nowhere but in the 26 November line, which is history: matched by its
+ * hash AND by where it sits, a paragraph of Changes in its own language. Moved into another section, into the
+ * other language or into the contact block, the same words fail.
+ */
+function checkNoName(p) {
+  const changesAt = p.sections.findIndex((x) => x.id === 'changes');
+  for (const [where, text] of stringsOf(p).filter(([, x]) => named(x))) {
+    const at = /^sections\[(\d+)\]\.body\.(en|ar)\[\d+\]$/.exec(where);
+    const history = at !== null && Number(at[1]) === changesAt && isNov26(at[2], text);
+    assert.ok(history, `privacy.json ${where} names the assistant: ${text.slice(0, 120)}`);
+  }
+}
+
 test('every AI provider the assistant may call is named where the page says who gets the chat; no other AI vendor is named; Retell only where it still runs (D1)', async () => {
   const providers = await brainProviders();
   assert.ok(providers.length > 0, 'the brain names at least one provider');
@@ -436,34 +540,49 @@ test('every AI provider the assistant may call is named where the page says who 
       assert.ok(providersParagraph(locale)?.includes(name), `${locale}: sharing names ${name}`);
     }
   }
-  const all = JSON.stringify(policy) + JSON.stringify(faq);
-  for (const re of [/deepseek/i, /\bxAI\b/i, /\bgrok\b/i, /\banthropic\b/i]) assert.doesNotMatch(all, re);
-  // Retell: the website concierge (until D3, PLAN T28), its sharing clause, and the history in Changes.
-  for (const s of policy.sections) {
-    if (!['ai-concierge', 'sharing', 'changes'].includes(s.id)) assert.doesNotMatch(JSON.stringify(s), /Retell/, `${s.id} names Retell`);
-  }
+  for (const re of EXCLUDED_VENDORS) assert.doesNotMatch(JSON.stringify(policy) + JSON.stringify(faq), re);
+  checkRetell(policy);
+  assert.doesNotMatch(JSON.stringify(faq), /Retell/);
+});
+
+test('the Retell and no-name checks catch a Retell claim added to the concierge text or Changes, and the old name moved out of Changes (the checks themselves)', () => {
+  checkRetell(policy);
+  checkNoName(policy);
+  const edited = (id, locale, fn) => {
+    const p = structuredClone(policy);
+    const s = p.sections.find((x) => x.id === id);
+    s.body[locale] = fn(s.body[locale]);
+    return p;
+  };
+  const claim = { en: ' Retell also produces our AI assistant’s WhatsApp replies.', ar: ' وتُعدّ Retell أيضاً ردود مساعدتنا الذكية عبر واتساب.' };
   for (const locale of ['en', 'ar']) {
-    const sharing = section('sharing').body[locale].filter((p) => p.includes('Retell'));
-    assert.deepEqual(sharing, [providersParagraph(locale)], `${locale}: sharing names Retell in the providers paragraph only`);
-    // Once, and in its concierge clause: a second Retell claim added to the same paragraph fails too.
-    assert.equal(body(section('sharing'), locale).match(/Retell/g)?.length, 1, `${locale}: sharing names Retell once`);
-    assert.ok(providersParagraph(locale).includes(locale === 'en'
-      ? 'Retell and its AI service providers for the website concierge;'
-      : 'وRetell ومزوّدي خدمات الذكاء الاصطناعي لديها لمساعدة الموقع الذكية،'), `${locale}: Retell, for the website concierge`);
+    for (const id of ['ai-concierge', 'changes']) {
+      const p = edited(id, locale, (paras) => paras.map((x, i) => (i === paras.length - 1 ? x + claim[locale] : x)));
+      assert.throws(() => checkRetell(p), /names Retell/, `${locale}: a Retell claim added to ${id}`);
+    }
   }
-  assert.doesNotMatch(policy.contact.en + policy.contact.ar + JSON.stringify(faq), /Retell/);
+  // The 26 November line names the old assistant; it is allowed in Changes, in its own language, and nowhere else.
+  for (const locale of ['en', 'ar']) {
+    const line = section('changes').body[locale].find((x) => isNov26(locale, x));
+    if (!line) continue; // taken out after its 30 days: nothing left to move
+    const other = locale === 'en' ? 'ar' : 'en';
+    const moved = structuredClone(policy);
+    const changes = moved.sections.find((x) => x.id === 'changes');
+    changes.body[locale] = changes.body[locale].filter((x) => x !== line);
+    moved.sections.find((x) => x.id === 'whatsapp-conversations').body[locale].push(line);
+    assert.throws(() => checkNoName(moved), /names the assistant/, `${locale}: the 26 November line moved into another section`);
+    const swapped = structuredClone(policy);
+    swapped.sections.find((x) => x.id === 'changes').body[other].push(line);
+    assert.throws(() => checkNoName(swapped), /names the assistant/, `${locale}: the 26 November line in the ${other} text`);
+    const contact = structuredClone(policy);
+    contact.contact[locale] += ` ${line}`;
+    assert.throws(() => checkNoName(contact), /names the assistant/, `${locale}: the 26 November line appended to the contact block`);
+  }
 });
 
 test('no personal name (D1): Bona’s AI assistant is nameless on the privacy page, in the FAQ, in the concierge strings and in site.json', async () => {
-  /** Every string in a JSON value, with where it sits: [['sections[3].body.en[0]', '…'], …]. */
-  const stringsOf = (x, where = '') => typeof x === 'string' ? [[where, x]]
-    : Array.isArray(x) ? x.flatMap((v, i) => stringsOf(v, `${where}[${i}]`))
-    : x && typeof x === 'object' ? Object.entries(x).flatMap(([k, v]) => stringsOf(v, where ? `${where}.${k}` : k))
-    : [];
   // The one exception is history: the 26 November Changes line, verbatim until 2026-12-26.
-  for (const [where, text] of stringsOf(policy).filter(([, x]) => named(x))) {
-    assert.ok(isNov26('en', text) || isNov26('ar', text), `privacy.json ${where} names the assistant: ${text.slice(0, 120)}`);
-  }
+  checkNoName(policy);
   for (const [file, data] of [['faq.json', faq], ['site.json', site]]) {
     assert.deepEqual(stringsOf(data).filter(([, x]) => named(x)).map(([where]) => where), [], `${file} names the assistant`);
   }
@@ -554,10 +673,16 @@ test('the site copy around the assistant (D1): nameless, it answers at any hour,
   const meta = read('../../marketing/page-meta.json')['/privacy/'].description;
   assert.equal(meta.en, 'How Bona handles your personal data under the Saudi PDPL: what this site collects, WhatsApp enquiries and AI replies, viewing bookings, retention, sharing and your rights.');
   assert.equal(meta.ar, 'كيف تتعامل بونا مع بياناتك الشخصية وفق نظام حماية البيانات الشخصية السعودي: ما يجمعه الموقع، واستفسارات واتساب والردود الآلية، وحجز المعاينات، والاحتفاظ، والمشاركة، وحقوقك.');
+  // The /contact/ entry of llms.txt and llms-full.txt (gen-llms.mjs reads it): WhatsApp is answered at any
+  // hour, and the office hours are the team's (review of PR #87, round 2; test/llms-knowledge.test.mjs checks the built files).
+  const contact = read('../../marketing/page-meta.json')['/contact/'].description;
+  assert.ok(contact.en.includes(`Bona’s AI assistant answers WhatsApp at any hour; our team replies ${site.hours.en}.`), contact.en);
+  assert.ok(contact.ar.includes('تردّ مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، على واتساب في أي وقت، ويردّ فريقنا من الأحد إلى الخميس'), contact.ar);
+  assert.doesNotMatch(contact.en, /WhatsApp or by phone, Sunday to Thursday/);
 });
 
 // The shared rule (the owner's personal number) keeps a short record of chats that use a property
-// word. Bona's own number does not (D1; and, by the round-1 decision above, not while own_inbox is off
+// word. Bona's own number does not (D1; and, by the review decision above, not while own_inbox is off
 // either), so that text left the page; it waits, word for word, in the rollback json (DESIGN §13.2,
 // PR-D1r), and these asserts pin it there.
 // The rollback paragraphs are the section's first two as published before D1 (13e4954), byte for byte:
@@ -697,14 +822,14 @@ test('the business-partner sentence (owner OK 2026-11-26) sits with the WhatsApp
   assert.ok(body(section('whatsapp-conversations'), 'ar').includes(`تسجيل الدخول. ${ar} إليها.`));
   assert.ok(body(section('ai-phone-line'), 'ar').includes(`وقراءة النص. ${ar} إليهما.`));
   // The dated change line says so too, until its 30 days are up (on or after 2026-12-26).
-  if (new Date().toISOString().slice(0, 10) >= '2026-12-26') return;
+  if (today() >= '2026-12-26') return;
   const changes = section('changes');
   assert.ok(changes.body.en.some((p) => /^26 November 2026:.*business partner of the owner of Bona/.test(p)));
   assert.ok(changes.body.ar.some((p) => /^26 نوفمبر 2026:.*شريك أعمال لمالك بونا/.test(p)));
 });
 
 test('the 26 Nov change line mentions the call alert note (until its 30 days are up, 2026-12-26)', () => {
-  if (new Date().toISOString().slice(0, 10) >= '2026-12-26') return;
+  if (today() >= '2026-12-26') return;
   const changes = section('changes');
   assert.ok(changes.body.en.some((p) => /^26 November 2026:.*after each call, the owner of Bona gets a short WhatsApp note about it\./.test(p)));
   assert.ok(changes.body.ar.some((p) => /^26 نوفمبر 2026:.*وتصل مالكَ بونا بعد كل مكالمة ملاحظةٌ قصيرة عنها عبر واتساب\./.test(p)));
@@ -739,7 +864,7 @@ test('every number the policy writes out is site.whatsapp or site.phone, and the
 
 // The dated line comes out once its 30 days are up (on or after 2026-12-26), and this test with it.
 test('the Changes section flags the new WhatsApp number and the AI phone assistant, in both languages (30 days)', () => {
-  if (new Date().toISOString().slice(0, 10) >= '2026-12-26') return;
+  if (today() >= '2026-12-26') return;
   const changes = section('changes');
   const en = changes.body.en.find((p) => /^26 November 2026:/.test(p));
   const ar = changes.body.ar.find((p) => /^26 نوفمبر 2026:/.test(p));

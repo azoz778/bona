@@ -1,8 +1,10 @@
 /**
  * The knowledge file answer engines read (and, until D3, the website concierge's knowledge base), checked over
- * the BUILT site: dist/llms-full.txt, which scripts/og/gen-llms.mjs writes into public/ before the build. A
- * listing's coordinates say whether they are its own pin or a district centre, the privacy summary agrees with
- * the policy (src/data/privacy.json), and the enquiry line says who answers on WhatsApp and when, as the FAQ does.
+ * the BUILT site: dist/llms-full.txt and dist/llms.txt, which scripts/og/gen-llms.mjs writes into public/ before
+ * the build. A listing's coordinates say whether they are its own pin or a district centre, the privacy summary
+ * agrees with the policy (src/data/privacy.json), the enquiry and contact lines say who answers on WhatsApp and
+ * when, as the FAQ does, and neither file gives the assistant a personal name or names an AI vendor that gets no
+ * Bona chat (the privacy page's own rules, scripts/test/privacy-policy.test.mjs).
  *
  *   node scripts/og/gen-llms.mjs && npm run build && node --test test/llms-knowledge.test.mjs   (or: npm run test:dist)
  */
@@ -17,6 +19,9 @@ const dist = path.join(root, 'dist');
 const file = path.join(dist, 'llms-full.txt');
 assert.ok(existsSync(file), `dist/llms-full.txt is missing — run gen-llms and \`npm run build\` first (looked in ${dist})`);
 const full = readFileSync(file, 'utf8');
+const shortFile = path.join(dist, 'llms.txt');
+assert.ok(existsSync(shortFile), `dist/llms.txt is missing — run gen-llms and \`npm run build\` first (looked in ${dist})`);
+const short = readFileSync(shortFile, 'utf8');
 const read = (rel) => JSON.parse(readFileSync(path.join(root, rel), 'utf8'));
 const listings = read('src/data/listings.json');
 const site = read('src/data/site.json');
@@ -75,4 +80,32 @@ test('the enquiry line says who answers on WhatsApp and when, as the FAQ does (D
   assert.ok(how.includes(`Bona’s AI assistant answers on WhatsApp at any hour, in Arabic or English, and says that it is an AI; our team replies ${site.hours.en} (Saudi time).`), how);
   const contact = faq.items.find((x) => x.id === 'contact');
   assert.match(contact.a.en[0], /Bona’s AI assistant answers there at any hour, in Arabic or English, and says that it is an AI/, 'the FAQ says the same');
+});
+
+test('the Contact entry of both files says the AI assistant answers WhatsApp at any hour, not that WhatsApp keeps office hours (D1)', () => {
+  for (const [name, text] of [['llms.txt', short], ['llms-full.txt', full]]) {
+    const lines = text.split('\n').filter((x) => x.includes(`](${site.url.replace(/\/$/, '')}/contact/)`));
+    assert.equal(lines.length, 1, `${name}: one Contact entry`);
+    const [line] = lines;
+    assert.doesNotMatch(line, /Reach Bona on WhatsApp or by phone, Sunday to Thursday/, `${name}: WhatsApp is answered at any hour now`);
+    assert.ok(line.includes(`Bona’s AI assistant answers WhatsApp at any hour; our team replies ${site.hours.en}`), `${name}: ${line}`);
+  }
+});
+
+// The privacy page's rules for the name and the vendors (privacy-policy.test.mjs NAME, EXCLUDED_VENDORS),
+// applied to the two generated files: whole words only ("Sadana" is a listing), with the Arabic prefixes.
+const NAME = {
+  en: /\bDana\b/i,
+  ar: /(?<![\p{L}\p{M}])(?:[وفبلك]?(?:ال)?)دان[ةا](?![\p{L}\p{M}])/u,
+};
+const EXCLUDED_VENDORS = [/deepseek/i, /\bxAI\b/i, /\bgrok\b/i, /\banthropic\b/i];
+
+test('neither file gives the assistant a personal name or names an AI vendor that gets no Bona chat (D1)', () => {
+  for (const [name, text] of [['llms.txt', short], ['llms-full.txt', full]]) {
+    for (const [locale, re] of Object.entries(NAME)) {
+      const hits = text.split('\n').filter((x) => re.test(x));
+      assert.deepEqual(hits, [], `${name} names the assistant (${locale})`);
+    }
+    for (const re of EXCLUDED_VENDORS) assert.doesNotMatch(text, re, `${name} names an AI vendor that gets no Bona chat`);
+  }
 });

@@ -846,10 +846,11 @@ test('the property words are strong real-estate terms only, and the privacy page
   // that only these words keep a chat: it lists every one of them, in both languages, and none of
   // the words the code no longer counts. Bona's own number (D1) keeps no such chats, so the live
   // page no longer has the paragraph; the rule and its text stay in step here. That holds while
-  // own_inbox is off too (`#dana live off`): while the instance is verified as Bona's own number,
-  // the poller keeps no candidate row for a chat with a phone and deletes the ones already there
-  // (PR #87 round-1 decision; PLAN T06, T07, DESIGN §3.1). Such rows exist only on the personal
-  // number, whose privacy page is this text (PR-D1r).
+  // own_inbox is off too (`#dana live off`), and before the identity check passes: while the
+  // configured number is Bona's own (ownNumberFrom 'instance'), the poller keeps no candidate row
+  // for a chat with a phone and deletes the open ones already there (PR #87 review rounds 1-2;
+  // PLAN T06, T07, DESIGN §3.1). Such rows exist only on the personal number, whose privacy page
+  // is this text (PR-D1r).
   const s = sharedNumberText();
   const exception = { en: s.body.en.find((p) => p.startsWith('There is one narrow exception')), ar: s.body.ar.find((p) => p.startsWith('وهناك استثناء محدود')) };
   for (const locale of ['en', 'ar']) {
