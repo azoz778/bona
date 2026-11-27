@@ -860,6 +860,104 @@ test('a purge, Not a client, the lead gone or booking off while the re-check is 
   } finally { k.db.close(); }
 });
 
+test('a commit validated late on a Wednesday for Thursday whose Google calls answer after Riyadh midnight books nothing: the slot is checked against the clock again right before the insert (same-day never), the row ends cancelled', async () => {
+  const LATE = R(2026, 12, 2, 23, 59); // Wednesday 23:59
+  const AFTER = R(2026, 12, 3, 0, 1); // Thursday 00:01
+  const THU_10 = '2026-12-03T10:00+03:00';
+  const gcal = fakeGcal();
+  const held = { holidays: false, freeBusy: false, release: null };
+  for (const op of ['holidays', 'freeBusy']) {
+    const real = gcal[op];
+    gcal[op] = async (...args) => {
+      if (held[op]) { held[op] = false; await new Promise((resolve) => { held.release = resolve; }); }
+      return real(...args);
+    };
+  }
+  const reached = async () => {
+    for (let i = 0; i < 200 && !held.release; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(held.release, 'the commit reached the re-check');
+  };
+  const answer = () => { const r = held.release; held.release = null; r(); };
+  const clock = { t: LATE };
+  const h = setup({ gcal, clock });
+  try {
+    const rowOf = (leadId) => h.rows().find((r) => r.lead_id === leadId);
+    const inserts = () => gcal.calls.filter((c) => c[0] === 'insert');
+    // The control: at 23:59 on Wednesday, Thursday is tomorrow and books.
+    const ok = h.lead('LEAD-20261201-0000a0a0');
+    assert.equal(h.viewing.validate({ lead: ok, listingId: 'BONA-W901', slotId: '2026-12-03T14:00+03:00' }).ok, true);
+    assert.equal((await h.viewing.commitBooking({ lead: ok, listingId: 'BONA-W901', slotId: '2026-12-03T14:00+03:00' })).ok, true);
+    assert.equal(inserts().length, 1);
+    for (const [op, id] of [['freeBusy', 'LEAD-20261201-0000b0b0'], ['holidays', 'LEAD-20261201-0000c0c0']]) {
+      clock.t = LATE;
+      const lead = h.lead(id);
+      assert.equal(h.viewing.validate({ lead, listingId: 'BONA-W901', slotId: THU_10 }).ok, true, `${op}: valid before midnight`);
+      held[op] = true;
+      const p = h.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: THU_10 });
+      await reached();
+      assert.equal(rowOf(id).status, 'booked', `${op}: reserved before midnight`);
+      clock.t = AFTER;
+      answer();
+      assert.deepEqual(await p, { ok: false, reason: 'too_soon' }, `${op}: Thursday is today now`);
+      assert.equal(inserts().length, 1, `${op}: no insert was called`);
+      assert.equal(rowOf(id).status, 'cancelled', `${op}: no event was sent, so there is none to delete`);
+      assert.equal(tasksForLead(h.db, id).some((t) => t.kind === 'viewing'), false, `${op}: no task`);
+      assert.equal(h.viewing.validate({ lead, listingId: 'BONA-W901', slotId: THU_10 }).reason, 'too_soon');
+    }
+    await h.viewing.tick();
+    assert.equal(gcal.calls.some((c) => c[0] === 'delete'), false, 'the worker has nothing to delete');
+  } finally { h.db.close(); }
+
+  // The real client: freeBusy answers at 23:59 with the token run out, so the insert mints a new one
+  // first, and midnight passes during that mint. gcal asks ready() right before the request: nothing goes out.
+  const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const hold = { token: false, freeBusy: false, release: null };
+  const posts = [];
+  let mints = 0;
+  const pause = () => new Promise((resolve) => { hold.release = resolve; });
+  const fetchImpl = async (url, init = {}) => {
+    const u = new URL(url);
+    if (u.href === TOKEN_URL) {
+      mints += 1;
+      if (hold.token) { hold.token = false; await pause(); }
+      return json(200, { access_token: `tok-${mints}`, expires_in: 3599 });
+    }
+    if (u.pathname.includes('saudiarabian')) return json(200, { items: [] });
+    if (u.pathname.endsWith('/freeBusy')) {
+      if (hold.freeBusy) { hold.freeBusy = false; await pause(); }
+      return json(200, { calendars: { [CAL]: { busy: [] } } });
+    }
+    if ((init.method ?? 'GET') === 'POST') { posts.push(JSON.parse(init.body)); return json(200, { ...JSON.parse(init.body), status: 'confirmed' }); }
+    return json(500, {});
+  };
+  const clock2 = { t: R(2026, 12, 2, 23, 0) };
+  const real = createGcal({ saFile: '/home/example/.secrets/sa.json', calendarId: CAL, readFile: () => JSON.stringify({ client_email: 'robot@example.com', private_key: privateKey }), fetchImpl, now: () => clock2.t });
+  const k = setup({ gcal: real, clock: clock2 });
+  try {
+    const lead = k.lead('LEAD-20261201-0000d0d0');
+    const waitHold = async () => {
+      for (let i = 0; i < 200 && !hold.release; i += 1) await new Promise((resolve) => setImmediate(resolve));
+      assert.ok(hold.release, 'held');
+    };
+    const go = () => { const r = hold.release; hold.release = null; r(); };
+    hold.freeBusy = true;
+    const p = k.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: THU_10 });
+    await waitHold();
+    assert.equal(mints, 1);
+    clock2.t = LATE; // past the 55 min token cache, still Wednesday
+    hold.token = true;
+    go();
+    await waitHold();
+    assert.equal(mints, 2, 'the insert is minting its token (the first check passed on Wednesday)');
+    clock2.t = AFTER;
+    go();
+    assert.deepEqual(await p, { ok: false, reason: 'too_soon' });
+    assert.deepEqual(posts, [], 'no insert request went out');
+    assert.equal(k.rows()[0].status, 'cancelled');
+    assert.equal(tasksForLead(k.db, lead.lead_id).some((t) => t.kind === 'viewing'), false);
+  } finally { k.db.close(); }
+});
+
 test('Not a client, or a number put on the never list, BEFORE the reserve (the commit waits on the lock behind another lead, or its reads are on their way): no row, no insert, no task; slots and validate refuse it too', async () => {
   // One harness per case: a fake calendar whose held call waits once for the test to answer.
   const harness = (clock = { t: NOW }) => {

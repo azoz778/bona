@@ -35,8 +35,9 @@
  *
  * The hooks and the purge only write rows, synchronously, inside the caller's transaction; they
  * never call Google (DESIGN §8.4). Google is called from slots, commitBooking, tick and reconcile.
- * A commit sends the event (the client's name and phone) only if its row is still `booked` and the
- * lead may still book, read right before the request: a purge while Google answered sends nothing.
+ * A commit sends the event (the client's name and phone) only if its row is still `booked`, the
+ * lead may still book and the slot is still from tomorrow by the clock then, read right before the
+ * request: a purge, or Riyadh midnight, while Google answered sends nothing.
  * Logs carry booking ids, lead ids and codes only: never a name, a phone, a calendar id or text.
  *
  * Each event id records the calendar it was made in (gcal calendarTag). A 404 from another calendar
@@ -448,14 +449,23 @@ export function createViewing(deps = {}) {
     if (!isFree(v.startTs, fb.busy)) { dropRow(row.bookingId); return failed('busy'); }
     // Step 6: the event, only while the row is still this booking and the lead may still book (its row read
     // again: still in the inbox, no colleague's or never-list number, auto mode). A purge, Not a client, the
-    // lead gone or booking off while Google answered: the client's name and phone are never sent. Read here
+    // lead gone or booking off while Google answered: the client's name and phone are never sent. And only
+    // while the slot is still bookable by the clock now (checkSlot(), slots()' rule: from tomorrow, Sun-Thu,
+    // the grid, not a holiday read here): a commit validated late on a Wednesday for Thursday whose calls
+    // answered after Riyadh midnight would book a same-day viewing; it answers checkSlot's reason. Read here
     // with no await before the call, and again by gcal.insert right before its request (after any token
     // refresh). No event went out, so the row ends cancelled (nothing to delete).
-    const sendable = () => prep('SELECT status FROM viewing_bookings WHERE booking_id = ?').get(row.bookingId)?.status === 'booked'
-      && gate(db.getLead(v.leadId)) === null;
+    let why = 'cancelled';
+    const sendable = () => {
+      why = 'cancelled';
+      if (prep('SELECT status FROM viewing_bookings WHERE booking_id = ?').get(row.bookingId)?.status !== 'booked') return false;
+      if (gate(db.getLead(v.leadId)) !== null) return false;
+      why = checkSlot(v.startTs, { now: now(), holidays: hol.dates });
+      return why === null;
+    };
     const unsent = () => {
       prep("UPDATE viewing_bookings SET status = 'cancelled', updated = ? WHERE booking_id = ? AND status IN ('booked','cancel_pending')").run(now(), row.bookingId);
-      return failed('cancelled');
+      return failed(why ?? 'cancelled');
     };
     if (!sendable()) return unsent();
     const current = db.getLead(v.leadId);
