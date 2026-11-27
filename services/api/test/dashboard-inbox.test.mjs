@@ -1779,6 +1779,6 @@ test('the Team page counts the chats under a Dana test in its "Off" line', async
     const boss = await h.boss();
     await h.postForm('/v1/admin/inbox/LEAD-A/dana', { dana_test: '1' }, { cookie: boss });
     const html = await (await h.get('/dashboard/team', { cookie: boss })).text();
-    assert.match(html, /Off\. Dana answers nobody on WhatsApp, except 1 chat under test\./);
+    assert.match(html, /Off\. The AI assistant answers nobody on WhatsApp, except 1 chat under test\./);
   });
 });

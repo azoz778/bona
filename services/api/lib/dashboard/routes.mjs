@@ -88,6 +88,12 @@ export const PAGE_SECURITY_HEADERS = { ...SECURITY_HEADERS, 'Content-Security-Po
 const WORKER_CSP = "default-src 'none'; connect-src 'self'; img-src 'self'";
 
 export const MAX_NOTE = 2000;
+/**
+ * The full automation's switches (2026-11-27 DESIGN §5.1), all owner-only on the Team page
+ * like the three before them. Each ships off except owner_notes and owner_mail_copy, and
+ * each is read only by the module its own task builds.
+ */
+export const GO_LIVE_SWITCHES = ['own_inbox', 'owner_as_client', 'calendar_booking', 'owner_notes', 'email_replies', 'owner_mail_copy', 'dana_brain'];
 /** After an owner's join, Dana answers the waiting message only when it is this recent (U5). */
 export const MOVE_ANSWER_WINDOW_MS = 6 * 3_600_000;
 /**
@@ -197,12 +203,23 @@ export function readBody(req, maxBytes, { drainTo = 0 } = {}) {
  * @param {ReturnType<import('../wa-send.mjs').createSender>} [o.sender]             the one sender; its `reply` answers a chat
  * @param {ReturnType<import('../inbox/backfill.mjs').createBackfill>} [o.backfill]  per-chat Evolution reads: refresh, join history
  * @param {ReturnType<import('../alerts.mjs').createAlerts>} [o.alerts]              phone alerts (design §5); without it push is off and the pulse still works
+ * @param {(key: string, value: string) => unknown} [o.onSettingChanged]  told once per real change of a Team-page switch,
+ *   after it is saved (2026-11-27 DESIGN §3.2: the test switch's lifecycle). index.mjs wires it (T05); default a no-op
+ * @param {{ onTaskChange?: (task: object, patch: { status: string, dueTs: number|undefined }) => unknown,
+ *   onLeadLeaving?: (leadId: string) => unknown }} [o.hooks]  the viewing seam (DESIGN §8.4): a task the owner changed,
+ *   and a chat about to leave the inbox (Not a client, a new colleague's or never-list number). Defaults are no-ops
+ * @param {() => object} [o.ops]                         the Team page's Ops panel counts (DESIGN §5.4); T14 wires the real one
+ *
+ * A hook never decides the owner's action: it runs after (or, for a lead leaving, just before)
+ * the write, and a hook that throws or rejects is logged as `dash.hook_failed` by name and
+ * target id, never with its error's words, while the action goes through as it would without it.
  */
 export function createDashboardRoutes({
   db, cfg = {}, inventory = null, fanout = null, app = null,
   sendWhatsApp = null, probeRetell = null,
   team = null, audit = null, sendCode = null,
   inbox = null, sender = null, backfill = null, alerts = null,
+  onSettingChanged = () => {}, hooks = {}, ops = () => ({}),
   auth = null, stats = null, tiktokAccounts = null, log = () => {}, now = () => Date.now(),
 } = {}) {
   const statistics = stats ?? createStats({ db, now });
@@ -219,6 +236,30 @@ export function createDashboardRoutes({
     verify: createLimiter({ capacity: 20, perMs: 60_000, now }),
     page: createLimiter({ capacity: 240, perMs: 60_000, now }),
   };
+
+  /* -------------------- seams for the modules other tasks build -------------------- */
+
+  /** A hook's failure, by name and target id only: its message could carry a calendar id or a name. */
+  const hookFailed = (hook, target, err) => log({
+    level: 'warn', evt: 'dash.hook_failed', hook, target: target ?? null,
+    error: typeof err?.code === 'string' ? err.code : (err?.name ?? 'Error'),
+  });
+  /**
+   * Run one injected hook, sync or async, without letting it decide the owner's action: a
+   * throw or a rejection is logged and swallowed. Returns what the hook returned, or
+   * undefined when it threw.
+   */
+  function callHook(hook, target, fn, ...args) {
+    if (typeof fn !== 'function') return undefined;
+    try {
+      const out = fn(...args);
+      if (out && typeof out.then === 'function') out.then(null, (err) => hookFailed(hook, target, err));
+      return out;
+    } catch (err) {
+      hookFailed(hook, target, err);
+      return undefined;
+    }
+  }
 
   /* -------------------- responses -------------------- */
 
@@ -673,6 +714,12 @@ export function createDashboardRoutes({
     }));
   }
 
+  /** The Ops panel's counts; a failing `ops()` is logged and the page opens with the placeholder. */
+  function opsCounts() {
+    const out = callHook('ops', null, ops);
+    return out && typeof out === 'object' && typeof out.then !== 'function' ? out : {};
+  }
+
   function teamView({ res, url, me }) {
     if (me.role !== 'owner') return sendHtml(res, 403, messagePage({ title: 'Owners only', message: 'Only an owner can open the Team page.', me }));
     return sendHtml(res, 200, teamPage({
@@ -686,6 +733,11 @@ export function createDashboardRoutes({
       danaTests: inbox ? inbox.countDanaTests() : 0,
       // Since when Retell has refused Dana for lack of credit (2026-10-05 R2): the red banner.
       fundsOut: fundsOutSince(team),
+      // Since when the AI service has not answered (the `brain_out` marker): its own banner.
+      brainOut: team.brainOutSince(),
+      // The go-live switches (DESIGN §5.1), each read fail-closed: only an exact '1' is on.
+      switches: Object.fromEntries(GO_LIVE_SWITCHES.map((k) => [k, team.isOn(k)])),
+      ops: opsCounts(),
       ok: url.searchParams.get('ok'),
       error: url.searchParams.get('error'),
     }));
@@ -776,6 +828,9 @@ export function createDashboardRoutes({
       }
       if(!task)throw new RangeError('Task not found');
       audit?.record({userId:me.user_id,action:'lead_task',target:leadId,meta:{taskId:task.task_id,kind:task.kind,status:task.status}});
+      // A changed task (not a new one) goes to the viewing seam: a cancelled booked viewing
+      // cancels its calendar event there (DESIGN §8.4, T10). Its failure never fails the save.
+      if(fields.task_id)callHook('onTaskChange',task.task_id,hooks?.onTaskChange,task,{status:String(fields.status),dueTs});
       return answer(res,{form,back:back+'?ok=task',status:200,payload:{ok:true,task}});
     }catch{return answer(res,{form,back:back+'?error=bad_task',status:400,payload:{error:'bad_task'}});}
   }
@@ -896,6 +951,8 @@ export function createDashboardRoutes({
     inbox.removeCandidatesFor({ phone: digits, jid: `${digits}@s.whatsapp.net` });
     const lead = db.getLeadByPhone(digits) ?? db.getLeadByJid(`${digits}@s.whatsapp.net`);
     if (!lead || lead.inbox_state === 'out') return;
+    // Before the purge, so the viewing seam still finds what it must cancel (DESIGN §8.4, T10).
+    callHook('onLeadLeaving', lead.lead_id, hooks?.onLeadLeaving, lead.lead_id);
     inbox.leaveInbox(lead.lead_id);
     audit?.record({ userId: me.user_id, action: 'inbox_out', target: lead.lead_id });
   }
@@ -958,12 +1015,17 @@ export function createDashboardRoutes({
     }, 'never_added');
   }
 
-  /** The owner's switches, as the Team page posts them: one per form. */
-  const SWITCHES = ['sending_enabled', 'inbox_replies', 'dana_enabled'];
+  /**
+   * The owner's switches, as the Team page posts them: one per form. The markers
+   * (`brain_out`, `owner_summary_day`, `mail_from_ok`, …) are not here, so the form can never
+   * set one; code and, later, their own audited actions do.
+   */
+  const SWITCHES = ['sending_enabled', 'inbox_replies', 'dana_enabled', ...GO_LIVE_SWITCHES];
 
   function saveSetting(ctx) {
     const { fields, me } = ctx;
-    return teamWrite(ctx, () => {
+    let changed = null;
+    const answered = teamWrite(ctx, () => {
       // Exactly one switch per post, the way the Team page's buttons send it: none, or
       // two at once, is refused rather than guessed at.
       const keys = SWITCHES.filter((k) => Object.hasOwn(fields, k));
@@ -975,9 +1037,15 @@ export function createDashboardRoutes({
       // it ever reaches the row. Coercing here (the old `=== '0' ? '0' : '1'`) would
       // have defeated that check by handing it only ever '0' or '1' to approve.
       const value = asText(fields[key]);
-      team.setSetting(key, value, { by: me.user_id });
+      const before = team.getSetting(key);
+      const after = team.setSetting(key, value, { by: me.user_id });
       audit?.record({ userId: me.user_id, action: 'setting', target: key, meta: { value } });
+      if (after !== before) changed = [key, after];
     }, 'setting');
+    // Once per real change, after the row and its audit are written: a repeat of the same
+    // value, or a refused one, tells nobody.
+    if (changed) callHook('onSettingChanged', changed[0], onSettingChanged, ...changed);
+    return answered;
   }
 
   /* -------------------- the Bona inbox -------------------- */
@@ -1413,7 +1481,9 @@ export function createDashboardRoutes({
     const lead = db.getLead(leadId);
     if (!lead) return answer(res, { form, back: '/dashboard/inbox?error=not_a_chat', status: 404, payload: { error: 'not_found' } });
     // Not a client (design §4.1): out now, the transcript gone now, and it never comes
-    // back on its own — only the owner's Move or Add brings it in again.
+    // back on its own — only the owner's Move or Add brings it in again. The viewing seam
+    // hears first, while the lead is still as it was (DESIGN §8.4, T10).
+    callHook('onLeadLeaving', leadId, hooks?.onLeadLeaving, leadId);
     const purged = inbox.leaveInbox(leadId);
     audit?.record({ userId: me.user_id, action: 'inbox_out', target: leadId });
     log({ evt: 'dash.inbox_out', leadId, messages: purged.messages });

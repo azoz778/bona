@@ -1,10 +1,17 @@
 /**
- * The Team page (owner only): who can log in, the numbers that are never a client, and
- * the switches for what the dashboard sends from the owner's WhatsApp — everything
- * (Sending), replies to clients (off until the owner turns them on, design D14), and Dana
- * on WhatsApp (off until the owner turns her on, D14). While Retell refuses Dana for lack of
- * credit (lib/dana-funds.mjs, 2026-10-05 design R2), a red banner says so at the top.
- * Every write is a form post to /v1/admin/*, like the rest of the dashboard.
+ * The Team page (owner only): who can log in, the numbers that are never a client, and the
+ * switches for what the dashboard sends from Bona's WhatsApp — everything (Sending),
+ * replies to clients (off until the owner turns them on, design D14), and the AI assistant
+ * on WhatsApp (off until the owner turns it on, D14) — then the go-live switches of the
+ * full automation (2026-11-27 DESIGN §5.1) and the Ops panel. While the AI service is not
+ * answering, or Retell refuses for lack of credit (lib/dana-funds.mjs, 2026-10-05 design R2),
+ * a red banner says so at the top. Every write is a form post to /v1/admin/*, like the rest
+ * of the dashboard.
+ *
+ * The assistant has no client-facing name (brain migration, 27 Nov): this page calls it "the
+ * AI assistant", and its copy holds on either engine (the Retell agent or the AI service)
+ * and with bookings on or off. The Retell funds banner keeps today's words for the website
+ * chat, which stays on Retell until T28.
  */
 import { esc, fullPhone, dateTime, layout, scrollTable, knownError, messageFor } from './render.mjs';
 import { TZ_OFFSET_MS } from './stats.mjs';
@@ -24,18 +31,97 @@ const post = (action, label, fields = {}, cls = '') => `<form method="post" acti
   Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('') +
   `<button type="submit"${cls ? ` class="${esc(cls)}"` : ''}>${esc(label)}</button></form>`;
 
+/** `dateTime` writes UTC; shifted by Riyadh's fixed +03:00 it reads as the owner's clock. */
+const riyadh = (ms) => `${dateTime(ms + TZ_OFFSET_MS)} Riyadh time`;
+const isInstant = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
+
 /**
- * The out-of-credit banner, or '' while Retell is fine. `fundsOut` is when it started (ms).
- * Also drawn on the owners' inbox list, where a tapped funds alert lands (render-inbox.mjs).
+ * The red banners, or '' while all is fine. `fundsOut` is when Retell started refusing for
+ * lack of credit (ms); `brainOut` is when the AI service stopped answering (the `brain_out`
+ * marker, ms). The AI-service banner comes first. Also drawn on the owners' inbox list, where
+ * a tapped funds alert lands (render-inbox.mjs), which still passes `fundsOut` alone.
  */
-export function fundsBanner(fundsOut) {
-  if (typeof fundsOut !== 'number' || !Number.isFinite(fundsOut) || fundsOut <= 0) return '';
-  // `dateTime` writes UTC; shifted by Riyadh's fixed +03:00 it reads as the owner's clock.
-  const at = `${dateTime(fundsOut + TZ_OFFSET_MS)} Riyadh time`;
-  return `<div class="err">Dana can’t answer: Retell credit ran out at ${esc(at)}. Top up Retell and she resumes by herself; until then clients get the hand-over line.</div>`;
+export function fundsBanner(fundsOut, { brainOut = null } = {}) {
+  const brain = isInstant(brainOut)
+    ? `<div class="err">The AI service is not answering since ${esc(riyadh(brainOut))}. Until it is back, clients get a line saying the team will reply.</div>`
+    : '';
+  const retell = isInstant(fundsOut)
+    ? `<div class="err">Dana can’t answer: Retell credit ran out at ${esc(riyadh(fundsOut))}. Top up Retell and she resumes by herself; until then clients get the hand-over line.</div>`
+    : '';
+  return brain + retell;
 }
 
-export function teamPage({ me, users = [], never = [], sendingEnabled = true, repliesEnabled = false, danaEnabled = false, danaConfigured = false, danaTests = 0, fundsOut = null, ok = null, error = null }) {
+/**
+ * The Ops panel (DESIGN §5.4): counts for the owner only, from an injected `ops()`. Until
+ * T14 wires the real one it is a stub that returns `{}`, and the panel says so. Every key
+ * and value is escaped; a nested value is shown as its JSON.
+ */
+export function opsPanel(ops) {
+  const entries = ops && typeof ops === 'object' && !Array.isArray(ops) ? Object.entries(ops) : [];
+  const shown = (v) => (v === null || v === undefined ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+  const rows = entries.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(shown(v))}</td></tr>`);
+  return `<h2 style="margin-top:28px">Ops</h2>
+<p class="sub">Counts for you only: answers, hand-overs, notes and bookings. Never a client’s words.</p>
+${rows.length ? scrollTable('<th>What</th><th>Count</th>', rows, '') : '<p class="sub">No counts yet.</p>'}`;
+}
+
+/**
+ * The go-live switches, in the order the go-live runs them. Each: the setting key, its
+ * heading, what it does while on and while off, and the button for each state. The copy
+ * says what is true in either state: a switch whose part is not deployed yet changes
+ * nothing, which the section's first line says once for all of them.
+ */
+const GO_LIVE = [
+  {
+    key: 'own_inbox', title: 'Every chat on Bona’s number',
+    on: 'On. Every one-to-one chat on Bona’s WhatsApp number joins the Bona inbox and the AI assistant answers it, except the team’s chats and the never list. It works only while Bona’s own number is linked and checked.',
+    off: 'Off. A chat joins the Bona inbox only as before: by its Ref code, or by your Move or Add. Turning this off stops new chats joining; chats that joined while it was on stay served.',
+    turnOn: 'Turn on for every chat', turnOff: 'Turn off for new chats',
+  },
+  {
+    key: 'owner_as_client', title: 'Test mode: your own chat as a client',
+    on: 'On. Your own WhatsApp chat with Bona’s number is treated as a client’s, so you can try the whole flow before clients see it. It works only while Bona’s own number is linked and checked, and stays on until you turn it off.',
+    off: 'Off. Your own chat with Bona’s number is never treated as a client’s.',
+    turnOn: 'Turn test mode on', turnOff: 'Turn test mode off',
+  },
+  {
+    key: 'calendar_booking', title: 'Viewing bookings',
+    on: 'On. In the chats it fully serves, the AI assistant can offer free times from Bona’s viewing calendar and book a viewing, once Google Calendar is set up.',
+    off: 'Off. The AI assistant passes viewing requests to the team.',
+    turnOn: 'Turn bookings on', turnOff: 'Turn bookings off',
+  },
+  {
+    key: 'owner_notes', title: 'Notes to your WhatsApp',
+    on: 'On. Notes about new enquiries, hand-overs and bookings, and the daily summary, reach your WhatsApp from Bona’s number while Sending is on.',
+    off: 'Off. Those notes are dropped, not kept for later.',
+    turnOn: 'Turn notes on', turnOff: 'Turn notes off',
+  },
+  {
+    key: 'email_replies', title: 'Email replies',
+    on: 'On. The AI assistant answers enquiry emails to info@bona-real-estate.com, but only once the sender address has been checked.',
+    off: 'Off. Clients’ email is sorted by its headers and listed for you; no AI reads it.',
+    turnOn: 'Turn email replies on', turnOff: 'Turn email replies off',
+  },
+  {
+    key: 'owner_mail_copy', title: 'Platform mail to your Gmail',
+    on: 'On. Account and security mail to info@bona-real-estate.com from trusted platforms (Meta, WhatsApp, Google, TikTok and similar) is copied to your Gmail.',
+    off: 'Off. Platform mail stays in Bona’s mailbox only.',
+    turnOn: 'Copy to my Gmail', turnOff: 'Stop the Gmail copy',
+  },
+  {
+    key: 'dana_brain', title: 'AI service for every WhatsApp chat',
+    on: 'On. Every WhatsApp chat the AI assistant answers uses Bona’s AI service (OpenAI). Once the privacy page names OpenAI, do not turn this off to stop the assistant: use “Turn the AI assistant off” above.',
+    off: 'Off. Only the chats the AI assistant fully serves use Bona’s AI service (OpenAI); every other chat still uses the Retell agent. Turn this on only once the privacy page names OpenAI.',
+    turnOn: 'Move every chat to OpenAI', turnOff: 'Back to the Retell agent',
+  },
+];
+
+/**
+ * `switches` maps each go-live key to its state; only a real `true` is on (a missing key is
+ * off), the same fail-closed reading as the three switches before it. `ops` is the injected
+ * `ops()` result, `brainOut` the `brain_out` marker (ms) or null.
+ */
+export function teamPage({ me, users = [], never = [], sendingEnabled = true, repliesEnabled = false, danaEnabled = false, danaConfigured = false, danaTests = 0, fundsOut = null, brainOut = null, switches = {}, ops = {}, ok = null, error = null }) {
   // Fails closed like the setting itself: only a real `true` from team.repliesEnabled() is on.
   const repliesOn = repliesEnabled === true;
   const danaOn = danaEnabled === true;
@@ -67,7 +153,16 @@ export function teamPage({ me, users = [], never = [], sendingEnabled = true, re
   const nevers = never.map((n) => `<tr><td dir="ltr">${esc(fullPhone(n.phone_e164))}</td><td dir="auto">${esc(n.note ?? '')}</td>` +
     `<td>${post('/v1/admin/never/remove', 'Remove', { phone: n.phone_e164 })}</td></tr>`);
 
-  const body = `${fundsBanner(fundsOut)}${flash}
+  // Each go-live switch reads as on only for a real `true`, like the three above.
+  const state = switches && typeof switches === 'object' ? switches : {};
+  const goLive = GO_LIVE.map(({ key, title, on, off, turnOn, turnOff }) => {
+    const isOn = state[key] === true;
+    return `<h3 style="margin-top:18px">${esc(title)}</h3>
+<p class="sub">${esc(isOn ? on : off)}</p>
+${post('/v1/admin/settings', isOn ? turnOff : turnOn, { [key]: isOn ? '0' : '1' })}`;
+  }).join('\n');
+
+  const body = `${fundsBanner(fundsOut, { brainOut })}${flash}
 <h2>People</h2>
 <p class="sub">Everyone here logs in with a 6-digit code sent to their own WhatsApp from Bona's WhatsApp number, and sees the same dashboard you do. Only owners see this page.</p>
 ${scrollTable('<th>Name</th><th>WhatsApp</th><th>Role</th><th>Status</th><th>Last login</th><th></th>', people, 'Nobody yet.')}
@@ -102,11 +197,16 @@ ${post('/v1/admin/settings', sendingEnabled ? 'Turn sending off' : 'Turn sending
     : 'Off. Nobody can send a client a message from the dashboard yet; the team can still read the inbox, and login codes still go.'}</p>
 ${post('/v1/admin/settings', repliesOn ? 'Turn replies off' : 'Turn replies on', { inbox_replies: repliesOn ? '0' : '1' })}
 
-<h2 style="margin-top:28px">Dana on WhatsApp</h2>
+<h2 style="margin-top:28px">The AI assistant on WhatsApp</h2>
 <p class="sub">${danaOn
-    ? 'On. Dana answers Bona inbox chats when nobody on the team has replied for 24 hours. She says she is Bona’s AI assistant, quotes only published prices, sends links instead of cards, and hands the chat to the team for a viewing, an offer, a complaint, or when asked for a person. Turn her off for one chat from that chat’s page.'
-    : `Off. Dana answers nobody on WhatsApp${tests > 0 ? `, except ${tests} chat${tests === 1 ? '' : 's'} under test` : ''}. To try her on one chat first, open that chat and choose “Let Dana test on this chat”.`}${danaConfigured ? '' : ' Dana is not provisioned for WhatsApp yet (services/api/retell/provision.mjs --whatsapp-only), so nothing would be sent either way.'}</p>
-${post('/v1/admin/settings', danaOn ? 'Turn Dana off' : 'Turn Dana on', { dana_enabled: danaOn ? '0' : '1' })}`;
+    ? 'On. The AI assistant answers Bona inbox chats when nobody on the team has replied for 24 hours. It says it is an AI assistant, quotes only published prices, and hands the chat to the team when a client asks for a person. Turn it off for one chat from that chat’s page.'
+    : `Off. The AI assistant answers nobody on WhatsApp${tests > 0 ? `, except ${tests} chat${tests === 1 ? '' : 's'} under test` : ''}. To try it on one chat first, open that chat and use its “test on this chat” button.`}${danaConfigured ? '' : ' The AI assistant is not set up for WhatsApp yet, so nothing would be sent either way.'}</p>
+${post('/v1/admin/settings', danaOn ? 'Turn the AI assistant off' : 'Turn the AI assistant on', { dana_enabled: danaOn ? '0' : '1' })}
 
+<h2 style="margin-top:28px">Go-live switches</h2>
+<p class="sub">These belong to the move to full automation. Each one has an effect only once its part is deployed; until then turning it on changes nothing.</p>
+${goLive}
+
+${opsPanel(ops)}`;
   return layout({ title: 'Team', active: '/dashboard/team', me, body: `<h1>Team</h1>${body}` });
 }

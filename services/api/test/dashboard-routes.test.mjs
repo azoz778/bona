@@ -18,6 +18,8 @@ import http from 'node:http';
 import { createDashboardRoutes } from '../lib/dashboard/routes.mjs';
 import { createTeam } from '../lib/team.mjs';
 import { createAudit } from '../lib/audit.mjs';
+import { createInboxStore } from '../lib/inbox/store.mjs';
+import { addTask } from '../lib/lead-tasks.mjs';
 
 const TOKEN = 'a'.repeat(32);
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
@@ -899,7 +901,11 @@ test('the spend page renders unknown campaign metrics as dashes, never fabricate
 const OWNER_PHONE = '966593296933';
 const STAFF_PHONE = '966500000001';
 
-async function withTeamRoutes(fn) {
+/**
+ * `extra` goes into createDashboardRoutes as well: an object, or a function of `{ db, team }`
+ * for the options that need the store (an inbox built on it, say).
+ */
+async function withTeamRoutes(fn, extra = {}) {
   const db = openDb(':memory:');
   const team = createTeam(db);
   const owner = team.ensureOwner({ phone: OWNER_PHONE, name: 'Abdulaziz' });
@@ -912,6 +918,7 @@ async function withTeamRoutes(fn) {
     inventory, team, audit,
     sendCode: async ({ jid, text }) => { sent.push({ jid, text }); return { ok: true }; },
     log: (o) => logs.push(o),
+    ...(typeof extra === 'function' ? extra({ db, team }) : extra),
   });
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -1472,4 +1479,193 @@ test('task dates reject calendar rollover and queue pages show total and next li
   const html=await(await get('/dashboard',{cookie})).text();assert.match(html,/105 open tasks/);assert.match(html,/tasks_page=1/);
   assert.match(await(await get('/dashboard?tasks_page=1',{cookie})).text(),/Previous/);
  });
+});
+
+/* ---------------- the go-live switches and the seams for later tasks (PLAN T04) ---------------- */
+
+const GO_LIVE_SWITCHES = ['own_inbox', 'owner_as_client', 'calendar_booking', 'owner_notes', 'email_replies', 'owner_mail_copy', 'dana_brain'];
+/** Lets a hook's promise (or a fire-and-forget catch) settle before the test looks. */
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test('every go-live switch is owner-only: a staff member is refused and nothing changes', async () => {
+  await withTeamRoutes(async ({ team, audit, postForm, login }) => {
+    const staff = await login('0500000001');
+    const auditBefore = audit.recent(500).length;
+    for (const key of GO_LIVE_SWITCHES) {
+      const before = team.getSetting(key);
+      const res = await postForm('/v1/admin/settings', { _dash: '1', [key]: before === '1' ? '0' : '1' }, { cookie: staff });
+      assert.equal(res.status, 403, key);
+      assert.deepEqual(await res.json(), { error: 'owner_only' }, key);
+      assert.equal(team.getSetting(key), before, key);
+    }
+    assert.equal(audit.recent(500).length, auditBefore, 'a refused write is not audited as a change');
+  });
+});
+
+test('the owner flips every go-live switch from the Team page; each write is audited by key and value only', async () => {
+  await withTeamRoutes(async ({ team, audit, owner, postForm, login, get }) => {
+    const cookie = await login(OWNER_PHONE);
+    for (const key of GO_LIVE_SWITCHES) {
+      const want = team.getSetting(key) === '1' ? '0' : '1';
+      const res = await postForm('/v1/admin/settings', { _dash: '1', [key]: want }, { cookie });
+      assert.equal(res.status, 303, key);
+      assert.equal(res.headers.get('location'), '/dashboard/team?ok=setting', key);
+      assert.equal(team.getSetting(key), want, key);
+      const row = audit.recent(1)[0];
+      assert.deepEqual([row.user_id, row.action, row.target, row.meta], [owner.user_id, 'setting', key, { value: want }], key);
+    }
+    const html = await (await get('/dashboard/team', { cookie })).text();
+    for (const key of GO_LIVE_SWITCHES) {
+      const now = team.getSetting(key);
+      assert.match(html, new RegExp(`name="${key}" value="${now === '1' ? '0' : '1'}"`), `${key}: the page offers the opposite of ${now}`);
+    }
+    // Two switches in one post, or a value outside '0'/'1', is refused as before.
+    const two = await postForm('/v1/admin/settings', { _dash: '1', own_inbox: '1', dana_brain: '1' }, { cookie });
+    assert.equal(two.headers.get('location'), '/dashboard/team?error=bad_setting');
+    const bad = await postForm('/v1/admin/settings', { _dash: '1', own_inbox: 'on' }, { cookie });
+    assert.equal(bad.headers.get('location'), '/dashboard/team?error=bad_setting_value');
+    // A marker is not a switch: the Team page's form cannot post one.
+    for (const marker of ['brain_out', 'brain_usd_day', 'mail_from_ok', 'owner_summary_day']) {
+      const res = await postForm('/v1/admin/settings', { _dash: '1', [marker]: '' }, { cookie });
+      assert.equal(res.headers.get('location'), '/dashboard/team?error=bad_setting', marker);
+    }
+  });
+});
+
+test('onSettingChanged gets (key, value) once per real change, never for a repeat or a refusal', async () => {
+  const calls = [];
+  await withTeamRoutes(async ({ postForm, login }) => {
+    const cookie = await login(OWNER_PHONE);
+    await postForm('/v1/admin/settings', { _dash: '1', owner_as_client: '1' }, { cookie });
+    await postForm('/v1/admin/settings', { _dash: '1', owner_as_client: '1' }, { cookie });
+    await postForm('/v1/admin/settings', { _dash: '1', owner_as_client: 'yes' }, { cookie });
+    await postForm('/v1/admin/settings', { _dash: '1', owner_notes: '1' }, { cookie }); // ships on: no change
+    await postForm('/v1/admin/settings', { _dash: '1', owner_as_client: '0' }, { cookie });
+    await postForm('/v1/admin/settings', { _dash: '1', sending_enabled: '0' }, { cookie });
+    await settle();
+    assert.deepEqual(calls, [['owner_as_client', '1'], ['owner_as_client', '0'], ['sending_enabled', '0']]);
+  }, { onSettingChanged: (key, value) => { calls.push([key, value]); } });
+});
+
+test('a failing onSettingChanged is logged, never a 500: the setting is saved and the owner sees "Saved"', async () => {
+  let n = 0;
+  await withTeamRoutes(async ({ team, postForm, login, logs }) => {
+    const cookie = await login(OWNER_PHONE);
+    const res = await postForm('/v1/admin/settings', { _dash: '1', own_inbox: '1' }, { cookie });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), '/dashboard/team?ok=setting');
+    assert.equal(team.getSetting('own_inbox'), '1');
+    const res2 = await postForm('/v1/admin/settings', { _dash: '1', own_inbox: '0' }, { cookie });
+    assert.equal(res2.headers.get('location'), '/dashboard/team?ok=setting');
+    await settle();
+    const failed = logs.filter((l) => l.evt === 'dash.hook_failed');
+    assert.deepEqual(failed.map((l) => [l.hook, l.target]), [['onSettingChanged', 'own_inbox'], ['onSettingChanged', 'own_inbox']], 'a thrown error and a rejected promise alike');
+    assert.doesNotMatch(JSON.stringify(failed), /boom/, 'the log names the hook and the key, never the error\'s words');
+  }, { onSettingChanged: () => { n += 1; if (n === 1) throw new Error('boom'); return Promise.reject(new Error('boom')); } });
+});
+
+test('the Team page shows the AI-service banner while brain_out is set, and renders the injected ops()', async () => {
+  const at = Date.UTC(2026, 9, 3, 9, 30);
+  await withTeamRoutes(async ({ team, get, login }) => {
+    const cookie = await login(OWNER_PHONE);
+    let html = await (await get('/dashboard/team', { cookie })).text();
+    assert.doesNotMatch(html, /AI service is not answering/);
+    assert.match(html, /<td>answers_24h<\/td><td>7<\/td>/);
+    team.setSetting('brain_out', String(at));
+    html = await (await get('/dashboard/team', { cookie })).text();
+    assert.match(html, /The AI service is not answering since 2026-10-03 12:30 Riyadh time\./);
+  }, { ops: () => ({ answers_24h: 7 }) });
+});
+
+test('without an ops() the Team page shows the placeholder; a throwing ops() is logged and the page still opens', async () => {
+  await withTeamRoutes(async ({ get, login }) => {
+    const cookie = await login(OWNER_PHONE);
+    const res = await get('/dashboard/team', { cookie });
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /No counts yet\./);
+  });
+  await withTeamRoutes(async ({ get, login, logs }) => {
+    const cookie = await login(OWNER_PHONE);
+    const res = await get('/dashboard/team', { cookie });
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /No counts yet\./);
+    assert.ok(logs.some((l) => l.evt === 'dash.hook_failed' && l.hook === 'ops'));
+  }, { ops: () => { throw new Error('ops down'); } });
+});
+
+test('hooks.onTaskChange(task, patch) runs after an owner changes a task; adding one does not call it, and a failing hook is only logged', async () => {
+  const calls = [];
+  await withTeamRoutes(async ({ db, postForm, login, logs }) => {
+    const leadId = seedLead(db, { phone: '966500000071', inboxState: 'in' });
+    const task = addTask(db, { leadId, kind: 'viewing', source: 'owner', details: { note: 'x' }, dueTs: Date.UTC(2026, 11, 1, 13, 30), now: Date.UTC(2026, 10, 27) });
+    const cookie = await login(OWNER_PHONE);
+    const added = await postForm(`/v1/admin/leads/${leadId}/task`, { _dash: '1', kind: 'followup', due_at: '2026-12-02T10:00' }, { cookie });
+    assert.equal(added.status, 303);
+    assert.equal(calls.length, 0, 'a new task is not a change');
+    const res = await postForm(`/v1/admin/leads/${leadId}/task`, { _dash: '1', task_id: task.task_id, status: 'cancelled' }, { cookie });
+    assert.equal(res.headers.get('location'), `/dashboard/leads/${leadId}?ok=task`);
+    await settle();
+    assert.equal(calls.length, 1);
+    const [seen, patch] = calls[0];
+    assert.equal(seen.task_id, task.task_id);
+    assert.equal(seen.status, 'cancelled', 'the hook gets the task as saved');
+    assert.deepEqual(patch, { status: 'cancelled', dueTs: undefined });
+    const moved = await postForm(`/v1/admin/leads/${leadId}/task`, { _dash: '1', task_id: task.task_id, status: 'cancelled', due_at: '2026-12-03T12:00' }, { cookie });
+    assert.equal(moved.headers.get('location'), `/dashboard/leads/${leadId}?ok=task`, 'a failing hook does not turn a saved task into an error');
+    await settle();
+    assert.deepEqual(calls[1][1], { status: 'cancelled', dueTs: Date.parse('2026-12-03T12:00:00+03:00') });
+    assert.ok(logs.some((l) => l.evt === 'dash.hook_failed' && l.hook === 'onTaskChange'));
+    const refused = await postForm(`/v1/admin/leads/${leadId}/task`, { _dash: '1', task_id: task.task_id, status: 'nonsense' }, { cookie });
+    assert.equal(refused.headers.get('location'), `/dashboard/leads/${leadId}?error=bad_task`);
+    await settle();
+    assert.equal(calls.length, 2, 'a refused change is no change');
+  }, { hooks: { onTaskChange: (task, patch) => { calls.push([task, patch]); if (calls.length === 2) throw new Error('calendar down'); } } });
+});
+
+test('hooks.onLeadLeaving(leadId) runs before "Not a client" takes the chat out; a failing hook never stops it', async () => {
+  const seen = [];
+  await withTeamRoutes(async ({ db, postForm, login, logs }) => {
+    const leadId = seedLead(db, { phone: '966500000072', inboxState: 'in' });
+    const cookie = await login(OWNER_PHONE);
+    const res = await postForm(`/v1/admin/inbox/${leadId}/out`, { _dash: '1' }, { cookie });
+    assert.equal(res.status, 303);
+    assert.deepEqual(seen, [[leadId, 'in']], 'called once, while the lead is still in');
+    assert.equal(db.getLead(leadId).inbox_state, 'out');
+    const other = seedLead(db, { id: 'LEAD-20260908-aaaa0002', phone: '966500000073', inboxState: 'in' });
+    const res2 = await postForm(`/v1/admin/inbox/${other}/out`, { _dash: '1' }, { cookie });
+    assert.equal(res2.status, 303);
+    assert.equal(db.getLead(other).inbox_state, 'out', 'out all the same');
+    assert.ok(logs.some((l) => l.evt === 'dash.hook_failed' && l.hook === 'onLeadLeaving'));
+  }, ({ db }) => ({
+    inbox: createInboxStore(db),
+    hooks: { onLeadLeaving: (id) => { seen.push([id, db.getLead(id).inbox_state]); if (seen.length === 2) throw new Error('calendar down'); } },
+  }));
+});
+
+test('hooks.onLeadLeaving(leadId) runs when a new colleague or never-list number takes a chat out of the inbox', async () => {
+  const seen = [];
+  await withTeamRoutes(async ({ db, postForm, login }) => {
+    const colleague = seedLead(db, { phone: '966500000074', inboxState: 'in' });
+    const cousin = seedLead(db, { id: 'LEAD-20260908-aaaa0003', phone: '966500000075', inboxState: 'in' });
+    const cookie = await login(OWNER_PHONE);
+    await postForm('/v1/admin/team', { _dash: '1', name: 'Omar', phone: '0500000074', role: 'staff' }, { cookie });
+    assert.deepEqual(seen, [[colleague, 'in']]);
+    assert.equal(db.getLead(colleague).inbox_state, 'out');
+    await postForm('/v1/admin/never', { _dash: '1', phone: '0500000075', note: 'cousin' }, { cookie });
+    assert.deepEqual(seen, [[colleague, 'in'], [cousin, 'in']]);
+    assert.equal(db.getLead(cousin).inbox_state, 'out');
+    // A number with no chat in the inbox: nothing leaves, so nothing is called.
+    await postForm('/v1/admin/never', { _dash: '1', phone: '0500000076' }, { cookie });
+    assert.equal(seen.length, 2);
+  }, ({ db }) => ({ inbox: createInboxStore(db), hooks: { onLeadLeaving: (id) => { seen.push([id, db.getLead(id).inbox_state]); } } }));
+});
+
+test('without hooks the routes behave exactly as before: the defaults are no-ops', async () => {
+  await withTeamRoutes(async ({ db, postForm, login, logs }) => {
+    const leadId = seedLead(db, { phone: '966500000078', inboxState: 'in' });
+    const cookie = await login(OWNER_PHONE);
+    assert.equal((await postForm(`/v1/admin/inbox/${leadId}/out`, { _dash: '1' }, { cookie })).status, 303);
+    assert.equal((await postForm('/v1/admin/settings', { _dash: '1', own_inbox: '1' }, { cookie })).headers.get('location'), '/dashboard/team?ok=setting');
+    assert.equal(logs.filter((l) => l.evt === 'dash.hook_failed').length, 0);
+  }, ({ db }) => ({ inbox: createInboxStore(db) }));
 });
