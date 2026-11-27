@@ -141,6 +141,37 @@ test('a range reads its lower bound with the upper bound\'s scale ("between 2 an
   assert.equal(checkReply('It is 2.9–3.1 million.', { toolResults: [JSON.stringify({ price_en: 'SAR 2.9–3.1 million' })] }).ok, true, 'a range a tool returned may be quoted back');
 });
 
+test('a range shares one currency: the bound without one takes the other bound\'s ("80,000–90,000 SAR" is SAR 80,000 and SAR 90,000)', () => {
+  const cur = (s) => findAmounts(s).map((a) => [a.raw, a.currency]);
+  const lowerTakes = [
+    'Annual rent is 80,000–90,000 SAR.', 'Annual rent is 80,000-90,000 SAR.', 'Annual rent is 80,000 to 90,000 SAR.', 'Annual rent is 80,000 to SAR 90,000.',
+    'الإيجار السنوي من 80,000 إلى 90,000 ريال', 'الإيجار السنوي 80,000-90,000 ريال', 'الإيجار السنوي ٨٠٬٠٠٠–٩٠٬٠٠٠ ر.س', 'الإيجار من 80,000 الى 90,000 ر.س',
+  ];
+  const upperTakes = ['Annual rent is SAR 80,000–90,000.', 'Annual rent is SAR 80,000 to 90,000.', 'الإيجار من 80,000 ريال إلى 90,000', 'الإيجار ر.س 80,000-90,000'];
+  for (const s of [...lowerTakes, ...upperTakes]) assert.deepEqual(cur(s), [[80_000, 'SAR'], [90_000, 'SAR']], s);
+  assert.deepEqual(cur('80,000–90,000 USD'), [[80_000, 'USD'], [90_000, 'USD']]);
+  assert.deepEqual(cur('1.2-1.5 م ريال'), [[1_200_000, 'SAR'], [1_500_000, 'SAR']], 'a short scale next to the shared currency');
+  assert.deepEqual(cur('SAR 2.5 million to 3 million'), [[2_500_000, 'SAR'], [3_000_000, 'SAR']]);
+  for (const [s, raws] of [['2 million to 3 million USD', [2_000_000, 3_000_000]], ['500k-900k USD', [500_000, 900_000]], ['من 2 مليون إلى 3 مليون دولار', [2_000_000, 3_000_000]]]) {
+    assert.deepEqual(cur(s), raws.map((r) => [r, 'USD']), `${s}: a bound with its own scale takes the shared currency`);
+  }
+  for (const s of ['SAR 85,000 or 2 years', 'SAR 2 million or 3 bedrooms', 'SAR 85,000 and 100,000 m² of land']) {
+    assert.deepEqual(cur(s), [[s.includes('million') ? 2_000_000 : 85_000, 'SAR']], `${s}: not a range`);
+  }
+
+  const upper = [JSON.stringify({ results: [{ id: 'BONA-902', price_en: 'SAR 90,000 / year', price_ar: '90,000 ر.س سنوياً' }] })];
+  const lower = [JSON.stringify({ results: [{ id: 'BONA-902', price_en: 'SAR 80,000 / year', price_ar: '80,000 ر.س سنوياً' }] })];
+  for (const s of lowerTakes) assert.deepEqual(checkReply(s, { toolResults: upper }).hits, [{ kind: 'amount' }], `${s}: a lower bound no tool returned`);
+  for (const s of upperTakes) assert.deepEqual(checkReply(s, { toolResults: lower }).hits, [{ kind: 'amount' }], `${s}: an upper bound no tool returned`);
+  const usd = [JSON.stringify({ results: [{ price_en: 'USD 90,000' }, { price_en: 'SAR 80,000' }] })];
+  assert.deepEqual(checkReply('It is 80,000–90,000 USD.', { toolResults: usd }).hits, [{ kind: 'amount' }], 'the lower bound is USD 80,000, not the SAR 80,000 the tool gave');
+
+  const range = [JSON.stringify({ results: [{ id: 'BONA-902', price_en: 'SAR 80,000–90,000 / year', price_ar: 'من 80,000 إلى 90,000 ر.س سنوياً' }] })];
+  for (const s of [...lowerTakes, ...upperTakes]) assert.deepEqual(checkReply(s, { toolResults: range }), { ok: true, hits: [] }, `${s}: the tool's own range`);
+  const both = [JSON.stringify({ results: [{ rent_min: 80_000, rent_max: 90_000 }] })];
+  for (const s of lowerTakes) assert.deepEqual(checkReply(s, { toolResults: both }), { ok: true, hits: [] }, `${s}: both bounds returned`);
+});
+
 test('"SR" is riyals; a spelled-out thousand after a number word, or before a currency, is an amount of unknown value; idioms and areas are not', () => {
   const [sr] = findAmounts('Rent SR 85,000 a year');
   assert.deepEqual([sr.raw, sr.currency], [85_000, 'SAR']);
@@ -168,11 +199,20 @@ test('a unit reference passes only when a tool returned it in this turn (Arabic-
   assert.equal(checkReply('B08-19 is available.', { toolResults: [], earlierReplies: ['B08-19'] }).ok, false, 'units: this turn only');
 });
 
-test('a property link passes only for a home a tool returned (this turn, or an earlier guarded reply)', () => {
+test('a property link passes only for a home a tool returned in this turn; an earlier guarded reply allows its amounts, never its home links', () => {
   assert.equal(checkReply(`Here it is: ${SITE}/properties/sea-view-villa/`, { toolResults: [villa], siteUrl: SITE }).ok, true);
   assert.equal(checkReply(`هنا: ${SITE}/ar/properties/sea-view-villa/`, { toolResults: [villa], siteUrl: SITE }).ok, true);
   assert.deepEqual(checkReply(`Here: ${SITE}/properties/other-villa/`, { toolResults: [villa], siteUrl: SITE }).hits, [{ kind: 'link' }]);
-  assert.equal(checkReply(`Again: ${SITE}/properties/other-villa/`, { earlierReplies: [`${SITE}/properties/other-villa/`], siteUrl: SITE }).ok, true);
+  // Yesterday's link to a home this turn's search no longer returns (sold, removed) is a hit (DESIGN-brain §5.4).
+  assert.deepEqual(checkReply(`Again: ${SITE}/properties/other-villa/`, { earlierReplies: [`${SITE}/properties/other-villa/`], siteUrl: SITE }).hits, [{ kind: 'link' }]);
+  assert.deepEqual(checkReply(`Again: ${SITE}/ar/properties/other-villa/`, { toolResults: [villa], earlierReplies: [`${SITE}/ar/properties/other-villa/`], siteUrl: SITE }).hits,
+    [{ kind: 'link' }], 'an earlier reply adds nothing to the homes this turn returned');
+  const earlier = [`The other villa ${SITE}/properties/other-villa/ is SAR 4,100,000.`];
+  assert.deepEqual(checkReply(`It is SAR 4,100,000: ${SITE}/properties/other-villa/`, { earlierReplies: earlier, siteUrl: SITE }).hits, [{ kind: 'link' }],
+    'the amount of the earlier reply passes, its link does not');
+  assert.deepEqual(checkReply('It is SAR 4,100,000.', { earlierReplies: earlier, siteUrl: SITE }), { ok: true, hits: [] });
+  const other = JSON.stringify({ results: [{ id: 'BONA-903', slug: 'other-villa', url_en: `${SITE}/properties/other-villa/` }] });
+  assert.equal(checkReply(`Again: ${SITE}/properties/other-villa/`, { toolResults: [other], earlierReplies: earlier, siteUrl: SITE }).ok, true, 'returned again in this turn');
   assert.equal(checkReply(`Our site: ${SITE}/ and ${SITE}/ar/`, { siteUrl: SITE }).ok, true, 'the site itself is not a home');
 });
 
@@ -196,7 +236,7 @@ test("a home link passes only on Bona's own site (the same scheme, host and port
     'https://evil.example/go?to=/properties/sea-view-villa/', // the path in a query
   ]) assert.deepEqual(checkReply(`Here: ${url}`, ctx).hits, [{ kind: 'link' }], url);
   assert.deepEqual(checkReply('Again: https://evil.example/properties/other-villa/', { earlierReplies: [`${SITE}/properties/other-villa/`], siteUrl: SITE }).hits,
-    [{ kind: 'link' }], 'an earlier reply allows the home, never another host');
+    [{ kind: 'link' }], 'an earlier reply allows no home, on any host');
   assert.deepEqual(checkReply(`Here: ${SITE}/properties/sea-view-villa/`, { toolResults: [villa] }).hits, [{ kind: 'link' }], 'no siteUrl: no home link passes (fail closed)');
   assert.deepEqual(checkReply(`Here: ${SITE}/properties/sea-view-villa/`, { toolResults: [villa], siteUrl: 'not a url' }).hits, [{ kind: 'link' }]);
 });
@@ -338,9 +378,9 @@ test("a home link written without a scheme (\"www.example.com/properties/x/\") i
     assert.deepEqual(checkReply(`الرابط (${link})`, ctx).hits, [{ kind: 'link' }], `${link} (in brackets)`);
   }
   assert.deepEqual(checkReply('Here: bona-real-estate.com/properties/sea-view-villa/', { toolResults: [villa] }).hits, [{ kind: 'link' }], 'no siteUrl: no home link passes');
-  assert.equal(checkReply('Again: bona-real-estate.com/properties/other-villa/', { earlierReplies: [`${SITE}/properties/other-villa/`], siteUrl: SITE }).ok, true,
-    'an earlier guarded reply allows its home, with or without a scheme');
-  assert.equal(checkReply(`Again: ${SITE}/properties/other-villa/`, { earlierReplies: ['bona-real-estate.com/properties/other-villa/'], siteUrl: SITE }).ok, true);
+  assert.deepEqual(checkReply('Again: bona-real-estate.com/properties/other-villa/', { earlierReplies: [`${SITE}/properties/other-villa/`], siteUrl: SITE }).hits,
+    [{ kind: 'link' }], 'an earlier guarded reply allows no home link, with or without a scheme');
+  assert.deepEqual(checkReply(`Again: ${SITE}/properties/other-villa/`, { earlierReplies: ['bona-real-estate.com/properties/other-villa/'], siteUrl: SITE }).hits, [{ kind: 'link' }]);
   assert.deepEqual(checkReply('Again: www.example.com/properties/other-villa/', { earlierReplies: [`${SITE}/properties/other-villa/`], siteUrl: SITE }).hits,
     [{ kind: 'link' }], 'never another host');
   assert.equal(checkReply('Our site: bona-real-estate.com and bona-real-estate.com/ar/', { siteUrl: SITE }).ok, true, 'the site itself is not a home');

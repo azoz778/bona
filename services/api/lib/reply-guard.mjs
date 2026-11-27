@@ -10,8 +10,9 @@
  * therefore never allowed back ("within your budget" instead).
  *
  * Also refused: a unit reference (`B08-19`) no tool returned in this turn, and a link to a home
- * no tool returned (this turn, or an earlier guarded reply) or on any site but Bona's (`siteUrl`:
- * the same scheme, host and port; no site URL, no home link), written with a scheme or without one
+ * no tool returned in this turn (an earlier guarded reply allows amounts only: yesterday's link to a
+ * home that is sold or removed is a hit) or on any site but Bona's (`siteUrl`: the same scheme, host
+ * and port; no site URL, no home link), written with a scheme or without one
  * ("www.example.com/properties/x/"). Each hit says only its kind; the text and the amount are never
  * repeated, so a hit can be logged.
  *
@@ -92,13 +93,14 @@ const FRACTION_BEFORE_RE = /(?:^|[^\p{L}])[وفبكل]?(?:نص|نصف|ربع|ث�
 const FRACTION_AFTER_RE = /^[\s-]{0,2}(?:و|and[\s-]+(?:an?[\s-]+)?|(?:إلا|الا)\s{0,2})\s{0,2}(?:نص|نصف|ربع|half|quarter)(?![\p{L}])/iu;
 /**
  * The upper bound of a range right after a number: "2 and 3 million", "2.9–3.1 million", "2 إلى 3 مليون",
- * "2 و3 ملايين", "2-3m", "500-900k". The lower bound takes the upper bound's scale. A dash counts only
- * glued on both sides: "Villa 2 – 3.2 million" and "1- 2.5 مليون" are list lines, not ranges.
+ * "2 و3 ملايين", "2-3m", "500-900k", "80,000–90,000 SAR", "1.2-1.5 م ريال". The lower bound takes the upper
+ * bound's scale and currency, the upper bound the lower bound's currency ("SAR 80,000–90,000"). A dash counts
+ * only glued on both sides: "Villa 2 – 3.2 million" and "1- 2.5 مليون" are list lines, not ranges.
  */
 const RANGE_AFTER_RE = new RegExp(
   String.raw`^(?:[-–—~]|\s{0,2}(?:to|and|or|till|until|إلى|الى|حتى|لين|لـ?|و|أو|او)\s{0,2})(?:(?<cur1>${CUR})\s{0,2})?(?<num>${NUM})(?![\d])` +
-  String.raw`(?<att>[km](?![\p{L}\d]))?(?:\s{0,2}(?<word>${SCALE})(?![\p{L}]))?(?:\s{0,2}(?<cur2>${CUR})(?![\p{L}]))?`,
-  'iu',
+  String.raw`(?<att>[km](?![\p{L}\d]))?(?:\s{0,2}(?<word>${SCALE})(?![\p{L}])|\s{0,2}(?<short>${SHORT_SCALE})(?![\p{L}\d]))?(?:\s{0,2}(?<cur2>${CUR})(?![\p{L}]))?`,
+  'diu',
 );
 const AREA_AFTER_RE = /^\s{0,2}(?:m²|m2\b|sqm|sq\.?\s?m|square\s+met|sq\.?\s?ft|م²|م2|متر|مترا|أمتار|امتار)/iu;
 const PERCENT_AFTER_RE = /^\s{0,2}(?:%|٪|percent|per\s?cent|بالمية|بالمئة|في\s?المية|في\s?المئة)/iu;
@@ -162,20 +164,27 @@ function readNumber(num) {
 }
 
 /**
- * The scale a range's lower bound takes from the upper bound right after it ("2 and 3 million" → 1e6,
- * "500-900k" → 1e3), or 1. A "lower bound" that is not below the upper one is no range ("Villa 3-2.5
- * million"), and an area ("2-3 million m²") or metres ("200-500m") give 1, as they do for the upper bound.
+ * The upper bound of a range right after a number, read as `findAmounts` reads an amount: its value, its scale
+ * ("2 and 3 million" → 1e6, "500-900k" → 1e3, "1.2-1.5 م ريال" → 1e6, else 1), its currency, and where its
+ * number starts in `after`; null when no range follows or the upper bound is an area ("2-3 million m²").
+ * Metres ("200-500m") read as scale 1, as they do for the upper bound itself. The caller decides whether it is
+ * a range at all: a "lower bound" that is not below the upper one is not ("Villa 3-2.5 million").
  */
-function rangeScale(value, after) {
+function rangeUpper(after) {
   const r = RANGE_AFTER_RE.exec(after);
-  if (!r) return 1;
-  const upper = readNumber(r.groups.num);
-  if (upper === null || !(value < upper) || AREA_AFTER_RE.test(after.slice(r[0].length))) return 1;
-  if (r.groups.word) return scaleOf(r.groups.word);
+  if (!r) return null;
+  const value = readNumber(r.groups.num);
+  const currency = currencyOf(r.groups.cur1) ?? currencyOf(r.groups.cur2);
+  // A short scale with no currency is no scale ("15-20 م"): what follows it is read from where it starts.
+  const end = r.groups.short && !currency ? r.indices.groups.short[0] : r[0].length;
+  if (value === null || AREA_AFTER_RE.test(after.slice(end))) return null;
   const att = r.groups.att?.toLowerCase();
-  if (att === 'k') return 1e3;
-  if (att === 'm' && (upper < 100 || currencyOf(r.groups.cur1) || currencyOf(r.groups.cur2))) return 1e6;
-  return 1;
+  let scale = 1;
+  if (r.groups.word) scale = scaleOf(r.groups.word);
+  else if (r.groups.short && currency) scale = r.groups.short.toLowerCase() === 'k' ? 1e3 : 1e6;
+  else if (att === 'k') scale = 1e3;
+  else if (att === 'm' && (value < 100 || currency)) scale = 1e6;
+  return { value, scale, currency, at: r.indices.groups.num[0] };
 }
 
 /**
@@ -189,6 +198,8 @@ export function findAmounts(text) {
   const out = [];
   /** Where the scale words an amount used start: the word passes below skip only those. */
   const used = new Set();
+  /** Where an upper bound's number starts → the currency it takes from its lower bound ("SAR 80,000–90,000"). */
+  const shared = new Map();
   for (const m of s.matchAll(AMOUNT_RE)) {
     const { cur1, num, att, word, short, cur2 } = m.groups;
     const [numStart, numEnd] = m.indices.groups.num;
@@ -202,7 +213,7 @@ export function findAmounts(text) {
     if (PERCENT_AFTER_RE.test(after)) continue;
     if (AREA_AFTER_RE.test(after)) continue;
     if (/^:\d/.test(after)) continue; // 10:00
-    const currency = currencyOf(cur1) ?? currencyOf(cur2);
+    const currency = currencyOf(cur1) ?? currencyOf(cur2) ?? shared.get(numStart) ?? null;
     if (word && !currency && AREA_AFTER_RE.test(s.slice(m.index + m[0].length))) { use(); continue; } // "85 ألف متر": an area
     if (word && FRACTION_AFTER_RE.test(s.slice(m.indices.groups.word[1]))) { // "2 مليون ونص": a value the guard cannot read
       use(); out.push({ raw: null, sar: null, currency, at: numStart }); continue;
@@ -214,20 +225,28 @@ export function findAmounts(text) {
       continue;
     }
     const bare = !/[,.]/.test(num);
+    // The range is read after the whole amount: "80,000 ريال إلى 90,000", "2 million to 3 million SAR", "500k-900k SAR".
+    const amountEnd = m.index + m[0].length;
+    const up = rangeUpper(s.slice(amountEnd));
     const shortScale = short && currency ? (short.toLowerCase() === 'k' ? 1e3 : 1e6) : 0; // "1.2 م ريال"; "15 م" is metres
     let scale = word ? scaleOf(word) : shortScale || 1;
     if (att) {
       if (att.toLowerCase() === 'k') scale = 1e3;
-      else if (value < 100 || currency) scale = 1e6;
+      else if (value < 100 || currency || (up?.currency && value * 1e6 < up.value * up.scale)) scale = 1e6; // "SAR 2.5m", "200m-300m SAR"
       else continue; // "500m from the beach": metres
     }
-    if (!word && !att && !shortScale) scale = rangeScale(value, after); // "between 2 and 3 million": the 2 is 2,000,000
-    if (bare && !currency && scale === 1 && (num.length >= 9 || /^0\d/.test(num))) continue; // a phone, an ID or a licence number
+    const ownScale = Boolean(word || att || shortScale);
+    // A range only when this bound is below the upper one, both read at their scale ("2.5 million or 85,000 SAR" is none).
+    const range = up && value * (ownScale ? scale : up.scale) < up.value * up.scale ? up : null;
+    if (range && !ownScale) scale = range.scale; // "between 2 and 3 million": the 2 is 2,000,000
+    const cur = currency ?? range?.currency ?? null; // "80,000–90,000 SAR": the 80,000 is SAR 80,000 too
+    if (range && cur && !range.currency) shared.set(amountEnd + range.at, cur); // "SAR 80,000–90,000": so is the 90,000
+    if (bare && !cur && scale === 1 && (num.length >= 9 || /^0\d/.test(num))) continue; // a phone, an ID or a licence number
     if (!Number.isFinite(value) || value <= 0) { use(); continue; }
     const raw = Math.round(value * scale);
-    if (!(currency || scale > 1 || raw >= 100_000)) continue;
+    if (!(cur || scale > 1 || raw >= 100_000)) continue;
     use();
-    out.push({ raw, sar: Math.round(raw * SAR_RATE[currency ?? 'SAR']), currency, at: numStart });
+    out.push({ raw, sar: Math.round(raw * SAR_RATE[cur ?? 'SAR']), currency: cur, at: numStart });
   }
   for (const m of s.matchAll(MILLION_WORD_RE)) {
     const [at, end] = m.indices.groups.word;
@@ -347,7 +366,8 @@ function leaves(result) {
 }
 
 /**
- * What a reply may quote: amounts, unit refs and property slugs. `amounts` holds keys: `sar:<SAR value>` for
+ * What a reply may quote: amounts (this turn's tool results and the earlier guarded replies), unit refs and
+ * property slugs (this turn's tool results only). `amounts` holds keys: `sar:<SAR value>` for
  * every allowed amount, `<CUR>:<figure>` for one written with a currency, and `raw:<figure>` for every figure.
  * A figure with no currency counts as SAR, as `findAmounts` reads it; a JSON number counts only in a price
  * field (`leaves`). Amounts and unit refs are read in every form of a text (`forms`), as the reply is.
@@ -374,9 +394,9 @@ export function allowedFrom({ toolResults = [], earlierReplies = [] } = {}) {
       for (const slug of propertySlugs(s)) slugs.add(slug);
     }
   }
+  // An earlier guarded reply allows its amounts only; units and home links come from this turn's tools (§5.4).
   for (const r of Array.isArray(earlierReplies) ? earlierReplies : []) {
     for (const t of forms(r)) addAmounts(t);
-    for (const slug of propertySlugs(r)) slugs.add(slug);
   }
   return { amounts, units, slugs };
 }
