@@ -75,7 +75,9 @@ test('schema v4 gives leads their inbox columns and adds the transcript, outbox,
   const info = (table) => s.db.prepare(`PRAGMA table_info(${table})`).all();
   const names = (table) => info(table).map((c) => c.name);
   const leadCols = info('leads');
-  assert.deepEqual(leadCols.slice(-13).map((c) => c.name), ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from', 'chat_rev', 'dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts']);
+  // v4-v6 append these, in this order; later versions append theirs after them (v8 below).
+  const from = leadCols.findIndex((c) => c.name === 'inbox_state');
+  assert.deepEqual(leadCols.slice(from, from + 13).map((c) => c.name), ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from', 'chat_rev', 'dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts']);
   const needsHuman = leadCols.find((c) => c.name === 'needs_human');
   assert.equal(needsHuman.notnull, 1);
   assert.equal(needsHuman.dflt_value, '0');
@@ -86,7 +88,7 @@ test('schema v4 gives leads their inbox columns and adds the transcript, outbox,
   assert.equal(chatRev.notnull, 1);
   assert.equal(chatRev.dflt_value, '0');
   assert.deepEqual(names('wa_messages'), ['key_id', 'lead_id', 'jid', 'direction', 'sender_kind', 'sender_user_id', 'text', 'media_type', 'ts', 'status']);
-  assert.deepEqual(names('wa_outbox'), ['send_id', 'lead_id', 'jid', 'text', 'user_id', 'sender_kind', 'status', 'key_id', 'created', 'updated', 'error', 'covers_ts']);
+  assert.deepEqual(names('wa_outbox').slice(0, 12), ['send_id', 'lead_id', 'jid', 'text', 'user_id', 'sender_kind', 'status', 'key_id', 'created', 'updated', 'error', 'covers_ts'], 'v4 and v6; v8 appends after them');
   assert.deepEqual(names('inbox_reads'), ['user_id', 'lead_id', 'last_read_ts']);
   assert.deepEqual(names('wa_gaps'), ['key_id', 'lead_id', 'jid', 'ts', 'reason']);
   assert.deepEqual(names('inbox_candidates'), ['cand_id', 'jid', 'lid', 'phone_e164', 'name', 'first_ts', 'last_ts', 'hits', 'words', 'last_dir', 'state', 'updated']);
@@ -244,7 +246,9 @@ test('a v3 file db moves to v4: each existing lead is placed by what is certain 
 
   const a = openDb(file);
   assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION);
-  const added = ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from', 'chat_rev', 'dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts'];
+  // Every leads column added after v3: v4, v6 and v8 (the file goes all the way up).
+  const added = ['inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from', 'chat_rev', 'dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts',
+    'inbox_via', 'dana_hold_until', 'dana_hold_reason'];
   const after = snapshot(a.db);
   assert.equal(after.length, before.length, 'no lead is added or lost');
   assert.equal(countOf(a.db, 'touchpoints'), touchpointsBefore);
@@ -651,4 +655,342 @@ test('BEGIN IMMEDIATE lock timeout never poisons later transaction rollback',()=
   assert.throws(()=>b.transaction(()=>{b.insertLead({lead_id:'must-rollback',created:1,updated:1});throw Error('rollback proof');}),/rollback proof/);
   assert.equal(b.getLead('must-rollback'),null);b.transaction(()=>b.insertLead({lead_id:'committed',created:1,updated:1}),{immediate:true});assert.ok(b.getLead('committed'));
  }finally{a.close();b.close();cleanup();}
+});
+
+/* ---------------- v8: own-number inbox, holds, media, the reply guard, owner notes, viewing bookings ---------------- */
+
+const V8_LEAD_COLUMNS = ['inbox_via', 'dana_hold_until', 'dana_hold_reason'];
+const V8_OUTBOX_COLUMNS = ['media_kind', 'guarded'];
+const NOTE_KINDS = ['new_client', 'handover', 'booking', 'stopped', 'summary', 'command', 'alert', 'mail'];
+const NOTE_STATUSES = ['queued', 'sent', 'failed', 'uncertain', 'merged', 'dropped'];
+const BOOKING_STATUSES = ['booked', 'cancel_pending', 'cancelled', 'done'];
+const CLIENT_JID = '966500000001@s.whatsapp.net';
+const OWNER_JID = '966500000009@s.whatsapp.net';
+
+/** Every row of every table, in rowid order: what a migration must leave exactly as it found it. */
+function dumpTables(db) {
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
+  return Object.fromEntries(tables.map((name) => [name, db.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all().map((r) => ({ ...r }))]));
+}
+
+const withoutColumns = (rows, cols) => rows.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !cols.includes(k))));
+
+/** A file the bona-api of today (v7) would leave: the real chain stopped at 7, with rows the inbox, Dana, tasks and the team write. */
+function v7File(t) {
+  const { file, cleanup } = tmp();
+  t.after(cleanup);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const seed = new DatabaseSync(file);
+  seed.exec('PRAGMA foreign_keys=ON');
+  migrate(seed, { upTo: 7 });
+  assert.equal(seed.prepare('PRAGMA user_version').get().user_version, 7, 'a genuine v7 file');
+  assert.ok(!seed.prepare('PRAGMA table_info(leads)').all().some((c) => c.name === 'inbox_via'), 'no v8 column yet');
+  seed.exec(`
+    INSERT INTO users (user_id, name, phone_e164, wa_jid, role, active, created) VALUES ('USR-1', 'Owner', '966500000009', '${OWNER_JID}', 'owner', 1, 1);
+    INSERT INTO settings (key, value, updated, updated_by) VALUES ('dana_enabled', '1', 5, 'USR-1');
+    INSERT INTO audit_log (id, ts, user_id, action, target, meta) VALUES ('A-1', 6, 'USR-1', 'setting', 'dana_enabled', '{"value":"1"}');
+    INSERT INTO leads (lead_id, created, updated, phone_e164, wa_jid, name, channel, match_method, stage, stage_ts, inbox_state, inbox_since,
+                       history_from, needs_human, chat_rev, dana_off, dana_introduced, last_human_out_ts, last_msg_ts, dana_chat_id, dana_chat_ts)
+      VALUES ('L-in', 1000, 2000, '966500000001', '${CLIENT_JID}', 'Client One', 'whatsapp', 'ref', 'new', 1000, 'in', 1000,
+              -85399000, 1, 4, 0, 1, 1500, 1900, 'chat_1', 1200),
+             ('L-unsure', 3000, 3000, '966500000002', '966500000002@s.whatsapp.net', NULL, 'whatsapp', 'keyword', 'contacted', 3000, 'unsure', NULL,
+              NULL, 0, 0, 1, 0, NULL, NULL, NULL, NULL),
+             ('L-form', 4000, 4000, '966500000003', NULL, 'Form Client', 'form', 'form', NULL, NULL, NULL, NULL,
+              NULL, 0, 0, 0, 0, NULL, NULL, NULL, NULL);
+    INSERT INTO touchpoints (id, lead_id, ts, channel, event_type, meta) VALUES ('tp-1', 'L-in', 1000, 'whatsapp', 'lead_created', '{"snippet":"Ref K7Q2XR"}');
+    INSERT INTO wa_messages (key_id, lead_id, jid, direction, sender_kind, text, ts) VALUES
+      ('K-in', 'L-in', '${CLIENT_JID}', 'in', 'client', 'Is BONA-W003 still available?', 1100),
+      ('K-dana', 'L-in', '${CLIENT_JID}', 'out', 'dana', 'Yes, it is.', 1200),
+      ('K-staff', 'L-in', '${CLIENT_JID}', 'out', 'staff', 'Hello from the team.', 1500);
+    INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts) VALUES
+      ('S-dana', 'L-in', '${CLIENT_JID}', 'Yes, it is.', NULL, 'dana', 'accepted', 'K-dana', 1200, 1201, NULL, 1100),
+      ('S-code', NULL, '${OWNER_JID}', NULL, 'USR-1', 'code', 'accepted', 'K-code', 1300, 1301, NULL, NULL),
+      ('S-note', NULL, '${OWNER_JID}', 'Bona — new enquiry', NULL, 'note', 'failed', NULL, 1400, 1401, 'http_500', NULL),
+      ('S-staff', 'L-in', '${CLIENT_JID}', 'Hello from the team.', 'USR-1', 'staff', 'accepted', 'K-staff', 1500, 1501, NULL, NULL);
+    INSERT INTO enquiry_receipts (event_id, payload_hash, lead_id, created, notify_status) VALUES ('evt-1', 'hash', 'L-form', 4000, 'sent');
+    INSERT INTO lead_tasks (task_id, lead_id, kind, source, reason, details, status, due_ts, created, updated) VALUES
+      ('task-viewing', 'L-in', 'viewing', 'dana', NULL, '{"listing_id":"BONA-W003"}', 'requested', NULL, 1600, 1600),
+      ('task-handoff', 'L-in', 'handoff', 'dana', 'asked for a person', '{}', 'open', NULL, 1700, 1700);
+  `);
+  const before = dumpTables(seed);
+  seed.close();
+  return { file, before };
+}
+
+test('v8: a v7 file opens as v8 with the inbox, hold, media and guard columns and the notes and bookings tables, and every v7 row is unchanged', (t) => {
+  const { file, before } = v7File(t);
+  const a = openDb(file);
+  try {
+    assert.equal(SCHEMA_VERSION, 8);
+    assert.equal(a.db.prepare('PRAGMA user_version').get().user_version, 8);
+    const info = (table) => a.db.prepare(`PRAGMA table_info(${table})`).all();
+    const shape = (c) => [c.name, c.type, c.notnull, c.dflt_value];
+
+    // leads: three nullable columns at the end, no default (NULL = joined by proof, no hold).
+    assert.deepEqual(info('leads').slice(-3).map(shape), [['inbox_via', 'TEXT', 0, null], ['dana_hold_until', 'INTEGER', 0, null], ['dana_hold_reason', 'TEXT', 0, null]]);
+    // wa_outbox: media keeps sender_kind 'dana' and is marked here; `guarded` is 0 unless the reply guard passed a brain turn.
+    const outCols = info('wa_outbox');
+    assert.deepEqual(outCols.map((c) => c.name), ['send_id', 'lead_id', 'jid', 'text', 'user_id', 'sender_kind', 'status', 'key_id', 'created', 'updated', 'error', 'covers_ts', 'media_kind', 'guarded']);
+    assert.deepEqual(outCols.slice(-2).map(shape), [['media_kind', 'TEXT', 0, null], ['guarded', 'INTEGER', 1, '0']]);
+
+    // Nothing that was there moved: every table and row of the v7 file, less the new columns.
+    const after = dumpTables(a.db);
+    assert.deepEqual(Object.keys(after).filter((name) => !(name in before)), ['owner_notes', 'viewing_bookings'], 'two new tables, nothing else');
+    for (const name of Object.keys(before)) {
+      const added = name === 'leads' ? V8_LEAD_COLUMNS : name === 'wa_outbox' ? V8_OUTBOX_COLUMNS : [];
+      assert.ok(before[name].length === after[name].length, `${name}: no row added or lost`);
+      assert.deepEqual(withoutColumns(after[name], added), before[name], `${name}: every v7 row is unchanged`);
+    }
+    assert.ok(before.leads.length === 3 && before.wa_outbox.length === 4, 'the fixture has rows to keep');
+    assert.deepEqual(after.leads.map((r) => V8_LEAD_COLUMNS.map((c) => r[c])), [[null, null, null], [null, null, null], [null, null, null]], 'no lead came by the new rules or is held');
+    assert.deepEqual(after.wa_outbox.map((r) => [r.send_id, r.media_kind, r.guarded]),
+      [['S-dana', null, 0], ['S-code', null, 0], ['S-note', null, 0], ['S-staff', null, 0]], 'every v7 send is text and was never guarded, Dana\'s included');
+    assert.deepEqual([after.owner_notes, after.viewing_bookings], [[], []]);
+    assert.throws(() => a.db.prepare("UPDATE wa_outbox SET guarded = 2 WHERE send_id = 'S-dana'").run(), /CHECK/, 'guarded is 0 or 1');
+    assert.throws(() => a.db.prepare("UPDATE wa_outbox SET guarded = NULL WHERE send_id = 'S-dana'").run(), /NOT NULL/);
+
+    // The new tables and their indexes.
+    assert.deepEqual(info('owner_notes').map((c) => c.name), ['note_id', 'kind', 'lead_id', 'dedupe_key', 'due_ts', 'status', 'send_id', 'meta', 'created', 'updated']);
+    assert.ok(!info('owner_notes').some((c) => /text|body|quote/.test(c.name)), 'a note is rendered at send time; its text is never stored');
+    assert.deepEqual(info('viewing_bookings').map((c) => c.name), ['booking_id', 'lead_id', 'task_id', 'listing_id', 'start_ts', 'end_ts', 'event_id', 'status', 'client_told', 'created', 'updated']);
+    const indexes = (table) => a.db.prepare(`PRAGMA index_list(${table})`).all().filter((i) => i.origin === 'c')
+      .map((i) => [i.name, i.unique, i.partial, a.db.prepare(`PRAGMA index_info(${i.name})`).all().map((c) => c.name)]).sort();
+    assert.deepEqual(indexes('owner_notes'), [['owner_notes_due', 0, 0, ['status', 'due_ts']]]);
+    assert.deepEqual(indexes('viewing_bookings'), [['viewing_bookings_lead', 1, 1, ['lead_id']], ['viewing_bookings_slot', 1, 1, ['start_ts']]]);
+    for (const name of ['viewing_bookings_lead', 'viewing_bookings_slot']) {
+      assert.match(a.db.prepare('SELECT sql FROM sqlite_master WHERE name = ?').get(name).sql, /WHERE status = 'booked'$/, `${name} counts booked rows only`);
+    }
+    // No foreign key on either: a note or a booking outlives its lead (purge deletes the notes; a booking's event can still be cancelled).
+    assert.deepEqual([a.db.prepare('PRAGMA foreign_key_list(owner_notes)').all(), a.db.prepare('PRAGMA foreign_key_list(viewing_bookings)').all()], [[], []]);
+
+    // Every v7 CHECK, key and foreign key still holds.
+    assert.throws(() => a.db.prepare("UPDATE wa_outbox SET text = '123456' WHERE send_id = 'S-code'").run(), /CHECK/, "a login code's row never holds its text");
+    assert.throws(() => a.db.prepare("UPDATE wa_outbox SET sender_kind = 'client' WHERE send_id = 'S-staff'").run(), /CHECK/);
+    assert.throws(() => a.db.prepare("UPDATE wa_outbox SET status = 'sent' WHERE send_id = 'S-staff'").run(), /CHECK/);
+    assert.throws(() => a.db.prepare("UPDATE wa_messages SET sender_kind = 'staff' WHERE key_id = 'K-in'").run(), /CHECK/);
+    assert.throws(() => a.updateLead('L-in', { inbox_state: 'maybe' }), /CHECK/);
+    assert.throws(() => a.updateLead('L-in', { needs_human: 2 }), /CHECK/);
+    assert.throws(() => a.updateLead('L-in', { dana_off: 2 }), /CHECK/);
+    assert.throws(() => a.insertLead({ lead_id: 'L-twin', created: 1, updated: 1, phone_e164: '966500000001' }), /UNIQUE/, 'one phone, one lead');
+    const task = a.db.prepare("INSERT INTO lead_tasks (task_id, lead_id, kind, source, status, created, updated) VALUES (?, ?, ?, 'dana', ?, 1, 1)");
+    assert.throws(() => task.run('task-2', 'L-in', 'handoff', 'open'), /UNIQUE/, 'still one open hand-over per lead');
+    assert.throws(() => task.run('task-3', 'L-in', 'call', 'open'), /CHECK/);
+    assert.throws(() => task.run('task-4', 'L-nobody', 'followup', 'open'), /FOREIGN KEY/);
+  } finally {
+    a.close();
+  }
+});
+
+test('v8 CHECKs: media is a document or nothing, guarded is 0 or 1, and owner notes and viewing bookings take only the kinds and statuses the design names', () => {
+  const s = openDb(':memory:');
+  try {
+    const media = s.db.prepare('INSERT INTO wa_outbox (send_id, lead_id, jid, sender_kind, status, created, updated, media_kind) VALUES (?, ?, ?, ?, ?, 1, 1, ?)');
+    media.run('S-doc', 'L1', CLIENT_JID, 'dana', 'pending', 'document');
+    media.run('S-null', 'L1', CLIENT_JID, 'dana', 'pending', null);
+    for (const kind of ['location', 'image', 'video', 'audio', 'Document', '']) {
+      assert.throws(() => media.run(`S-${kind || 'blank'}`, 'L1', CLIENT_JID, 'dana', 'pending', kind), /CHECK/, `media_kind ${JSON.stringify(kind)}`);
+    }
+    assert.throws(() => media.run('S-doc-media', 'L1', CLIENT_JID, 'dana_media', 'pending', 'document'), /CHECK/, "media keeps sender_kind 'dana'; there is no media kind of sender");
+    const plain = s.db.prepare('INSERT INTO wa_outbox (send_id, lead_id, jid, sender_kind, status, created, updated) VALUES (?, ?, ?, ?, ?, 1, 1)');
+    plain.run('S-plain', 'L1', CLIENT_JID, 'staff', 'pending');
+    assert.deepEqual({ ...s.db.prepare("SELECT media_kind, guarded FROM wa_outbox WHERE send_id = 'S-plain'").get() }, { media_kind: null, guarded: 0 }, 'a send that names neither is text and unguarded');
+    const guard = s.db.prepare('INSERT INTO wa_outbox (send_id, lead_id, jid, sender_kind, status, created, updated, guarded) VALUES (?, ?, ?, ?, ?, 1, 1, ?)');
+    guard.run('S-g0', 'L1', CLIENT_JID, 'dana', 'accepted', 0);
+    guard.run('S-g1', 'L1', CLIENT_JID, 'dana', 'accepted', 1);
+    for (const v of [2, -1]) assert.throws(() => guard.run(`S-g${v}`, 'L1', CLIENT_JID, 'dana', 'accepted', v), /CHECK/, `guarded ${v}`);
+    assert.throws(() => guard.run('S-gnull', 'L1', CLIENT_JID, 'dana', 'accepted', null), /NOT NULL/);
+
+    const note = s.db.prepare('INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, send_id, meta, created, updated) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)');
+    for (const kind of NOTE_KINDS) note.run(`N-${kind}`, kind, 'L1', `key:${kind}`, 10, 'queued', '{"test":1}', 1, 1);
+    for (const status of NOTE_STATUSES) note.run(`N-${status}`, 'alert', null, `al:${status}`, 10, status, null, 1, 1);
+    assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM owner_notes').get().n, NOTE_KINDS.length + NOTE_STATUSES.length);
+    for (const kind of ['reminder', 'note', 'Alert', '']) assert.throws(() => note.run(`N-bad-${kind}`, kind, null, `bad:${kind}`, 10, 'queued', null, 1, 1), /CHECK/, `kind ${JSON.stringify(kind)}`);
+    for (const status of ['pending', 'accepted', 'Sent', '']) assert.throws(() => note.run(`N-bad-${status}`, 'alert', null, `bad-status:${status}`, 10, status, null, 1, 1), /CHECK/, `status ${JSON.stringify(status)}`);
+    assert.throws(() => note.run('N-dup', 'alert', null, 'key:alert', 10, 'queued', null, 1, 1), /UNIQUE/, 'one note per dedupe key, ever');
+    assert.throws(() => note.run('N-alert', 'alert', null, 'other-key', 10, 'queued', null, 1, 1), /UNIQUE/, 'one row per note id');
+    for (const [col, row] of [
+      ['note_id', [null, 'alert', null, 'k1', 10, 'queued', null, 1, 1]],
+      ['kind', ['N-k', null, null, 'k2', 10, 'queued', null, 1, 1]],
+      ['dedupe_key', ['N-d', 'alert', null, null, 10, 'queued', null, 1, 1]],
+      ['due_ts', ['N-t', 'alert', null, 'k3', null, 'queued', null, 1, 1]],
+      ['status', ['N-s', 'alert', null, 'k4', 10, null, null, 1, 1]],
+      ['created', ['N-c', 'alert', null, 'k5', 10, 'queued', null, null, 1]],
+      ['updated', ['N-u', 'alert', null, 'k6', 10, 'queued', null, 1, null]],
+    ]) assert.throws(() => note.run(...row), /NOT NULL/, `owner_notes.${col}`);
+
+    const booking = s.db.prepare('INSERT INTO viewing_bookings (booking_id, lead_id, task_id, listing_id, start_ts, end_ts, event_id, status, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1)');
+    BOOKING_STATUSES.forEach((status, i) => booking.run(`B-${status}`, `L-${status}`, null, 'BONA-W003', 1000 * (i + 1), 1000 * (i + 1) + 500, `ev-${status}`, status));
+    assert.equal(s.db.prepare("SELECT client_told FROM viewing_bookings WHERE booking_id = 'B-booked'").get().client_told, 0, 'nobody is told until the confirmation is accepted');
+    for (const status of ['pending', 'confirmed', 'requested', 'Booked', '']) {
+      assert.throws(() => booking.run(`B-bad-${status}`, 'L-x', null, 'BONA-W003', 9000, 9500, `ev-bad-${status}`, status), /CHECK/, `status ${JSON.stringify(status)}`);
+    }
+    assert.throws(() => booking.run('B-dup-event', 'L-y', null, 'BONA-W003', 9000, 9500, 'ev-done', 'done'), /UNIQUE/, 'one booking per calendar event');
+    assert.throws(() => booking.run('B-done', 'L-z', null, 'BONA-W003', 9000, 9500, 'ev-other', 'done'), /UNIQUE/, 'one row per booking id');
+    for (const [col, row] of [
+      ['booking_id', [null, 'L-n', null, 'BONA-W003', 9000, 9500, 'ev-n1', 'done']],
+      ['lead_id', ['B-n2', null, null, 'BONA-W003', 9000, 9500, 'ev-n2', 'done']],
+      ['listing_id', ['B-n3', 'L-n', null, null, 9000, 9500, 'ev-n3', 'done']],
+      ['start_ts', ['B-n4', 'L-n', null, 'BONA-W003', null, 9500, 'ev-n4', 'done']],
+      ['end_ts', ['B-n5', 'L-n', null, 'BONA-W003', 9000, null, 'ev-n5', 'done']],
+      ['event_id', ['B-n6', 'L-n', null, 'BONA-W003', 9000, 9500, null, 'done']],
+      ['status', ['B-n7', 'L-n', null, 'BONA-W003', 9000, 9500, 'ev-n7', null]],
+    ]) assert.throws(() => booking.run(...row), /NOT NULL/, `viewing_bookings.${col}`);
+    assert.equal(s.db.prepare("UPDATE viewing_bookings SET client_told = 1 WHERE booking_id = 'B-booked'").run().changes, 1);
+    for (const v of [2, null]) assert.throws(() => s.db.prepare('UPDATE viewing_bookings SET client_told = ? WHERE booking_id = ?').run(v, 'B-booked'), /CHECK|NOT NULL/, `client_told ${v}`);
+
+    // No foreign key: a booking and a note keep their rows when the lead they name is gone (or never was).
+    s.insertLead({ lead_id: 'L-gone', created: 1, updated: 1 });
+    note.run('N-gone', 'booking', 'L-gone', 'bk:B-gone', 10, 'sent', null, 1, 1);
+    booking.run('B-gone', 'L-gone', 'task-1', 'BONA-W003', 20_000, 20_500, 'ev-gone', 'booked');
+    s.db.prepare("DELETE FROM leads WHERE lead_id = 'L-gone'").run();
+    assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM viewing_bookings WHERE lead_id = 'L-gone'").get().n, 1, 'the event can still be cancelled');
+    assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM owner_notes WHERE lead_id = 'L-gone'").get().n, 1, 'the purge, not a cascade, deletes notes');
+  } finally {
+    s.close();
+  }
+});
+
+test('v8 viewing_bookings: one booked viewing per slot and per lead; done, cancelled and cancel-pending rows never block one', () => {
+  const s = openDb(':memory:');
+  try {
+    const H = 3_600_000;
+    const T = 1_764_410_400_000;
+    const ins = s.db.prepare('INSERT INTO viewing_bookings (booking_id, lead_id, listing_id, start_ts, end_ts, event_id, status, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1)');
+    const book = (id, lead, start, status) => ins.run(id, lead, 'BONA-W003', start, start + H, `ev-${id}`, status);
+    const setStatus = (id, status) => s.db.prepare('UPDATE viewing_bookings SET status = ? WHERE booking_id = ?').run(status, id);
+
+    book('B1', 'L1', T, 'booked');
+    assert.throws(() => book('B2', 'L2', T, 'booked'), /UNIQUE/, 'two booked rows with the same start');
+    book('B3', 'L3', T + 2 * H, 'done');
+    book('B4', 'L4', T + 2 * H, 'booked');
+    book('B5', 'L5', T + 2 * H, 'cancelled');
+    book('B6', 'L6', T + 2 * H, 'cancel_pending');
+    assert.equal(s.db.prepare('SELECT COUNT(*) AS n FROM viewing_bookings WHERE start_ts = ?').get(T + 2 * H).n, 4, 'done, cancelled and cancel-pending share the slot with one booked row');
+
+    assert.throws(() => book('B7', 'L1', T + 4 * H, 'booked'), /UNIQUE/, 'two booked rows for one lead');
+    book('B8', 'L8', T + 6 * H, 'cancelled');
+    book('B9', 'L8', T + 8 * H, 'booked');
+    book('B10', 'L8', T + 10 * H, 'done');
+    assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM viewing_bookings WHERE lead_id = 'L8'").get().n, 3, 'cancelled + booked (+ done) for one lead');
+
+    // An UPDATE is held to the same rule: the slot and the lead are free only while no other row there is booked.
+    assert.throws(() => setStatus('B3', 'booked'), /UNIQUE/, 'B4 is booked in that slot');
+    assert.throws(() => setStatus('B8', 'booked'), /UNIQUE/, 'L8 already has B9 booked');
+    setStatus('B1', 'cancel_pending');
+    book('B11', 'L11', T, 'booked');
+    book('B12', 'L1', T + 12 * H, 'booked');
+    assert.throws(() => setStatus('B1', 'booked'), /UNIQUE/, 'its slot and its lead are both taken again');
+    assert.deepEqual(s.db.prepare("SELECT booking_id FROM viewing_bookings WHERE status = 'booked' ORDER BY start_ts").all().map((r) => r.booking_id), ['B11', 'B4', 'B9', 'B12']);
+  } finally {
+    s.close();
+  }
+});
+
+test('v8: a second open is a no-op, and insertLead and updateLead carry the inbox_via and hold columns', (t) => {
+  const { file, cleanup } = tmp();
+  t.after(cleanup);
+  let s = openDb(file);
+  try {
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 8);
+    const pick = (l) => Object.fromEntries(V8_LEAD_COLUMNS.map((c) => [c, l[c]]));
+    assert.deepEqual(pick(s.insertLead({ lead_id: 'L0', created: 1, updated: 1 })), { inbox_via: null, dana_hold_until: null, dana_hold_reason: null }, 'NULL: joined by proof, as today, and not held');
+    assert.deepEqual(pick(s.insertLead({ lead_id: 'L1', created: 1, updated: 1, inbox_via: 'owner_test', dana_hold_until: 5000, dana_hold_reason: 'brain_out' })),
+      { inbox_via: 'owner_test', dana_hold_until: 5000, dana_hold_reason: 'brain_out' });
+    assert.equal(s.updateLead('L1', { dana_hold_reason: 'cap_chat' }), true, 'a patch of one v8 column alone is a known column');
+    assert.equal(s.updateLead('L1', { inbox_via: 'own_number', dana_hold_until: null }), true);
+    assert.deepEqual(pick(s.getLead('L1')), { inbox_via: 'own_number', dana_hold_until: null, dana_hold_reason: 'cap_chat' });
+    assert.equal(s.updateLead('L0', { dana_hold_until: 7000, dana_hold_reason: 'loop' }), true);
+    s.db.prepare("INSERT INTO wa_outbox (send_id, lead_id, jid, text, sender_kind, status, created, updated, media_kind, guarded) VALUES ('S-1', 'L1', ?, NULL, 'dana', 'accepted', 2, 2, 'document', 1)").run(CLIENT_JID);
+    s.db.prepare("INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, created, updated) VALUES ('N-1', 'new_client', 'L1', 'new:L1', 3, 'queued', 3, 3)").run();
+    s.db.prepare("INSERT INTO viewing_bookings (booking_id, lead_id, listing_id, start_ts, end_ts, event_id, status, created, updated) VALUES ('B-1', 'L1', 'BONA-W003', 4, 5, 'ev-1', 'booked', 4, 4)").run();
+    const columns = (db, table) => db.prepare(`PRAGMA table_info(${table})`).all().length;
+    const widths = ['leads', 'wa_outbox', 'owner_notes', 'viewing_bookings'].map((table) => columns(s.db, table));
+    const rows = dumpTables(s.db);
+    s.close();
+
+    s = openDb(file);
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, 8, 'opening again is a no-op');
+    assert.deepEqual(['leads', 'wa_outbox', 'owner_notes', 'viewing_bookings'].map((table) => columns(s.db, table)), widths, 'no column added twice');
+    assert.deepEqual(dumpTables(s.db), rows, 'every row written at v8 is kept');
+    assert.deepEqual(pick(s.getLead('L0')), { inbox_via: null, dana_hold_until: 7000, dana_hold_reason: 'loop' });
+  } finally {
+    s.close();
+  }
+});
+
+test('a file a schema version ahead of this code still opens: no step re-runs and the version is never lowered (a code rollback still starts)', (t) => {
+  // Guard, green before v8 (the tolerance is migrate()'s `m.version <= current` skip): run on the v7 code, this is
+  // "a v8 file opens under the v7 code"; from v8 on it keeps the next rollback (v9, the email phase) safe too.
+  const { file, cleanup } = tmp();
+  t.after(cleanup);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const raw = new DatabaseSync(file);
+  migrate(raw);
+  raw.exec(`ALTER TABLE leads ADD COLUMN from_a_newer_version TEXT; PRAGMA user_version = ${SCHEMA_VERSION + 1}`);
+  raw.prepare("INSERT INTO leads (lead_id, created, updated, name, from_a_newer_version) VALUES ('L1', 1, 1, 'Client One', 'kept')").run();
+  raw.close();
+
+  let s = openDb(file);
+  try {
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION + 1, 'the newer version is kept');
+    assert.equal(s.getLead('L1').name, 'Client One');
+    assert.equal(s.getLead('L1').from_a_newer_version, 'kept', 'what the newer code added is left alone');
+    assert.equal(s.insertLead({ lead_id: 'L2', created: 2, updated: 2, phone_e164: '966500000002' }).lead_id, 'L2', 'and this code still writes');
+    assert.equal(s.updateLead('L2', { name: 'Client Two' }), true);
+    assert.equal(s.ping(), true);
+    s.close();
+    s = openDb(file);
+    assert.equal(s.db.prepare('PRAGMA user_version').get().user_version, SCHEMA_VERSION + 1, 'and again');
+  } finally {
+    s.close();
+  }
+});
+
+test('v8 rolled back: a real v8 file opens under the v7 chain untouched, and the v7 code\'s own writes still work with the v8 defaults', (t) => {
+  const { file, cleanup } = tmp();
+  t.after(cleanup);
+  const s = openDb(file);
+  s.insertLead({ lead_id: 'L1', created: 1, updated: 1, phone_e164: '966500000001', wa_jid: CLIENT_JID, inbox_state: 'in', inbox_via: 'own_number', dana_hold_until: 9000, dana_hold_reason: 'send_failed' });
+  s.db.prepare("INSERT INTO wa_outbox (send_id, lead_id, jid, text, sender_kind, status, created, updated, guarded) VALUES ('S-guarded', 'L1', ?, 'From SAR 1,000,000.', 'dana', 'accepted', 2, 2, 1)").run(CLIENT_JID);
+  s.db.prepare("INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, created, updated) VALUES ('N-1', 'handover', 'L1', 'ho:L1:cap_day:1', 3, 'queued', 3, 3)").run();
+  s.close();
+
+  // What the v7 bona-api does at start (openDb at 13e4954): the same pragmas, then the chain, which ends at 7.
+  const old = new DatabaseSync(file);
+  try {
+    old.exec('PRAGMA journal_mode=WAL');
+    old.exec('PRAGMA foreign_keys=ON');
+    old.exec('PRAGMA busy_timeout=3000');
+    const before = dumpTables(old);
+    migrate(old, { upTo: 7 });
+    assert.equal(old.prepare('PRAGMA user_version').get().user_version, 8, 'every v1-v7 step is skipped and the version is not lowered');
+    assert.deepEqual(dumpTables(old), before, 'nothing in the file changed');
+
+    // The v7 code's statements, as it writes them (store.mjs insertOutbox, lead-tasks.mjs, db.mjs insertRow): none names a v8 column.
+    old.prepare('INSERT INTO leads (lead_id, created, updated, phone_e164, channel, match_method) VALUES (?, ?, ?, ?, ?, ?)').run('L2', 4, 4, '966500000002', 'whatsapp', 'keyword');
+    old.prepare(`INSERT OR IGNORE INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts)
+                 VALUES (?,?,?,?,?,?,?,NULL,?,?,NULL,?)`).run('S-legacy', 'L2', '966500000002@s.whatsapp.net', 'Hello', null, 'dana', 'pending', 5, 5, 4);
+    old.prepare("UPDATE wa_outbox SET status = 'accepted', key_id = 'K-legacy' WHERE send_id = 'S-legacy'").run();
+    old.prepare('INSERT INTO lead_tasks(task_id,lead_id,kind,source,reason,details,status,due_ts,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?)')
+      .run('task-1', 'L2', 'viewing', 'dana', null, '{}', 'requested', null, 6, 6);
+    old.prepare("UPDATE leads SET needs_human = 1, dana_off = 1 WHERE lead_id = 'L1'").run();
+    const out = (id) => ({ ...old.prepare('SELECT media_kind, guarded FROM wa_outbox WHERE send_id = ?').get(id) });
+    assert.deepEqual(out('S-legacy'), { media_kind: null, guarded: 0 }, 'a send made by the rolled-back code is text and never guarded');
+    assert.deepEqual(out('S-guarded'), { media_kind: null, guarded: 1 }, 'what v8 wrote is left as it was');
+    const holds = (id) => ({ ...old.prepare('SELECT inbox_via, dana_hold_until, dana_hold_reason FROM leads WHERE lead_id = ?').get(id) });
+    assert.deepEqual(holds('L2'), { inbox_via: null, dana_hold_until: null, dana_hold_reason: null });
+    assert.deepEqual(holds('L1'), { inbox_via: 'own_number', dana_hold_until: 9000, dana_hold_reason: 'send_failed' });
+    assert.equal(old.prepare('SELECT COUNT(*) AS n FROM owner_notes').get().n, 1, 'the notes ledger waits, untouched, for the roll forward');
+  } finally {
+    old.close();
+  }
+
+  // Rolling forward again is a no-op too.
+  const again = openDb(file);
+  try {
+    assert.equal(again.db.prepare('PRAGMA user_version').get().user_version, 8);
+    assert.equal(again.getLead('L2').inbox_via, null);
+  } finally {
+    again.close();
+  }
 });
