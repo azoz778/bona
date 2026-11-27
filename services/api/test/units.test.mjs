@@ -196,6 +196,61 @@ describe('units', () => {
     });
   });
 
+  it('changedAt() is the mtime of the file the served sheets came from (search_units waits an hour after it), null before the first load and while the file cannot be read', () => {
+    withFile(FIXTURE, (file) => {
+      let t = 1_000_000;
+      const u = createUnits({ file, now: () => t });
+      const put = (text, sec) => { fs.writeFileSync(file, text); fs.utimesSync(file, sec, sec); };
+      put(JSON.stringify(FIXTURE), 1_700_000_000);
+      assert.equal(u.changedAt(), null, 'nothing loaded yet');
+      assert.ok(u.forListing('BONA-W014'));
+      assert.equal(u.changedAt(), 1_700_000_000_000, 'the mtime the sheet was read at');
+
+      put(JSON.stringify({ ...FIXTURE, updated: '2026-09-03' }), 1_700_000_600);
+      assert.equal(u.forListing('BONA-W014').updated, '2026-09-02', 'inside the stat window: the old sheet, still');
+      assert.equal(u.changedAt(), 1_700_000_000_000, 'and its own mtime');
+      t += STAT_MS + 1;
+      assert.equal(u.forListing('BONA-W014').updated, '2026-09-03', 'the new sheet at the next stat');
+      assert.equal(u.changedAt(), 1_700_000_600_000, 'with the new mtime');
+
+      fs.rmSync(file);
+      t += STAT_MS + 1;
+      assert.equal(u.forListing('BONA-W014'), null, 'removed: no sheet');
+      assert.equal(u.changedAt(), null, 'and no change time');
+      put('{"listingId": "BONA-W014", "units": [', 1_700_001_200);
+      t += STAT_MS + 1;
+      assert.equal(u.forListing('BONA-W014'), null, 'broken: no sheet');
+      assert.equal(u.changedAt(), null, 'and no change time');
+      put(JSON.stringify(FIXTURE), 1_700_001_800);
+      t += STAT_MS + 1;
+      assert.ok(u.forListing('BONA-W014'), 'back');
+      assert.equal(u.changedAt(), 1_700_001_800_000, 'with the mtime it came back with');
+    });
+  });
+
+  it('a write between the stat and the read dates the served sheet by that write, never by the older mtime', () => {
+    withFile(FIXTURE, (file) => {
+      fs.utimesSync(file, 1_700_000_000, 1_700_000_000);
+      const u = createUnits({ file });
+      // repo-sync replaces the file after the loader's stat and before its read: what is read is the new file.
+      const realRead = fs.readFileSync;
+      let raced = false;
+      fs.readFileSync = function (p, ...rest) {
+        if (!raced && p === file) {
+          raced = true;
+          fs.writeFileSync(file, JSON.stringify({ ...FIXTURE, updated: '2026-09-03' }));
+          fs.utimesSync(file, 1_700_003_600, 1_700_003_600);
+        }
+        return realRead.call(this, p, ...rest);
+      };
+      try {
+        assert.equal(u.forListing('BONA-W014')?.updated, '2026-09-03', 'the read got the new file');
+      } finally { fs.readFileSync = realRead; }
+      assert.ok(raced, 'the write landed between the stat and the read');
+      assert.equal(u.changedAt(), 1_700_003_600_000, 'the served sheet is as new as the write that brought it');
+    });
+  });
+
   it('formats money the same way in both locales, Western digits', () => {
     assert.equal(money(701500, 'en'), 'SAR 701,500');
     assert.equal(money(701500, 'ar'), '701,500 ر.س');

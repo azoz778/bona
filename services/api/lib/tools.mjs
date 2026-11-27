@@ -67,17 +67,28 @@ function isBedLabel(label) {
   return bedLabels.has(JSON.stringify([label?.en, label?.ar]));
 }
 
+/** How long units.json must sit unchanged on disk before search_units quotes it (quotableSummary, "Arrival"). */
+export const SHEET_SETTLE_MS = 60 * 60 * 1000;
+
 /**
  * What search_units may quote from one sheet at request time `nowMs` (ms): the listing page's own summary, or null.
- * It never says anything earlier than the page, nor anything other than the page:
- * - Time. Pages builds at 03:00 UTC daily and on pushes (.github/workflows/deploy.yml), and hides a sheet dated after
+ * `changedAtMs` is when the file the sheet came from last changed on disk (units.mjs changedAt()). The API never
+ * says anything earlier than the page, nor anything other than the page:
+ * - Date. Pages builds at 03:00 UTC daily and on pushes (.github/workflows/deploy.yml), and hides a sheet dated after
  *   its build day (UTC). So a sheet is quoted only once its date is before today in Riyadh: from 21:00 UTC on that
  *   date, after that day's build. The API may lag the page by up to a day; it never leads it.
+ * - Arrival. repo-sync pulls main every 5 minutes, so the merge that brings a sheet can land it on the VPS while that
+ *   merge's push build of the page is still running: a sheet dated D merged at 20:58 UTC on D would be quoted at 21:00,
+ *   before the page shows it. So nothing is quoted until the file has been unchanged for SHEET_SETTLE_MS (an hour; the
+ *   build takes minutes). An unknown change time, or one in the future (a clock ahead of ours), quotes nothing.
+ *   Residual: a push build that FAILS (or is not live within the hour) leaves the page on the previous sheet until the
+ *   next build that succeeds (the 03:00 UTC daily build or a re-run); in that window the API quotes the new sheet.
  * - Rows. The rows are liveSummary's over the same units the page summarises. When a row label is not a whole bedroom
  *   count (a malformed sheet: the page would print a unit ref or "null bedrooms"), nothing is quoted for the project.
  */
-export function quotableSummary(record, listing, nowMs) {
+export function quotableSummary(record, listing, nowMs, changedAtMs) {
   if (!isSheetDate(record?.updated) || record.updated >= riyadhDay(nowMs)) return null;
+  if (!Number.isFinite(changedAtMs) || !(nowMs - changedAtMs >= SHEET_SETTLE_MS)) return null;
   const live = liveSummary(record, listing, new Date(nowMs));
   return live && live.rows.every((r) => isBedLabel(r.label)) ? live : null;
 }
@@ -199,8 +210,9 @@ export function createToolHandlers({
    * email, the website chat and a missing or unknown source. The answer is what the listing page publishes
    * (quotableSummary over lib/units-summary.mjs liveSummary): one row per bedroom count with its lowest cash
    * price, or null when the page publishes nothing (listing not available, sheet date impossible or in the
-   * future), has not been built with the sheet yet, or would print a malformed row label. No unit refs, no
-   * per-unit prices, no payment plans: those are not published (DESIGN §4.5). The model's filters are ignored.
+   * future), has not been built with the sheet yet (its date, or units.json changed less than an hour ago), or would
+   * print a malformed row label. No unit refs, no per-unit prices, no payment plans: those are not published
+   * (DESIGN §4.5). The model's filters are ignored.
    */
   async function search_units(args, ctx) {
     // The first id that is not blank; none (missing, null, '' or spaces) means W014, as the tool schema says.
@@ -211,7 +223,7 @@ export function createToolHandlers({
 
     const record = units ? units.forListing(listingId) : null;
     const listing = record ? inventory.find(listingId) : null;
-    const live = record && listing?.id === record.listingId ? quotableSummary(record, listing, now()) : null;
+    const live = record && listing?.id === record.listingId ? quotableSummary(record, listing, now(), units.changedAt()) : null;
     if (!live) return { count: 0, summary: null, note: UNITS_NOT_PUBLISHED_NOTE };
 
     // Put the project card on screen so the visitor sees what is being discussed.

@@ -6,13 +6,13 @@
 // the VPS sparse checkout it is skipped (NO_SRC_LIB); anywhere else (the PC, a worktree, CI) a missing src/lib
 // fails the import below. Every comparison is a boolean: the values are the real sheet's (public CI logs).
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { inspect, isDeepStrictEqual } from 'node:util';
 import test from 'node:test';
-import { publishedUnitsCut, quotableSummary } from '../lib/tools.mjs';
+import { publishedUnitsCut, quotableSummary, SHEET_SETTLE_MS } from '../lib/tools.mjs';
 import * as api from '../lib/units-summary.mjs';
 import { createUnits, WORKTREE_UNITS } from '../lib/units.mjs';
 
@@ -40,9 +40,17 @@ const UNITS_FILE = JSON.parse(readFileSync(WORKTREE_UNITS, 'utf8'));
 const W014 = [UNITS_FILE].flat().find((r) => r?.listingId === 'BONA-W014');
 const LISTINGS = JSON.parse(readFileSync(path.join(REPO_ROOT, 'src/data/listings.json'), 'utf8'));
 const LISTING = LISTINGS.find((l) => l.id === 'BONA-W014') ?? { id: 'BONA-W014', status: 'available' };
-const NOW = new Date('2026-11-27T09:00:00Z');
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
+/** The clock the checks run at: two days after the real sheet's date, and never before 2026-11-27T09:00Z (a sheet
+    without a real date keeps that). A refreshed sheet, whatever its date, is then one the page shows and the API
+    quotes, and the cases that move the date (a sheet dated in the future) are built from this clock, not a fixed day. */
+function sheetClock(updated) {
+  const fixed = Date.parse('2026-11-27T09:00:00Z');
+  return api.isSheetDate(updated) ? Math.max(fixed, Date.parse(`${updated}T00:00:00Z`) + 2 * DAY) : fixed;
+}
+const NOW = new Date(sheetClock(W014?.updated));
+const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 
 /** Every value compared here comes from the real W014 sheet (unit refs, unpublished instalment prices), and a failing
     assertion prints in a public CI log: compare to a boolean, so a failure shows its message and never either value. */
@@ -66,7 +74,7 @@ function cases() {
   return [
     ['the W014 sheet', W014, available, true],
     ['the W014 sheet on a listing that is not available', W014, { ...LISTING, status: 'sold' }, false],
-    ['a sheet dated in the future', { ...W014, updated: '2026-12-30' }, available, false],
+    ['a sheet dated in the future', { ...W014, updated: isoDay(NOW.getTime() + 30 * DAY) }, available, false],
     ['an impossible sheet date', { ...W014, updated: '2026-02-30' }, available, false],
     ['an impossible delivery', { ...W014, delivery: '2028-13' }, available, true],
     ['a delivery given as a day', { ...W014, delivery: '2028-02-29' }, available, true],
@@ -128,23 +136,63 @@ test('lib/units-summary.mjs publishes exactly what src/lib/units-summary.mjs pub
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+/**
+ * The merge that brings a sheet starts a push build of the page, and repo-sync (git pull every 5 minutes) lands the
+ * file on the VPS up to 5 minutes after the merge, while that build may still run (Codex r4: a sheet dated D merged
+ * at 20:58 UTC on D, quoted at 21:00). For a merge every hour from a day before the sheet's date to a day after it,
+ * and at 20:58 UTC on its date, nothing is quoted before a build that started after the merge is live and shows the
+ * sheet: the push build, live within SHEET_SETTLE_MS of its start (it takes minutes), or a daily 03:00 UTC build.
+ * A push build that FAILS is the residual quotableSummary documents: this sweep assumes it deploys.
+ */
+function pushBuildSweep(site, name, served, record, listing, base) {
+  const SYNC = 5 * 60_000;
+  const merges = [base + 20 * HOUR + 58 * 60_000];
+  for (let m = base - DAY; m <= base + DAY; m += HOUR) merges.push(m);
+  for (const merge of merges) {
+    const landed = merge + SYNC;
+    const asks = [landed, landed + SHEET_SETTLE_MS - 1, landed + SHEET_SETTLE_MS];
+    for (let t = merge; t <= merge + 2 * DAY; t += HOUR) asks.push(t);
+    for (const t of asks) {
+      const quoted = quotableSummary(served, listing, t, landed);
+      if (!quoted) continue;
+      // The builds that started after the merge and are live at t: the push build, and every daily build since.
+      const live = [];
+      if (merge + SHEET_SETTLE_MS <= t) live.push(merge);
+      for (let b = lastCronBuild(t); b >= merge; b -= DAY) live.push(b);
+      assert.ok(live.length, `${name}: merged ${new Date(merge).toISOString()}, quoted at ${new Date(t).toISOString()} before any build after the merge is live`);
+      const page = site.liveSummary(record, listing, new Date(Math.max(...live)));
+      assert.ok(page, `${name}: merged ${new Date(merge).toISOString()}, quoted at ${new Date(t).toISOString()}, before the live build shows the sheet`);
+      assertSame(publishedUnitsCut(quoted), publishedUnitsCut(page), `${name}: rows quoted at ${new Date(t).toISOString()} after a merge at ${new Date(merge).toISOString()}`);
+    }
+    // Never within the settle hour of the file landing, whatever the sheet's date.
+    assert.equal(quotableSummary(served, listing, landed + SHEET_SETTLE_MS - 1, landed), null, `${name}: quoted inside the hour after a merge at ${new Date(merge).toISOString()}`);
+  }
+}
+
 test('search_units quotes what the page shows or nothing, and never before the page\'s build shows it (file → units.mjs → quotableSummary)', { skip: NO_SRC_LIB ? 'NO_SRC_LIB' : false }, async () => {
   const site = await import(pathToFileURL(SITE_LIB).href);
   const dir = mkdtempSync(path.join(os.tmpdir(), 'bona-units-quote-'));
   try {
     for (const [i, [name, record, listing, quotesNow]] of cases().entries()) {
       // What bona-api actually summarises: units.mjs's copy of the record, read from the file the page builds from.
+      const base = api.isSheetDate(record?.updated) ? Date.parse(`${record.updated}T00:00:00Z`) : NOW.getTime();
       const file = path.join(dir, `units-${i}.json`);
       writeFileSync(file, JSON.stringify(record));
-      const served = createUnits({ file }).forListing(W014.listingId);
+      // repo-sync landed the file two days before anything below asks: its settle hour (SHEET_SETTLE_MS) is over, so
+      // this sweep checks the date gate against the daily build. The push build is the sweep further down.
+      const landed = Math.min(base, NOW.getTime()) - 2 * DAY;
+      utimesSync(file, landed / 1000, landed / 1000);
+      const loader = createUnits({ file });
+      const served = loader.forListing(W014.listingId);
+      const changed = loader.changedAt();
+      assert.equal(changed, landed, `${name}: the loader dates the sheet by its file`);
       assertSame(api.liveSummary(served, listing, NOW), site.liveSummary(record, listing, NOW), `served record: ${name}`);
-      assert.equal(Boolean(quotableSummary(served, listing, NOW.getTime())), quotesNow, `quoted at NOW: ${name}`);
+      assert.equal(Boolean(quotableSummary(served, listing, NOW.getTime(), changed)), quotesNow, `quoted at NOW: ${name}`);
       // Every hour from a day before the sheet's date to three days after it: nothing, or the page's rows as the
       // newest daily build shows them. A push can build the page earlier, never later than that build.
-      const base = api.isSheetDate(record?.updated) ? Date.parse(`${record.updated}T00:00:00Z`) : NOW.getTime();
       let first = null;
       for (let t = base - DAY; t <= base + 3 * DAY; t += HOUR) {
-        const quoted = quotableSummary(served, listing, t);
+        const quoted = quotableSummary(served, listing, t, changed);
         if (!quoted) continue;
         first ??= t;
         const page = site.liveSummary(record, listing, new Date(lastCronBuild(t)));
@@ -154,6 +202,7 @@ test('search_units quotes what the page shows or nothing, and never before the p
       }
       // A current sheet is quoted from 00:00 Riyadh the day after its date (21:00 UTC), less than a day after the page.
       if (quotesNow) assert.equal(first, base + 21 * HOUR, `${name}: first quoted at 21:00 UTC on the sheet's date`);
+      if (quotesNow) pushBuildSweep(site, name, served, record, listing, base);
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

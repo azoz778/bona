@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { inspect } from 'node:util';
-import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES } from '../lib/tools.mjs';
+import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES, quotableSummary, SHEET_SETTLE_MS } from '../lib/tools.mjs';
 import { createInventory, readInventoryFile, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { createUnits, STAT_MS, WORKTREE_UNITS } from '../lib/units.mjs';
 import { createStore } from '../lib/store.mjs';
@@ -450,7 +450,11 @@ const PUBLISHED_CUT = {
 const ODD_BEDS_UNIT = { ...UNIT('B95-17', 1, 'Standard', 57.5, [722750, 738750, 795250, 831250]), beds: 'B95-17' };
 // A blank bedroom cell on a penthouse (build-units.py writes beds: null): the page keeps it in the penthouse row.
 const BLANK_PENTHOUSE = { ...UNIT('B07-33', 2, 'Penthouse', 205.75, [1950000, 1991000, 2144000, 2242000]), beds: null };
+// The first unit at a new cash price: the sheet repo-sync brings in a test of the settle hour.
+const REPRICED_UNIT = { ...SHEET.units[0], price: { ...SHEET.units[0].price, cash: 690250 } };
 const UNITS_NOW = Date.parse('2026-11-27T09:00:00Z');
+const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
 const SOURCES = ['bona-whatsapp', 'bona-email', 'bona-web', undefined, 'someone-else'];
 // What a model asking for a unit would send: a unit ref, a plan, a bed count, a budget.
 const UNIT_ARGS = { listing_id: 'BONA-W014', beds: 1, plan: 'twoYear', query: 'B91-23', max_price: 900000, limit: 20, maid_room: false };
@@ -462,11 +466,14 @@ function w014Inventory(status = 'available') {
   return createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk', read: () => [w014] });
 }
 
-function unitsHarness({ sheet = SHEET, status = 'available', withUnits = true, extra = {}, unitsNow = Date.now } = {}) {
+/** `mtimeMs`: when units.json last changed on disk (repo-sync's pull). A day before UNITS_NOW by default, so the
+    hour search_units waits after a change (SHEET_SETTLE_MS) is over unless a test says otherwise. */
+function unitsHarness({ sheet = SHEET, status = 'available', withUnits = true, extra = {}, unitsNow = Date.now, mtimeMs = UNITS_NOW - DAY } = {}) {
   const h = harness();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-tool-units-'));
   const file = path.join(dir, 'units.json');
   fs.writeFileSync(file, JSON.stringify(sheet));
+  fs.utimesSync(file, mtimeMs / 1000, mtimeMs / 1000);
   const tools = createToolHandlers({
     ...h.deps, inventory: w014Inventory(status), units: withUnits ? createUnits({ file, now: unitsNow }) : null, now: () => UNITS_NOW, ...extra,
   });
@@ -572,7 +579,7 @@ test('the search_units fixture is made up: no unit ref or price of it is on the 
   const refs = new Set(real.map((u) => u.ref));
   const amounts = new Set(real.flatMap((u) => Object.values(u.price ?? {})).filter((n) => typeof n === 'number'));
   // The messages name the fixture unit by its place, never by a value: a failure here prints in a public CI log.
-  [...SHEET.units, ODD_BEDS_UNIT, BLANK_PENTHOUSE].forEach((u, i) => {
+  [...SHEET.units, ODD_BEDS_UNIT, BLANK_PENTHOUSE, REPRICED_UNIT].forEach((u, i) => {
     assert.ok(!refs.has(u.ref), `fixture unit #${i}: its ref is on the real sheet`);
     for (const plan of Object.keys(u.price)) assert.ok(!amounts.has(u.price[plan]), `fixture unit #${i}: its ${plan} price is on the real sheet`);
   });
@@ -643,10 +650,73 @@ test('search_units never quotes a sheet before the listing page can show it: dat
   } finally { h.cleanup(); }
 });
 
+test('quotableSummary waits SHEET_SETTLE_MS (an hour) after units.json changed on disk, and never quotes a change from the future or of no known time', () => {
+  assert.equal(SHEET_SETTLE_MS, 60 * MINUTE);
+  const listing = { id: 'BONA-W014', status: 'available' };
+  const page = (t) => quotableSummary(SHEET, listing, UNITS_NOW, t);
+  assert.equal(page(UNITS_NOW - 59 * MINUTE), null, 'changed 59 minutes ago: the push-triggered Pages build may not be live yet');
+  assert.equal(page(UNITS_NOW - 60 * MINUTE + 1), null, 'a millisecond short of the hour');
+  assert.ok(page(UNITS_NOW - 60 * MINUTE), 'changed an hour ago: quoted');
+  assert.ok(page(UNITS_NOW - 61 * MINUTE), 'changed 61 minutes ago: quoted');
+  assert.equal(page(UNITS_NOW), null, 'changed just now');
+  assert.equal(page(UNITS_NOW + MINUTE), null, 'changed a minute in the future (a clock ahead of ours)');
+  assert.equal(page(UNITS_NOW + DAY), null, 'changed a day in the future');
+  for (const unknown of [undefined, null, NaN, Infinity, -Infinity, '0', {}]) {
+    assert.equal(page(unknown), null, `no known change time (${String(unknown)}): nothing`);
+  }
+  // Settled is not enough: the date gate still holds (a sheet dated today in Riyadh waits for tomorrow).
+  assert.equal(quotableSummary({ ...SHEET, updated: '2026-11-27' }, listing, UNITS_NOW, UNITS_NOW - DAY), null, 'settled, dated today');
+  assert.ok(quotableSummary({ ...SHEET, updated: '2026-11-26' }, listing, UNITS_NOW, UNITS_NOW - 61 * MINUTE), 'settled, dated yesterday');
+});
+
+test('search_units quotes nothing for an hour after units.json changed (repo-sync can land it while the push-triggered Pages build still runs)', async () => {
+  for (const [name, mtimeMs, expected] of [
+    ['changed 59 minutes ago', UNITS_NOW - 59 * MINUTE, null],
+    ['changed 61 minutes ago', UNITS_NOW - 61 * MINUTE, PUBLISHED_CUT],
+    ['changed a minute in the future', UNITS_NOW + MINUTE, null],
+    ['changed a day in the future', UNITS_NOW + DAY, null],
+  ]) {
+    const h = unitsHarness({ mtimeMs });
+    try {
+      for (const source of SOURCES) {
+        const { raw, result } = await h.ask(source);
+        assert.deepEqual(result.summary, expected, `${name}, ${source}`);
+        assert.match(result.note, expected ? /quote them as 'from'/ : /not published/, `${name}, ${source}`);
+        assertNoUnpublished(raw);
+      }
+      if (!expected) assert.equal(h.store.getCall('units-bona-web'), null, `${name}: no project card`);
+    } finally { h.cleanup(); }
+  }
+});
+
+test('search_units on a warm loader: a new units.json (repo-sync) stops the quotes at the next stat, and the new sheet is quoted an hour after it landed', async () => {
+  let clock = UNITS_NOW;
+  const h = unitsHarness({ unitsNow: () => clock, extra: { now: () => clock } });
+  const newer = { ...SHEET, updated: '2026-11-20', units: [REPRICED_UNIT, ...SHEET.units.slice(1)] };
+  const newerCut = { ...PUBLISHED_CUT, updated: '2026-11-20', rows: [{ ...PUBLISHED_CUT.rows[0], cashFrom: REPRICED_UNIT.price.cash }, ...PUBLISHED_CUT.rows.slice(1)] };
+  try {
+    assert.deepEqual((await h.ask('bona-whatsapp')).result.summary, PUBLISHED_CUT, 'the settled sheet');
+    // repo-sync replaces the file a minute later (past the loader's stat window), with that minute as its mtime.
+    const landed = (clock += MINUTE);
+    assert.ok(MINUTE > STAT_MS);
+    fs.writeFileSync(h.file, JSON.stringify(newer));
+    fs.utimesSync(h.file, landed / 1000, landed / 1000);
+    for (const [after, expected] of [[0, null], [30 * MINUTE, null], [60 * MINUTE - 1, null], [60 * MINUTE, newerCut], [2 * DAY, newerCut]]) {
+      clock = landed + after;
+      for (const source of SOURCES) {
+        const { raw, result } = await h.ask(source);
+        assert.deepEqual(result.summary, expected, `${after / MINUTE} min after the new file, ${source}`);
+        assertNoUnpublished(raw, { units: [...SHEET.units, ...newer.units] });
+      }
+    }
+  } finally { h.cleanup(); }
+});
+
 test('search_units on a warm loader stops quoting once units.json is removed or broken, and quotes again once it is back', async () => {
   let t = Date.parse('2026-11-27T09:00:00Z');
   const h = unitsHarness({ unitsNow: () => t });
-  let sec = 1_800_000_000;
+  // Each write gets a new mtime, a day or more before the tools' clock (UNITS_NOW): the settle hour is over.
+  let sec = (UNITS_NOW - 2 * DAY) / 1000;
   const put = (text) => { fs.writeFileSync(h.file, text); fs.utimesSync(h.file, (sec += 60), sec); };
   const notPublished = async (why) => {
     for (const source of SOURCES) {
@@ -733,7 +803,10 @@ test('search_units: the note says the prices are "from" prices and no longer ask
 test('search_units on the real W014 sheet (src/data/units.json): nothing beyond the published "from" rows, for every source', async () => {
   const h = harness();
   try {
-    const tools = createToolHandlers({ ...h.deps, units: createUnits({ file: WORKTREE_UNITS }) });
+    // A checkout (CI's included) writes units.json just now: the clock is past its settle hour, so the real sheet is
+    // checked on what it quotes, not skipped as "not published yet".
+    const settled = fs.statSync(WORKTREE_UNITS).mtimeMs + SHEET_SETTLE_MS;
+    const tools = createToolHandlers({ ...h.deps, units: createUnits({ file: WORKTREE_UNITS }), now: () => Math.max(Date.now(), settled) });
     // One record today, an array once a second project has a sheet: every unit of every sheet is checked.
     const sheet = { units: [JSON.parse(fs.readFileSync(WORKTREE_UNITS, 'utf8'))].flat().flatMap((r) => r?.units ?? []) };
     for (const source of SOURCES) {

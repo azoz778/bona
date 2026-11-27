@@ -67,6 +67,8 @@ export function createUnits({ file = WORKTREE_UNITS, now = Date.now } = {}) {
   let loadedAt = 0;
   let statedAt = 0;
   let mtime = 0;
+  /** When the served sheets' file last changed on disk (changedAt()); null while it cannot be read. */
+  let changed = null;
 
   /** Every sheet in the file, each with its priced units only. units.json is one record today and an array once
       a second project has a sheet: the two shapes the listing page reads (src/lib/units-summary.mjs recordFor). */
@@ -84,9 +86,13 @@ export function createUnits({ file = WORKTREE_UNITS, now = Date.now } = {}) {
       const m = fs.statSync(file).mtimeMs;   // before the read: a write after it shows up at the next stat
       doc = read();
       mtime = m;
+      // And after it: a write between the two stats may be what was read, so the sheet is dated by the later one
+      // (search_units waits an hour after it). The next stat then sees mtime differ and reads the file again.
+      changed = Math.max(m, fs.statSync(file).mtimeMs);
     } catch {
       doc = { records: [] };
       mtime = -1;
+      changed = null;
     }
     loadedAt = t;
   }
@@ -243,5 +249,12 @@ export function createUnits({ file = WORKTREE_UNITS, now = Date.now } = {}) {
     };
   }
 
-  return { load, forListing, search, toRow, summary, get file() { return file; } };
+  /** When the file the served sheets came from last changed on disk (mtime, ms), as of the last load (the sheet a
+      forListing() just returned): tools.mjs quotableSummary quotes nothing for SHEET_SETTLE_MS after it. null before the
+      first load and while the file cannot be read. */
+  function changedAt() {
+    return changed;
+  }
+
+  return { load, forListing, search, toRow, summary, changedAt, get file() { return file; } };
 }
