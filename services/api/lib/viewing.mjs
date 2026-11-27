@@ -5,7 +5,10 @@
  * Booking needs three things at once (DESIGN §2): `calendar_booking` = '1', auto mode for the lead
  * (ownerTest.autoMode), and a calendar (BONA_GCAL_SA_FILE and BONA_GCAL_CALENDAR_ID). Without them
  * nothing is bookable and nothing is booked, exactly as the stub answered. A bookable home is a
- * listing in listings.json, by its exact id, `available`, in Jeddah.
+ * listing in listings.json, by its exact id, `available`, in Jeddah. Only a chat Dana may answer
+ * books: in the inbox, and no colleague's or never-list number (as dana-wa eligible()). The lead is
+ * always read from the database, never from the caller's copy: a Not a client while a commit waited
+ * (on the lock, or on Google) leaves no row to mark, and only that read stops the booking.
  *
  * Who calls what (the callers arrive with later PRs; index.mjs already wires the hooks):
  *   - the tools (PR-B4): slots() for viewing_slots, validate() for book_viewing (writes nothing);
@@ -47,6 +50,7 @@
 import { newId } from './db.mjs';
 import { bookingEvent, calendarTagOf, createGcal, eventIdFor } from './gcal.mjs';
 import { propertyPath } from './inventory.mjs';
+import { isExcludedLead } from './team.mjs';
 import { bookViewing, cancelBookedViewing, moveBookedViewing, plausibleName, saveNeeds } from './lead-tasks.mjs';
 import {
   TIMEZONE, VIEWING_MS, bookableDays, checkSlot, dayStart, freeSlots, isFree, isoRiyadh, parseSlotId, riyadhDay, searchWindow,
@@ -154,11 +158,19 @@ export function createViewing(deps = {}) {
   const publicApi = deps.publicApi ?? cfg?.publicApi ?? 'https://api.bona-real-estate.com';
 
   const enabled = () => configured && team?.calendarBookingEnabled?.() === true;
-  const leadOf = (o) => (o?.lead && typeof o.lead === 'object' ? o.lead : (db && o?.leadId ? db.getLead(o.leadId) : null));
+  /** The lead as the database has it now, by the caller's lead or id: a caller's copy may predate a Not a client. */
+  const leadOf = (o) => {
+    const id = o?.lead && typeof o.lead === 'object' ? o.lead.lead_id : o?.leadId;
+    return db && id ? db.getLead(String(id)) ?? null : null;
+  };
+  /** A colleague's or never-list chat the daily sweep has not taken out yet (lib/team.mjs, the inbox's one exclusion test). */
+  const excluded = (lead) => typeof team?.isExcludedPhone === 'function' && isExcludedLead(team, db, lead);
   /** Why this lead cannot book at all right now, or null. */
   function gate(lead) {
     if (!enabled()) return 'off';
     if (!lead?.lead_id) return 'lead';
+    // Only a chat Dana may answer (dana-wa eligible()): auto mode alone stays true for an own-number lead after Not a client.
+    if (lead.inbox_state !== 'in' || excluded(lead)) return 'not_in_inbox';
     if (ownerTest?.autoMode?.(lead) !== true) return 'not_auto';
     return null;
   }
@@ -248,7 +260,8 @@ export function createViewing(deps = {}) {
     const s = await settle(now(), lead.lead_id);
     if (s.code) return { bookable: false, reason: 'calendar', code: s.code };
     const t = now();
-    const why = precheck(lead, o.listingId, t, true);
+    // The lead again: it may have left the inbox while Google answered.
+    const why = precheck(leadOf(o), o.listingId, t, true);
     if (why) return { bookable: false, reason: why };
     const hol = await gcal.holidays();
     if (!hol.ok) return { bookable: false, reason: 'calendar', code: hol.code };
@@ -341,15 +354,18 @@ export function createViewing(deps = {}) {
     // Then ONE write transaction: the rows follow their events (the lead's past booking turns done), the
     // checks run again on what they now say, and the row is reserved. A reserve the indexes refuse rolls
     // all of it back ('busy': another booking is still at this start); a check that refuses keeps what
-    // the reads found.
+    // the reads found. The checks read the lead from the database by its id, never the caller's copy: a
+    // Not a client while the reads were on their way (or while this commit waited on the lock) left no
+    // row to mark, and the lead's row is what says it left.
     const t = now();
+    const again = { ...o, lead: null, leadId: pre.leadId };
     let step = 'follow';
     let made;
     try {
       made = db.transaction(() => {
         const { stuck } = follow(res.plans);
         step = 'check';
-        const v = validate(o);
+        const v = validate(again);
         if (!v.ok) return { v, stuck };
         // Read: any booked row of the lead left is its booking (moved later, or its event missing).
         if (leadBooked(v.leadId, now(), true)) return { v: { ok: false, reason: 'active_booking' }, stuck };
@@ -390,10 +406,11 @@ export function createViewing(deps = {}) {
     const fb = await gcal.freeBusy({ timeMin: isoRiyadh(w.start), timeMax: isoRiyadh(w.end) });
     if (!fb.ok) { dropRow(row.bookingId); return failed('calendar', fb.code); }
     if (!isFree(v.startTs, fb.busy)) { dropRow(row.bookingId); return failed('busy'); }
-    // Step 6: the event, only while the row is still this booking and the lead may still book. A purge,
-    // Not a client, the lead gone or booking off while Google answered: the client's name and phone are
-    // never sent. Read here with no await before the call, and again by gcal.insert right before its
-    // request (after any token refresh). No event went out, so the row ends cancelled (nothing to delete).
+    // Step 6: the event, only while the row is still this booking and the lead may still book (its row read
+    // again: still in the inbox, no colleague's or never-list number, auto mode). A purge, Not a client, the
+    // lead gone or booking off while Google answered: the client's name and phone are never sent. Read here
+    // with no await before the call, and again by gcal.insert right before its request (after any token
+    // refresh). No event went out, so the row ends cancelled (nothing to delete).
     const sendable = () => prep('SELECT status FROM viewing_bookings WHERE booking_id = ?').get(row.bookingId)?.status === 'booked'
       && gate(db.getLead(v.leadId)) === null;
     const unsent = () => {

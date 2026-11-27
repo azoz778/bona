@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import http from 'node:http';
 import { openDb } from '../lib/db.mjs';
-import { createTeam } from '../lib/team.mjs';
+import { createTeam, learnTeamLid } from '../lib/team.mjs';
 import { createAudit } from '../lib/audit.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
 import { createDashboardRoutes } from '../lib/dashboard/routes.mjs';
@@ -858,6 +858,106 @@ test('a purge, Not a client, the lead gone or booking off while the re-check is 
     assert.deepEqual(posts, [], 'no insert request went out');
     assert.equal(k.rows()[0].status, 'cancelled');
   } finally { k.db.close(); }
+});
+
+test('Not a client, or a number put on the never list, BEFORE the reserve (the commit waits on the lock behind another lead, or its reads are on their way): no row, no insert, no task; slots and validate refuse it too', async () => {
+  // One harness per case: a fake calendar whose held call waits once for the test to answer.
+  const harness = (clock = { t: NOW }) => {
+    const gcal = fakeGcal();
+    const held = { op: null, release: null };
+    for (const op of ['holidays', 'get']) {
+      const real = gcal[op];
+      gcal[op] = async (...args) => {
+        if (held.op === op) { held.op = null; await new Promise((resolve) => { held.release = resolve; }); }
+        return real(...args);
+      };
+    }
+    const h = setup({ gcal, clock });
+    const inbox = createInboxStore(h.db, { onPurge: (id) => h.viewing.onPurge(id) });
+    return {
+      ...h,
+      hold: (op) => { held.op = op; },
+      reached: async () => {
+        for (let i = 0; i < 200 && !held.release; i += 1) await new Promise((resolve) => setImmediate(resolve));
+        assert.ok(held.release, 'the call is on its way');
+      },
+      answer: () => { const r = held.release; held.release = null; r(); },
+      // As routes.mjs runs them: the viewing seam first, then the purge, in one transaction (DESIGN §8.4).
+      leaves: {
+        'Not a client': (id) => h.db.transaction(() => { h.viewing.onLeadLeaving(id); inbox.leaveInbox(id); }),
+        'a never-list number': (id) => h.db.transaction(() => {
+          h.team.addNever({ phone: h.db.getLead(id).phone_e164 });
+          h.viewing.onLeadLeaving(id);
+          inbox.leaveInbox(id);
+        }),
+      },
+      inserts: () => gcal.calls.filter((c) => c[0] === 'insert').map((c) => c[1]),
+      viewingTasks: (id) => tasksForLead(h.db, id).filter((t) => t.kind === 'viewing'),
+    };
+  };
+
+  for (const what of ['Not a client', 'a never-list number']) {
+    // 1. Waiting on the lock: another lead's commit holds it while Google answers its re-check.
+    const h = harness();
+    try {
+      const x = h.lead('LEAD-20261201-0000aaaa');
+      const y = h.lead('LEAD-20261201-0000bbbb');
+      h.hold('holidays');
+      const px = h.viewing.commitBooking({ lead: x, listingId: 'BONA-W901', slotId: SLOT });
+      await h.reached();
+      // The caller read the lead before it left: the commit reads it again.
+      const py = h.viewing.commitBooking({ lead: y, listingId: 'BONA-W902', slotId: '2026-12-07T10:00+03:00' });
+      h.leaves[what](y.lead_id);
+      assert.equal(h.db.getLead(y.lead_id).inbox_state, 'out', what);
+      h.answer();
+      assert.equal((await px).ok, true, `${what}: the other lead's booking stands`);
+      assert.deepEqual(await py, { ok: false, reason: 'not_in_inbox' }, what);
+      assert.equal(h.inserts().length, 1, `${what}: only the other lead's event went out`);
+      assert.doesNotMatch(JSON.stringify(h.inserts()), new RegExp(y.phone_e164), `${what}: nothing of the lead reached Google`);
+      assert.deepEqual(h.rows().filter((r) => r.lead_id === y.lead_id), [], `${what}: no row`);
+      assert.deepEqual(h.viewingTasks(y.lead_id), [], `${what}: no task`);
+      // The tools refuse it as well, from the lead the caller holds or its id.
+      for (const ask of [{ lead: y }, { leadId: y.lead_id }]) {
+        assert.deepEqual(h.viewing.validate({ ...ask, listingId: 'BONA-W902', slotId: '2026-12-07T10:00+03:00' }), { ok: false, reason: 'not_in_inbox' }, what);
+        assert.deepEqual(await h.viewing.slots({ ...ask, listingId: 'BONA-W902' }), { bookable: false, reason: 'not_in_inbox' }, what);
+      }
+    } finally { h.db.close(); }
+
+    // 2. While the commit's reads are on their way: its booking that is over by its stored times is read first.
+    const k = harness();
+    try {
+      const y = k.lead('LEAD-20261201-0000cccc');
+      const first = await k.viewing.commitBooking({ lead: y, listingId: 'BONA-W901', slotId: SLOT });
+      assert.equal(first.ok, true);
+      k.clock.t = R(2026, 12, 6, 11, 5);
+      k.hold('get');
+      const p = k.viewing.commitBooking({ lead: y, listingId: 'BONA-W902', slotId: '2026-12-09T10:00+03:00' });
+      await k.reached();
+      k.leaves[what](y.lead_id);
+      k.answer();
+      assert.deepEqual(await p, { ok: false, reason: 'not_in_inbox' }, what);
+      assert.equal(k.inserts().length, 1, `${what}: only the first booking's event ever went out`);
+      assert.deepEqual(k.rows().map((r) => [r.booking_id, r.status]), [[first.bookingId, 'cancel_pending']], `${what}: no new row`);
+      assert.deepEqual(k.viewingTasks(y.lead_id).map((t) => t.status), ['cancelled'], `${what}: no new task`);
+      await k.viewing.tick();
+      assert.equal(k.gcal.events.size, 0, `${what}: the first booking's event is deleted`);
+      assert.deepEqual(k.rows().map((r) => r.status), ['cancelled']);
+    } finally { k.db.close(); }
+  }
+
+  // 3. A chat excluded while still in (a lid learned as a colleague's; the daily sweep takes it out later): refused the same way.
+  const e = harness();
+  try {
+    const lid = '100000000000001@lid';
+    const y = e.lead('LEAD-20261201-0000dddd', { wa_lid: lid });
+    e.team.ensureOwner({ phone: '966500000009', name: 'Owner Example' });
+    assert.equal(learnTeamLid(e.db, '966500000009', lid), true);
+    assert.equal(e.db.getLead(y.lead_id).inbox_state, 'in');
+    assert.deepEqual(e.viewing.validate({ lead: y, listingId: 'BONA-W901', slotId: SLOT }), { ok: false, reason: 'not_in_inbox' });
+    assert.deepEqual(await e.viewing.commitBooking({ lead: y, listingId: 'BONA-W901', slotId: SLOT }), { ok: false, reason: 'not_in_inbox' });
+    assert.deepEqual(e.inserts(), []);
+    assert.deepEqual(e.rows(), []);
+  } finally { e.db.close(); }
 });
 
 test('a restart on another WRITABLE calendar id: a queued deletion waits (a 404 there is no "already gone"), reconcile cancels none of its bookings, health says not_found; the right calendar back, the event goes', async () => {
