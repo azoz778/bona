@@ -17,7 +17,10 @@
  *   bookable day (MAX_AHEAD_DAYS in lib/slots.mjs).
  * - insert / get / delete: events.insert with `sendUpdates=none` and a deterministic id
  *   (eventIdFor), so a retry of the same booking can be recognised: a 409 is a success only when
- *   the event there carries this lead's id. delete treats 404/410 as done.
+ *   the event there carries this lead's id. delete treats 404/410 as done. insert's `ready` is the
+ *   caller's last word, asked right before the request (after any token refresh): false sends nothing.
+ * - The event id records the calendar it was made in (calendarTag: a short fingerprint, never the
+ *   id), so a 404 from another calendar id is never read as that event gone (calendarTagOf).
  * - access(): may the robot still manage events on the owner's calendar? A calendar that is no
  *   longer shared with it answers 404 for every event too, so the worker and reconcile ask this
  *   before they read a 404 as "already gone".
@@ -50,6 +53,9 @@ export const BOOKED_BY = "Booked by Bona's AI assistant on WhatsApp";
 
 const EVENT_ID_RE = /^[0-9a-v]{5,1024}$/;
 const BASE32HEX = '0123456789abcdefghijklmnopqrstuv';
+const TAG_RE = /^[0-9a-v]{8}$/;
+/** An id that records its calendar: this prefix, the tag, then the 26-character hash. Ids written before are `bona` + hash. */
+const TAGGED_ID_RE = /^bonc([0-9a-v]{8})[0-9a-v]{26}$/;
 
 const fail = (code, extra = {}) => ({ ok: false, code, ...extra });
 
@@ -71,14 +77,31 @@ function base32hex(buf) {
 }
 
 /**
+ * The calendar's fingerprint that its events' ids carry: 8 base32hex characters (40 bits) of a
+ * hash of the calendar id. Never the id itself: an event id is no place for an address.
+ */
+export function calendarTag(calendarId) {
+  return base32hex(crypto.createHash('sha256').update(`bona-calendar|${calendarId}`, 'utf8').digest().subarray(0, 5));
+}
+
+/** The calendar fingerprint an event id records, or null (an id written before ids recorded one). */
+export function calendarTagOf(eventId) {
+  return TAGGED_ID_RE.exec(String(eventId ?? ''))?.[1] ?? null;
+}
+
+/**
  * The event id of a booking: from the lead and the start, so the same booking always maps to the
  * same event (a retried insert answers 409, never a second event). `attempt` picks another id for
  * the same lead and start: Google keeps a deleted event's id, and an owner's move keeps the first
  * start's id on the moved booking, so a new booking takes the first attempt no row holds yet.
+ * `tag` (calendarTag of the calendar the event goes to) is recorded in the id; without one, the
+ * id is the earlier form, which records no calendar.
  */
-export function eventIdFor(leadId, startTs, attempt = 0) {
+export function eventIdFor(leadId, startTs, attempt = 0, tag = null) {
+  if (tag != null && !TAG_RE.test(String(tag))) throw new TypeError('eventIdFor: tag must be a calendarTag');
   const seed = `${leadId}|${startTs}${attempt > 0 ? `|${attempt}` : ''}`;
-  return `bona${base32hex(crypto.createHash('sha256').update(seed, 'utf8').digest().subarray(0, 16))}`;
+  const hash = base32hex(crypto.createHash('sha256').update(seed, 'utf8').digest().subarray(0, 16));
+  return tag == null ? `bona${hash}` : `bonc${tag}${hash}`;
 }
 
 /** One line of text: no line breaks (a name cannot add a line to the description), clipped. */
@@ -218,11 +241,20 @@ export function createGcal({
     return { ok: true, value: token.value };
   }
 
-  /** An authorised API call. A 401 drops the cached token, so the next call mints a new one. */
-  async function api(op, method, path, { query = null, json = undefined } = {}) {
+  /**
+   * An authorised API call. A 401 drops the cached token, so the next call mints a new one.
+   * `ready`, when given, is asked once the token is in hand, with no await before the request:
+   * anything but true (a throw too) sends nothing and answers `{ aborted: true }`.
+   */
+  async function api(op, method, path, { query = null, json = undefined, ready = null } = {}) {
     if (!configured) return { error: 'auth', notConfigured: true };
     const t = await accessToken();
     if (!t.ok) return { error: t.code, reported: true };
+    if (ready) {
+      let go = false;
+      try { go = ready() === true; } catch { go = false; }
+      if (!go) return { aborted: true };
+    }
     const url = new URL(`${API}${path}`);
     if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
     const headers = { authorization: `Bearer ${t.value}` };
@@ -309,12 +341,15 @@ export function createGcal({
    * Insert a booking's event (bookingEvent()). A 409 means that id exists: a success only when the
    * event there is live and carries the same lead. `uncertain` says whether the event may exist
    * although the call failed (a timeout, a network error, a 5xx), so the caller cleans it up.
+   * `ready()` is asked right before the request goes out: not true → `{ ok: false, aborted: true,
+   * uncertain: false }`, nothing sent (no code: no calendar failure either).
    */
-  async function insert(event) {
+  async function insert(event, { ready = null } = {}) {
     if (!EVENT_ID_RE.test(String(event?.id ?? ''))) return fail('bad_response', { uncertain: false });
-    const r = await api('insert', 'POST', calendarPath(calendarId), { query: { sendUpdates: 'none' }, json: event });
+    const r = await api('insert', 'POST', calendarPath(calendarId), { query: { sendUpdates: 'none' }, json: event, ready });
     if (r.notConfigured) return fail('auth', { uncertain: false });
     if (r.reported) return fail(r.error, { uncertain: false });
+    if (r.aborted) return { ok: false, aborted: true, uncertain: false };
     if (r.error) return failed('insert', r.error, { uncertain: true });
     if (r.status === 200) { succeeded(); return { ok: true, eventId: event.id }; }
     if (r.status === 409) {
@@ -378,6 +413,8 @@ export function createGcal({
 
   return {
     configured,
+    /** The fingerprint new event ids carry (calendarTag of the configured calendar); null when not configured. */
+    calendarTag: configured ? calendarTag(calendarId) : null,
     freeBusy,
     holidays,
     cachedHolidays,

@@ -32,13 +32,20 @@
  *
  * The hooks and the purge only write rows, synchronously, inside the caller's transaction; they
  * never call Google (DESIGN §8.4). Google is called from slots, commitBooking, tick and reconcile.
+ * A commit sends the event (the client's name and phone) only if its row is still `booked` and the
+ * lead may still book, read right before the request: a purge while Google answered sends nothing.
  * Logs carry booking ids, lead ids and codes only: never a name, a phone, a calendar id or text.
+ *
+ * Each event id records the calendar it was made in (gcal calendarTag). A 404 from another calendar
+ * id (a restart on the wrong BONA_GCAL_CALENDAR_ID, even one the robot can write to) never cancels a
+ * row or finishes a deletion: the row waits, and health says not_found until the right calendar is
+ * back. Ids written before carry no calendar and keep the earlier rule.
  *
  * For PR-INT (index.mjs): pass `inventory` (the shared one; without it no listing is bookable),
  * and `fetchImpl` for the tests' fake fetch.
  */
 import { newId } from './db.mjs';
-import { bookingEvent, createGcal, eventIdFor } from './gcal.mjs';
+import { bookingEvent, calendarTagOf, createGcal, eventIdFor } from './gcal.mjs';
 import { propertyPath } from './inventory.mjs';
 import { bookViewing, cancelBookedViewing, moveBookedViewing, plausibleName, saveNeeds } from './lead-tasks.mjs';
 import {
@@ -165,6 +172,11 @@ export function createViewing(deps = {}) {
   const bookableListing = (l) => Boolean(l?.slug) && l.status === 'available' && l.location?.city?.en === BOOKABLE_CITY;
 
   const prep = (sql) => db.db.prepare(sql);
+  /** The event was made in another calendar than the one configured now (its id says so; an id written before says nothing). */
+  const madeElsewhere = (eventId) => {
+    const tag = calendarTagOf(eventId);
+    return tag !== null && tag !== (gcal?.calendarTag ?? null);
+  };
   /**
    * Booked rows over by their stored times whose event no read confirmed (a 404/410, or an event
    * with no times): never done on that, since the owner may have moved it later in a calendar the
@@ -278,8 +290,9 @@ export function createViewing(deps = {}) {
       // the robot ever sent has a row: dropRow only removes a row whose insert never went out or
       // was refused.)
       const taken = prep('SELECT 1 FROM viewing_bookings WHERE event_id = ?');
-      let eventId = eventIdFor(v.leadId, v.startTs, 0);
-      for (let attempt = 1; taken.get(eventId); attempt += 1) eventId = eventIdFor(v.leadId, v.startTs, attempt);
+      const tag = gcal.calendarTag ?? null;
+      let eventId = eventIdFor(v.leadId, v.startTs, 0, tag);
+      for (let attempt = 1; taken.get(eventId); attempt += 1) eventId = eventIdFor(v.leadId, v.startTs, attempt, tag);
       const bookingId = newId('bk');
       prep(`INSERT INTO viewing_bookings (booking_id, lead_id, task_id, listing_id, start_ts, end_ts, event_id, status, client_told, created, updated)
             VALUES (?, ?, NULL, ?, ?, ?, ?, 'booked', 0, ?, ?)`).run(bookingId, v.leadId, v.listingId, v.startTs, v.endTs, eventId, t, t);
@@ -377,13 +390,25 @@ export function createViewing(deps = {}) {
     const fb = await gcal.freeBusy({ timeMin: isoRiyadh(w.start), timeMax: isoRiyadh(w.end) });
     if (!fb.ok) { dropRow(row.bookingId); return failed('calendar', fb.code); }
     if (!isFree(v.startTs, fb.busy)) { dropRow(row.bookingId); return failed('busy'); }
-    // Step 6: the event.
+    // Step 6: the event, only while the row is still this booking and the lead may still book. A purge,
+    // Not a client, the lead gone or booking off while Google answered: the client's name and phone are
+    // never sent. Read here with no await before the call, and again by gcal.insert right before its
+    // request (after any token refresh). No event went out, so the row ends cancelled (nothing to delete).
+    const sendable = () => prep('SELECT status FROM viewing_bookings WHERE booking_id = ?').get(row.bookingId)?.status === 'booked'
+      && gate(db.getLead(v.leadId)) === null;
+    const unsent = () => {
+      prep("UPDATE viewing_bookings SET status = 'cancelled', updated = ? WHERE booking_id = ? AND status IN ('booked','cancel_pending')").run(now(), row.bookingId);
+      return failed('cancelled');
+    };
+    if (!sendable()) return unsent();
+    const current = db.getLead(v.leadId);
     const event = bookingEvent({
       eventId: row.eventId, leadId: v.leadId, bookingId: row.bookingId, listingId: listing.id,
       title: listing.title?.en || listing.id, homeUrl: homeUrl(siteUrl, listing, 'en'), leadUrl: leadLink(publicApi, v.leadId),
-      name: v.name, phone: lead?.phone_e164 ? `+${lead.phone_e164}` : null, startTs: v.startTs, endTs: v.endTs,
+      name: v.name, phone: current?.phone_e164 ? `+${current.phone_e164}` : null, startTs: v.startTs, endTs: v.endTs,
     });
-    const ins = await gcal.insert(event);
+    const ins = await gcal.insert(event, { ready: sendable });
+    if (ins.aborted) return unsent();
     if (!ins.ok) {
       // A call that may have gone through leaves the row to the worker, which deletes any event (404 = none).
       if (ins.uncertain) markPending(row.bookingId); else dropRow(row.bookingId);
@@ -482,15 +507,19 @@ export function createViewing(deps = {}) {
     }
     for (const r of probe?.ok ? pending : []) {
       const res = await gcal.delete(r.event_id);
-      if (res.ok) {
+      // 404 is "already gone" only in the calendar the event was made in: another calendar id (one the
+      // robot can write to as well) says nothing about it, and the row waits for the right one.
+      const elsewhere = res.ok && res.gone === true && madeElsewhere(r.event_id);
+      if (res.ok && !elsewhere) {
         out.cancelled += prep("UPDATE viewing_bookings SET status = 'cancelled', updated = ? WHERE booking_id = ? AND status = 'cancel_pending'").run(now(), r.booking_id).changes;
         continue;
       }
+      const code = elsewhere ? 'not_found' : res.code;
       out.failed += 1;
       // To the back of the queue, so one event that keeps failing never blocks the others.
       prep("UPDATE viewing_bookings SET updated = ? WHERE booking_id = ? AND status = 'cancel_pending'").run(now(), r.booking_id);
-      log({ level: 'warn', evt: 'viewing.cancel_retry', bookingId: r.booking_id, code: res.code });
-      if (CALENDAR_DOWN.has(res.code)) break;
+      log({ level: 'warn', evt: 'viewing.cancel_retry', bookingId: r.booking_id, code });
+      if (CALENDAR_DOWN.has(code)) break;
     }
     // Keep the holiday copy warm (one call per 12 h): validate() reads it without waiting.
     await gcal.holidays();
@@ -748,8 +777,10 @@ export function createViewing(deps = {}) {
       return out;
     }
     const res = await readEvents('reconcile', rows, t);
-    // Every time update of the run, and the 404s judged deleted, in one transaction (apply()).
-    const judged = res.found > 0 ? res.gone : [];
+    // Every time update of the run, and the 404s judged deleted, in one transaction (apply()). Never the
+    // 404 of an event made in another calendar: this one cannot show it (health says not_found).
+    const elsewhere = res.gone.filter((r) => madeElsewhere(r.event_id));
+    const judged = res.found > 0 ? res.gone.filter((r) => !elsewhere.includes(r)) : [];
     const did = apply(res.plans, judged);
     Object.assign(out, { checked: res.checked, moved: did.moved, cancelled: did.cancelled });
     if (res.found > 0) {
@@ -759,7 +790,7 @@ export function createViewing(deps = {}) {
       out.held = res.gone.length;
       log({ level: 'warn', evt: 'viewing.reconcile_held', gone: res.gone.length });
     }
-    unconfirmed(res.found > 0 ? res.unread : [...res.gone, ...res.unread], t);
+    unconfirmed(res.found > 0 ? [...res.unread, ...elsewhere] : [...res.gone, ...res.unread], t);
     log({ evt: 'viewing.reconciled', ...out });
     return out;
   }
@@ -768,9 +799,11 @@ export function createViewing(deps = {}) {
     if (!configured) return { enabled: false, gcal: { ...NOT_CONFIGURED } };
     const g = gcal.health?.() ?? {};
     for (const id of missing) if (!prep("SELECT 1 FROM viewing_bookings WHERE booking_id = ? AND status = 'booked'").get(id)) missing.delete(id);
+    // A booking or a queued deletion whose event was made in another calendar than the one configured now.
+    const elsewhere = prep("SELECT event_id FROM viewing_bookings WHERE status IN ('booked','cancel_pending')").all().some((r) => madeElsewhere(r.event_id));
     // The client's own failure first; else a held reconcile, or a booking whose event is missing (the calendar
-    // answers, without our events).
-    const own = held ?? (missing.size ? 'not_found' : null);
+    // answers, without our events, or it is another calendar).
+    const own = held ?? (missing.size || elsewhere ? 'not_found' : null);
     return { enabled: enabled(), gcal: { configured: true, ok: g.ok === true && !own, lastErrorCode: g.lastErrorCode ?? own ?? null } };
   }
 

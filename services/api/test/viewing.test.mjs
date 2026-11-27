@@ -14,7 +14,7 @@ import { createAudit } from '../lib/audit.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
 import { createDashboardRoutes } from '../lib/dashboard/routes.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
-import { createGcal, TOKEN_URL } from '../lib/gcal.mjs';
+import { calendarTagOf, createGcal, TOKEN_URL } from '../lib/gcal.mjs';
 import { DAY_CAP, confirmationText, createViewing } from '../lib/viewing.mjs';
 import { addTask, ensureHandoff, tasksForLead } from '../lib/lead-tasks.mjs';
 
@@ -760,6 +760,199 @@ test("a purge, the worker and reconcile while the insert is on its way: the row 
     await h.viewing.tick();
     assert.equal(gcal.events.has(eventC), false, 'no event is left behind');
     assert.equal(rowOf(c.lead_id).status, 'cancelled');
+  } finally { h.db.close(); }
+});
+
+test('a purge, Not a client, the lead gone or booking off while the re-check is on its way: no insert at all (nothing personal reaches Google), the row ends cancelled', async () => {
+  const gcal = fakeGcal();
+  const held = { holidays: false, freeBusy: false, release: null };
+  for (const op of ['holidays', 'freeBusy']) {
+    const real = gcal[op];
+    gcal[op] = async (...args) => {
+      if (held[op]) { held[op] = false; await new Promise((resolve) => { held.release = resolve; }); }
+      return real(...args);
+    };
+  }
+  const reached = async () => {
+    for (let i = 0; i < 200 && !held.release; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(held.release, 'the commit reached the re-check');
+  };
+  const answer = () => { const r = held.release; held.release = null; r(); };
+  const h = setup({ gcal });
+  try {
+    const rowOf = (leadId) => h.rows().find((r) => r.lead_id === leadId);
+    const inserts = () => gcal.calls.filter((c) => c[0] === 'insert');
+    const cases = [
+      ['a purge (leaving the inbox, the retention purge, the test switch off)', 'freeBusy', 'LEAD-20261201-0000aaaa', (id) => h.viewing.onPurge(id)],
+      ['Not a client (deleteForLead)', 'holidays', 'LEAD-20261201-0000bbbb', (id) => h.viewing.onLeadLeaving(id)],
+      ['the lead row gone', 'freeBusy', 'LEAD-20261201-0000cccc', (id) => h.db.db.prepare('DELETE FROM leads WHERE lead_id = ?').run(id)],
+      ['calendar booking switched off', 'freeBusy', 'LEAD-20261201-0000dddd', () => h.team.setSetting('calendar_booking', '0')],
+    ];
+    for (const [what, op, id, act] of cases) {
+      const lead = h.lead(id);
+      held[op] = true;
+      const p = h.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+      await reached();
+      assert.equal(rowOf(id).status === 'booked' || rowOf(id).status === 'cancel_pending', true, what);
+      act(id);
+      answer();
+      assert.deepEqual(await p, { ok: false, reason: 'cancelled' }, what);
+      assert.equal(inserts().length, 0, `${what}: no insert was called`);
+      assert.equal(gcal.events.size, 0, what);
+      assert.equal(rowOf(id).status, 'cancelled', `${what}: no event was sent, so there is none to delete`);
+      assert.equal(tasksForLead(h.db, id).some((t) => t.kind === 'viewing'), false, `${what}: no task`);
+      h.team.setSetting('calendar_booking', '1');
+    }
+    await h.viewing.tick();
+    assert.equal(gcal.calls.some((c) => c[0] === 'delete'), false, 'the worker has nothing to delete');
+    // The start is free again: the next client books it.
+    const next = h.lead('LEAD-20261201-0000eeee');
+    assert.equal((await h.viewing.commitBooking({ lead: next, listingId: 'BONA-W901', slotId: SLOT })).ok, true);
+    assert.doesNotMatch(JSON.stringify(h.logs), /Sara|9665/, 'logs carry ids and codes only');
+  } finally { h.db.close(); }
+
+  // The real client: the token runs out while freeBusy answers, so the insert mints a new one first,
+  // and the purge lands during that mint. The client asks again right before the request: nothing goes out.
+  const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const hold = { token: false, freeBusy: false, release: null };
+  const posts = [];
+  let mints = 0;
+  const pause = () => new Promise((resolve) => { hold.release = resolve; });
+  const fetchImpl = async (url, init = {}) => {
+    const u = new URL(url);
+    if (u.href === TOKEN_URL) {
+      mints += 1;
+      if (hold.token) { hold.token = false; await pause(); }
+      return json(200, { access_token: `tok-${mints}`, expires_in: 3599 });
+    }
+    if (u.pathname.includes('saudiarabian')) return json(200, { items: [] });
+    if (u.pathname.endsWith('/freeBusy')) {
+      if (hold.freeBusy) { hold.freeBusy = false; await pause(); }
+      return json(200, { calendars: { [CAL]: { busy: [] } } });
+    }
+    if ((init.method ?? 'GET') === 'POST') { posts.push(JSON.parse(init.body)); return json(200, { ...JSON.parse(init.body), status: 'confirmed' }); }
+    return json(500, {});
+  };
+  const clock = { t: NOW };
+  const real = createGcal({ saFile: '/home/example/.secrets/sa.json', calendarId: CAL, readFile: () => JSON.stringify({ client_email: 'robot@example.com', private_key: privateKey }), fetchImpl, now: () => clock.t });
+  const k = setup({ gcal: real, clock });
+  try {
+    const lead = k.lead('LEAD-20261201-0000ffff');
+    const waitHold = async () => {
+      for (let i = 0; i < 200 && !hold.release; i += 1) await new Promise((resolve) => setImmediate(resolve));
+      assert.ok(hold.release, 'held');
+    };
+    const go = () => { const r = hold.release; hold.release = null; r(); };
+    hold.freeBusy = true;
+    const p = k.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+    await waitHold();
+    assert.equal(mints, 1);
+    clock.t += 56 * 60_000; // past the 55 min token cache
+    hold.token = true;
+    go();
+    await waitHold();
+    assert.equal(mints, 2, 'the insert is minting its token');
+    k.viewing.onPurge(lead.lead_id);
+    go();
+    assert.deepEqual(await p, { ok: false, reason: 'cancelled' });
+    assert.deepEqual(posts, [], 'no insert request went out');
+    assert.equal(k.rows()[0].status, 'cancelled');
+  } finally { k.db.close(); }
+});
+
+test('a restart on another WRITABLE calendar id: a queued deletion waits (a 404 there is no "already gone"), reconcile cancels none of its bookings, health says not_found; the right calendar back, the event goes', async () => {
+  const CAL2 = 'other-calendar@example.com';
+  const cals = new Map([[CAL, new Map()], [CAL2, new Map()]]);
+  const deletes = [];
+  const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  const notFound = () => json(404, { error: { code: 404, errors: [{ domain: 'global', reason: 'notFound' }] } });
+  const fetchImpl = async (url, init = {}) => {
+    const u = new URL(url);
+    const method = init.method ?? 'GET';
+    if (u.href === TOKEN_URL) return json(200, { access_token: 'tok', expires_in: 3599 });
+    if (u.pathname.includes('saudiarabian')) return json(200, { items: [] });
+    if (u.pathname.endsWith('/freeBusy')) {
+      const ids = JSON.parse(init.body).items.map((i) => i.id);
+      return json(200, { calendars: Object.fromEntries(ids.map((id) => [id, { busy: [] }])) });
+    }
+    const m = /^\/calendar\/v3\/calendars\/([^/]+)\/events(?:\/([^/]+))?$/.exec(u.pathname);
+    const calId = m ? decodeURIComponent(m[1]) : null;
+    const events = calId ? cals.get(calId) : null;
+    if (!events) return notFound();
+    const id = m[2];
+    if (!id && method === 'GET') return json(200, { accessRole: 'writer' }); // both calendars are writable
+    if (!id && method === 'POST') {
+      const ev = JSON.parse(init.body);
+      events.set(ev.id, { ...ev, status: 'confirmed' });
+      return json(200, events.get(ev.id));
+    }
+    if (method === 'GET') return events.has(id) ? json(200, events.get(id)) : notFound();
+    if (method === 'DELETE') {
+      deletes.push([calId, id]);
+      if (!events.has(id)) return notFound();
+      events.delete(id);
+      return new Response(null, { status: 204 });
+    }
+    return json(500, {});
+  };
+  const clock = { t: NOW };
+  const gcalFor = (calendarId) => createGcal({ saFile: '/home/example/.secrets/sa.json', calendarId, readFile: () => JSON.stringify({ client_email: 'robot@example.com', private_key: privateKey }), fetchImpl, now: () => clock.t });
+  const h = setup({ gcal: gcalFor(CAL), clock });
+  const restart = (calendarId) => createViewing({
+    db: h.db, cfg: { siteUrl: SITE, publicApi: API_BASE }, team: h.team, ownerTest: { autoMode: () => true }, inventory, gcal: gcalFor(calendarId),
+    now: () => clock.t, log: (o) => h.logs.push(o),
+  });
+  try {
+    const statusOf = (bookingId) => h.rows().find((r) => r.booking_id === bookingId).status;
+    const taskOf = (leadId) => tasksForLead(h.db, leadId).find((t) => t.kind === 'viewing').status;
+    const a = h.lead('LEAD-20261201-0000aaaa');
+    const b = h.lead('LEAD-20261201-0000bbbb');
+    const ga = await h.viewing.commitBooking({ lead: a, listingId: 'BONA-W901', slotId: SLOT });
+    const gb = await h.viewing.commitBooking({ lead: b, listingId: 'BONA-W902', slotId: '2026-12-07T12:00+03:00' });
+    assert.equal(ga.ok && gb.ok, true);
+    assert.equal(calendarTagOf(ga.eventId), gcalFor(CAL).calendarTag, 'the event id records its calendar');
+    assert.equal(cals.get(CAL).has(ga.eventId), true);
+    assert.equal(h.viewing.cancelForLead(a.lead_id), 1, "A's deletion is queued");
+    // A row written before this change carries no calendar: today's behaviour (its 404 is done).
+    insertRow(h.db, { id: 'bk-old', leadId: 'LEAD-OLD', start: R(2026, 12, 10, 10), status: 'cancel_pending' });
+
+    // The restart, on another calendar id the robot can also write to.
+    const wrong = restart(CAL2);
+    assert.equal(wrong.health().gcal.lastErrorCode, 'not_found', 'the bookings were made in another calendar');
+    await wrong.tick();
+    assert.equal(statusOf(ga.bookingId), 'cancel_pending', "a 404 in another calendar is not A's event gone");
+    assert.equal(cals.get(CAL).has(ga.eventId), true, 'still in the calendar it was made in');
+    assert.deepEqual(deletes.find((d) => d[1] === ga.eventId), [CAL2, ga.eventId]);
+    assert.equal(statusOf('bk-old'), 'cancelled', 'no calendar recorded: as before');
+    assert.ok(h.logs.some((l) => l.evt === 'viewing.cancel_retry' && l.bookingId === ga.bookingId && l.code === 'not_found'));
+    assert.deepEqual(wrong.health(), { enabled: true, gcal: { configured: true, ok: false, lastErrorCode: 'not_found' } });
+    // A booking made on this calendar is found, so reconcile reads 404s as deleted; B's was made elsewhere: not B's.
+    const c = h.lead('LEAD-20261201-0000cccc');
+    const gc = await wrong.commitBooking({ lead: c, listingId: 'BONA-W903', slotId: '2026-12-08T10:00+03:00' });
+    assert.equal(gc.ok, true, JSON.stringify(gc));
+    assert.equal(cals.get(CAL2).has(gc.eventId), true);
+    assert.deepEqual(await wrong.reconcile(), { checked: 2, moved: 0, cancelled: 0, held: 0 });
+    assert.equal(statusOf(gb.bookingId), 'booked');
+    assert.equal(taskOf(b.lead_id), 'confirmed');
+    // A deletion of this calendar's own event still goes through.
+    wrong.cancelForLead(c.lead_id);
+    await wrong.tick();
+    assert.equal(statusOf(gc.bookingId), 'cancelled');
+    assert.equal(cals.get(CAL2).has(gc.eventId), false);
+    assert.equal(statusOf(ga.bookingId), 'cancel_pending', 'retried, and still waiting');
+
+    // The right calendar back: A's event goes, and health clears.
+    const right = restart(CAL);
+    await right.tick();
+    assert.equal(statusOf(ga.bookingId), 'cancelled');
+    assert.equal(cals.get(CAL).has(ga.eventId), false);
+    assert.deepEqual(right.health(), { enabled: true, gcal: { configured: true, ok: true, lastErrorCode: null } });
+    // In its own calendar a 404 is "already gone": the owner deleted B's event himself.
+    cals.get(CAL).delete(gb.eventId);
+    right.cancelForLead(b.lead_id);
+    await right.tick();
+    assert.equal(statusOf(gb.bookingId), 'cancelled');
+    assert.doesNotMatch(JSON.stringify(h.logs), /Sara|9665|owner-calendar|other-calendar|robot/, 'logs carry ids and codes only');
   } finally { h.db.close(); }
 });
 

@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import {
-  API, HOLIDAY_CALENDAR, SCOPES, TOKEN_URL, bookingEvent, createGcal, eventIdFor, isBlockingHoliday,
+  API, HOLIDAY_CALENDAR, SCOPES, TOKEN_URL, bookingEvent, calendarTag, calendarTagOf, createGcal, eventIdFor, isBlockingHoliday,
 } from '../lib/gcal.mjs';
 
 const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
@@ -288,6 +288,29 @@ test('the event id is deterministic base32hex: stable for the same lead and star
   assert.equal(eventIdFor('LEAD-20261201-0000aaaa', R(2026, 12, 6, 10), 0), a);
 });
 
+test('the event id records the calendar it is made in: a short fingerprint of the id, never the id; ids written before carry none', () => {
+  const lead = 'LEAD-20261201-0000aaaa';
+  const start = R(2026, 12, 6, 10);
+  const tag = calendarTag(CAL);
+  assert.match(tag, /^[0-9a-v]{8}$/);
+  assert.equal(tag, calendarTag(CAL), 'stable');
+  assert.notEqual(tag, calendarTag('other-calendar@example.com'));
+  const id = eventIdFor(lead, start, 0, tag);
+  assert.match(id, /^[0-9a-v]{5,1024}$/, 'still an id Google accepts');
+  assert.equal(id, eventIdFor(lead, start, 0, tag), 'deterministic: a retried insert still answers 409');
+  assert.notEqual(id, eventIdFor(lead, start, 1, tag));
+  assert.notEqual(id, eventIdFor(lead, start, 0, calendarTag('other-calendar@example.com')));
+  assert.equal(calendarTagOf(id), tag);
+  assert.equal(calendarTagOf(eventIdFor(lead, start)), null, 'an id without a calendar (rows written before) has none');
+  assert.equal(calendarTagOf('bonabk0000'), null);
+  assert.equal(calendarTagOf(null), null);
+  assert.doesNotMatch(id, /owner|calendar|example/);
+  assert.throws(() => eventIdFor(lead, start, 0, 'Not-A-Tag'), TypeError);
+  // The client says which calendar it is on; not configured, none.
+  assert.equal(client().gcal.calendarTag, tag);
+  assert.equal(createGcal({}).calendarTag, null);
+});
+
 const EVENT_INPUT = {
   eventId: eventIdFor('LEAD-20261201-0000aaaa', R(2026, 12, 6, 14)), leadId: 'LEAD-20261201-0000aaaa', bookingId: 'bk-0001',
   listingId: 'BONA-W012', title: 'Sea-view villa, Al Shati', homeUrl: 'https://bona.example.com/properties/sea-view-villa/',
@@ -360,6 +383,27 @@ test('insert posts to the calendar with sendUpdates=none; a 409 is a success onl
   assert.deepEqual(await c.gcal.insert(ev), { ok: false, code: 'bad_response', uncertain: false });
   c = conflict(json(200, { ...mine, status: 'cancelled' }));
   assert.equal((await c.gcal.insert(ev)).ok, false, 'our own deleted event is not a booking');
+});
+
+test("insert's `ready` is asked right before the request, after any token refresh: false sends nothing (no event, no name or phone)", async () => {
+  const ev = bookingEvent(EVENT_INPUT);
+  const clock = { t: T0 };
+  const asked = [];
+  const { gcal, g } = client({ clock, routes: { [`POST ${EVENTS_PATH}`]: (c) => json(200, { ...JSON.parse(c.body), status: 'confirmed' }) } });
+  const tokens = () => g.calls.filter((c) => c.url.href === TOKEN_URL).length;
+  assert.deepEqual(await gcal.insert(ev, { ready: () => { asked.push(tokens()); return false; } }), { ok: false, aborted: true, uncertain: false });
+  assert.deepEqual(asked, [1], 'asked once, after the token');
+  assert.equal(g.apiCalls().length, 0, 'no insert went out');
+  assert.equal(gcal.health().lastErrorCode, null, 'not a calendar failure');
+  // A ready that throws sends nothing either.
+  assert.deepEqual(await gcal.insert(ev, { ready: () => { throw new Error('db gone'); } }), { ok: false, aborted: true, uncertain: false });
+  assert.equal(g.apiCalls().length, 0);
+  // The token runs out: the new one is minted first, then `ready` decides.
+  clock.t += 56 * MIN;
+  asked.length = 0;
+  assert.deepEqual(await gcal.insert(ev, { ready: () => { asked.push(tokens()); return true; } }), { ok: true, eventId: ev.id });
+  assert.deepEqual(asked, [2]);
+  assert.equal(g.apiCalls().length, 1);
 });
 
 test('an insert that may have gone through (timeout, network, 5xx) says uncertain; a 4xx does not', async () => {
