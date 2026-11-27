@@ -7,7 +7,7 @@
 import { localePath, t, ui, type Locale } from '../lib/i18n';
 interface Props { locale: Locale }
 const { locale } = Astro.props;
-const privacyHref = `${localePath(locale, '/privacy/')}#cookies`;
+const privacyHref = `${localePath(locale, '/privacy/')}#what-this-site-collects`;
 ---
 <div class="consent" data-consent role="dialog" aria-modal="false" aria-labelledby="consent-title" aria-describedby="consent-text" hidden>
   <div class="consent-sheet">

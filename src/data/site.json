@@ -97,8 +97,8 @@
     "enabled": true,
     "apiBase": "https://api.bona-real-estate.com",
     "name": {
-      "en": "Dana",
-      "ar": "دانة"
+      "en": "Bona’s AI assistant",
+      "ar": "مساعدة بونا الذكية"
     }
   },
   "analytics": {

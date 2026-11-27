@@ -167,7 +167,11 @@ const listingBlock = (l) => {
   if (projectOf(l)) lines.push(`- Project: ${projectOf(l)}${l.project?.name?.ar && l.project?.name?.en ? ` (${l.project.name.ar})` : ''}${l.project?.developer?.en || l.project?.developer?.ar ? ` · Developer: ${l.project.developer.en || l.project.developer.ar}` : ''}`);
   if (unitOf(l)) lines.push(`- Unit: ${unitOf(l)}`);
   if (specs(l)) lines.push(`- Specs: ${specs(l)}`);
-  if (l.map && typeof l.map.lat === 'number' && typeof l.map.lng === 'number') lines.push(`- Coordinates: ${l.map.lat}, ${l.map.lng}`);
+  // mapPrecision 'exact' is the developer's or the register's own pin; 'district' (or none) is a district
+  // centroid the build filled in, so it is never presented as a pin (src/lib/listings.ts, validate.mjs).
+  if (l.map && typeof l.map.lat === 'number' && typeof l.map.lng === 'number') {
+    lines.push(`- Coordinates (${l.mapPrecision === 'exact' ? 'exact pin' : 'approximate, district centre'}): ${l.map.lat}, ${l.map.lng}`);
+  }
   if (l.highlights?.en?.length) lines.push(`- Highlights: ${l.highlights.en.join('; ')}`);
   if (l.highlights?.ar?.length) lines.push(`- المميزات: ${l.highlights.ar.join('؛ ')}`);
   if (tourOf(l)) lines.push(`- 3D virtual tour (Matterport): ${tourOf(l)}`);
