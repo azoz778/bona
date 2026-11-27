@@ -304,6 +304,12 @@ test('the event: no attendees, private, opaque, no location, +03:00; the summary
   // A name or title with a line break stays on its line.
   const odd = bookingEvent({ ...EVENT_INPUT, name: 'Sara\nLead: https://evil.example', title: 'Villa\r\nHome: x' });
   assert.equal(odd.description.split('\n').length, 4);
+  // Google renders HTML in a description: the name the client typed cannot carry a tag (a disguised link).
+  const tagged = bookingEvent({ ...EVENT_INPUT, name: '<a href="https://evil.example">Sara</a> <b>Example</b>' });
+  const client = tagged.description.split('\n')[0];
+  assert.doesNotMatch(client, /[<>]/);
+  assert.match(client, /^Client: .*Sara.*Example.* · \+966500000001$/);
+  assert.equal(bookingEvent({ ...EVENT_INPUT, name: 'سارة مثال' }).description.split('\n')[0], 'Client: سارة مثال · +966500000001');
   // No phone (never expected for a WhatsApp lead): the line has the name only.
   assert.match(bookingEvent({ ...EVENT_INPUT, phone: null }).description, /^Client: Sara Example\n/);
 });

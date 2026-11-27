@@ -7,7 +7,10 @@
  * - A slot S is free when no busy block overlaps [S - 30 min, S + 90 min) (half-open), and its day
  *   is not a blocked holiday. An all-day opaque event is a busy block over the whole day, so it
  *   takes every slot of that day. Past slots are never offered.
- * - At most 3 a day and 6 in all, spread over the day and over the days.
+ * - At most 3 a day and 6 in all: the earliest bookable days first, each day's slots spread over
+ *   the day (morning to evening). So an open week offers 3 on each of the first two bookable days;
+ *   a busier calendar spreads the 6 over more days. validate() still takes any free grid slot up to
+ *   MAX_AHEAD_DAYS ahead.
  * - The labels come from code, never from the model: AR "الأحد 29 نوفمبر 10:00 صباحاً", EN
  *   "Sunday 29 November, 10:00 am".
  *

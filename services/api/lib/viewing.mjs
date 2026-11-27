@@ -15,8 +15,8 @@
  *     onLeadLeaving (Not a client, a new colleague's or never-list number → deleteForLead);
  *   - the inbox store's `onPurge` (purgeLead: leaving the inbox, the retention purge, the test
  *     switch going off) → cancelForLead;
- *   - the timers (PR-INT): tick() every 5 min (cancellations, past → done, the holiday copy) and
- *     reconcile() at 05:00 and before the summary.
+ *   - the timers (PR-INT): tick() every 5 min (rows a restart left untold, cancellations, past →
+ *     done, the holiday copy) and reconcile() at 05:00 and before the summary.
  *
  * The hooks and the purge only write rows, synchronously, inside the caller's transaction; they
  * never call Google (DESIGN §8.4). Google is called from slots, commitBooking, tick and reconcile.
@@ -43,6 +43,12 @@ const WORKER_BATCH = 25;
 const RECONCILE_BATCH = 200;
 /** Codes that mean the whole calendar is unreachable: the rest of a run would fail the same way. */
 const CALENDAR_DOWN = new Set(['auth', 'forbidden', 'network', 'timeout', 'quota']);
+/**
+ * A `booked` row with no task that no commit in this process holds, and older than this, was left by
+ * a process that stopped between the reserve and the task (a restart). A commit takes at most a
+ * few 5 s calls; the margin also covers a commit in another process over the same database.
+ */
+export const STRANDED_MS = 2 * 60_000;
 
 const NOT_CONFIGURED = Object.freeze({ configured: false, ok: false, lastErrorCode: null });
 
@@ -234,6 +240,23 @@ export function createViewing(deps = {}) {
   const dropRow = (bookingId) => prep('DELETE FROM viewing_bookings WHERE booking_id = ?').run(bookingId);
   const markPending = (bookingId) => prep("UPDATE viewing_bookings SET status = 'cancel_pending', updated = ? WHERE booking_id = ? AND status IN ('booked','done')").run(now(), bookingId);
 
+  /**
+   * A restart between the reserve (step 3) and the task (step 7) leaves a `booked` row with no task:
+   * its insert may have landed, and the client was never told. Such a row → cancel_pending, so the
+   * worker deletes any event (404 = none) and the lead and the start are free again. A row this
+   * process's own commit holds is never touched; every other commit sets its task, drops its row or
+   * marks it before it lets go (place()).
+   */
+  function sweepStranded(t) {
+    const rows = prep("SELECT booking_id FROM viewing_bookings WHERE status = 'booked' AND task_id IS NULL AND created < ? ORDER BY created, booking_id")
+      .all(t - STRANDED_MS).filter((r) => !inFlight.has(r.booking_id));
+    if (!rows.length) return 0;
+    const marked = db.transaction(() => rows.filter((r) => prep("UPDATE viewing_bookings SET status = 'cancel_pending', updated = ? WHERE booking_id = ? AND status = 'booked' AND task_id IS NULL")
+      .run(t, r.booking_id).changes === 1));
+    for (const r of marked) log({ level: 'warn', evt: 'viewing.stranded', bookingId: r.booking_id });
+    return marked.length;
+  }
+
   async function commit(o) {
     const v = validate(o);
     if (!v.ok) return v;
@@ -358,10 +381,11 @@ export function createViewing(deps = {}) {
   function onLeadLeaving(leadId) { deleteForLead(leadId); }
   function onPurge(leadId) { cancelForLead(leadId); }
 
-  /** The worker: past → done, then the cancellations, oldest first; a failure waits for the next run. */
+  /** The worker: rows a restart left untold → cancel_pending, past → done, then the cancellations, oldest first; a failure waits for the next run. */
   async function work() {
     const t = now();
-    const out = { done: flipDone(t), cancelled: 0, failed: 0 };
+    const stranded = sweepStranded(t);
+    const out = { stranded, done: flipDone(t), cancelled: 0, failed: 0 };
     const pending = prep("SELECT booking_id, event_id FROM viewing_bookings WHERE status = 'cancel_pending' ORDER BY updated, booking_id LIMIT ?").all(WORKER_BATCH)
       .filter((r) => !inFlight.has(r.booking_id));
     // A delete answers 404 on a calendar the robot cannot see as well: that is no "already gone".
@@ -418,6 +442,8 @@ export function createViewing(deps = {}) {
     const out = { checked: 0, moved: 0, cancelled: 0, held: 0 };
     if (!configured) return out;
     const t = now();
+    // A row a restart left untold is no booking to check: the worker deletes its event.
+    sweepStranded(t);
     flipDone(t);
     const rows = prep("SELECT * FROM viewing_bookings WHERE status = 'booked' AND end_ts >= ? ORDER BY start_ts, booking_id LIMIT ?").all(t, RECONCILE_BATCH);
     if (!rows.length) {

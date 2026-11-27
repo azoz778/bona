@@ -83,6 +83,8 @@ export function eventIdFor(leadId, startTs, attempt = 0) {
 
 /** One line of text: no line breaks (a name cannot add a line to the description), clipped. */
 const line = (v, max = 200) => String(v ?? '').replace(/[\r\n\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+/** The name the client typed: one line and no `<` or `>`, since Google renders HTML in a description (no disguised link). */
+const nameLine = (v) => line(String(v ?? '').replace(/[<>]/g, ' '), 80);
 
 /**
  * The calendar event of a booking (DESIGN §8.3 step 6). The summary carries the listing, never the
@@ -94,7 +96,7 @@ export function bookingEvent({ eventId, leadId, bookingId, listingId, title, hom
     id: eventId,
     summary: `Bona viewing · ${line(listingId, 40)}`,
     description: [
-      `Client: ${line(name, 80)}${phone ? ` · ${line(phone, 20)}` : ''}`,
+      `Client: ${nameLine(name)}${phone ? ` · ${line(phone, 20)}` : ''}`,
       `Home: ${line(title)} ${line(homeUrl, 300)}`,
       `Lead: ${line(leadUrl, 300)}`,
       BOOKED_BY,

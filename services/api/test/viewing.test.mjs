@@ -100,10 +100,13 @@ function setup({ gcal = fakeGcal(), auto = true, booking = '1', clock = { t: NOW
   return { db, team, viewing, gcal, clock, logs, lead, rows };
 }
 
-/** A booked row written straight into the table (another process, or an earlier day). */
-function insertRow(db, { id, leadId, start, status = 'booked', listing = 'BONA-W901', created = NOW - DAY, eventId = `bona${id.replace(/[^0-9a-v]/g, '')}0000` }) {
+/**
+ * A finished booking's row written straight into the table (another process, or an earlier day): it
+ * has a task id, as every committed booking does. `taskId: null` is a commit that never finished.
+ */
+function insertRow(db, { id, leadId, start, status = 'booked', listing = 'BONA-W901', created = NOW - DAY, eventId = `bona${id.replace(/[^0-9a-v]/g, '')}0000`, taskId = `task-${id}` }) {
   db.db.prepare(`INSERT INTO viewing_bookings (booking_id, lead_id, task_id, listing_id, start_ts, end_ts, event_id, status, client_told, created, updated)
-    VALUES (?,?,NULL,?,?,?,?,?,0,?,?)`).run(id, leadId, listing, start, start + H, eventId, status, created, created);
+    VALUES (?,?,?,?,?,?,?,?,0,?,?)`).run(id, leadId, taskId, listing, start, start + H, eventId, status, created, created);
   return eventId;
 }
 
@@ -727,6 +730,83 @@ test("a purge, the worker and reconcile while the insert is on its way: the row 
     await h.viewing.tick();
     assert.equal(gcal.events.has(eventC), false, 'no event is left behind');
     assert.equal(rowOf(c.lead_id).status, 'cancelled');
+  } finally { h.db.close(); }
+});
+
+test('a restart between the reserve and the task: the next process moves the untold row (booked, no task) to cancel_pending and deletes its event; a commit in flight is never touched', async () => {
+  const clock = { t: NOW };
+  const gcal = fakeGcal();
+  const insert = gcal.insert;
+  const gate = { on: false, release: null };
+  // The event lands; Google's answer only comes when the test releases it (the process "dies" in between).
+  gcal.insert = async (ev) => {
+    const got = await insert(ev);
+    if (gate.on) await new Promise((resolve) => { gate.release = resolve; });
+    return got;
+  };
+  const h = setup({ gcal, clock });
+  try {
+    const lead = h.lead();
+    gate.on = true;
+    const first = h.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+    for (let i = 0; i < 200 && !gate.release; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(gate.release, 'the commit reached the insert');
+    gate.on = false;
+    const [row] = h.rows();
+    assert.deepEqual({ status: row.status, task: row.task_id, told: row.client_told }, { status: 'booked', task: null, told: 0 });
+    assert.equal(gcal.events.has(row.event_id), true, 'the event landed');
+
+    // The restart: a new process over the same database, with nothing in flight.
+    const after = createViewing({
+      db: h.db, cfg: { siteUrl: SITE, publicApi: API_BASE }, team: h.team, ownerTest: { autoMode: () => true }, inventory, gcal,
+      now: () => clock.t, log: (o) => h.logs.push(o),
+    });
+    // A row this young may still be another process's commit: left alone.
+    clock.t = NOW + 30_000;
+    await after.tick();
+    assert.equal(h.rows()[0].status, 'booked');
+    // The process that holds the commit leaves its own row alone, however long Google takes.
+    clock.t = NOW + 10 * 60_000;
+    await h.viewing.tick();
+    assert.equal(h.rows()[0].status, 'booked');
+    assert.deepEqual(gcal.calls.filter((c) => c[0] === 'delete'), []);
+
+    // The new process: the row goes cancel_pending, and the same run deletes the event.
+    const out = await after.tick();
+    assert.equal(out.stranded, 1);
+    assert.equal(h.rows()[0].status, 'cancelled');
+    assert.equal(gcal.events.has(row.event_id), false, 'no event is left in the calendar for a client who was never told');
+    assert.ok(h.logs.some((l) => l.evt === 'viewing.stranded' && l.bookingId === row.booking_id));
+    assert.doesNotMatch(JSON.stringify(h.logs), /Sara|9665/, 'logs carry ids and codes only');
+    // The lead can book again, in the new process (a new event id: Google keeps the deleted one's).
+    const again = await after.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+    assert.equal(again.ok, true, JSON.stringify(again));
+    assert.notEqual(again.eventId, row.event_id);
+    // The old commit's late answer (were it still alive) finds its row cancelled: no second booking.
+    gate.release();
+    assert.deepEqual(await first, { ok: false, reason: 'cancelled' });
+    assert.deepEqual(h.rows().map((r) => r.status), ['cancelled', 'booked']);
+  } finally { h.db.close(); }
+});
+
+test('reconcile sweeps an untold row (booked, no task) left by an earlier process before it checks the calendar', async () => {
+  const h = setup();
+  try {
+    const at = (ts) => ({ dateTime: new Date(ts).toISOString() });
+    const lead = h.lead();
+    const strandedEvent = insertRow(h.db, { id: 'bk-stranded', leadId: lead.lead_id, start: SLOT_TS, taskId: null });
+    h.gcal.events.set(strandedEvent, { id: strandedEvent, status: 'confirmed', start: at(SLOT_TS), end: at(SLOT_TS + H) });
+    const other = h.lead('LEAD-20261201-0000bbbb');
+    const fineEvent = insertRow(h.db, { id: 'bk-fine', leadId: other.lead_id, start: R(2026, 12, 7, 12) });
+    h.gcal.events.set(fineEvent, { id: fineEvent, status: 'confirmed', start: at(R(2026, 12, 7, 12)), end: at(R(2026, 12, 7, 13)) });
+    assert.equal(h.viewing.validate({ lead, listingId: 'BONA-W901', slotId: '2026-12-08T10:00+03:00' }).reason, 'active_booking');
+
+    assert.deepEqual(await h.viewing.reconcile(), { checked: 1, moved: 0, cancelled: 0, held: 0 }, 'only the finished booking is checked');
+    assert.deepEqual(h.rows().map((r) => [r.booking_id, r.status]), [['bk-fine', 'booked'], ['bk-stranded', 'cancel_pending']]);
+    await h.viewing.tick();
+    assert.deepEqual(h.rows().map((r) => [r.booking_id, r.status]), [['bk-fine', 'booked'], ['bk-stranded', 'cancelled']]);
+    assert.deepEqual([h.gcal.events.has(strandedEvent), h.gcal.events.has(fineEvent)], [false, true]);
+    assert.equal(h.viewing.validate({ lead, listingId: 'BONA-W901', slotId: '2026-12-08T10:00+03:00' }).ok, true, 'the lead can book again');
   } finally { h.db.close(); }
 });
 
