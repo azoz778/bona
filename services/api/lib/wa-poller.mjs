@@ -648,12 +648,14 @@ export function createPoller({
    * 16b, 16c, 16d): a record of a chat whose phone, jid or lid is on a dismissed row makes no lead,
    * joins nothing and stores nothing, under the own rule or the shared one, in either direction:
    * a dismissed caller's Ref line, and a `fromMe` Bona link or listing id (typed on the phone, a
-   * staff send, a WhatsApp Business Greeting/Away message) alike. Nor does the list's cleanup
-   * (noteCandidateSafely) run for it, so the mark is never removed by the poller: only the
-   * owner's own action on the dashboard brings such a chat in. A lead already `in` is not held:
-   * its own inbox state rules (the owner moved it in). Under the own rule, a mark made before the
-   * move is noted for the owner when the chat writes (an inbound record only). The store's
-   * `dismissedCandidateFor` is PR-A2's; until it is there nothing is held.
+   * staff send, a WhatsApp Business Greeting/Away message) alike. It is asked before any branch
+   * of the tick, so noise (a reaction, an edit, a delete) is held too, and the list's cleanup
+   * (noteCandidateSafely) never runs for a held record: the mark is never removed by the poller,
+   * only the owner's own action on the dashboard brings such a chat in. A lead already `in` is not
+   * held: its own inbox state rules (the owner moved it in). Under the own rule, a mark made before
+   * the move is noted for the owner when the chat writes (an inbound message only: noise is no
+   * message of its own). The store's `dismissedCandidateFor` is PR-A2's; until it is there nothing
+   * is held.
    * @returns {boolean} held
    */
   function heldAsDismissed(rec) {
@@ -664,7 +666,7 @@ export function createPoller({
     if (lead?.inbox_state === 'in') return false;
     const row = inboxStore.dismissedCandidateFor({ phone: jids.phone, jid: jids.waJid, lid: jids.waLid });
     if (!row) return false;
-    if (!rec.fromMe && ownRuleOn(jids) && !isOwnerChat(jids, lead) && beforeLink(row.updated)) oldOutWrote({ candId: row.cand_id });
+    if (!rec.fromMe && !rec.noise && ownRuleOn(jids) && !isOwnerChat(jids, lead) && beforeLink(row.updated)) oldOutWrote({ candId: row.cand_id });
     return true;
   }
 
@@ -1163,7 +1165,7 @@ export function createPoller({
    * Noise (an edit, a reaction …) is no message of its own, so it notes nothing: an edit's
    * text is the new text of a message already counted, and counting it again would also
    * move `last_ts`, and with it the 30-day deletion, later. It still takes a chat that has
-   * become a lead off the list.
+   * become a lead off the list (`dropCandidateRows`).
    *
    * Known edge, accepted: the note is written before the record is marked seen, and the two
    * are not one transaction (the list never fails the record, D17). If `waSeenAdd` throws
@@ -1183,8 +1185,9 @@ export function createPoller({
       const jids = jidsOf(rec);
       if (jids.waJid && !jids.waJid.endsWith('@s.whatsapp.net')) return;
       if (!jids.phone && !jids.waJid && !jids.waLid) return;
-      if (findLead(jids)) {
-        inboxStore.removeCandidatesFor({ phone: jids.phone, jid: jids.waJid, lid: jids.waLid });
+      const lead = findLead(jids);
+      if (lead) {
+        dropCandidateRows(jids, lead);
         return;
       }
       if (rec.noise) return;
@@ -1206,6 +1209,26 @@ export function createPoller({
       if (res.state === 'open') tally.candidates += 1;
     } catch (err) {
       log({ level: 'warn', evt: 'inbox.candidate_failed', ...errorKind(err) });
+    }
+  }
+
+  /**
+   * A chat that became a lead leaves the list: its rows go, its inbox state rules now. On Bona's
+   * number, while that lead is not `in`, only its OPEN rows go, id by id: a dismissed row is the
+   * owner's *Not a client* (`heldAsDismissed`), which only his own action ends. The hold already
+   * keeps a dismissed chat's records away from here; this keeps the mark when it lands while a
+   * record is being handled (after the hold was asked, before this cleanup). Without PR-A2's
+   * `dismissedCandidateFor` the store cannot tell the two apart and nothing is held yet, so every
+   * row goes, as today; off Bona's number, and for a lead the owner moved in, as today too.
+   */
+  function dropCandidateRows(jids, lead) {
+    const ids = { phone: jids.phone, jid: jids.waJid, lid: jids.waLid };
+    if (!bonaNumber || lead.inbox_state === 'in' || typeof inboxStore.dismissedCandidateFor !== 'function') {
+      inboxStore.removeCandidatesFor(ids);
+      return;
+    }
+    for (const [kind, id] of Object.entries(ids)) {
+      if (id && !inboxStore.dismissedCandidateFor({ [kind]: id })) inboxStore.removeCandidatesFor({ [kind]: id });
     }
   }
 
@@ -1361,14 +1384,18 @@ export function createPoller({
         let handled = inboxOn ? (failures.get(rec.id)?.handled ?? null) : null;
         let held = false;
         try {
+          // A chat the owner marked "Not a client" on the list to check, on Bona's number, is held
+          // before any branch, noise included (`heldAsDismissed`): no lead, no join, nothing stored,
+          // and the list's cleanup below never runs for it, so its row is left as he left it.
+          held = heldAsDismissed(rec);
           if (rec.noise) {
             // A reaction, an edit, a delete (lib/evolution.mjs `isNoise`) is no message of
             // its own, whoever sent it: it never goes through the merge (no touchpoint, no
             // `first_inbound_ts`, no reopened add), never answers a lead, never creates one
             // (not from a Ref line or a Bona link in an edit's new text either) and never
             // moves a chat's inbox state. Ingest would refuse to store it anyway. The
-            // candidate list below still hears of it, only to take a chat that has become
-            // a lead off the list.
+            // candidate list below still hears of it (a held chat's never), only to take a
+            // chat that has become a lead off the list.
             tally.ignored += 1;
           } else if (rec.fromMe) {
             // The lead as it is BEFORE the inbox steps: a stranger this record makes into an
@@ -1382,24 +1409,20 @@ export function createPoller({
             // watchdog nags about a lead that was answered — the harmless direction; a Dana
             // record silencing the watchdog for an unanswered lead is the harmful one.
             //
-            // A chat the owner marked "Not a client" on the list to check, on Bona's number, is held
-            // on this side too (`heldAsDismissed`): no lead, no join, nothing stored, the mark kept.
-            // The reply clock of a lead it already has still stamps: that writes no message.
+            // A held chat (above) is held on this side too: no lead, no join, nothing stored, the
+            // mark kept. The reply clock of a lead it already has still stamps: that writes no message.
             const seen = findLead(jidsOf(rec));
-            held = heldAsDismissed(rec);
             if (held) tally.held += 1;
             else if (inboxOn) await inboxAfterOutbound(rec, ts, tally);
             if (!isDanaRecordSafely(rec) && recordReply(seen, ts)) tally.replies += 1;
+          } else if (held) {
+            tally.held += 1;
           } else if (handled) {
             // Matched and merged on an earlier attempt; only the inbox steps failed.
             await inboxAfterInbound(rec, ts, handled, tally);
           } else {
-            // A chat the owner marked "Not a client" on the list to check, on Bona's number: no
-            // lead, no join, nothing stored, and its row is left as he left it.
-            held = heldAsDismissed(rec);
-            const out = held ? null : await handleInbound(rec, ts);
-            if (held) tally.held += 1;
-            else if (!out) tally.unmatched += 1;
+            const out = await handleInbound(rec, ts);
+            if (!out) tally.unmatched += 1;
             else {
               tally.matched += 1;
               if (out.created) tally.created += 1; else tally.merged += 1;

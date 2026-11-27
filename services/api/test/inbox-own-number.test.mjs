@@ -1032,3 +1032,66 @@ test('T06-16d on Bona\'s number the mark holds on the outbound path too: a fromM
     h.close();
   }
 });
+
+test('T06-16d on Bona\'s number noise in a dismissed chat (a reaction or an edit, inbound or fromMe) keeps the mark: a later Ref or "Hi" joins nothing', async () => {
+  for (const state of [{ ownInbox: true }, { ownInbox: false }]) {
+    const h = harness({ state });
+    seedSession(h);
+    seedDismissed(h, { candId: 'CND-lead', phone: digitsOf(131), at: LINKED_AT - DAY });
+    // A form lead with the same number, never in: before the fix the noise's cleanup found it and deleted the mark.
+    seedLead(h, 'LEAD-uns', 131, { inbox_state: 'unsure', inbox_since: NOW - DAY, match_method: 'form', channel: 'form' });
+    const cleanups = [];
+    const realRemove = h.inbox.removeCandidatesFor;
+    h.inbox.removeCandidatesFor = (ids) => { cleanups.push(ids); return realRemove(ids); };
+    h.push([
+      msg({ id: 'N1', jid: jidOf(131), ts: NOW - 95_000, text: '', messageType: 'reactionMessage', noise: true }),
+      msg({ id: 'N2', jid: jidOf(131), fromMe: true, pushName: null, ts: NOW - 90_000, text: '', messageType: 'reactionMessage', noise: true }),
+      msg({ id: 'N3', jid: jidOf(131), ts: NOW - 85_000, text: 'Ref BONA-W003 · K7Q2XR', messageType: null, noise: true }),
+      msg({ id: 'N4', jid: jidOf(131), fromMe: true, pushName: null, ts: NOW - 80_000, text: `${SITE}/properties/bona-w003/`, messageType: null, noise: true }),
+      msg({ id: 'R1', jid: jidOf(131), ts: NOW - 70_000, text: 'Hello\nRef BONA-W003 · K7Q2XR' }),
+      msg({ id: 'H1', jid: jidOf(131), ts: NOW - 60_000, text: 'Hi' }),
+    ]);
+    const tally = await h.tick(); // eslint-disable-line no-await-in-loop
+    const what = JSON.stringify(state);
+    assert.deepEqual(h.candidates().map((r) => [r.cand_id, r.state]), [['CND-lead', 'dismissed']], `${what}: the mark stays`);
+    assert.deepEqual(cleanups, [], `${what}: a held record, noise included, never reaches the list's cleanup`);
+    assert.equal(tally.joined, 0, what);
+    assert.deepEqual(h.leads().map((l) => [l.lead_id, l.inbox_state]), [['LEAD-uns', 'unsure']], `${what}: no lead made, none joined`);
+    assert.equal(h.messages(), 0, `${what}: nothing stored`);
+    assert.deepEqual(h.calls.wake, [], `${what}: Dana is not woken`);
+    assert.deepEqual(h.calls.leadEvent, [], what);
+    const ownRule = state.ownInbox;
+    assert.deepEqual(h.calls.alert, ownRule ? [['old_out_wrote', { candId: 'CND-lead' }]] : [],
+      `${what}: noise is not "the chat wrote"; the client's own message is, once a day`);
+    h.close();
+  }
+});
+
+test('T06-16d on Bona\'s number the cleanup of a chat whose lead is not in removes only its open rows: a mark that lands while the record is handled stays', async () => {
+  const LID = '400000000000142@lid';
+  for (const state of [{ ownInbox: true }, { ownInbox: false }]) {
+    const h = harness({ state });
+    seedLead(h, 'LEAD-a', 141, { inbox_state: 'out', match_method: 'form', channel: 'form' });
+    seedLead(h, 'LEAD-b', 142, { inbox_state: 'out', match_method: 'form', channel: 'form' });
+    seedDismissed(h, { candId: 'CND-a', phone: digitsOf(141), at: LINKED_AT + DAY });
+    // An open hidden-number row of LEAD-b's chat, listed before WhatsApp showed its number.
+    h.db.db.prepare(`INSERT INTO inbox_candidates (cand_id, jid, lid, phone_e164, name, first_ts, last_ts, hits, words, last_dir, state, updated)
+                     VALUES ('CND-b', NULL, ?, NULL, NULL, ?, ?, 1, 'lid-only', 'in', 'open', ?)`).run(LID, NOW - DAY, NOW - DAY, NOW - DAY);
+    // The owner's "Not a client" on CND-a lands after the hold check of A1 and before its cleanup.
+    let missed = false;
+    h.inbox.dismissedCandidateFor = (ids) => {
+      if (!missed && ids.phone === digitsOf(141)) { missed = true; return null; }
+      return dismissedFor(h.db, ids);
+    };
+    h.push([
+      msg({ id: 'A1', jid: jidOf(141), ts: NOW - 70_000, text: 'Hi' }),
+      msg({ id: 'B1', jid: LID, jidAlt: jidOf(142), ts: NOW - 60_000, text: 'Hi' }),
+    ]);
+    await h.tick(); // eslint-disable-line no-await-in-loop
+    const what = JSON.stringify(state);
+    assert.ok(missed, `${what}: the hold check ran first`);
+    assert.deepEqual(h.candidates().map((r) => [r.cand_id, r.state]), [['CND-a', 'dismissed']],
+      `${what}: the mark stays; the open row of a lead's chat goes`);
+    h.close();
+  }
+});
