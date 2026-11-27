@@ -97,6 +97,30 @@ function probe(s) {
   return { text, from, to };
 }
 
+const IGNORABLE_RE = /^[\p{Cf}\p{Default_Ignorable_Code_Point}]$/u;
+const MARK_RE = /^\p{M}$/u;
+const LETTER_RE = /^\p{L}$/u;
+/**
+ * The text as a reader sees it, for the reply guard (reply-guard.mjs): every digit ASCII (`asciiDigits`) and every
+ * other character as the probe reads it (a dash `-`, a space separator a space, ...), with two differences: a
+ * combining mark on a letter stays, so "ريالاً" is still a currency word (on anything else, a digit or a space, it
+ * goes); and every format or default-ignorable character (a direction or zero-width mark, a word joiner, a BOM, a
+ * bidi isolate, the soft hyphen, a variation selector) goes, wherever it is.
+ */
+export function readable(text) {
+  let out = '';
+  let onLetter = false;
+  for (const ch of asciiDigits(String(text ?? ''))) {
+    if (ch.charCodeAt(0) < 0x80) { out += ch; onLetter = /[A-Za-z]/.test(ch); continue; } // plain ASCII is itself
+    if (IGNORABLE_RE.test(ch)) continue;
+    if (MARK_RE.test(ch)) { if (onLetter) out += ch; continue; }
+    const mapped = probeOf(ch);
+    out += mapped ?? ch;
+    onLetter = mapped === undefined && LETTER_RE.test(ch);
+  }
+  return out;
+}
+
 /** The mask for a run of digits, or null when it is not a phone or an ID. */
 function maskFor(digits, plus) {
   if (plus && /^\d{9,15}$/.test(digits)) return '[phone]';

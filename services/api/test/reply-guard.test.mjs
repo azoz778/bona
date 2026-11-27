@@ -345,3 +345,53 @@ test("a home link written without a scheme (\"www.example.com/properties/x/\") i
     [{ kind: 'link' }], 'never another host');
   assert.equal(checkReply('Our site: bona-real-estate.com and bona-real-estate.com/ar/', { siteUrl: SITE }).ok, true, 'the site itself is not a home');
 });
+
+test('invisible and look-alike characters never hide an amount or a unit ref: the guard also reads the reply as a reader sees it (format marks gone, every space a space, every dash "-", every digit ASCII)', () => {
+  // A direction mark, a zero-width space, a word joiner, a BOM or a bidi isolate (\p{Cf}) between a figure and its currency,
+  // or inside a figure, is not drawn: "85,000<RLM> ريال" reaches the client as "85,000 ريال". A thin or en space (\p{Zs})
+  // between digit groups reads as a space; U+2011, an en dash or a minus (\p{Pd}, U+2212) in a unit ref as "-"; a mark on
+  // a digit (U+FE0F) is not there, but one on a letter stays ("ريالاً" is still riyals).
+  const priced = (en, ar) => [JSON.stringify({ results: [{ id: 'BONA-902', price_en: en, price_ar: ar }] })];
+  const tools = {
+    85_000: priced('SAR 85,000', '85,000 ر.س'), 1_500_000: priced('SAR 1,500,000', '1,500,000 ر.س'), 2_950_000: priced('SAR 2,950,000', '2,950,000 ر.س'),
+  };
+  const another = priced('SAR 95,000', '95,000 ر.س');
+  const marks = ['\u200F', '\u200E', '\u061C', '\u200B', '\u2060', '\uFEFF', '\u2066', '\u2067', '\u2068', '\u2069', '\u200F\u2069', '\uFE0F'];
+  const cases = [
+    ...marks.flatMap((c) => [
+      [`The annual rent is 85,000${c} SAR.`, 85_000], [`The annual rent is SAR${c} 85,000.`, 85_000], [`الإيجار 85,000${c} ريال`, 85_000],
+      [`الإيجار السنوي 85,000 ${c}ريالاً`, 85_000], [`الإيجار ${c}٨٥٬٠٠٠${c} ر.س`, 85_000],
+    ]),
+    ['الإيجار 85,000\u200F ريال', 85_000], ['السعر 2,950\u200F,000 ريال', 2_950_000], ['1\u200B,500,000 SAR', 1_500_000], ['1,500\u200B,000', 1_500_000],
+    ['The annual rent is 85\u200B,000 SAR.', 85_000], ['الإيجار 85,\u200F000 ريال', 85_000], ['Rent: 85\u2060000 SAR', 85_000],
+    ['Price 2\u2009950\u2009000 SAR', 2_950_000], ['Price 2\u2009950\u2009000', 2_950_000], ['Price 2\u2002950\u2002000', 2_950_000],
+    ['Price 2\u2008950\u2008000', 2_950_000], ['السعر 2\u2009950\u2009000 ريال', 2_950_000], ['The annual rent is 85\u2009000 SAR.', 85_000],
+    ['The annual rent is 85\u2005000 riyals.', 85_000], ['The annual rent is \uFF18\uFF15,\uFF10\uFF10\uFF10 SAR.', 85_000], ['الإيجار \u{1D7F4}\u{1D7F1},\u{1D7EC}\u{1D7EC}\u{1D7EC} ريال', 85_000],
+    ['The annual rent is *85,000*\u200F SAR.', 85_000],
+  ];
+  for (const [text, figure] of cases) {
+    const name = JSON.stringify(text);
+    assert.deepEqual(checkReply(text, { toolResults: [] }), { ok: false, hits: [{ kind: 'amount' }] }, `${name} (no tool)`);
+    assert.deepEqual(checkReply(text, { toolResults: another }).hits, [{ kind: 'amount' }], `${name} (another price)`);
+    assert.deepEqual(checkReply(text, { toolResults: tools[figure] }), { ok: true, hits: [] }, `${name} (the tool's own figure)`);
+  }
+  // The tool's own figure, written by the tool with these characters, allows the plain figure, and an earlier guarded reply too.
+  assert.equal(checkReply('السعر 2,950,000 ريال', { toolResults: priced('SAR 2\u2009950\u2009000', '2,950\u200F,000 ر.س') }).ok, true);
+  assert.equal(checkReply('الإيجار 85,000 ريال', { earlierReplies: ['الإيجار 85,000\u200F ريال'] }).ok, true);
+  assert.deepEqual(checkReply('الإيجار 95,000 ريال', { earlierReplies: ['الإيجار 85,000\u200F ريال'] }).hits, [{ kind: 'amount' }]);
+
+  const unit = [JSON.stringify({ results: [{ ref: 'B08-19', price_en: 'SAR 708,164', price_ar: '708,164 ر.س' }] })];
+  const otherUnit = [JSON.stringify({ results: [{ ref: 'B09-01', price_en: 'SAR 708,164', price_ar: '708,164 ر.س' }] })];
+  for (const ref of ['B08\u201119', 'B08\u201319', 'B08\u201019', 'B08\u221219', 'B08\u200B-19', 'B\u200F08-19', 'B08-\u206619\u2069', 'B\uFF10\uFF18-\uFF11\uFF19', 'b08\u201119']) {
+    const text = `الوحدة ${ref} متاحة`;
+    assert.deepEqual(checkReply(text, { toolResults: [] }), { ok: false, hits: [{ kind: 'unit' }] }, `${JSON.stringify(ref)} (no tool)`);
+    assert.deepEqual(checkReply(text, { toolResults: otherUnit }), { ok: false, hits: [{ kind: 'unit' }] }, `${JSON.stringify(ref)} (another unit)`);
+    assert.deepEqual(checkReply(text, { toolResults: unit }), { ok: true, hits: [] }, `${JSON.stringify(ref)} (the tool's own unit)`);
+  }
+  assert.equal(checkReply('الوحدة B08-19 متاحة', { toolResults: [JSON.stringify({ results: [{ ref: 'B08\u201119' }] })] }).ok, true, 'a tool that writes U+2011 allows the plain ref');
+
+  // Plain text is untouched by the extra reading: no new hit.
+  for (const text of ['نفتح 10:00\u2013 19:00', 'Call us on +966\u202F50\u202F000\u202F0000', 'رقم الإعلان BONA\u2011902', 'Villa\u00A0with 4\u2009bedrooms and 450\u2009m²', 'Plot 12\u2009500 m²', 'السعر يحدده الفريق\u200F.']) {
+    assert.deepEqual(checkReply(text, { toolResults: [] }), { ok: true, hits: [] }, JSON.stringify(text));
+  }
+});

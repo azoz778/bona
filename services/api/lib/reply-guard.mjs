@@ -15,13 +15,17 @@
  * ("www.example.com/properties/x/"). Each hit says only its kind; the text and the amount are never
  * repeated, so a hit can be logged.
  *
- * Every check reads the reply twice: as written, and as the client sees it (`shown`: the WhatsApp
- * path's own cleanup, then WhatsApp's formatting marks gone), so "*85,000* SAR" is "85,000 SAR".
+ * Every check reads the reply three times (`forms`): as written; as the client sees it (`shown`: the
+ * WhatsApp path's own cleanup, then WhatsApp's formatting marks gone), so "*85,000* SAR" is "85,000 SAR";
+ * and that with the characters a reader does not see as such read as what they look like (minimise.mjs
+ * `readable`), so "85,000<RLM> ريال", "2<thin space>950<thin space>000" and "B08<U+2011>19" are read too.
+ * Tool results and earlier replies are read the same way for the amounts and unit refs they allow.
  *
  * `claimsBooking` is the booking-claim check of DESIGN §4.3's safety net, for the commit step.
  */
 import { toAsciiDigits } from './inventory.mjs';
 import { stripMarkers, plainText } from './actions.mjs';
+import { readable } from './brain/minimise.mjs';
 
 export const REPAIR_NOTE = "Your draft quoted an amount or unit that no tool returned in this turn. Write the reply again; quote prices only exactly as this turn's tool results give them, or say a team member will confirm.";
 
@@ -113,6 +117,11 @@ const PROPERTY_PATH_RE = /\/(?:ar\/)?properties\/([a-z0-9][a-z0-9-]*)/gi;
  * it does not know.
  */
 const shown = (text) => plainText(stripMarkers(text).text).replace(/[*_~`]/g, '');
+/** The three forms a check reads (a hit in any one is a hit): as written, `shown`, and `shown` of minimise.mjs `readable`. */
+const forms = (text) => {
+  const s = String(text ?? '');
+  return [s, shown(s), shown(readable(s))];
+};
 
 /**
  * "2 950 000" (a space, NBSP or narrow NBSP between groups of three) is one number. The run is taken whole or
@@ -341,7 +350,7 @@ function leaves(result) {
  * What a reply may quote: amounts, unit refs and property slugs. `amounts` holds keys: `sar:<SAR value>` for
  * every allowed amount, `<CUR>:<figure>` for one written with a currency, and `raw:<figure>` for every figure.
  * A figure with no currency counts as SAR, as `findAmounts` reads it; a JSON number counts only in a price
- * field (`leaves`).
+ * field (`leaves`). Amounts and unit refs are read in every form of a text (`forms`), as the reply is.
  */
 export function allowedFrom({ toolResults = [], earlierReplies = [] } = {}) {
   const amounts = new Set();
@@ -358,13 +367,15 @@ export function allowedFrom({ toolResults = [], earlierReplies = [] } = {}) {
     const { strings, numbers } = leaves(r);
     for (const n of numbers) amounts.add(`sar:${Math.round(n)}`).add(`raw:${Math.round(n)}`);
     for (const s of strings) {
-      addAmounts(s);
-      for (const u of unitRefs(s)) units.add(u);
+      for (const t of forms(s)) {
+        addAmounts(t);
+        for (const u of unitRefs(t)) units.add(u);
+      }
       for (const slug of propertySlugs(s)) slugs.add(slug);
     }
   }
   for (const r of Array.isArray(earlierReplies) ? earlierReplies : []) {
-    addAmounts(r);
+    for (const t of forms(r)) addAmounts(t);
     for (const slug of propertySlugs(r)) slugs.add(slug);
   }
   return { amounts, units, slugs };
@@ -384,11 +395,10 @@ export function checkReply(text, ctx = {}) {
   const allowedAmount = (a) => a.raw !== null
     && (allowed.amounts.has(`sar:${a.sar}`) || allowed.amounts.has(a.currency ? `${a.currency}:${a.raw}` : `raw:${a.raw}`));
   const site = siteOf(ctx?.siteUrl);
-  // As written, and as the client sees it: a hit in either is a hit.
-  const forms = [text, shown(text)];
-  if (forms.some((t) => !findAmounts(t).every(allowedAmount))) hits.push({ kind: 'amount' });
-  if (forms.some((t) => unitRefs(t).some((u) => !allowed.units.has(u)))) hits.push({ kind: 'unit' });
-  if (forms.some((t) => badHomeLink(t, allowed.slugs, site))) hits.push({ kind: 'link' });
+  const read = forms(text);
+  if (read.some((t) => !findAmounts(t).every(allowedAmount))) hits.push({ kind: 'amount' });
+  if (read.some((t) => unitRefs(t).some((u) => !allowed.units.has(u)))) hits.push({ kind: 'unit' });
+  if (read.some((t) => badHomeLink(t, allowed.slugs, site))) hits.push({ kind: 'link' });
   return { ok: hits.length === 0, hits };
 }
 

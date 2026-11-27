@@ -6,7 +6,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { minimise } from '../lib/brain/minimise.mjs';
+import { minimise, readable } from '../lib/brain/minimise.mjs';
 
 test('phone shapes are masked after Arabic-Indic digits and the separators inside digit groups are normalised', () => {
   for (const [input, want] of [
@@ -199,4 +199,14 @@ test('a budget range of two thousand-grouped amounts on a dash or a slash stays 
     ['32 34 56 78 - 90 12 34', '[account-number]'],
     ['2 9500 000 - 3 100 000', '[account-number]'],
   ]) assert.equal(minimise(input), want, input);
+});
+
+test('readable (the reply guard\'s reading) folds every digit, reads every space as a space and every dash as "-", drops format marks, and keeps a combining mark only on a letter', () => {
+  assert.equal(readable('٨٥٬٠٠٠ \uFF18\uFF15 \u{1D7F4}'), '85,000 85 8');
+  assert.equal(readable('85,000\u200F\u200E\u061C\u200B\u2060\uFEFF\u2066\u2069\u00AD ريال'), '85,000 ريال');
+  assert.equal(readable('2\u2009950\u2002000\u00A0SAR'), '2 950 000 SAR');
+  assert.equal(readable('B08\u201119 B08\u201319 B08\u221219'), 'B08-19 B08-19 B08-19');
+  assert.equal(readable('ريالاً مليوناً'), 'ريالاً مليوناً', 'a tanween on a letter stays');
+  assert.equal(readable('8\uFE0F5\u0301,000 ريالاً'), '85,000 ريالاً', 'a mark on a digit goes');
+  assert.equal(readable(null), '');
 });
