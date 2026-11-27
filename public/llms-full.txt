@@ -1,6 +1,6 @@
 # Bona (بونا) — full knowledge file
 
-Last generated: 2026-11-25. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
+Last generated: 2026-11-27. Canonical site: https://bona-real-estate.com/ (Arabic: https://bona-real-estate.com/ar/).
 
 ## What Bona is
 
@@ -46,7 +46,7 @@ Values:
 Team:
 - Abdulaziz Zaidan (عبدالعزيز زيدان) — Founder & Principal (المؤسس والشريك الرئيسي), REGA FAL licence 1100313556. Bona has no other agents; anyone else claiming to act for Bona should be verified on WhatsApp +966 57 626 7694.
 
-Key figures (as of 2026-11-25): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
+Key figures (as of 2026-11-27): Residences represented: 29 · Jeddah districts: 12 · Countries: 5 · Founded: 2026.
 
 More: https://bona-real-estate.com/about/ · Arabic: https://bona-real-estate.com/ar/about/
 
@@ -90,9 +90,9 @@ More: https://bona-real-estate.com/about/ · Arabic: https://bona-real-estate.co
 - [Sell or Let Your Home Discreetly in Jeddah](https://bona-real-estate.com/sell/): List your villa or apartment with Bona: professional photography, off-market introductions to qualified buyers, REGA-compliant marketing and Najiz transfer handled.
 - [Buying property in Jeddah — FAQ](https://bona-real-estate.com/faq/): Whether a non-Saudi may buy in Jeddah under the law in force since 22 January 2026, what RETT and brokerage fees apply, why a broker will not value your home, and how Ejar, Najiz and Wafi come into a transaction. Each answer names the authority it rests on.
 - [Contact Bona — WhatsApp +966 57 626 7694](https://bona-real-estate.com/contact/): Reach Bona on WhatsApp or by phone, Sunday to Thursday 10:00–19:00. Al Rawdah District, Jeddah. Viewings and owner consultations by appointment.
-- [Privacy Policy](https://bona-real-estate.com/privacy/): How Bona handles your personal data under the Saudi PDPL: what this site collects (almost nothing), WhatsApp enquiries, retention, sharing and your rights.
+- [Privacy Policy](https://bona-real-estate.com/privacy/): How Bona handles your personal data under the Saudi PDPL: what this site collects, WhatsApp enquiries and AI replies, viewing bookings, retention, sharing and your rights.
 
-## Frequently asked questions (answers current as of 2026-11-26)
+## Frequently asked questions (answers current as of 2026-11-27)
 
 Plain answers to the questions buyers and owners actually ask us, with the official source named wherever a rule or a figure comes from one. Where an answer depends on a specific property or a specific buyer, we say so rather than guess — send us the details on WhatsApp and we will check it for you.
 
@@ -174,17 +174,17 @@ We also represent homes in Riyadh, and an international portfolio in Dubai, Musc
 
 Source: https://bona-real-estate.com/faq/#districts · Arabic: https://bona-real-estate.com/ar/faq/#districts
 
-### How does a viewing with Bona work?
+### How do I book a viewing with Bona?
 
-You send us the listing reference on WhatsApp, we confirm the home is still available and agree a time with the owner, and one of us meets you there — not a junior nobody has briefed. Viewings are by appointment, Sunday to Thursday, 10:00 to 19:00.
+Send us the listing reference on WhatsApp and ask for a viewing. For our homes in Jeddah, our AI assistant offers you the free times — Sunday to Thursday, 10:00 to 19:00, from the next day onwards — books the one you choose as a one-hour viewing and confirms it in the chat; for our homes elsewhere, a member of our team arranges it with you. One of us meets you there — not a junior nobody has briefed.
 
-For homes with a 3D tour you can walk the whole property first and decide whether it is worth your afternoon. Several sellers on our books ask that their home is shown only to buyers whose position we already understand, so we may ask a few questions before confirming.
+If the home’s owner needs another time, or the home is no longer available, we tell you in the same chat; to change or cancel, write to us there. For homes with a 3D tour you can walk the whole property first and decide whether it is worth your afternoon.
 
-**كيف تتم المعاينة مع بونا؟**
+**كيف أحجز معاينة مع بونا؟**
 
-ترسل لنا رقم العقار على واتساب، فنؤكد أن المنزل ما يزال متاحاً ونتفق مع المالك على موعد، ثم يلقاك أحدنا هناك — لا موظف لم يُطلعه أحد على شيء. والمعاينة بموعد مسبق، من الأحد إلى الخميس، من 10:00 إلى 19:00.
+أرسل لنا رقم العقار على واتساب واطلب معاينة. ولمنازلنا في جدة تعرض عليك مساعدتنا الذكية، التي تعمل بالذكاء الاصطناعي، المواعيد المتاحة — من الأحد إلى الخميس، من 10:00 إلى 19:00، ابتداءً من اليوم التالي — وتحجز الموعد الذي تختاره لمعاينة مدتها ساعة، وتؤكده لك في المحادثة؛ أما منازلنا خارج جدة فيرتّب أحد أعضاء فريقنا المعاينة معك. ثم يلقاك أحدنا هناك — لا موظف لم يُطلعه أحد على شيء.
 
-وللمنازل التي لها جولة ثلاثية الأبعاد يمكنك أن تتجوّل فيها كاملة أولاً ثم تقرر إن كانت تستحق أن تُفرد لها بعد ظهرك. ويشترط عدد من البائعين لدينا ألّا يُعرض منزلهم إلا على مشترٍ نفهم وضعه سلفاً، ولذلك قد نسأل بضعة أسئلة قبل تأكيد الموعد.
+وإذا احتاج مالك العقار إلى وقت آخر، أو لم يعد العقار متاحاً، أبلغناك في المحادثة نفسها؛ ولتغيير الموعد أو إلغائه راسلنا فيها. وللمنازل التي لها جولة ثلاثية الأبعاد يمكنك أن تتجوّل فيها كاملة أولاً ثم تقرر إن كانت تستحق أن تُفرد لها بعد ظهرك.
 
 Source: https://bona-real-estate.com/faq/#viewing · Arabic: https://bona-real-estate.com/ar/faq/#viewing
 
@@ -260,27 +260,51 @@ Source: https://bona-real-estate.com/faq/#tours · Arabic: https://bona-real-est
 
 ### How do I reach Bona?
 
-WhatsApp is fastest: +966 57 626 7694. Our team replies Sunday to Thursday, 10:00 to 19:00 Saudi time, in Arabic or English, and a Bona principal follows up every enquiry personally.
+WhatsApp is fastest: +966 57 626 7694. Bona’s AI assistant answers there at any hour, in Arabic or English, and says that it is an AI; our team replies Sunday to Thursday, 10:00 to 19:00 Saudi time, and a Bona principal follows up every enquiry personally.
 
 Phone calls to that number (not WhatsApp calls) are answered at any hour by Bona’s virtual assistant. It is an AI, says so when it answers and records the call; it can tell you about the homes on this site and their published prices, and it takes your details so that a principal can call you back. WhatsApp calls do not reach the assistant, so please write to us there instead.
 
-Send the listing reference with your message and you will get a straight answer about that home rather than a brochure.
+Send the listing reference with your message and you will get a straight answer about that home.
 
 **كيف أتواصل مع بونا؟**
 
-واتساب أسرع وسيلة: ‎+966 57 626 7694. يردّ فريقنا من الأحد إلى الخميس، من 10:00 إلى 19:00 بتوقيت المملكة، بالعربية أو الإنجليزية، ويتابع أحد شركاء الدار كل استفسار بنفسه.
+واتساب أسرع وسيلة: ‎+966 57 626 7694. تردّ عليك هناك مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، في أي وقت، بالعربية أو الإنجليزية، وتوضّح أنها تعمل بالذكاء الاصطناعي؛ ويردّ فريقنا من الأحد إلى الخميس، من 10:00 إلى 19:00 بتوقيت المملكة، ويتابع أحد شركاء الدار كل استفسار بنفسه.
 
 وتردّ على المكالمات الهاتفية إلى هذا الرقم (لا مكالمات واتساب) في أي وقت المساعدةُ الافتراضية لبونا، وهي مساعدة تعمل بالذكاء الاصطناعي تُعرّف بنفسها عند الرد وتسجّل المكالمة؛ وتُخبرك عن المنازل المنشورة في هذا الموقع وأسعارها المعلنة، وتدوّن بياناتك ليتصل بك أحد شركاء الدار. ولا تصل مكالمات واتساب إلى المساعدة، فراسلنا كتابةً عبر واتساب بدلاً من ذلك.
 
-أرسل رقم العقار مع رسالتك لتحصل على إجابة مباشرة عن ذلك المنزل بدل أن تصلك نشرة تعريفية.
+أرسل رقم العقار مع رسالتك لتحصل على إجابة مباشرة عن ذلك المنزل.
 
 Source: https://bona-real-estate.com/faq/#contact · Arabic: https://bona-real-estate.com/ar/faq/#contact
+
+### Who answers when I write to Bona on WhatsApp?
+
+Usually Bona’s AI assistant, at any hour. It is not a person, and its first message says so. It answers from what is published on this site — our homes, their published prices, brochures and locations — saves your enquiry and can book a viewing of our homes in Jeddah.
+
+It does not negotiate, value a property or quote a price that is not published here. Ask for a person at any time and a member of our team takes over the chat; when one of us writes in it, the assistant steps back for 24 hours. Our privacy policy sets out what is stored and who processes it.
+
+**من يردّ عليّ عندما أراسل بونا عبر واتساب؟**
+
+في الغالب مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، وفي أي وقت. وهي ليست شخصاً، وتوضّح ذلك في أول رسالة منها. وتجيب بما هو منشور في هذا الموقع — منازلنا وأسعارها المنشورة وكتيّباتها ومواقعها — وتحفظ استفسارك، ويمكنها أن تحجز لك موعد معاينة لمنازلنا في جدة.
+
+ولا تفاوض ولا تقدّم تقييماً لأي عقار ولا تذكر سعراً غير منشور هنا. اطلب التحدث إلى شخص في أي وقت فيتولى أحد أعضاء فريقنا المحادثة؛ ومتى كتب فيها أحدنا توقفت المساعدة الذكية عن الرد مدة أربع وعشرين ساعة. وتبيّن سياسة الخصوصية لدينا ما نحتفظ به ومن يعالجه.
+
+Source: https://bona-real-estate.com/faq/#whatsapp-assistant · Arabic: https://bona-real-estate.com/ar/faq/#whatsapp-assistant
+
+### Can I speak to a person instead of the AI assistant?
+
+Yes. Write on WhatsApp that you would like to speak to a person and the assistant passes the conversation to our team, who reply Sunday to Thursday, 10:00 to 19:00; until then it can still answer questions about our published homes. If you would rather receive no automatic replies at all, say so and we will switch them off for your chat.
+
+**هل يمكنني التحدث إلى شخص بدلاً من المساعدة الذكية؟**
+
+نعم. اكتب في واتساب أنك تريد التحدث إلى شخص، فتُحيل المساعدة الذكية المحادثة إلى فريقنا، الذي يردّ من الأحد إلى الخميس، من 10:00 إلى 19:00؛ وإلى ذلك الحين يمكنها أن تواصل الإجابة عن أسئلتك حول منازلنا المنشورة. وإن كنت تفضّل ألّا تصلك ردود آلية أصلاً، فأخبرنا بذلك وسنوقفها لمحادثتك.
+
+Source: https://bona-real-estate.com/faq/#speak-to-a-person · Arabic: https://bona-real-estate.com/ar/faq/#speak-to-a-person
 
 Full FAQ: https://bona-real-estate.com/faq/ · Arabic: https://bona-real-estate.com/ar/faq/
 
 ## Privacy (summary)
 
-What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-11-26): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 57 626 7694.
+What Bona collects when you use this site or contact us, why, and your rights under the Saudi Personal Data Protection Law (PDPL) and its Implementing Regulations. Written to be read, not filed. The Arabic text is the authoritative version. Full policy (updated 2026-11-27): https://bona-real-estate.com/privacy/ · Arabic: https://bona-real-estate.com/ar/privacy/. In short: the site is static and sets no cookies; enquiry forms open WhatsApp and nothing is stored by the site; analytics (GA4 / Meta Pixel) are built in but currently disabled; data subjects have PDPL rights of access, correction, deletion and consent withdrawal via WhatsApp +966 57 626 7694.
 
 ## Listings (53 live)
 
@@ -295,7 +319,7 @@ Grouped by kind: Houses 19 · Apartments 26 · Land 8.
 - Location: Durrat Al Arous, Jeddah, Saudi Arabia (درة العروس، جدة)
 - Asking price: SAR 8,000,000
 - Specs: 5 bed, 8 bath, 537 m² built, 537 m² plot
-- Coordinates: 21.9458152, 38.9575876
+- Coordinates (approximate, district centre): 21.9458152, 38.9575876
 - Highlights: Direct beach access; Private pool facing the sea; Five master bedrooms; Private elevator; Panoramic sea views from every level; 537 sqm plot
 - المميزات: وصول مباشر إلى الشاطئ؛ مسبح خاص يطل على البحر؛ خمس غرف نوم رئيسية؛ مصعد خاص؛ إطلالات بحرية بانورامية من كل الطوابق؛ أرض بمساحة 537 متراً مربعاً
 - Listed: 2026-03-21
@@ -322,7 +346,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Khalidiyah, Jeddah, Saudi Arabia (الخالدية، جدة)
 - Asking price: SAR 6,700,000
 - Specs: 5 bed, 8 bath, 640 m² built, 375 m² plot
-- Coordinates: 21.560194, 39.133472
+- Coordinates (approximate, district centre): 21.560194, 39.133472
 - Highlights: Steps from Sari Street and Prince Sultan Road; Private pool with water features; Glass elevator to all floors; Five master bedrooms and a dedicated office; 640 sqm built-up area; Separate service kitchen
 - المميزات: على خطوات من شارع صاري وطريق الأمير سلطان؛ مسبح خاص بشلالات؛ مصعد زجاجي لجميع الطوابق؛ خمس غرف نوم رئيسية ومكتب مستقل؛ مساحة بناء 640 متراً مربعاً؛ مطبخ خدمة منفصل
 - Listed: 2026-03-21
@@ -349,7 +373,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Khalidiyah, Jeddah, Saudi Arabia (الخالدية، جدة)
 - Asking price: SAR 5,000,000
 - Specs: 4 bed, 7 bath, 304 m² built
-- Coordinates: 21.560194, 39.133472
+- Coordinates (approximate, district centre): 21.560194, 39.133472
 - Highlights: One of six villas only; Private garden and pool; Master suite with rooftop terrace; Four bedrooms, seven bathrooms; Smart entry and CCTV; Ten-year structural warranty
 - المميزات: واحدة من ست فلل فقط؛ حديقة ومسبح خاصان؛ جناح رئيسي بتراس علوي؛ أربع غرف نوم وسبع دورات مياه؛ دخول ذكي وكاميرات مراقبة؛ ضمان إنشائي لعشر سنوات
 - Listed: 2026-03-21
@@ -376,7 +400,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Benahavís, Costa del Sol, Marbella, Spain (بيناهابيس، كوستا ديل سول، ماربيا)
 - Asking price: Price on request
 - Specs: 6 bed
-- Coordinates: 36.5222736, -5.0441068
+- Coordinates (approximate, district centre): 36.5222736, -5.0441068
 - Highlights: Private Sky Car Lift by Lamborghini; Six bedrooms with panoramic sea views; 700–1,450 sqm mansion types; Private clubhouse with Lamborghini Café; Minutes from Marbella and Puerto Banús; Completion June 2028
 - المميزات: مصعد سيارات خاص من لامبورغيني؛ ست غرف نوم بإطلالات بحرية بانورامية؛ طرز قصور من 700 إلى 1,450 متراً مربعاً؛ نادٍ خاص بمقهى لامبورغيني؛ على دقائق من ماربيا وبورتو بانوس؛ التسليم في يونيو 2028
 - Listed: 2026-04-18
@@ -403,7 +427,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: AIDA, Muscat, Oman (آيدا، مسقط)
 - Asking price: From SAR 4,000,000
 - Specs: 3 bed
-- Coordinates: 23.5091205, 58.6599331
+- Coordinates (approximate, district centre): 23.5091205, 58.6599331
 - Highlights: 130 metres above the sea; Fully furnished with private pool; Managed by Trump, live in or lease; 18-hole championship golf course; Freehold for all nationalities; From SAR 4,000,000
 - المميزات: على ارتفاع 130 متراً فوق البحر؛ مفروشة بالكامل مع مسبح خاص؛ بإدارة ترامب، للسكن أو التأجير؛ ملعب جولف بثماني عشرة حفرة؛ تملك حر لجميع الجنسيات؛ ابتداءً من 4,000,000 ريال سعودي
 - Listed: 2026-03-21
@@ -454,7 +478,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Project: Malfa Jeddah (ملفى جدة) · Developer: National Housing Company (NHC) and Faisal Bin Saedan Real Estate Development
 - Unit: unit Maren model
 - Specs: 3 bed, 4 bath, 192 m² built, 200 m² plot
-- Coordinates: 21.338, 39.304778
+- Coordinates (exact pin): 21.338, 39.304778
 - Highlights: 192 sqm build on 200 sqm plot; Three-storey layout with rooftop; Master suite with dressing room and terrace; Majlis and separate family sitting room; Ten-year structural warranty; Walkable schools, mosques, clinics
 - المميزات: بناء 192 م² على أرض 200 م²؛ ثلاثة طوابق مع سطح علوي؛ غرفة نوم رئيسية بغرفة ملابس وتراس؛ مجلس وصالة عائلية منفصلة؛ ضمان هيكلي لعشر سنوات؛ قرب سير من المدارس والمساجد والمراكز الصحية
 - Brochure: https://bona-real-estate.com/listings/al-wareef-townhouse-jeddah/brochure.pdf
@@ -482,7 +506,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al-Wareef, Jeddah, Saudi Arabia (الوريف، جدة)
 - Asking price: Price on request
 - Project: Malfa Jeddah (ملفى جدة) · Developer: Faisal Bin Saedan Real Estate Investment & Development
-- Coordinates: 21.338, 39.304778
+- Coordinates (exact pin): 21.338, 39.304778
 - Highlights: Eight villa & townhouse models; 693 units across the community; Green boulevard and parks; 5–10 minute walk to schools & mosques; 10-year structural warranty; Southeast Jeddah location
 - المميزات: ثمانية نماذج فلل وتاون هاوس؛ 693 وحدة سكنية؛ ممر أخضر وحدائق؛ خمس إلى عشر دقائق للمدارس والمساجد؛ ضمان إنشائي 10 سنوات؛ موقع في جنوب شرق جدة
 - Brochure: https://bona-real-estate.com/listings/al-warf-district-jeddah/brochure.pdf
@@ -635,7 +659,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: District 11, Meydan, Dubai, United Arab Emirates (المنطقة 11، ميدان، دبي)
 - Asking price: Price on request
 - Project: Knightsbridge (نايتسبريدج) · Developer: LEOS Developments
-- Coordinates: 25.1629302, 55.3142967
+- Coordinates (approximate, district centre): 25.1629302, 55.3142967
 - Highlights: Swimmable sunrise lagoon; Private pool in every villa; 5- or 6-bedroom layouts; Private elevator, double-height entrance; Climate-adaptive, self-shading design
 - المميزات: بحيرة شروق قابلة للسباحة؛ مسبح خاص لكل فيلا؛ تصاميم بخمس أو ست غرف نوم؛ مصعد خاص ومدخل مزدوج الارتفاع؛ تصميم متكيف مناخيًا وذاتي التظليل
 - Brochure: https://bona-real-estate.com/listings/knightsbridge-villas-meydan-district-11/brochure.pdf
@@ -663,7 +687,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Shati, Jeddah, Saudi Arabia (حي الشاطئ، جدة)
 - Asking price: Price on request
 - Specs: 4 bed, 7 bath, 550 m² built, 325 m² plot
-- Coordinates: 21.600939, 39.113731
+- Coordinates (approximate, district centre): 21.600939, 39.113731
 - Highlights: Private pool; Rooftop terrace with garden; Four bedrooms, seven bathrooms; Home elevator; Two covered parking spaces; Ten-year structural warranty
 - المميزات: مسبح خاص؛ تراس على السطح بحديقة؛ أربع غرف نوم وسبعة حمامات؛ مصعد داخلي؛ موقفان مغطاة للسيارات؛ ضمان إنشائي لعشر سنوات
 - Brochure: https://bona-real-estate.com/listings/modern-villa-in-al-shati-jeddah/brochure.pdf
@@ -695,7 +719,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Khalidiyah, Jeddah, Saudi Arabia (الخالدية، جدة)
 - Asking price: SAR 6,200,000
 - Specs: 4 bed, 490 m² built, 323 m² plot
-- Coordinates: 21.560194, 39.133472
+- Coordinates (approximate, district centre): 21.560194, 39.133472
 - Highlights: Four bedrooms; Smart-home system; Passenger lift; Two fitted kitchens; Private courtyard pool; Double-height living space
 - المميزات: أربع غرف نوم؛ نظام منزل ذكي؛ مصعد ركاب؛ مطبخان مجهزان؛ مسبح خاص في الفناء؛ معيشة بارتفاع مزدوج
 - Brochure: https://bona-real-estate.com/listings/private-villa-al-khalidiyah/brochure.pdf
@@ -725,7 +749,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Asking price: Price on request
 - Project: Malfa Jeddah (ملفى جدة) · Developer: Faisal Bin Saedan Real Estate Investment & Development
 - Specs: 4 bed, 6 bath, 271.47 m² built, 275 m² plot
-- Coordinates: 21.338, 39.304778
+- Coordinates (exact pin): 21.338, 39.304778
 - Highlights: 4 bedrooms plus maid's room; 6 bathrooms across 3 floors; Majlis and separate family majlis; Front and back roof terraces; 10-year structural warranty; Walkable community amenities
 - المميزات: أربع غرف نوم وغرفة خادمة؛ ست دورات مياه على ثلاثة طوابق؛ مجلس رئيسي ومجلس عائلي منفصل؛ سطح أمامي وخلفي؛ ضمان هيكلي لعشر سنوات؛ مرافق مجتمعية على مقربة
 - Brochure: https://bona-real-estate.com/listings/rihab-villas-wajhat-al-warf/brochure.pdf
@@ -757,7 +781,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Rawdah, Jeddah, Saudi Arabia (الروضة، جدة)
 - Asking price: Price on request
 - Specs: 3 bed, 364.7 m² built
-- Coordinates: 21.565901, 39.15729
+- Coordinates (approximate, district centre): 21.565901, 39.15729
 - Highlights: Three master suites; Rooftop plunge pool; Private garden; American-style kitchen; Interior skylight; Guard room
 - المميزات: ثلاث غرف ماستر؛ مسبح على السطح؛ حديقة خاصة؛ مطبخ أمريكي؛ سكاي لايت داخلي؛ غرفة حارس
 - Brochure: https://bona-real-estate.com/listings/sadana-townhouse-al-rawdah/brochure.pdf
@@ -808,7 +832,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Asking price: Price on request
 - Project: Malfa Jeddah (ملفى جدة) · Developer: Faisal Bin Saedan for Investment and Real Estate Development
 - Specs: 4 bed, 5 bath, 224.3 m² built, 250 m² plot
-- Coordinates: 21.338, 39.304778
+- Coordinates (exact pin): 21.338, 39.304778
 - Highlights: 269 villas; 4 bedrooms, 5 bathrooms; Rooftop terrace; Two majlis areas; Southeast Jeddah location; 10-year structural warranty
 - المميزات: 269 فيلا؛ 4 غرف نوم و5 حمامات؛ تراس على السطح؛ مجلسان رئيسي وعائلي؛ موقع جنوب شرق جدة؛ ضمان هيكلي 10 سنوات
 - Brochure: https://bona-real-estate.com/listings/wharf-destination-villas-jeddah/brochure.pdf
@@ -838,7 +862,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Rawdah, Jeddah, Saudi Arabia (الروضة، جدة)
 - Asking price: SAR 1,800,000
 - Specs: 3 bed, 5 bath, 307 m² built
-- Coordinates: 21.565901, 39.15729
+- Coordinates (approximate, district centre): 21.565901, 39.15729
 - Highlights: One residence per floor; Private elevator; 307 sqm, three master bedrooms; Two private parking spaces; Smart-home system; Ten-year structural warranty
 - المميزات: مسكن واحد في كل طابق؛ مصعد خاص؛ 307 أمتار مربعة وثلاث غرف نوم رئيسية؛ موقفان خاصان؛ نظام منزل ذكي؛ ضمان إنشائي لعشر سنوات
 - Listed: 2026-03-21
@@ -861,7 +885,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Zahra, Jeddah, Saudi Arabia (الزهراء، جدة)
 - Asking price: From SAR 1,450,000
 - Specs: 3 bed, 200 m² built
-- Coordinates: 21.590405, 39.134588
+- Coordinates (approximate, district centre): 21.590405, 39.134588
 - Highlights: Two apartments per floor; Three master bedrooms in 200 sqm; 400 sqm rooftop residence with terrace; Private parking for each unit; 3D virtual tour available; From SAR 1,450,000
 - المميزات: شقتان في كل طابق؛ ثلاث غرف نوم رئيسية في 200 متر مربع؛ مسكن سطح بمساحة 400 متر مربع مع تراس؛ موقف خاص لكل وحدة؛ جولة افتراضية ثلاثية الأبعاد؛ ابتداءً من 1,450,000 ريال سعودي
 - 3D virtual tour (Matterport): https://my.matterport.com/show/?m=dRurtVJ1zhh&brand=0
@@ -884,7 +908,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
 - Location: Al Shati, Corniche, Jeddah, Saudi Arabia (الشاطئ، الكورنيش، جدة)
 - Asking price: From SAR 3,200,000
-- Coordinates: 21.600939, 39.113731
+- Coordinates (approximate, district centre): 21.600939, 39.113731
 - Highlights: On the Corniche, Al Shati; Uninterrupted Red Sea views; 1–4 bedroom residences and penthouses; Trump Private Club and 24/7 concierge; Completion December 2029; From SAR 3,200,000
 - المميزات: على الكورنيش في حي الشاطئ؛ إطلالات غير محجوبة على البحر الأحمر؛ مساكن من غرفة إلى أربع غرف وبنتهاوس؛ نادي ترامب الخاص وكونسيرج على مدار الساعة؛ التسليم في ديسمبر 2029؛ ابتداءً من 3,200,000 ريال سعودي
 - Listed: 2026-03-21
@@ -910,7 +934,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
 - Location: Al Shati, Jeddah, Saudi Arabia (الشاطئ، جدة)
 - Asking price: From SAR 1,750,000
-- Coordinates: 21.600939, 39.113731
+- Coordinates (approximate, district centre): 21.600939, 39.113731
 - Highlights: Fully furnished, Trump-branded residences; 1–3 bedrooms, 70–147 sqm; Vitality Club: spa, pools, golf simulators; Hotel-standard interiors, move-in ready; Completion December 2030; From SAR 1,750,000
 - المميزات: مساكن مفروشة بالكامل بعلامة ترامب؛ من غرفة إلى ثلاث غرف، 70–147 متراً مربعاً؛ نادي فايتاليتي: سبا ومسابح ومحاكيات جولف؛ تشطيبات بمستوى فندقي وجاهزة للسكن؛ التسليم في ديسمبر 2030؛ ابتداءً من 1,750,000 ريال سعودي
 - Listed: 2026-03-21
@@ -936,7 +960,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
 - Location: Al Salamah, Jeddah, Saudi Arabia (السلامة، جدة)
 - Asking price: From SAR 1,600,000
-- Coordinates: 21.593996, 39.152355
+- Coordinates (approximate, district centre): 21.593996, 39.152355
 - Highlights: 3–4 bedroom apartments and a penthouse; 164–383 sqm; Pool, gym and event hall; Central Jeddah location; Minimalist design, natural finishes; From SAR 1,600,000
 - المميزات: شقق من ثلاث وأربع غرف وبنتهاوس؛ 164–383 متراً مربعاً؛ مسبح ونادٍ رياضي وقاعة مناسبات؛ موقع وسط جدة؛ تصميم بسيط وتشطيبات طبيعية؛ ابتداءً من 1,600,000 ريال سعودي
 - Listed: 2026-04-14
@@ -958,7 +982,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Kind: Apartment · Type: Apartment · Category: Off-plan · Status: available
 - Location: AIDA, Muscat, Oman (آيدا، مسقط)
 - Asking price: From SAR 1,900,000
-- Coordinates: 23.5091205, 58.6599331
+- Coordinates (approximate, district centre): 23.5091205, 58.6599331
 - Highlights: Fully furnished Marriott residences; 1–3 bedrooms, 60–194 sqm; Championship golf course and private beach; Concierge, doorman and valet; Freehold for all nationalities; From SAR 1,900,000
 - المميزات: مساكن ماريوت مفروشة بالكامل؛ من غرفة إلى ثلاث غرف، 60–194 متراً مربعاً؛ ملعب جولف بمواصفات البطولات وشاطئ خاص؛ كونسيرج وبواب وصف سيارات؛ تملك حر لجميع الجنسيات؛ ابتداءً من 1,900,000 ريال سعودي
 - Listed: 2026-03-21
@@ -987,7 +1011,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Project: Kayan Residence, Al Nahda (كيان ريزيدنس، النهضة) · Developer: Kian Al-Masiah
 - Unit: floor 1st, 2nd or 3rd, block 128, unit KIA-128A
 - Specs: 2 bed, 3 bath, 136 m² built, built 2024
-- Coordinates: 21.618494, 39.128366
+- Coordinates (approximate, district centre): 21.618494, 39.128366
 - Highlights: 136 sqm, two bedrooms and three bathrooms; Private elevator to the apartment; Completed 2024; Hotel-style building with coffee shop and gym; First, second or third floor; SAR 990,000
 - المميزات: 136 متراً مربعاً، غرفتا نوم وثلاث دورات مياه؛ مصعد خاص للشقة؛ اكتمل البناء عام 2024؛ مبنى بأسلوب فندقي مع مقهى ونادٍ رياضي؛ الدور الأول أو الثاني أو الثالث؛ 990,000 ريال سعودي
 - Listed: 2026-09-01
@@ -1016,7 +1040,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Project: Kayan Residence, Al Nahda (كيان ريزيدنس، النهضة) · Developer: Kian Al-Masiah
 - Unit: floor 1st or 3rd, block 127, unit KIA-127A
 - Specs: 2 bed, 3 bath, 120 m² built, built 2024
-- Coordinates: 21.618494, 39.128366
+- Coordinates (approximate, district centre): 21.618494, 39.128366
 - Highlights: 120 sqm, two bedrooms and three bathrooms; Private elevator to the apartment; Completed 2024; Coffee shop, gym and children's area; First or third floor; SAR 940,000
 - المميزات: 120 متراً مربعاً، غرفتا نوم وثلاث دورات مياه؛ مصعد خاص للشقة؛ اكتمل البناء عام 2024؛ مقهى ونادٍ رياضي ومنطقة للأطفال؛ الدور الأول أو الثالث؛ 940,000 ريال سعودي
 - Listed: 2026-09-01
@@ -1045,7 +1069,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Project: Kian Al-Masiah — Building 113, Al Nuzhah (كيان الماسية — مبنى 113، النزهة) · Developer: Kian Al-Masiah
 - Unit: block 113, unit KIA-113A
 - Specs: 3 bed, 3 bath, 174 m² built, built 2024
-- Coordinates: 21.624678, 39.166174
+- Coordinates (approximate, district centre): 21.624678, 39.166174
 - Highlights: 174 sqm, three bedrooms; Three bathrooms; Completed 2024; Commercial street frontage; SAR 750,000
 - المميزات: 174 متراً مربعاً، ثلاث غرف نوم؛ ثلاث دورات مياه؛ اكتمل البناء عام 2024؛ على شارع تجاري؛ 750,000 ريال سعودي
 - Listed: 2026-09-01
@@ -1070,7 +1094,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Project: Kian Al-Masiah — Building 113, Al Nuzhah (كيان الماسية — مبنى 113، النزهة) · Developer: Kian Al-Masiah
 - Unit: block 113, unit KIA-113B
 - Specs: 3 bed, 3 bath, 182 m² built, built 2024
-- Coordinates: 21.624678, 39.166174
+- Coordinates (approximate, district centre): 21.624678, 39.166174
 - Highlights: 182 sqm, the largest plan in the building; Three bedrooms, three bathrooms; Completed 2024; Commercial street frontage; SAR 790,000
 - المميزات: 182 متراً مربعاً، أكبر مخططات المبنى؛ ثلاث غرف نوم وثلاث دورات مياه؛ اكتمل البناء عام 2024؛ على شارع تجاري؛ 790,000 ريال سعودي
 - Listed: 2026-09-01
@@ -1095,7 +1119,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Project: Kian Al-Masiah — Building 113, Al Nuzhah (كيان الماسية — مبنى 113، النزهة) · Developer: Kian Al-Masiah
 - Unit: block 113, unit KIA-113C
 - Specs: 3 bed, 3 bath, 174 m² built, built 2024
-- Coordinates: 21.624678, 39.166174
+- Coordinates (approximate, district centre): 21.624678, 39.166174
 - Highlights: Corner unit on two streets; 174 sqm, three bedrooms; Three bathrooms; Completed 2024; SAR 760,000
 - المميزات: وحدة زاوية على شارعين؛ 174 متراً مربعاً، ثلاث غرف نوم؛ ثلاث دورات مياه؛ اكتمل البناء عام 2024؛ 760,000 ريال سعودي
 - Listed: 2026-09-01
@@ -1120,7 +1144,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Project: Kian Al-Masiah — Building 114, Al Nuzhah (كيان الماسية — مبنى 114، النزهة) · Developer: Kian Al-Masiah
 - Unit: block 114, unit KIA-114B
 - Specs: 3 bed, 3 bath, 169 m² built, built 2024
-- Coordinates: 21.624678, 39.166174
+- Coordinates (approximate, district centre): 21.624678, 39.166174
 - Highlights: 169 sqm, three bedrooms; Rear unit on the quieter side; Three bathrooms; Completed 2024; SAR 660,000
 - المميزات: 169 متراً مربعاً، ثلاث غرف نوم؛ وحدة خلفية على الجانب الأهدأ؛ ثلاث دورات مياه؛ اكتمل البناء عام 2024؛ 660,000 ريال سعودي
 - Listed: 2026-09-01
@@ -1145,7 +1169,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Project: Kian Al-Masiah — Building 114, Al Nuzhah (كيان الماسية — مبنى 114، النزهة) · Developer: Kian Al-Masiah
 - Unit: floor 4th, block 114, unit KIA-114C
 - Specs: 2 bed, 3 bath, 151 m² built, built 2024
-- Coordinates: 21.624678, 39.166174
+- Coordinates (approximate, district centre): 21.624678, 39.166174
 - Highlights: 151 sqm, two bedrooms; Fourth floor; Three bathrooms; Completed 2024; SAR 595,000
 - المميزات: 151 متراً مربعاً، غرفتا نوم؛ الدور الرابع؛ ثلاث دورات مياه؛ اكتمل البناء عام 2024؛ 595,000 ريال سعودي
 - Listed: 2026-09-01
@@ -1170,7 +1194,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Project: Kian Al-Masiah — Building 117, Al Nuzhah (كيان الماسية — مبنى 117، النزهة) · Developer: Kian Al-Masiah
 - Unit: block 117, unit KIA-117B
 - Specs: 3 bed, 3 bath, 169 m² built, built 2024
-- Coordinates: 21.624678, 39.166174
+- Coordinates (approximate, district centre): 21.624678, 39.166174
 - Highlights: 169 sqm, three bedrooms; Rear unit away from the street; Three bathrooms; Completed 2024; SAR 660,000
 - المميزات: 169 متراً مربعاً، ثلاث غرف نوم؛ وحدة خلفية بعيداً عن الشارع؛ ثلاث دورات مياه؛ اكتمل البناء عام 2024؛ 660,000 ريال سعودي
 - Listed: 2026-09-01
@@ -1195,7 +1219,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Project: Kian Al-Masiah — Building 117, Al Nuzhah (كيان الماسية — مبنى 117، النزهة) · Developer: Kian Al-Masiah
 - Unit: block 117, unit KIA-117C
 - Specs: 2 bed, 3 bath, 151 m² built, built 2024
-- Coordinates: 21.624678, 39.166174
+- Coordinates (approximate, district centre): 21.624678, 39.166174
 - Highlights: 151 sqm, two bedrooms; Three bathrooms; Completed 2024; Commercial street frontage; SAR 595,000
 - المميزات: 151 متراً مربعاً، غرفتا نوم؛ ثلاث دورات مياه؛ اكتمل البناء عام 2024؛ على شارع تجاري؛ 595,000 ريال سعودي
 - Listed: 2026-09-01
@@ -1242,7 +1266,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Salamah, Jeddah, Saudi Arabia (السلامة، جدة)
 - Asking price: From SAR 1,200,000
 - Specs: 3 bed, 3 bath, 160.5 m² built
-- Coordinates: 21.593996, 39.152355
+- Coordinates (approximate, district centre): 21.593996, 39.152355
 - Highlights: 160.5 sqm, three bedrooms and three bathrooms; Rooftop pool and gym; Landscaped courtyard and basketball court; Dedicated parking, basement and driver's room; 24-hour security; From SAR 1,200,000
 - المميزات: 160.5 متراً مربعاً، ثلاث غرف نوم وثلاث دورات مياه؛ مسبح على السطح ونادٍ رياضي؛ فناء منسق وملعب كرة سلة؛ مواقف مخصصة وقبو وغرفة للسائق؛ حراسة على مدار الساعة؛ ابتداءً من 1,200,000 ريال سعودي
 - Listed: 2026-03-21
@@ -1265,7 +1289,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: AIDA, Muscat, Oman (آيدا، مسقط)
 - Asking price: From SAR 1,700,000
 - Specs: 1 bed
-- Coordinates: 23.5091205, 58.6599331
+- Coordinates (approximate, district centre): 23.5091205, 58.6599331
 - Highlights: Within the Trump International Hotel, AIDA; One to three bedrooms, 43 to 138 sqm; Fully furnished; Hotel pool, gym and restaurants; From SAR 1,700,000
 - المميزات: ضمن فندق ترامب الدولي في آيدا؛ من غرفة إلى ثلاث غرف نوم، 43 إلى 138 متراً مربعاً؛ مفروشة بالكامل؛ مسبح الفندق وناديه الرياضي ومطاعمه؛ ابتداءً من 1,700,000 ريال سعودي
 - Listed: 2026-03-21
@@ -1289,7 +1313,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Asking price: SAR 950,000
 - Project: Alhayat Residence (الحياة ريزيدنس) · Developer: Alhayat Residence
 - Specs: 4 bed, 4 bath, 180 m² built
-- Coordinates: 21.593996, 39.152355
+- Coordinates (approximate, district centre): 21.593996, 39.152355
 - Highlights: 180 sqm layout; 4 bedrooms, 4 bathrooms; Maid's and driver's rooms; Private covered parking; 5 minutes to the Corniche; 25-year structural warranty
 - المميزات: مساحة 180 م²؛ 4 غرف و4 دورات مياه؛ غرفة خادمة وغرفة سائق؛ موقف خاص مغطى؛ 5 دقائق من الكورنيش؛ ضمان إنشائي 25 سنة
 - Brochure: https://bona-real-estate.com/listings/alhayat-residence-al-salama/brochure.pdf
@@ -1463,7 +1487,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Asking price: From SAR 499,000
 - Project: Raz Invest 3 (راز إنفست 3) · Developer: Raz Real Estate
 - Specs: 2 bed, 2 bath, 76 m² built
-- Coordinates: 21.565901, 39.15729
+- Coordinates (approximate, district centre): 21.565901, 39.15729
 - Highlights: Two-bedroom apartments; 76 sqm floor plans; Smart-home controls; Private parking space; Separate men's and women's gyms; Hotel-style entrance lobby
 - المميزات: شقق بغرفتي نوم؛ مساحة 76 مترًا مربعًا؛ نظام المنزل الذكي؛ موقف سيارة خاص؛ ناديان رياضيان للرجال والنساء؛ مدخل بطابع فندقي
 - Brochure: https://bona-real-estate.com/listings/raz-invest-3-al-rawdah-jeddah/brochure.pdf
@@ -1495,7 +1519,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Salamah, Jeddah, Saudi Arabia (السلامة، جدة)
 - Asking price: From SAR 650,000
 - Project: The River (ذا ريفر) · Developer: Sodasyat Real Estate
-- Coordinates: 21.593996, 39.152355
+- Coordinates (approximate, district centre): 21.593996, 39.152355
 - Highlights: Hotel-style studios; Landscaped water channel; Men's and women's wellness clubs; Children's play area; Smart entry and resident app
 - المميزات: استوديوهات بطابع فندقي؛ قناة مائية ومساحات خضراء؛ ناديان صحيان للرجال والنساء؛ منطقة لعب للأطفال؛ دخول ذكي وتطبيق للسكان
 - Brochure: https://bona-real-estate.com/listings/the-river-residences-al-salamah-jeddah/brochure.pdf
@@ -1525,7 +1549,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Shati, Jeddah, Saudi Arabia (الشاطئ، جدة)
 - Asking price: SAR 3,816,000
 - Specs: 636 m² plot
-- Coordinates: 21.6011128, 39.1195974
+- Coordinates (exact pin): 21.6011128, 39.1195974
 - Highlights: 636 sqm; North-facing, 21.25 m frontage; 16-metre street; SAR 6,000 per sqm net; Direct from the owner
 - المميزات: 636 متراً مربعاً؛ واجهة شمالية بطول 21.25 متراً؛ شارع بعرض 16 متراً؛ 6,000 ريال للمتر صافياً؛ من المالك مباشرة
 - Listed: 2026-04-10
@@ -1548,7 +1572,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Shati, Jeddah, Saudi Arabia (الشاطئ، جدة)
 - Asking price: SAR 4,200,000
 - Specs: 625 m² plot
-- Coordinates: 21.613996, 39.1172
+- Coordinates (exact pin): 21.613996, 39.1172
 - Highlights: 625 sqm corner plot; Two 12-metre streets, north and east; 24 m by 26 m; Second block from King Road; Near the Jeddah waterfront; SAR 4,200,000
 - المميزات: أرض زاوية بمساحة 625 متراً مربعاً؛ شارعان بعرض 12 متراً شمالاً وشرقاً؛ 24 في 26 متراً؛ المربع الثاني من طريق الملك؛ قرب الواجهة البحرية لجدة؛ 4,200,000 ريال سعودي
 - Listed: 2026-04-09
@@ -1571,7 +1595,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Shati, Jeddah, Saudi Arabia (الشاطئ، جدة)
 - Asking price: SAR 10,200,000
 - Specs: 1200 m² plot
-- Coordinates: 21.562684543496626, 39.11201582272763
+- Coordinates (exact pin): 21.562684543496626, 39.11201582272763
 - Highlights: 1,200 sqm; Rear faces toward the Corniche; Access from a 20 m street; SAR 8,500 per sqm; Al Shati
 - المميزات: 1,200 متر مربع؛ الجهة الخلفية نحو الكورنيش؛ الوصول من شارع بعرض 20 متراً؛ 8,500 ريال للمتر المربع؛ حي الشاطئ
 - Listed: 2026-08-26
@@ -1594,7 +1618,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Durrat Al Basateen, Jeddah, Saudi Arabia (درة البساتين، جدة)
 - Asking price: SAR 8,330,000
 - Specs: 980 m² plot
-- Coordinates: 21.63689519443776, 39.12082236721488
+- Coordinates (exact pin): 21.63689519443776, 39.12082236721488
 - Highlights: 980 sqm; South-facing on a 16 m street; Villa district near the coast; SAR 8,500 per sqm
 - المميزات: 980 متراً مربعاً؛ واجهة جنوبية على شارع بعرض 16 متراً؛ حي فلل قريب من الساحل؛ 8,500 ريال للمتر المربع
 - Listed: 2026-08-26
@@ -1617,7 +1641,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Shati 1, Jeddah, Saudi Arabia (الشاطئ 1، جدة)
 - Asking price: SAR 3,825,000
 - Specs: 450 m² plot
-- Coordinates: 21.563638942028028, 39.11882520750281
+- Coordinates (exact pin): 21.563638942028028, 39.11882520750281
 - Highlights: 450 sqm; On a 32 m street; Close to the sea; SAR 8,500 per sqm
 - المميزات: 450 متراً مربعاً؛ على شارع بعرض 32 متراً؛ قريبة من البحر؛ 8,500 ريال للمتر المربع
 - Listed: 2026-08-26
@@ -1640,7 +1664,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Durrat Al Basateen, Jeddah, Saudi Arabia (درة البساتين، جدة)
 - Asking price: SAR 4,256,800
 - Specs: 500.8 m² plot
-- Coordinates: 21.637311611993507, 39.12081632967131
+- Coordinates (exact pin): 21.637311611993507, 39.12081632967131
 - Highlights: 500.8 sqm; North-facing on a 30 m street; Villa district near the coast; SAR 8,500 per sqm
 - المميزات: 500.8 متر مربع؛ واجهة شمالية على شارع بعرض 30 متراً؛ حي فلل قريب من الساحل؛ 8,500 ريال للمتر المربع
 - Listed: 2026-08-26
@@ -1663,7 +1687,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Khalidiyah, Jeddah, Saudi Arabia (الخالدية، جدة)
 - Asking price: SAR 3,937,500
 - Specs: 625 m² plot
-- Coordinates: 21.560239915427147, 39.136093577749236
+- Coordinates (exact pin): 21.560239915427147, 39.136093577749236
 - Highlights: 625 sqm corner plot; Two streets, south and west; 25 m by 25 m; SAR 6,300 per sqm; Al Khalidiyah
 - المميزات: أرض زاوية بمساحة 625 متراً مربعاً؛ شارعان جنوباً وغرباً؛ 25 في 25 متراً؛ 6,300 ريال للمتر المربع؛ حي الخالدية
 - Listed: 2026-08-26
@@ -1686,7 +1710,7 @@ Enquire on WhatsApp: https://wa.me/966576267694?text=Hello%20Bona%2C%20I'm%20int
 - Location: Al Khalidiyah, Jeddah, Saudi Arabia (الخالدية، جدة)
 - Asking price: SAR 2,150,000
 - Specs: 300 m² plot
-- Coordinates: 21.560999987056363, 39.1362687553322
+- Coordinates (exact pin): 21.560999987056363, 39.1362687553322
 - Highlights: 300 sqm per plot; Twelve plots, ten remaining; SAR 2,150,000 per plot; About SAR 7,167 per sqm; Al Khalidiyah
 - المميزات: 300 متر مربع للقطعة؛ اثنتا عشرة قطعة، تبقّت عشر؛ 2,150,000 ريال سعودي للقطعة؛ نحو 7,167 ريالاً للمتر المربع؛ حي الخالدية
 - Listed: 2026-08-26
