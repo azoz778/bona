@@ -7,6 +7,7 @@ import net from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import { PHONE_JID_RE } from '../lib/wa.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -220,6 +221,9 @@ function pcWa(home, kind) {
     'escaped-quote': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID="bad\\"\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n"\n',
     'reopened-quote': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID="bona" "\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n"\n',
     'cr-mid': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=bona\rBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n',
+    // systemd ends a comment at a CR as well as at a LF (env-file.c: NEWLINE is "\n\r"), so what follows the CR
+    // is a live assignment for it, while awk and env_value see one comment line (Claude r3 P3-1 on #84, L5).
+    'cr-in-comment': 'BONA_WA_INSTANCE=bona\nBONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n; old twin\rBONA_WA_INSTANCE=abdulaziz-personal\n',
     'show-fails': PC_WA_LINES,
   }[kind];
   assert.ok(file !== undefined, `unknown PC_WA kind ${kind}`);
@@ -395,6 +399,7 @@ const REFUSAL_REASON = {
   'escaped-quote': 'is not a plain KEY=value',
   'reopened-quote': 'is not a plain KEY=value',
   'cr-mid': 'is not a plain KEY=value',
+  'cr-in-comment': 'is not a plain KEY=value',
   'quoted-export': 'is not a plain KEY=value',
 };
 
@@ -410,6 +415,7 @@ for (const [kind, why] of [
   ['escaped-quote', 'the env file has an escaped quote that keeps the value open'],
   ['reopened-quote', 'the env file opens a second quote after the value'],
   ['cr-mid', 'the env file has a bare carriage return inside a line'],
+  ['cr-in-comment', 'the env file has a bare carriage return inside a comment line'],
   ['quoted-export', 'the env file uses export, which systemd does not read'],
   ['personal', "the env file names the owner's personal instance"],
   ['early', 'the env file is loaded before bona-services.env, so it does not win'],
@@ -505,9 +511,9 @@ for (const [kind, why] of [
 const REPO_ROOT = path.resolve(HERE, '../../..');
 const PLAN = path.join(REPO_ROOT, 'docs/superpowers/plans/2026-11-19-wa-own-number.md');
 // The VPS runs this suite from its sparse checkout (install-vps.sh: services + src/data), which has
-// no docs/ at all: there the five lock tests are skipped. Anywhere else (the PC, a worktree; CI does not
-// run this suite) they run, and a missing docs/ or plan fails in lockCommand(), so a moved or renamed
-// plan, or a deleted docs/, cannot turn them off.
+// no docs/ at all: there the five lock tests are skipped. Anywhere else (the PC, a worktree, and CI,
+// which runs this whole api suite since PR-INFRA) they run, and a missing docs/ or plan fails in
+// lockCommand(), so a moved or renamed plan, or a deleted docs/, cannot turn them off.
 const SPARSE = existsSync(path.join(REPO_ROOT, '.git', 'info', 'sparse-checkout'));
 const NO_DOCS = SPARSE && !existsSync(path.join(REPO_ROOT, 'docs'))
   ? 'docs/ is not in this sparse checkout (the VPS: services + src/data); the lock command is read from the plan'
@@ -761,7 +767,7 @@ const keepRun = (pc, vps) => {
   const dir = mkdtempSync(path.join(tmpdir(), 'bona-keep-'));
   writeFileSync(path.join(dir, 'pc'), pc);
   writeFileSync(path.join(dir, 'vps'), vps);
-  const r = bash(['-c', '. ./lib.sh; keep_vps_keys "$1" "$2" "$3"', 'keep', path.join(dir, 'pc'), path.join(dir, 'vps'), path.join(dir, 'out')], { env: { HOME: dir } });
+  const r = bash(['-c', '. ./lib.sh; keep_vps_keys "$1" "$2" "$3" "$(vps_keep_keys bona-services.env)"', 'keep', path.join(dir, 'pc'), path.join(dir, 'vps'), path.join(dir, 'out')], { env: { HOME: dir } });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout + r.stderr, '', 'prints nothing');
   return readFileSync(path.join(dir, 'out'), 'utf8');
@@ -785,7 +791,7 @@ test('vps_keep_grep: the VPS lines are found with or without spaces before the =
   mkdirSync(path.join(home, '.secrets'));
   writeFileSync(path.join(home, '.secrets', 'bona-services.env'),
     'A=1\nBONA_WA_INSTANCE = bona\nexport BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\nBONA_WA_INSTANCE_X=no\n# BONA_WA_INSTANCE=commented\n');
-  const r = bash(['-c', '. ./lib.sh; VPS_KEEP_FILE=bona-services.env; eval "$(vps_keep_grep)"'], { env: { HOME: home } });
+  const r = bash(['-c', '. ./lib.sh; eval "$(vps_keep_grep bona-services.env)"'], { env: { HOME: home } });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, 'BONA_WA_INSTANCE = bona\nexport BONA_WA_INSTANCE_JID=966576267694@s.whatsapp.net\n');
 });
@@ -845,6 +851,148 @@ test('sync-secrets.sh --dry-run names the kept keys and contacts nothing', () =>
   assert.equal(readFileSync(log, 'utf8'), '');
 });
 
+// ---------------------------------------------------------------- kept keys per file + the missing-key guard (PR-INFRA, 2026-11-27)
+// T00 step 6 (names only): the VPS copies hold keys the PC copies lack, bona-services.env the dashboard push pair
+// (BONA_VAPID_PUBLIC / BONA_VAPID_PRIVATE) and bona-marketing.env the three TikTok keys, and BONA_WA_POLL_MS differs
+// between the two machines (phase 1 critic C5). A verbatim copy would delete or reset them, so the VPS's own line wins
+// for each, per file; and a key the VPS has that the PC lacks (and that is not kept) stops the copy (the guard).
+const KEEP = {
+  'retell.env': [],
+  'evolution-api.env': [],
+  'bona-services.env': ['BONA_WA_INSTANCE', 'BONA_WA_INSTANCE_JID', 'BONA_WA_POLL_MS', 'BONA_VAPID_PUBLIC', 'BONA_VAPID_PRIVATE'],
+  'bona-marketing.env': ['TIKTOK_PIXEL_ID', 'TIKTOK_EVENTS_ACCESS_TOKEN', 'TIKTOK_TEST_EVENT_CODE'],
+};
+// fakeVpsSecrets({ file: text }) → a temp HOME whose ~/.secrets holds those files: the ssh shim runs sync-secrets'
+// two remote reads (the key names, the kept lines) for real against it when SHIM_VPS_HOME points there.
+function fakeVpsSecrets(files) {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-fake-vps-'));
+  mkdirSync(path.join(home, '.secrets'));
+  for (const [f, text] of Object.entries(files)) writeFileSync(path.join(home, '.secrets', f), text, { mode: 0o600 });
+  return home;
+}
+const syncRun = (args, { home, log }, extra = {}) => bash([path.join(VPS, 'sync-secrets.sh'), ...args], { env: {
+  PATH: `${SHIMS}:${process.env.PATH}`, HOME: home, SHIM_LOG: log, BONA_VPS_SSH: 'fake-vps', ...extra,
+} });
+const shimLines = (log) => readFileSync(log, 'utf8').split('\n').filter(Boolean);
+const noTempLeft = (home) => assert.deepEqual(readdirSync(path.join(home, '.secrets')).filter((f) => f.startsWith('.')), [], 'no temp file left behind');
+// The guard's list: one "  FILE KEY" line per key a copy would delete on the VPS.
+const lostList = (out) => (stripAnsi(out).match(/^ {2}\S+\.env [A-Za-z_][A-Za-z0-9_]*$/gm) || []).map((l) => l.trim()).sort();
+
+test('lib.sh keeps the VPS lines per file: the exact VAPID, WA poll and TikTok names (T00 step 6)', () => {
+  const r = bash(['-c', '. ./lib.sh; printf "files=%s\\n" "$VPS_KEEP_FILES"; for f in $SECRET_FILES; do printf "%s=%s\\n" "$f" "$(vps_keep_keys "$f")"; done'], { env: { HOME: tmpdir() } });
+  assert.equal(r.status, 0, r.stderr);
+  const got = Object.fromEntries(r.stdout.trim().split('\n').map((l) => { const i = l.indexOf('='); return [l.slice(0, i), l.slice(i + 1).split(' ').filter(Boolean)]; }));
+  assert.deepEqual([...got.files].sort(), ['bona-marketing.env', 'bona-services.env']);
+  for (const [f, keys] of Object.entries(KEEP)) assert.deepEqual([...(got[f] ?? [])].sort(), [...keys].sort(), f);
+});
+
+test('vps_keep_grep FILE: each file is searched for its own kept keys only; a missing file is nothing', () => {
+  const home = fakeVpsSecrets({ 'bona-marketing.env': 'META_PIXEL_ID=m\nTIKTOK_PIXEL_ID=p\nexport TIKTOK_EVENTS_ACCESS_TOKEN = t\nTIKTOK_TEST_EVENT_CODE=c\nTIKTOK_OTHER=x\nBONA_WA_INSTANCE=nope\n# TIKTOK_PIXEL_ID=commented\n' });
+  const r = bash(['-c', '. ./lib.sh; eval "$(vps_keep_grep bona-marketing.env)"'], { env: { HOME: home } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'TIKTOK_PIXEL_ID=p\nexport TIKTOK_EVENTS_ACCESS_TOKEN = t\nTIKTOK_TEST_EVENT_CODE=c\n');
+  const none = bash(['-c', '. ./lib.sh; eval "$(vps_keep_grep bona-services.env)"'], { env: { HOME: home } });
+  assert.equal(none.status, 0, none.stderr);
+  assert.equal(none.stdout, '');
+});
+
+test('vps_key_names_cmd and env_key_names: FILE KEY per key line, never a value; comments and non-keys are skipped', () => {
+  const text = 'A=1\n  export B = two\n# C=3\n; D=4\nnot a key\n=x\n1BAD=4\nE=\r\nF="q=1"\n';
+  const home = fakeVpsSecrets({ 'retell.env': text, 'bona-marketing.env': 'G=7\n' });
+  const r = bash(['-c', '. ./lib.sh; eval "$(vps_key_names_cmd)"'], { env: { HOME: home } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, 'retell.env A\nretell.env B\nretell.env E\nretell.env F\nbona-marketing.env G\n');
+  // the PC side reads the same names out of the same text
+  const pc = bash(['-c', '. ./lib.sh; env_key_names "$1"', 'names', path.join(home, '.secrets', 'retell.env')], { env: { HOME: home } });
+  assert.equal(pc.status, 0, pc.stderr);
+  assert.equal(pc.stdout, 'A\nB\nE\nF\n');
+});
+
+test('sync-secrets.sh keeps the VPS lines per file: VAPID, the poll interval, the WhatsApp pair and the TikTok keys survive; no value printed', () => {
+  const ctx = syncHome();
+  writeFileSync(path.join(ctx.home, '.secrets', 'bona-services.env'), 'X=1\nBONA_WA_INSTANCE=abdulaziz-personal\nBONA_WA_POLL_MS=pc-interval\n');
+  writeFileSync(path.join(ctx.home, '.secrets', 'bona-marketing.env'), 'META_PIXEL_ID=pc-meta\n');
+  const vps = fakeVpsSecrets({
+    'retell.env': 'X=vps-old\n',
+    'evolution-api.env': 'X=vps-old\n',
+    'bona-services.env': 'X=vps-old\nBONA_WA_INSTANCE=bona2\nBONA_WA_INSTANCE_JID=966500000000@s.whatsapp.net\nBONA_WA_POLL_MS=vps-interval\nBONA_VAPID_PUBLIC=vps-pub\nBONA_VAPID_PRIVATE=vps-priv\n',
+    'bona-marketing.env': 'META_PIXEL_ID=vps-meta\nTIKTOK_PIXEL_ID=vps-px\nTIKTOK_EVENTS_ACCESS_TOKEN=vps-tok\nTIKTOK_TEST_EVENT_CODE=vps-code\n',
+  });
+  const r = syncRun([], ctx, { SHIM_VPS_HOME: vps, SHIM_SCP_CAPTURE: ctx.capture });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const got = (f) => readFileSync(path.join(ctx.capture, f), 'utf8');
+  assert.equal(got('bona-services.env'), 'X=1\nBONA_WA_INSTANCE=bona2\nBONA_WA_POLL_MS=vps-interval\nBONA_WA_INSTANCE_JID=966500000000@s.whatsapp.net\nBONA_VAPID_PUBLIC=vps-pub\nBONA_VAPID_PRIVATE=vps-priv\n');
+  assert.equal(got('bona-marketing.env'), 'META_PIXEL_ID=pc-meta\nTIKTOK_PIXEL_ID=vps-px\nTIKTOK_EVENTS_ACCESS_TOKEN=vps-tok\nTIKTOK_TEST_EVENT_CODE=vps-code\n');
+  assert.equal(got('retell.env'), 'X=1\n', 'a file without kept keys goes verbatim');
+  assert.equal(readFileSync(path.join(ctx.home, '.secrets', 'bona-marketing.env'), 'utf8'), 'META_PIXEL_ID=pc-meta\n', 'the PC file is left as it was');
+  assert.deepEqual(lostList(r.stdout + r.stderr), [], 'every VPS-only key here is a kept key');
+  assert.doesNotMatch(r.stdout + r.stderr, /vps-|pc-|966500000000|abdulaziz-personal/, 'no value is printed');
+  // both kept-line reads and the key-name read happen before the first copy
+  const lines = shimLines(ctx.log);
+  const firstScp = lines.findIndex((l) => /^scp /.test(l));
+  for (const re of [/^ssh fake-vps .*grep -E .*BONA_VAPID_PUBLIC/, /^ssh fake-vps .*grep -E .*TIKTOK_PIXEL_ID/, /^ssh fake-vps .*sed -nE /]) {
+    const at = lines.findIndex((l) => re.test(l));
+    assert.ok(at >= 0 && at < firstScp, `${re} before the first scp\n${lines.join('\n')}`);
+  }
+  noTempLeft(ctx.home);
+});
+
+test('sync-secrets.sh refuses when a VPS copy has a key the PC copy lacks: key names only, nothing copied', () => {
+  const ctx = syncHome();
+  const vps = fakeVpsSecrets({
+    'retell.env': 'X=vps\nRETELL_NEW_AGENT=vps-secret-1\n',
+    'bona-services.env': 'X=vps\nBONA_WA_INSTANCE=bona2\nBONA_VAPID_PUBLIC=vps-pub\nexport BONA_NEW_SWITCH = vps-secret-2\n# BONA_COMMENTED=vps-secret-3\n',
+    'bona-marketing.env': 'TIKTOK_PIXEL_ID=vps-px\n',
+  });
+  const r = syncRun([], ctx, { SHIM_VPS_HOME: vps });
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  const out = r.stdout + r.stderr;
+  // kept keys (BONA_WA_INSTANCE, BONA_VAPID_PUBLIC, TIKTOK_PIXEL_ID) are not lost; X is on the PC; a comment is no key
+  assert.deepEqual(lostList(out), ['bona-services.env BONA_NEW_SWITCH', 'retell.env RETELL_NEW_AGENT']);
+  assert.match(out, /--force/);
+  assert.match(out, /nothing copied/i);
+  assert.doesNotMatch(out, /vps-secret|vps-pub|vps-px|=vps/, 'no value is printed');
+  const lines = shimLines(ctx.log);
+  assert.ok(lines.some((l) => /^ssh fake-vps .*sed -nE /.test(l)), `the names were read\n${lines.join('\n')}`);
+  assert.ok(!lines.some((l) => /^scp /.test(l)), `nothing copied\n${lines.join('\n')}`);
+  assert.ok(!lines.some((l) => /^ssh fake-vps chmod /.test(l)), `nothing chmodded\n${lines.join('\n')}`);
+  noTempLeft(ctx.home);
+});
+
+test('sync-secrets.sh --force copies anyway: the VPS-only keys are dropped (named, with a warning), the kept keys still kept', () => {
+  const ctx = syncHome();
+  const vps = fakeVpsSecrets({
+    'retell.env': 'X=vps\nRETELL_NEW_AGENT=vps-secret-1\n',
+    'bona-services.env': 'X=vps\nBONA_WA_INSTANCE=bona2\nBONA_VAPID_PUBLIC=vps-pub\nBONA_NEW_SWITCH=vps-secret-2\n',
+  });
+  const r = syncRun(['--force'], ctx, { SHIM_VPS_HOME: vps, SHIM_SCP_CAPTURE: ctx.capture });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const out = r.stdout + r.stderr;
+  assert.deepEqual(lostList(out), ['bona-services.env BONA_NEW_SWITCH', 'retell.env RETELL_NEW_AGENT']);
+  assert.match(out, /--force/);
+  assert.doesNotMatch(out, /vps-secret|vps-pub|=vps/, 'no value is printed');
+  assert.equal(readFileSync(path.join(ctx.capture, 'retell.env'), 'utf8'), 'X=1\n');
+  assert.equal(readFileSync(path.join(ctx.capture, 'bona-services.env'), 'utf8'), 'X=1\nBONA_WA_INSTANCE=bona2\nBONA_VAPID_PUBLIC=vps-pub\n');
+  noTempLeft(ctx.home);
+});
+
+test('sync-secrets.sh copies nothing when the VPS key names cannot be read', () => {
+  const ctx = syncHome();
+  const r = syncRun([], ctx, { SHIM_VPS_NAMES_FAIL: '1' });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /key names/);
+  assert.ok(!shimLines(ctx.log).some((l) => /^scp /.test(l)), 'no scp after a failed read');
+  noTempLeft(ctx.home);
+});
+
+test('sync-secrets.sh: an unknown argument is a usage error and contacts nothing', () => {
+  const ctx = syncHome();
+  const r = syncRun(['--forced'], ctx);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /usage: sync-secrets\.sh \[--dry-run\] \[--force\]/);
+  assert.equal(readFileSync(ctx.log, 'utf8'), '');
+});
+
 // deploy.sh runs ON the VPS, so its systemctl calls go through `sudo -n` (system units); the sudo
 // shim logs the `sudo -n systemctl …` line and then execs the systemctl shim, which logs its own.
 const TIMER = {
@@ -855,8 +1003,13 @@ const TIMER = {
   restart: /^sudo -n systemctl restart bona-api\.service$/,
 };
 
-test('deploy.sh pauses bona-repo-sync.timer (+ its service) around pull/test/restart and starts the timer again only if it was active', () => {
-  const { repo, env, shimLog } = fakeVpsHome();
+// The deploy's database snapshot (PR-INFRA): the pinned node runs db-snapshot.mjs on ~/bona-data/bona.db after the
+// tests and before the restart, and keeps the newest 5 deploy snapshots.
+const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const SNAPSHOT_CALL = (home) => new RegExp(`^node ${reEsc(VPS)}/db-snapshot\\.mjs --db ${reEsc(home)}/bona-data/bona\\.db --out ${reEsc(home)}/bona-data/release-backups --label deploy --keep 5$`);
+
+test('deploy.sh pauses bona-repo-sync.timer (+ its service) around pull/test/snapshot/restart and starts the timer again only if it was active', () => {
+  const { home, repo, env, shimLog } = fakeVpsHome();
   const r = bash([path.join(VPS, 'deploy.sh')], { env });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assertOrdered(shimLog(),
@@ -864,6 +1017,7 @@ test('deploy.sh pauses bona-repo-sync.timer (+ its service) around pull/test/res
     TIMER.stopBoth,
     new RegExp(`^git -C ${repo} pull --ff-only --quiet$`),
     /^node --test api\/test\/\*\.test\.mjs$/,
+    SNAPSHOT_CALL(home),
     TIMER.restart,
     /^curl .*http:\/\/127\.0\.0\.1:4120\/health$/,
     TIMER.start);
@@ -875,7 +1029,17 @@ test('deploy.sh pauses bona-repo-sync.timer (+ its service) around pull/test/res
   assert.notEqual(f.status, 0, 'deploy must fail when the tests fail');
   const lines = failing.shimLog();
   assert.ok(!lines.some((l) => /systemctl restart/.test(l)), `no restart on red tests\n${lines.join('\n')}`);
+  assert.ok(!lines.some((l) => /db-snapshot\.mjs/.test(l)), `no snapshot on red tests\n${lines.join('\n')}`);
   assertOrdered(lines, TIMER.wasActive, TIMER.stopBoth, /^node --test/, TIMER.start);
+
+  // the snapshot fails → no restart either (the new code would run migrations on an unsaved database), timer back on
+  const nosnap = fakeVpsHome();
+  const s = bash([path.join(VPS, 'deploy.sh')], { env: { ...nosnap.env, SHIM_NODE_SNAPSHOT_FAIL: '1' } });
+  assert.notEqual(s.status, 0, 'deploy must fail when the snapshot fails');
+  assert.match(s.stderr, /snapshot failed.*NOT restarted/);
+  const slines = nosnap.shimLog();
+  assert.ok(!slines.some((l) => /systemctl restart/.test(l)), `no restart without a snapshot\n${slines.join('\n')}`);
+  assertOrdered(slines, TIMER.stopBoth, /^node --test/, SNAPSHOT_CALL(nosnap.home), TIMER.start);
 
   // timer was NOT active before (the owner paused it, or before the cutover enabled it) → deploy
   // must not switch it on as a side effect
@@ -885,6 +1049,109 @@ test('deploy.sh pauses bona-repo-sync.timer (+ its service) around pull/test/res
   const plines = paused.shimLog();
   assertOrdered(plines, TIMER.wasActive, TIMER.stopBoth, TIMER.restart);
   assert.ok(!plines.some((l) => TIMER.start.test(l)), `an inactive timer must stay inactive\n${plines.join('\n')}`);
+});
+
+// ---------------------------------------------------------------- db-snapshot.mjs (PR-INFRA): VACUUM INTO before every restart
+// node:sqlite, because the VPS has no sqlite3 CLI. The copy is consistent while bona-api keeps writing (a read
+// transaction on the live file, WAL frames included), 0600, integrity-checked, and only then given its final name.
+const SNAP = path.join(VPS, 'db-snapshot.mjs');
+const snap = (args, env = {}) => spawnSync(process.execPath, [SNAP, ...args], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: tmpdir(), ...env } });
+// liveDb(dir) → a bona.db in WAL mode with its writer still open and one row only in the WAL, the way bona-api holds it.
+function liveDb(dir = mkdtempSync(path.join(tmpdir(), 'bona-snap-'))) {
+  const file = path.join(dir, 'bona.db');
+  const db = new DatabaseSync(file);
+  db.exec("PRAGMA journal_mode = WAL; CREATE TABLE leads (id INTEGER PRIMARY KEY, name TEXT); INSERT INTO leads (name) VALUES ('Example One'); PRAGMA user_version = 7;");
+  db.exec("INSERT INTO leads (name) VALUES ('Example Two')");
+  assert.ok(statSync(`${file}-wal`).size > 0, 'the last row is still in the WAL');
+  return { dir, file, db };
+}
+const SNAP_NAME = (label) => new RegExp(`^bona-${label}-\\d{8}T\\d{6}Z\\.db$`);
+
+test('db-snapshot.mjs: VACUUM INTO a 0600 file under release-backups/, integrity_check ok, WAL rows in, the source untouched', () => {
+  const { dir, file, db } = liveDb();
+  try {
+    const out = path.join(dir, 'release-backups');
+    const before = readFileSync(file);
+    const r = snap(['--db', file, '--out', out, '--label', 'pre-v8']);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    const files = readdirSync(out);
+    assert.equal(files.length, 1, `one file, no partial left: ${files.join(', ')}`);
+    assert.match(files[0], SNAP_NAME('pre-v8'));
+    const copyFile = path.join(out, files[0]);
+    assert.equal(statSync(copyFile).mode & 0o777, 0o600, 'the snapshot is 0600');
+    assert.equal(statSync(out).mode & 0o777, 0o700, 'a new release-backups/ is 0700');
+    const copy = new DatabaseSync(copyFile, { readOnly: true });
+    try {
+      assert.deepEqual(copy.prepare('PRAGMA integrity_check').all().map((row) => row.integrity_check), ['ok']);
+      assert.equal(copy.prepare('SELECT count(*) AS n FROM leads').get().n, 2, 'the WAL row is in the copy');
+      assert.equal(copy.prepare('PRAGMA user_version').get().user_version, 7, 'the schema version is kept');
+    } finally { copy.close(); }
+    assert.ok(readFileSync(file).equals(before), 'the live file is only read');
+    assert.ok(r.stdout.includes(copyFile), `it says where the copy is\n${r.stdout}`);
+    assert.match(r.stdout, /integrity ok/);
+    assert.match(r.stdout, /user_version 7/);
+    assert.doesNotMatch(r.stdout + r.stderr, /Example/, 'no row data is printed');
+  } finally { db.close(); }
+});
+
+test('db-snapshot.mjs with no --db/--out: ~/bona-data/bona.db into ~/bona-data/release-backups (the manual pre-v8 command)', () => {
+  const home = mkdtempSync(path.join(tmpdir(), 'bona-snap-home-'));
+  mkdirSync(path.join(home, 'bona-data'));
+  const { db } = liveDb(path.join(home, 'bona-data'));
+  try {
+    const r = snap(['--label', 'pre-v8'], { HOME: home });
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    const files = readdirSync(path.join(home, 'bona-data', 'release-backups'));
+    assert.equal(files.length, 1, files.join(', '));
+    assert.match(files[0], SNAP_NAME('pre-v8'));
+  } finally { db.close(); }
+});
+
+test('db-snapshot.mjs --keep 5: only that label is pruned, the newest 5 stay, other files and labels are never touched', () => {
+  const { dir, file, db } = liveDb();
+  try {
+    const out = path.join(dir, 'release-backups');
+    mkdirSync(path.join(out, '20261010-property-handoff'), { recursive: true });
+    writeFileSync(path.join(out, '20261010-property-handoff', 'bona-before-v7.db'), 'precedent');
+    const old = ['20261101T000000Z', '20261102T000000Z', '20261103T000000Z', '20261104T000000Z', '20261105T000000Z', '20261106T000000Z'];
+    for (const t of old) writeFileSync(path.join(out, `bona-deploy-${t}.db`), 'x', { mode: 0o600 });
+    const others = ['bona-pre-v8-20261001T000000Z.db', 'bona-deploy-latest.db', 'notes.txt', '20261010-property-handoff'];
+    for (const f of others.slice(0, 3)) writeFileSync(path.join(out, f), 'x');
+    const r = snap(['--db', file, '--out', out, '--label', 'deploy', '--keep', '5']);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    const left = readdirSync(out).sort();
+    assert.equal(left.filter((f) => SNAP_NAME('deploy').test(f)).length, 5, left.join('\n'));
+    for (const t of old.slice(2)) assert.ok(left.includes(`bona-deploy-${t}.db`), `${t} kept`);
+    for (const t of old.slice(0, 2)) {
+      assert.ok(!left.includes(`bona-deploy-${t}.db`), `${t} pruned`);
+      assert.match(r.stdout, new RegExp(`pruned bona-deploy-${t}\\.db`));
+    }
+    for (const f of others) assert.ok(left.includes(f), `${f} left alone`);
+    assert.equal(readFileSync(path.join(out, '20261010-property-handoff', 'bona-before-v7.db'), 'utf8'), 'precedent');
+  } finally { db.close(); }
+});
+
+test('db-snapshot.mjs refuses and leaves no file: no database, not a database, a bad label or keep (usage = 2)', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'bona-snap-bad-'));
+  const out = path.join(dir, 'release-backups');
+  const listed = () => (existsSync(out) ? readdirSync(out) : []);
+  const missing = snap(['--db', path.join(dir, 'nope.db'), '--out', out]);
+  assert.equal(missing.status, 1, missing.stderr);
+  assert.match(missing.stderr, /no database/);
+  assert.deepEqual(listed(), []);
+  writeFileSync(path.join(dir, 'junk.db'), 'this is not an SQLite file. '.repeat(200));
+  const junk = snap(['--db', path.join(dir, 'junk.db'), '--out', out, '--label', 'deploy']);
+  assert.equal(junk.status, 1, junk.stdout + junk.stderr);
+  assert.deepEqual(listed(), [], 'no snapshot and no partial file left');
+  for (const args of [['--label', '../x'], ['--label', ''], ['--label', 'Deploy'], ['--keep', '0'], ['--keep', '2x'], ['--bogus'], ['extra']]) {
+    const r = snap(['--db', path.join(dir, 'junk.db'), '--out', out, ...args]);
+    assert.equal(r.status, 2, `${args.join(' ')}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /usage: db-snapshot\.mjs/);
+  }
+  assert.deepEqual(listed(), []);
+  const src = readFileSync(SNAP, 'utf8');
+  assert.match(src, /from 'node:sqlite'/);
+  assert.doesNotMatch(src, /child_process|spawn|execFile/, 'no sqlite3 CLI or any other program (the VPS has none)');
 });
 
 test('render() keeps & and | in a value verbatim (no sed, no patsub_replacement surprises)', () => {

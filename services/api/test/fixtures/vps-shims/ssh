@@ -11,6 +11,8 @@
 #   ~/.local/opt/node-…/bin/node -e … ~/bona-data/bona.db → prints 7 (the lead count)
 #   test -f ~/bona-data/NAME                            → exit 0 (present) unless NAME is in SHIM_REMOTE_MISSING
 #   …grep -E… (sync-secrets' read of the kept keys)    → prints $SHIM_VPS_KEEP_LINES; exit 255 with SHIM_VPS_KEEP_FAIL=1
+#   …sed -nE… (sync-secrets' read of the key names)    → prints $SHIM_VPS_KEY_NAMES; exit 255 with SHIM_VPS_NAMES_FAIL=1
+#     With SHIM_VPS_HOME=DIR both reads run for real (bash -c, HOME=DIR) against DIR/.secrets instead.
 #   anything else                                       → exit 99 (the test sees an unexpected command)
 # The VPS units are SYSTEM units driven with `sudo -n systemctl` (lib.sh: VPS_SYSTEMCTL); a remote
 # `systemctl --user …` is therefore "anything else" — a regression to user units fails loudly here.
@@ -46,7 +48,13 @@ case "$cmd" in
     case " ${SHIM_REMOTE_MISSING:-} " in *" $name "*) exit 1 ;; *) exit 0 ;; esac ;;
   *grep\ -E*)
     [ "${SHIM_VPS_KEEP_FAIL:-0}" = 1 ] && { echo "ssh: connect to host fake-vps port 22: Connection refused (shim)" >&2; exit 255; }
+    [ -n "${SHIM_VPS_HOME:-}" ] && exec env HOME="$SHIM_VPS_HOME" bash -c "$cmd"
     [ -n "${SHIM_VPS_KEEP_LINES:-}" ] && printf '%s\n' "$SHIM_VPS_KEEP_LINES"
+    exit 0 ;;
+  *sed\ -nE*)
+    [ "${SHIM_VPS_NAMES_FAIL:-0}" = 1 ] && { echo "ssh: connect to host fake-vps port 22: Connection refused (shim)" >&2; exit 255; }
+    [ -n "${SHIM_VPS_HOME:-}" ] && exec env HOME="$SHIM_VPS_HOME" bash -c "$cmd"
+    [ -n "${SHIM_VPS_KEY_NAMES:-}" ] && printf '%s\n' "$SHIM_VPS_KEY_NAMES"
     exit 0 ;;
   *) echo "ssh shim: unexpected remote command: $cmd" >&2; exit 99 ;;
 esac

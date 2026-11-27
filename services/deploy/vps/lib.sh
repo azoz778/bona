@@ -43,11 +43,18 @@ CLOUDFLARED_VERSION=2026.8.3
 CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e
 
 SECRET_FILES="retell.env evolution-api.env bona-services.env bona-marketing.env"
-# bona-services.env is not copied verbatim (2026-11-19): the PC copy keeps the owner's personal
-# WhatsApp instance for bona-intake, while the VPS reads Bona's own. For these keys the VPS's
-# own line wins; a verbatim copy would silently undo the move (A2Z go-live item 7).
-VPS_KEEP_FILE="bona-services.env"
-VPS_KEEP_KEYS="BONA_WA_INSTANCE BONA_WA_INSTANCE_JID"
+# Kept keys: in these files the VPS's own line wins for the keys below (sync-secrets.sh); the other lines and
+# the other files are copied from the PC as they are. A verbatim copy would silently undo or delete them:
+# - bona-services.env (2026-11-19): BONA_WA_INSTANCE / BONA_WA_INSTANCE_JID, because the PC copy keeps the
+#   owner's personal WhatsApp instance for bona-intake while the VPS reads Bona's own (A2Z go-live item 7);
+#   (2026-11-27, PR-INFRA) BONA_WA_POLL_MS, the VPS's own poll interval, and BONA_VAPID_PUBLIC /
+#   BONA_VAPID_PRIVATE, the dashboard push keys, which exist only on the VPS.
+# - bona-marketing.env (2026-11-27): TIKTOK_PIXEL_ID, TIKTOK_EVENTS_ACCESS_TOKEN, TIKTOK_TEST_EVENT_CODE (only
+#   on the VPS).
+# A key name belongs to one file only. Any OTHER key the VPS has and the PC lacks stops the copy (the guard).
+VPS_KEEP_FILES="bona-services.env bona-marketing.env"
+VPS_KEEP_SERVICES_KEYS="BONA_WA_INSTANCE BONA_WA_INSTANCE_JID BONA_WA_POLL_MS BONA_VAPID_PUBLIC BONA_VAPID_PRIVATE"
+VPS_KEEP_MARKETING_KEYS="TIKTOK_PIXEL_ID TIKTOK_EVENTS_ACCESS_TOKEN TIKTOK_TEST_EVENT_CODE"
 DATA_FILES="bona.db bona.db-wal bona.db-shm leads.jsonl chats.jsonl calls.jsonl"
 UNITS="bona-api.service cloudflared-bona.service bona-repo-sync.service bona-repo-sync.timer"
 # Stop order on the VPS: the tunnel connector first (no more public traffic), then the API, then the timer.
@@ -71,21 +78,30 @@ warn() { printf '\033[1;33mwarn\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mfail\033[0m %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 
-# The remote command that prints the VPS's own VPS_KEEP_KEYS lines of VPS_KEEP_FILE: nothing
+# vps_keep_keys FILE → the kept keys of FILE, space-separated; nothing for a file copied verbatim.
+vps_keep_keys() {
+  case "$1" in
+    bona-services.env) printf '%s' "$VPS_KEEP_SERVICES_KEYS" ;;
+    bona-marketing.env) printf '%s' "$VPS_KEEP_MARKETING_KEYS" ;;
+  esac
+}
+
+# vps_keep_grep FILE → the remote command that prints the VPS's own kept-key lines of FILE: nothing
 # when the file is missing or has none, a non-zero status when grep itself fails. Spaces before
 # the `=` count, as the API's env parser (services/api/lib/env.mjs) accepts them.
 vps_keep_grep() {
-  local alt; alt=$(printf '%s' "$VPS_KEEP_KEYS" | tr ' ' '|')
-  printf '%s' "f=~/.secrets/$VPS_KEEP_FILE; [ -e \"\$f\" ] || exit 0; grep -E '^[[:space:]]*(export[[:space:]]+)?($alt)[[:space:]]*=' \"\$f\"; [ \$? -le 1 ]"
+  local alt; alt=$(vps_keep_keys "$1" | tr ' ' '|')
+  [ -n "$alt" ] || die "vps_keep_grep: $1 has no kept keys"
+  printf '%s' "f=~/.secrets/$1; [ -e \"\$f\" ] || exit 0; grep -E '^[[:space:]]*(export[[:space:]]+)?($alt)[[:space:]]*=' \"\$f\"; [ \$? -le 1 ]"
 }
 
-# keep_vps_keys PC_FILE VPS_LINES OUT: OUT is PC_FILE, except that a VPS_KEEP_KEYS line the VPS
-# has (VPS_LINES) stands in place of the PC's line for that key, or is appended when the PC has
-# none; a kept key the VPS lacks keeps the PC's line. Prints nothing.
+# keep_vps_keys PC_FILE VPS_LINES OUT KEYS: OUT is PC_FILE, except that a line for one of KEYS
+# (space-separated) the VPS has (VPS_LINES) stands in place of the PC's line for that key, or is
+# appended when the PC has none; a kept key the VPS lacks keeps the PC's line. Prints nothing.
 # (FILENAME == vpsfile, not NR == FNR: with an empty VPS_LINES the classic idiom would read the
 # PC's lines as the VPS's.)
 keep_vps_keys() {
-  awk -v keys="$VPS_KEEP_KEYS" -v vpsfile="$2" '
+  awk -v keys="$4" -v vpsfile="$2" '
     function key(line,  k) { k = line; sub(/^[ \t]*(export[ \t]+)?/, "", k); if (k !~ /=/) return ""; sub(/[ \t]*=.*/, "", k); return k }
     BEGIN { n = split(keys, list, " "); for (i = 1; i <= n; i++) want[list[i]] = 1 }
     FILENAME == vpsfile { k = key($0); if (k in want) vps[k] = $0; next }
@@ -94,6 +110,41 @@ keep_vps_keys() {
       print }
     END { for (i = 1; i <= n; i++) { k = list[i]; if ((k in vps) && !(k in done)) print vps[k] } }
   ' "$2" "$1" > "$3"
+}
+
+# ---- The missing-key guard (PR-INFRA, 2026-11-27) ------------------------------------------------
+# A key line: optional `export `, a name, optional spaces, `=` (lib/env.mjs parseEnvText reads the same
+# names; comments and lines without a valid name before the `=` are no keys). One pattern for both sides.
+KEY_LINE_ERE='^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*='
+
+# env_key_names FILE → the key names FILE sets, one per line (repeats as they come); never a value.
+env_key_names() {
+  [ -r "$1" ] || return 0
+  sed -nE "s/$KEY_LINE_ERE.*/\\2/p" "$1"
+}
+
+# vps_key_names_cmd → the remote command that prints "FILE KEY" for every key line of every
+# SECRET_FILES file on the VPS (never a value); nothing for a file that is not there, a non-zero
+# status when sed fails.
+vps_key_names_cmd() {
+  local f cmd='cd ~/.secrets 2>/dev/null || exit 0'
+  for f in $SECRET_FILES; do
+    cmd="$cmd; if [ -e $f ]; then sed -nE 's/$KEY_LINE_ERE.*/$f \\2/p' $f || exit 1; fi"
+  done
+  printf '%s' "$cmd"
+}
+
+# vps_only_keys NAMES → "FILE KEY" for every key NAMES (vps_key_names_cmd's output) lists that the
+# PC copy of FILE does not set and that is not a kept key of FILE: the keys a copy would delete on
+# the VPS. Names only, sorted per file.
+vps_only_keys() {
+  local f k have
+  for f in $SECRET_FILES; do
+    have=" $(env_key_names "$SECRETS_DIR/$f" | tr '\n' ' ') $(vps_keep_keys "$f") "
+    for k in $(awk -v f="$f" '$1 == f && $2 ~ /^[A-Za-z_][A-Za-z0-9_]*$/ { print $2 }' "$1" | sort -u); do
+      case "$have" in *" $k "*) ;; *) printf '%s %s\n' "$f" "$k" ;; esac
+    done
+  done
 }
 
 # ---- The PC bona-api twin's WhatsApp drop-in (A2Z go-live item 7, 2026-11-19) -------------------
@@ -187,6 +238,7 @@ pc_wa_dropin_ok() {
   if awk -v q="'" '
       BEGIN { plain = "^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*([^\"" q "\\\\\r]*|\"[^\"\\\\\r]*\"|" q "[^" q "\\\\\r]*" q ")[ \t]*$" }
       { l = $0; sub(/\r$/, "", l)
+        if (index(l, "\r")) { bad = 1; next }   # systemd ends a comment at a CR too: what follows is live
         if (l ~ /^[ \t]*$/ || l ~ /^[ \t]*[#;]/) next
         if (l !~ plain) bad = 1 }
       END { exit !bad }' "$PC_WA_ENV"; then

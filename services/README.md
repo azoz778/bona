@@ -482,9 +482,17 @@ before it stops anything, while the unit still loads `bona-api-pc-wa.env`: the t
 poll and send through Bona's instance after all. It prints the two commands that take the drop-in
 away (`rm` the `.conf` above, then `systemctl --user daemon-reload`).
 
-`sync-secrets.sh` keeps the VPS's own `BONA_WA_INSTANCE` / `BONA_WA_INSTANCE_JID` (lib.sh
-`VPS_KEEP_KEYS`), and copies nothing when it cannot read them; run it only from a checkout that has
-that guard.
+`sync-secrets.sh` keeps the VPS's own lines for the keys set there on purpose (lib.sh `vps_keep_keys`):
+in `bona-services.env` `BONA_WA_INSTANCE` / `BONA_WA_INSTANCE_JID`, `BONA_WA_POLL_MS` and the push pair
+`BONA_VAPID_PUBLIC` / `BONA_VAPID_PRIVATE`; in `bona-marketing.env` the three `TIKTOK_*` keys. Any other key a
+VPS file has and the PC copy lacks stops the copy before anything is sent, with the key names (never a value):
+add it to the PC file, or run `sync-secrets.sh --force` to drop it on the VPS. It copies nothing when it cannot
+read the VPS; run it only from a checkout that has these guards (PR-INFRA, 2026-11-27).
+
+`deploy.sh` snapshots `~/bona-data/bona.db` after the tests and before the restart (`db-snapshot.mjs`:
+VACUUM INTO, 0600, integrity-checked, `~/bona-data/release-backups/bona-deploy-<UTC time>.db`, newest 5 kept);
+a failed snapshot leaves the running service as it is. A copy by hand, never pruned:
+`ssh hermes-vps '~/.local/opt/node-v24.19.0-linux-x64/bin/node /opt/bona/services/deploy/vps/db-snapshot.mjs --label pre-v8'`.
 
 ### Legacy / rollback only: the PC installer
 

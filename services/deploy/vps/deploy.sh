@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Run ON THE VPS (or: ssh hermes-vps bash /opt/bona/services/deploy/vps/deploy.sh).
-# Pause the repo-sync timer, pull main, run the API test suite with the pinned node, restart the
-# unit, wait for /health; on exit — whatever happened in between — the timer starts again IF it was
-# active when this script began (a timer the owner had paused stays paused).
-# Tests failing = the running service is left untouched.
+# Pause the repo-sync timer, pull main, run the API test suite with the pinned node, snapshot the
+# database, restart the unit, wait for /health; on exit — whatever happened in between — the timer
+# starts again IF it was active when this script began (a timer the owner had paused stays paused).
+# Tests failing, or the snapshot failing = the running service is left untouched.
+# The snapshot (db-snapshot.mjs, PR-INFRA 2026-11-27): a VACUUM INTO copy of ~/bona-data/bona.db,
+# 0600 and integrity-checked, in ~/bona-data/release-backups/bona-deploy-<UTC time>.db, taken before
+# the restart because the new code applies its schema migrations at start; the newest 5 are kept.
 # The units are SYSTEM units (lib.sh: BONA_UNIT_DIR, the userns restriction on Ubuntu 24.04), so
 # every systemctl/journalctl here goes through $VPS_SYSTEMCTL / $VPS_JOURNALCTL (sudo -n …).
 set -euo pipefail
@@ -37,6 +40,10 @@ ok "$before -> $after"
 say "Tests"
 ( cd "$BONA_VPS_REPO/services" && "$NODE_BIN/node" --test api/test/*.test.mjs ) || die "tests failed — service NOT restarted (still on $before)"
 ok "tests green"
+
+say "Snapshot bona.db"
+"$NODE_BIN/node" "$HERE/db-snapshot.mjs" --db "$DATA_DIR/bona.db" --out "$DATA_DIR/release-backups" --label deploy --keep 5 \
+  || die "database snapshot failed — service NOT restarted (still on $before)"
 
 say "Restart bona-api"
 $VPS_SYSTEMCTL restart bona-api.service
