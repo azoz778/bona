@@ -43,11 +43,18 @@ CLOUDFLARED_VERSION=2026.8.3
 CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e
 
 SECRET_FILES="retell.env evolution-api.env bona-services.env bona-marketing.env"
-# bona-services.env is not copied verbatim (2026-11-19): the PC copy keeps the owner's personal
-# WhatsApp instance for bona-intake, while the VPS reads Bona's own. For these keys the VPS's
-# own line wins; a verbatim copy would silently undo the move (A2Z go-live item 7).
-VPS_KEEP_FILE="bona-services.env"
-VPS_KEEP_KEYS="BONA_WA_INSTANCE BONA_WA_INSTANCE_JID"
+# Kept keys: in these files the VPS's own line wins for the keys below (sync-secrets.sh); the other lines and
+# the other files are copied from the PC as they are. A verbatim copy would silently undo or delete them:
+# - bona-services.env (2026-11-19): BONA_WA_INSTANCE / BONA_WA_INSTANCE_JID, because the PC copy keeps the
+#   owner's personal WhatsApp instance for bona-intake while the VPS reads Bona's own (A2Z go-live item 7);
+#   (2026-11-27, PR-INFRA) BONA_WA_POLL_MS, the VPS's own poll interval, and BONA_VAPID_PUBLIC /
+#   BONA_VAPID_PRIVATE, the dashboard push keys, which exist only on the VPS.
+# - bona-marketing.env (2026-11-27): TIKTOK_PIXEL_ID, TIKTOK_EVENTS_ACCESS_TOKEN, TIKTOK_TEST_EVENT_CODE (only
+#   on the VPS).
+# A key name belongs to one file only. Any OTHER key the VPS has and the PC lacks stops the copy (the guard).
+VPS_KEEP_FILES="bona-services.env bona-marketing.env"
+VPS_KEEP_SERVICES_KEYS="BONA_WA_INSTANCE BONA_WA_INSTANCE_JID BONA_WA_POLL_MS BONA_VAPID_PUBLIC BONA_VAPID_PRIVATE"
+VPS_KEEP_MARKETING_KEYS="TIKTOK_PIXEL_ID TIKTOK_EVENTS_ACCESS_TOKEN TIKTOK_TEST_EVENT_CODE"
 DATA_FILES="bona.db bona.db-wal bona.db-shm leads.jsonl chats.jsonl calls.jsonl"
 UNITS="bona-api.service cloudflared-bona.service bona-repo-sync.service bona-repo-sync.timer"
 # Stop order on the VPS: the tunnel connector first (no more public traffic), then the API, then the timer.
@@ -71,22 +78,48 @@ warn() { printf '\033[1;33mwarn\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mfail\033[0m %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing command: $1"; }
 
-# The remote command that prints the VPS's own VPS_KEEP_KEYS lines of VPS_KEEP_FILE: nothing
-# when the file is missing or has none, a non-zero status when grep itself fails. Spaces before
-# the `=` count, as the API's env parser (services/api/lib/env.mjs) accepts them.
-vps_keep_grep() {
-  local alt; alt=$(printf '%s' "$VPS_KEEP_KEYS" | tr ' ' '|')
-  printf '%s' "f=~/.secrets/$VPS_KEEP_FILE; [ -e \"\$f\" ] || exit 0; grep -E '^[[:space:]]*(export[[:space:]]+)?($alt)[[:space:]]*=' \"\$f\"; [ \$? -le 1 ]"
+# vps_keep_keys FILE → the kept keys of FILE, space-separated; nothing for a file copied verbatim.
+vps_keep_keys() {
+  case "$1" in
+    bona-services.env) printf '%s' "$VPS_KEEP_SERVICES_KEYS" ;;
+    bona-marketing.env) printf '%s' "$VPS_KEEP_MARKETING_KEYS" ;;
+  esac
 }
 
-# keep_vps_keys PC_FILE VPS_LINES OUT: OUT is PC_FILE, except that a VPS_KEEP_KEYS line the VPS
-# has (VPS_LINES) stands in place of the PC's line for that key, or is appended when the PC has
-# none; a kept key the VPS lacks keeps the PC's line. Prints nothing.
+# ---- How the shell reads a key line, on both machines: lib/env.mjs parseEnvText, as ONE awk function ---
+# parseEnvText trims each line with String.prototype.trim(), which strips the ASCII blanks (space, \t, \v, \f, \r) and
+# the Unicode white space: U+00A0, U+1680, U+2000-U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and the BOM U+FEFF.
+# Then `export ` (exactly "export" and one ASCII space) and a trim again, then the name before the first `=`, trimmed.
+# key(line) does the same on the UTF-8 bytes and returns "" for a line that sets no key: so `export<TAB>KEY=` and
+# `export =` are no keys, as in the API. Every read of a key line goes through it: the PC's names, both VPS reads,
+# the check of their answers and the merge, so no two of them can read a line differently (fix round 2; the r1
+# sed/awk pair did: Claude r2, Codex r2). Every awk that uses it runs with LC_ALL=C, so gawk reads bytes as mawk does
+# (the VPS and the CI runner have mawk, this PC gawk; vps-deploy.test.mjs holds it to parseEnvText for each white
+# space character). nobom(line) is the line without a leading BOM. No single quote in it: the remote commands
+# carry it inside single quotes.
+KEY_AWK='function key(line,  k, n, r) { k = line; sub("^" WS "+", "", k); if (substr(k, 1, 7) == "export ") { k = substr(k, 8); sub("^" WS "+", "", k) }; if (!match(k, /^[A-Za-z_][A-Za-z0-9_]*/)) return ""; n = substr(k, 1, RLENGTH); r = substr(k, RLENGTH + 1); sub("^" WS "+", "", r); return substr(r, 1, 1) == "=" ? n : "" }; function nobom(line) { return index(line, BOM) == 1 ? substr(line, 4) : line }; BEGIN { BOM = "\357\273\277"; WS = "([[:space:]]|\302\240|\341\232\200|\342\200[\200\201\202\203\204\205\206\207\210\211\212\250\251\257]|\342\201\237|\343\200\200|" BOM ")" }'
+# The answers of the two VPS reads: rows, then for every file it was asked about a record, "= FILE N" (N = its rows)
+# or "= FILE -" (the file is not there), and last "= end". A record cannot be a key line (it starts with `=`). So an
+# answer that exits 0 but lost its rows, a record or its end is told apart from a VPS without the file (Codex r2).
+
+# vps_keep_grep FILE → the remote command that prints the VPS's own kept-key lines of FILE (a leading BOM dropped),
+# then "= FILE N" and "= end"; "= FILE -" and "= end" when the file is not there; a non-zero status when awk fails.
+# It dies when FILE keeps no key, and it runs inside "$(…)", where die only leaves the subshell: the caller stops on
+# its status (`cmd=$(vps_keep_grep "$f") || exit 1`; Claude r1).
+vps_keep_grep() {
+  local keys; keys=$(vps_keep_keys "$1")
+  [ -n "$keys" ] || die "vps_keep_grep: $1 has no kept keys"
+  printf '%s' "f=~/.secrets/$1; if [ -e \"\$f\" ]; then LC_ALL=C awk -v f=$1 -v keys=\"$keys\" '$KEY_AWK; BEGIN { n = split(keys, l, \" \"); for (i = 1; i <= n; i++) want[l[i]] = 1 } (key(\$0) in want) { print nobom(\$0); c++ } END { print \"=\", f, c + 0; print \"= end\" }' \"\$f\" || exit 1; else echo '= $1 -'; echo '= end'; fi"
+}
+
+# keep_vps_keys PC_FILE VPS_LINES OUT KEYS: OUT is PC_FILE, except that a line for one of KEYS
+# (space-separated) the VPS has (VPS_LINES) stands in place of the PC's line for that key, or is
+# appended when the PC has none; a kept key the VPS lacks keeps the PC's line. Prints nothing.
+# Both files are read with key() (KEY_AWK); the records in VPS_LINES set no key, so they are not lines here.
 # (FILENAME == vpsfile, not NR == FNR: with an empty VPS_LINES the classic idiom would read the
 # PC's lines as the VPS's.)
 keep_vps_keys() {
-  awk -v keys="$VPS_KEEP_KEYS" -v vpsfile="$2" '
-    function key(line,  k) { k = line; sub(/^[ \t]*(export[ \t]+)?/, "", k); if (k !~ /=/) return ""; sub(/[ \t]*=.*/, "", k); return k }
+  LC_ALL=C awk -v keys="$4" -v vpsfile="$2" "$KEY_AWK"'
     BEGIN { n = split(keys, list, " "); for (i = 1; i <= n; i++) want[list[i]] = 1 }
     FILENAME == vpsfile { k = key($0); if (k in want) vps[k] = $0; next }
     { k = key($0)
@@ -94,6 +127,103 @@ keep_vps_keys() {
       print }
     END { for (i = 1; i <= n; i++) { k = list[i]; if ((k in vps) && !(k in done)) print vps[k] } }
   ' "$2" "$1" > "$3"
+}
+
+# ---- The missing-key guard (PR-INFRA, 2026-11-27) ------------------------------------------------
+# env_key_names FILE → the key names FILE sets, one per line (repeats as they come); never a value. Nothing when
+# FILE cannot be read; a non-zero status when awk fails.
+env_key_names() {
+  [ -r "$1" ] || return 0
+  LC_ALL=C awk "$KEY_AWK"'; { k = key($0); if (k != "") print k }' "$1"
+}
+
+# vps_key_names_cmd → the remote command that prints "FILE KEY" for every key line of every SECRET_FILES file on the
+# VPS (never a value), "= FILE -" for a file that is not there, "= FILE N" for one that is, and "= end"; a non-zero
+# status when ~/.secrets cannot be entered (sync-secrets.sh has just made it) or awk fails.
+vps_key_names_cmd() {
+  printf '%s' "cd ~/.secrets || exit 1; set --; for f in $SECRET_FILES; do if [ -e \"\$f\" ]; then set -- \"\$@\" \"\$f\"; else echo \"= \$f -\"; fi; done; if [ \$# -gt 0 ]; then LC_ALL=C awk '$KEY_AWK; { k = key(\$0); if (k != \"\") { print FILENAME, k; c[FILENAME]++ } } END { for (i = 1; i < ARGC; i++) print \"=\", ARGV[i], c[ARGV[i]] + 0 }' \"\$@\" || exit 1; fi; echo '= end'"
+}
+
+# vps_only_keys NAMES → "FILE KEY" for every key NAMES (vps_key_names_cmd's answer) lists that the PC copy of FILE
+# does not set and that is not a kept key of FILE: the keys a copy would delete on the VPS. Names only, in the VPS's
+# order. One awk per file reads both sides (key() for the PC file); status 1 when it fails: never "no keys" (Codex
+# r1). No sort or other unchecked step in between (Codex r2).
+vps_only_keys() {
+  local f
+  for f in $SECRET_FILES; do
+    LC_ALL=C awk -v f="$f" -v kept="$(vps_keep_keys "$f")" -v names="$1" "$KEY_AWK"'
+      BEGIN { n = split(kept, l, " "); for (i = 1; i <= n; i++) keep[l[i]] = 1 }
+      FILENAME == names { if (NF == 2 && $1 == f && $2 ~ /^[A-Za-z_][A-Za-z0-9_]*$/ && !($2 in vps)) { vps[$2] = 1; order[++m] = $2 }; next }
+      { k = key($0); if (k != "") pc[k] = 1 }
+      END { for (i = 1; i <= m; i++) if (!(order[i] in pc) && !(order[i] in keep)) print f, order[i] }
+    ' "$1" "$SECRETS_DIR/$f" || return 1
+  done
+}
+
+# vps_reads_check DIR → 0 when sync-secrets.sh's two VPS reads in DIR are whole and look like what the commands above
+# print. DIR/vps-names: only "FILE KEY" rows of SECRET_FILES files and records, one record per file, after its rows,
+# with the right count, and "= end" last. DIR/keep.FILE: only lines that set a kept key of FILE (key()), the record of
+# FILE with their count, and "= end" last. And the two reads agree: on whether FILE is there, and on its kept keys
+# (the same names, the same number of lines). Otherwise 1, with the reason on stderr (counts and key names, never a
+# line). A zero ssh exit alone proves nothing: a banner or a profile script on stdout, an answer that lost its tail,
+# or a file that changed between the two reads would let the guard pass and the PC's values replace the VPS's own
+# (Codex r1, r2). Every step's status is checked (it runs on the left of `||`, where errexit is off; Codex r2).
+vps_reads_check() {
+  local dir=$1 f why
+  why=$(LC_ALL=C awk -v files="$SECRET_FILES" '
+    BEGIN { n = split(files, l, " "); for (i = 1; i <= n; i++) known[l[i]] = 1 }
+    why != "" { next }
+    ended { why = "a line after the end marker"; next }
+    $0 == "= end" { ended = 1; next }
+    $1 == "=" && NF == 3 && $0 == "= " $2 " " $3 && ($2 in known) && ($3 == "-" || $3 ~ /^[0-9]+$/) {
+      if ($2 in rec) why = "two records for " $2; else rec[$2] = $3; next }
+    NF == 2 && $0 == $1 " " $2 && ($1 in known) && $2 ~ /^[A-Za-z_][A-Za-z0-9_]*$/ {
+      if ($1 in rec) why = "a row of " $1 " after its record"; else rows[$1]++; next }
+    { why = "line " NR " is not \"FILE KEY\" or a record" }
+    END {
+      if (why == "" && !ended) why = "no end marker (the answer is not whole)"
+      for (i = 1; why == "" && i <= n; i++) {
+        f = l[i]
+        if (!(f in rec)) why = "no record for " f
+        else if (rec[f] == "-" && rows[f] > 0) why = f " has rows but its record says it is not there"
+        else if (rec[f] != "-" && rows[f] + 0 != rec[f] + 0) why = f " has " rows[f] + 0 " row(s), its record says " rec[f]
+      }
+      if (why != "") { print why; exit 1 }
+    }' "$dir/vps-names") || { warn "the key-name read from the VPS: ${why:-awk failed}"; return 1; }
+  for f in $VPS_KEEP_FILES; do
+    why=$(LC_ALL=C awk -v f="$f" -v keys="$(vps_keep_keys "$f")" -v names="$dir/vps-names" "$KEY_AWK"'
+      BEGIN { n = split(keys, l, " "); for (i = 1; i <= n; i++) want[l[i]] = 1 }
+      FILENAME == names {
+        if (NF == 2 && $1 == f && ($2 in want)) { listed[$2]++; nlisted++ }
+        else if ($1 == "=" && $2 == f) there = ($3 != "-")
+        next }
+      why != "" { next }
+      ended { why = "a line after the end marker"; next }
+      $0 == "= end" { ended = 1; next }
+      $1 == "=" && NF == 3 && $0 == "= " f " " $3 && ($3 == "-" || $3 ~ /^[0-9]+$/) {
+        if (rec != "") why = "two records"; else rec = $3; next }
+      { k = key($0)
+        if (rec != "") why = "a line after its record"
+        else if (k in want) { got[k]++; ngot++ }
+        else why = "line " FNR " sets no kept key of " f }
+      END {
+        if (why == "" && !ended) why = "no end marker (the answer is not whole)"
+        if (why == "" && rec == "") why = "no record for " f
+        if (why == "" && rec == "-" && ngot > 0) why = "kept lines, but its record says the file is not there"
+        if (why == "" && rec != "-" && ngot + 0 != rec + 0) why = ngot + 0 " kept line(s), its record says " rec
+        if (why == "" && (rec != "-") != there) why = "the two reads disagree on whether " f " is there"
+        for (i = 1; why == "" && i <= n; i++) if (listed[l[i]] + 0 != got[l[i]] + 0) {
+          for (j = 1; j <= n; j++) { if (listed[l[j]]) a = a " " l[j]; if (got[l[j]]) b = b " " l[j] }
+          why = "the two reads of the VPS'"'"'s " f " disagree on its kept keys (names:" a "; lines:" b ")"
+        }
+        if (why != "") { print why; exit 1 }
+      }' "$dir/vps-names" "$dir/keep.$f") || { warn "the read of the VPS's own $f lines: ${why:-awk failed}"; return 1; }
+  done
+}
+
+# kept_count KEEP_FILE FILE → N from the "= FILE N" record of a checked kept-lines answer (0 for "= FILE -").
+kept_count() {
+  LC_ALL=C awk -v f="$2" '$1 == "=" && $2 == f && NF == 3 { print ($3 == "-" ? 0 : $3) }' "$1"
 }
 
 # ---- The PC bona-api twin's WhatsApp drop-in (A2Z go-live item 7, 2026-11-19) -------------------
@@ -187,6 +317,7 @@ pc_wa_dropin_ok() {
   if awk -v q="'" '
       BEGIN { plain = "^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*([^\"" q "\\\\\r]*|\"[^\"\\\\\r]*\"|" q "[^" q "\\\\\r]*" q ")[ \t]*$" }
       { l = $0; sub(/\r$/, "", l)
+        if (index(l, "\r")) { bad = 1; next }   # systemd ends a comment at a CR too: what follows is live
         if (l ~ /^[ \t]*$/ || l ~ /^[ \t]*[#;]/) next
         if (l !~ plain) bad = 1 }
       END { exit !bad }' "$PC_WA_ENV"; then

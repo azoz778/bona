@@ -33,6 +33,11 @@ jobs:
         run: npm test
       - name: Unit tests (WhatsApp intake)
         run: node --test services/intake/test/*.test.mjs
+      # The bona-api suite (services/api, node:sqlite, no npm deps), incl. the VPS deploy scripts through their
+      # shims (vps-deploy.test.mjs, under the runner's default awk). Before PR-INFRA the first run of this suite on
+      # merged code was deploy.sh on the VPS; now every PR runs it.
+      - name: Unit tests (bona-api)
+        run: node --test --test-concurrency=4 services/api/test/*.test.mjs
       - name: Unit tests (two-model review gate)
         run: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
       - run: node scripts/curate/validate.mjs

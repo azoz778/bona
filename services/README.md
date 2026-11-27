@@ -496,9 +496,43 @@ before it stops anything, while the unit still loads `bona-api-pc-wa.env`: the t
 poll and send through Bona's instance after all. It prints the two commands that take the drop-in
 away (`rm` the `.conf` above, then `systemctl --user daemon-reload`).
 
-`sync-secrets.sh` keeps the VPS's own `BONA_WA_INSTANCE` / `BONA_WA_INSTANCE_JID` (lib.sh
-`VPS_KEEP_KEYS`), and copies nothing when it cannot read them; run it only from a checkout that has
-that guard.
+`sync-secrets.sh` keeps the VPS's own lines for the keys set there on purpose (lib.sh `vps_keep_keys`):
+in `bona-services.env` `BONA_WA_INSTANCE` / `BONA_WA_INSTANCE_JID`, `BONA_WA_POLL_MS` and the push pair
+`BONA_VAPID_PUBLIC` / `BONA_VAPID_PRIVATE`; in `bona-marketing.env` the three `TIKTOK_*` keys. Any other key a
+VPS file has and the PC copy lacks stops the copy before anything is sent, with the key names (never a value):
+add it to the PC file, or run `sync-secrets.sh --force` to drop it on the VPS. It copies nothing when it cannot
+read the VPS, or when an answer is not whole (each one gives every file a record and ends with `= end`) or does not
+look like the VPS files (a banner or a profile script on stdout, two reads that disagree). Every read of a key line,
+on both machines and in the merge, is one awk function (lib.sh `KEY_AWK`) that reads it as `lib/env.mjs` does,
+white space included (a BOM, a no-break space, `export ` with a space). Run it only from a checkout that has these
+guards (PR-INFRA, 2026-11-27).
+
+`deploy.sh` snapshots `~/bona-data/bona.db` after the tests and before the restart (`db-snapshot.mjs`:
+VACUUM INTO, 0600, integrity-checked, `~/bona-data/release-backups/bona-deploy-<UTC time>.db`, newest 5 kept,
+never the one just made; a file without Bona's schema, such as a zero-byte one, is refused; one run per label
+at a time, `release-backups/.bona-<label>.lock`); a failed snapshot leaves the running service as it is. Each
+deploy also deletes every snapshot in `release-backups` older than 30 days, of every label (`--max-age-days 30`,
+judged by the UTC time in its name), and every temp copy a snapshot run that was killed left behind
+(`.bona-<label>-<UTC time>.db.<pid>.<random>.partial`, a whole copy when the run died after the copy and before it
+was checked and named) once its file is older than 1 day; a younger one can be a run still writing it, so it stays.
+Other files and sub-folders there are not touched. A copy by hand:
+`ssh hermes-vps '~/.local/opt/node-v24.19.0-linux-x64/bin/node /opt/bona/services/deploy/vps/db-snapshot.mjs --label pre-v8'`;
+its own run deletes nothing, and the first deploy after it is 30 days old deletes it. Nothing deletes a snapshot
+between deploys: when no deploy has run for a while, the copies there can be older than 30 days, so delete them by
+hand (`ls ~/bona-data/release-backups`; the name says when each was made). The snapshots are whole copies of
+bona.db, so every lead and conversation is in them, including conversations the live database has deleted since: a
+deletion request must reach `~/bona-data/release-backups` too (delete the person's rows from each copy, or delete
+the copies and take a new one), and a labelled copy such as `pre-v8` can be deleted by hand sooner, once its
+migration is verified. The privacy notice (`src/data/privacy.json`) does not name these copies yet: the two copies
+it says the automatic deletion does not reach are the WhatsApp gateway and the phones; the sentence on database
+backups kept for up to 30 days comes with PR-D1 (PLAN T15), not with this change.
+
+To restore a snapshot (the last resort, owner OK; on the VPS; the copies there are the newest 5 deploys and any copy
+by hand, going back at most 30 days before the last deploy): stop bona-api (`sudo -n systemctl stop bona-api`),
+check that nothing else has the database open (`ls -l /proc/[0-9]*/fd 2>/dev/null | grep -F bona-data/bona.db`
+prints nothing), move `~/bona-data/bona.db-wal` and `~/bona-data/bona.db-shm` aside (SQLite replays a WAL left
+beside the restored file onto it, so the restore would quietly not restore), copy the snapshot to
+`~/bona-data/bona.db`, `chmod 600` it, then start bona-api (`sudo -n systemctl start bona-api`).
 
 ### Legacy / rollback only: the PC installer
 

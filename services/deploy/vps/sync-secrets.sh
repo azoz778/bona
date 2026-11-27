@@ -1,44 +1,91 @@
 #!/usr/bin/env bash
 # Run ON THE PC. Copies the four ~/.secrets/*.env files and the tunnel credentials JSON to the VPS,
 # mode 0600, without ever printing their contents. Re-run any time a secret changes on the PC.
-# bona-services.env keeps the VPS's own lines for $VPS_KEEP_KEYS (lib.sh): since 2026-11-19 the
-# VPS reads Bona's own WhatsApp while the PC copy keeps the owner's personal one for bona-intake.
-# Those lines are read from the VPS first; when they cannot be read, nothing is copied.
+# Two guards, both read from the VPS before anything is copied; when a read fails, or its answer is not whole
+# or does not look like what the read prints (lib.sh vps_reads_check: every file gets a record and every answer
+# ends with "= end", so a lost or cut answer, a banner on stdout or two reads that disagree are all caught),
+# nothing is copied. Every read of a key line is lib/env.mjs parseEnvText's, as one awk function (lib.sh KEY_AWK):
+# - Kept keys (lib.sh vps_keep_keys): in bona-services.env and bona-marketing.env the VPS's own line
+#   wins for the keys that are set on the VPS on purpose (its WhatsApp instance and number since
+#   2026-11-19, its poll interval, the dashboard push keys, the TikTok keys).
+# - Missing keys (2026-11-27): a key the VPS copy of a file has, that the PC copy lacks and that is not
+#   kept, would be deleted on the VPS by the copy. Then nothing is copied, and the key NAMES are printed
+#   (never a value). Add each one to the PC file (or keep it, lib.sh), or run with --force to drop them.
 #   sync-secrets.sh            copy
-#   sync-secrets.sh --dry-run  list what would be copied
+#   sync-secrets.sh --dry-run  list what would be copied (contacts nothing, so neither guard runs)
+#   sync-secrets.sh --force    copy even though the VPS has keys the PC lacks (they are removed there)
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=lib.sh
 . "$HERE/lib.sh"
-need scp; need ssh; need awk
 
-DRY=0; [ "${1:-}" = --dry-run ] && DRY=1
+DRY=0; FORCE=0
+for a in "$@"; do
+  case "$a" in
+    --dry-run) DRY=1 ;;
+    --force) FORCE=1 ;;
+    *) die "usage: sync-secrets.sh [--dry-run] [--force]" ;;
+  esac
+done
+need scp; need ssh; need awk; need sed
+
 files=()
 for f in $SECRET_FILES; do
   [ -f "$SECRETS_DIR/$f" ] || die "missing $SECRETS_DIR/$f on this machine"
-  [ "$f" = "$VPS_KEEP_FILE" ] || files+=("$SECRETS_DIR/$f")
+  files+=("$SECRETS_DIR/$f")
 done
 [ -f "$CF_DIR/$BONA_TUNNEL_ID.json" ] || die "missing tunnel credentials $CF_DIR/$BONA_TUNNEL_ID.json"
 
 say "Secrets to copy to $BONA_VPS_SSH"
-for f in "${files[@]}" "$SECRETS_DIR/$VPS_KEEP_FILE" "$CF_DIR/$BONA_TUNNEL_ID.json"; do echo "  $f ($(stat -c %s "$f") bytes)"; done
-echo "  $VPS_KEEP_FILE keeps the VPS's own lines for: $VPS_KEEP_KEYS"
-[ "$DRY" = 1 ] && { ok "dry run, nothing copied"; exit 0; }
+for f in "${files[@]}" "$CF_DIR/$BONA_TUNNEL_ID.json"; do echo "  $f ($(stat -c %s "$f") bytes)"; done
+for f in $VPS_KEEP_FILES; do echo "  $f keeps the VPS's own lines for: $(vps_keep_keys "$f")"; done
+[ "$DRY" = 1 ] && { ok "dry run, nothing copied (the VPS is not contacted, so the missing-key check did not run)"; exit 0; }
 
 umask 077
-keep=$(mktemp "$SECRETS_DIR/.vps-keep.XXXXXX")
-merged=$(mktemp "$SECRETS_DIR/.$VPS_KEEP_FILE.sync.XXXXXX")
-trap 'rm -f "$keep" "$merged"' EXIT
+work=$(mktemp -d "$SECRETS_DIR/.vps-sync.XXXXXX")
+trap 'rm -rf "$work"' EXIT
 
 ssh "$BONA_VPS_SSH" 'install -d -m 700 ~/.secrets ~/.cloudflared'
-# The VPS's own lines for the kept keys, into a 0600 file: never echoed, never logged.
-ssh "$BONA_VPS_SSH" "$(vps_keep_grep)" > "$keep" || die "could not read the VPS's own $VPS_KEEP_FILE lines; nothing copied"
-keep_vps_keys "$SECRETS_DIR/$VPS_KEEP_FILE" "$keep" "$merged"
-kept=$(grep -c . "$keep" || true)
-scp -q -p "${files[@]}" "$BONA_VPS_SSH:.secrets/"
-scp -q -p "$merged" "$BONA_VPS_SSH:.secrets/$VPS_KEEP_FILE"
+# The VPS's key names (names only) for the missing-key guard, and its own kept-key lines (values) into
+# 0600 files under $work: never echoed, never logged.
+# Each remote command is built before its ssh: a `die` inside "$(…)" only leaves that subshell (Claude r1).
+names_cmd=$(vps_key_names_cmd) || exit 1
+ssh "$BONA_VPS_SSH" "$names_cmd" > "$work/vps-names" || die "could not read the key names on the VPS; nothing copied"
+for f in $VPS_KEEP_FILES; do
+  keep_cmd=$(vps_keep_grep "$f") || exit 1
+  ssh "$BONA_VPS_SSH" "$keep_cmd" > "$work/keep.$f" || die "could not read the VPS's own $f lines; nothing copied"
+done
+# A zero ssh exit is not enough: the answers must be whole and look like what the commands print (Codex r1, r2).
+vps_reads_check "$work" || die "the VPS's answers are not whole or do not look like its files (does ssh $BONA_VPS_SSH print anything of its own?); nothing copied"
+
+say "Keys on the VPS that the PC lacks"
+lost=$(vps_only_keys "$work/vps-names") || die "could not compare the key names; nothing copied"
+if [ -n "$lost" ]; then
+  {
+    echo "The VPS has these keys and the PC copies do not, so this copy would delete them on the VPS (file, key):"
+    printf '%s\n' "$lost" | sed 's/^/  /'
+  } >&2
+  if [ "$FORCE" = 1 ]; then
+    warn "--force: copying anyway; the keys above are removed from the VPS files"
+  else
+    die "refused, nothing copied: add each key to the PC file (or keep it: lib.sh vps_keep_keys), or run again with --force to remove them on the VPS"
+  fi
+else
+  ok "none (every VPS key is in the PC copy or kept)"
+fi
+
+kept=""
+for f in $VPS_KEEP_FILES; do
+  keep_vps_keys "$SECRETS_DIR/$f" "$work/keep.$f" "$work/$f" "$(vps_keep_keys "$f")"
+  kept="$kept, $(kept_count "$work/keep.$f" "$f") in $f"
+done
+copy=()
+for f in $SECRET_FILES; do
+  case " $VPS_KEEP_FILES " in *" $f "*) copy+=("$work/$f") ;; *) copy+=("$SECRETS_DIR/$f") ;; esac
+done
+scp -q -p "${copy[@]}" "$BONA_VPS_SSH:.secrets/"
 scp -q -p "$CF_DIR/$BONA_TUNNEL_ID.json" "$BONA_VPS_SSH:.cloudflared/"
 remote=""
 for f in $SECRET_FILES; do remote="$remote ~/.secrets/$f"; done   # only the files this script copies, never a glob
 ssh "$BONA_VPS_SSH" "chmod 600$remote ~/.cloudflared/$BONA_TUNNEL_ID.json && ls -l ~/.secrets ~/.cloudflared | sed 's/^/  /'"
-ok "copied ($kept line(s) of $VPS_KEEP_FILE kept from the VPS); now run install-vps.sh --check on the VPS"
+ok "copied (VPS lines kept: ${kept#, }); now run install-vps.sh --check on the VPS"

@@ -10,7 +10,13 @@
 #   curl … /health …                                    → prints {"ok":true}
 #   ~/.local/opt/node-…/bin/node -e … ~/bona-data/bona.db → prints 7 (the lead count)
 #   test -f ~/bona-data/NAME                            → exit 0 (present) unless NAME is in SHIM_REMOTE_MISSING
-#   …grep -E… (sync-secrets' read of the kept keys)    → prints $SHIM_VPS_KEEP_LINES; exit 255 with SHIM_VPS_KEEP_FAIL=1
+#   f=~/.secrets/FILE; … (sync-secrets' read of FILE's kept lines) → exit 255 with SHIM_VPS_KEEP_FAIL=1
+#   cd ~/.secrets … (sync-secrets' read of the key names) → prints $SHIM_VPS_KEY_NAMES (a canned answer) when set;
+#                                                       exit 255 with SHIM_VPS_NAMES_FAIL=1
+#     Otherwise both reads run for real (bash -c, HOME=DIR) against DIR/.secrets when SHIM_VPS_HOME=DIR, and print
+#     nothing (exit 0: an answer that got lost) when it is not set.
+#     SHIM_VPS_BANNER=TEXT is printed first (a profile script on stdout), before the reads SHIM_VPS_BANNER_ON names
+#     (names, keep or both; default both).
 #   anything else                                       → exit 99 (the test sees an unexpected command)
 # The VPS units are SYSTEM units driven with `sudo -n systemctl` (lib.sh: VPS_SYSTEMCTL); a remote
 # `systemctl --user …` is therefore "anything else" — a regression to user units fails loudly here.
@@ -25,6 +31,10 @@ set -u
 log=${SHIM_LOG:?SHIM_LOG must point at the log file}
 cmd=${!#}
 seen() { grep -q -- "^ssh .*$1" "$log" 2>/dev/null; }
+banner() {
+  [ -n "${SHIM_VPS_BANNER:-}" ] || return 0
+  case "${SHIM_VPS_BANNER_ON:-both}" in both | "$1") printf '%s\n' "$SHIM_VPS_BANNER" ;; esac
+}
 down=0
 if [ "${SHIM_SSH_DOWN_AFTER_START:-0}" = 1 ] && seen 'enable --now bona-api'; then down=1; fi
 printf 'ssh %s\n' "$*" >> "$log"
@@ -44,9 +54,16 @@ case "$cmd" in
   test\ -f\ ~/bona-data/*)
     name=${cmd##*/}
     case " ${SHIM_REMOTE_MISSING:-} " in *" $name "*) exit 1 ;; *) exit 0 ;; esac ;;
-  *grep\ -E*)
+  'f=~/.secrets/'*)
     [ "${SHIM_VPS_KEEP_FAIL:-0}" = 1 ] && { echo "ssh: connect to host fake-vps port 22: Connection refused (shim)" >&2; exit 255; }
-    [ -n "${SHIM_VPS_KEEP_LINES:-}" ] && printf '%s\n' "$SHIM_VPS_KEEP_LINES"
+    banner keep
+    [ -n "${SHIM_VPS_HOME:-}" ] && exec env HOME="$SHIM_VPS_HOME" bash -c "$cmd"
+    exit 0 ;;
+  'cd ~/.secrets'*)
+    [ "${SHIM_VPS_NAMES_FAIL:-0}" = 1 ] && { echo "ssh: connect to host fake-vps port 22: Connection refused (shim)" >&2; exit 255; }
+    banner names
+    [ -n "${SHIM_VPS_KEY_NAMES:-}" ] && { printf '%s\n' "$SHIM_VPS_KEY_NAMES"; exit 0; }
+    [ -n "${SHIM_VPS_HOME:-}" ] && exec env HOME="$SHIM_VPS_HOME" bash -c "$cmd"
     exit 0 ;;
   *) echo "ssh shim: unexpected remote command: $cmd" >&2; exit 99 ;;
 esac

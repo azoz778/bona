@@ -1634,13 +1634,14 @@ A4. AI line privacy gate: the privacy text promises "audio kept up to 90 days". 
     `systemctl --user is-active bona-line-call-alert.service` says `inactive` or `failed` (Kuma "Bona
     call alert" goes DOWN while it is stopped); (2) delete the call record files above; (3) only then its
     markers `~/bona-line/calls/alerts/<call_id>.sent` and `.sending` (a marker removed while the record
-    is still there makes the note go out again); (4) every copy of the note in the Bona chat on the Fold
+    is still there makes the note go out again); (4) `systemctl --user start bona-line-call-alert.timer`
+    right away: the record is gone, so no run can send this note again, and new calls get their alert
+    while the rest waits on the phones; (5) every copy of the note in the Bona chat on the Fold
     and in the owner's chat on his phone, and any forward or reply quoting it ("Delete for everyone" from
     the Fold while WhatsApp still offers it, about 2 days; after that delete it on each phone);
-    (5) Evolution's stored copies for both instances, `bona2` (sent) and `abdulaziz-personal`
+    (6) Evolution's stored copies for both instances, `bona2` (sent) and `abdulaziz-personal`
     (received): on hermes-vps, in evolution-postgres, the "Message" rows of those two instances whose
-    `message`::text contains "(call <call_id>)" (SELECT them first, then DELETE exactly those rows);
-    (6) `systemctl --user start bona-line-call-alert.timer`.
+    `message`::text contains "(call <call_id>)" (SELECT them first, then DELETE exactly those rows).
 A5. Lebara SIM: validity and credit on a reminder (a lapsed SIM can lose the WhatsApp account).
 A6. CLICK-TO-WHATSAPP ADS FIRST: the owner opens Meta Ads Manager, filters Active, and checks for
     any ad whose destination is WhatsApp. Such ads route to the personal number; plan to pause
@@ -1829,8 +1830,10 @@ C2. Brochures (26 Nov): `services/intake/brochure_pdf.py` prints `site.json` pho
     published brochures keep the old number (and its wa.me link) until re-rendered; after B7 nothing reads
     that number, so re-render them (intake `brochure <id>`), coordinated with the session that owns the
     intake. New intake brochures follow site.json once ~/bona is pulled to the merged main. Daily property
-    posts: the reel and carousel cards print Bona's WhatsApp, site.whatsapp (+966 57 626 7694,
-    scripts/social/lib/cards.mjs); the caption's only number is the REGA advertiser line, which keeps
+    posts: only the TikTok reel prints Bona's WhatsApp, site.whatsapp (+966 57 626 7694,
+    scripts/social/lib/cards.mjs), in its lower third and on its closing card above the advertiser/FAL line
+    (which has no phone); Instagram, Facebook and LinkedIn post the reviewed frames, which print no number.
+    Every caption's only number is the REGA advertiser line, which keeps
     site.advertiser.phone (+966593296933, the REGA-registered number; it reaches the owner's personal
     WhatsApp, not the Bona inbox) until the owner updates REGA (Phase 3).
     Done 26 Nov ~13:05: 18 brochures re-rendered through the intake's brochure path (18 commits
@@ -1912,7 +1915,7 @@ R4. If WhatsApp bans the new number: R1 + R2 the same day (the site, brochures a
 Only what is his to decide or to do; everything else above has a default.
 
 1. **OK the privacy notice and FAQ text (Appendix A, EN and AR)** before the merge. With it, one yes/no: Tarek's full access through Lisa (approvals 2026-11-17) reaches the Evolution gateway and the PC call files, while Bona's notice says only "the owner of Bona and authorised members of the Bona team" read conversations and recordings. Add the optional partner sentence (A2Z's notice v1.1 already says the same for A2Z), or leave it out?
-2. **Adverts beside the FAL licence before REGA is updated.** Since the 26 Nov cutover, Bona brochures (all but W011, W018 and W024, which print the old number until rebuilt) and the cards of the daily posts (reels, carousels) print +966 57 626 7694, while the REGA ad licences still list 059 329 6933. The caption's advertiser line next to FAL 1100313556 keeps `site.advertiser.phone` = 059 329 6933, so the 31 reviews stay valid and match REGA (it reaches the owner's personal WhatsApp, not the Bona inbox). `site.phone` moved to the new number too (owner decision 26 Nov). O1 (lawyer OK) already says the REGA line switches too. Default: go ahead, and he updates the REGA records when convenient (Phase 3). The alternative, holding cards and brochures on the old number until then, needs a small code change.
+2. **Adverts beside the FAL licence before REGA is updated.** Since the 26 Nov cutover, Bona brochures (all but W011, W018 and W024, which print the old number until rebuilt) and the TikTok reel of the daily property posts (its lower third and closing card; the Instagram, Facebook and LinkedIn frames print no number) print +966 57 626 7694, while the REGA ad licences still list 059 329 6933. The caption's advertiser line next to FAL 1100313556 keeps `site.advertiser.phone` = 059 329 6933, so the 31 reviews stay valid and match REGA (it reaches the owner's personal WhatsApp, not the Bona inbox). `site.phone` moved to the new number too (owner decision 26 Nov). O1 (lawyer OK) already says the REGA line switches too. Default: go ahead, and he updates the REGA records when convenient (Phase 3). The alternative, holding cards and brochures on the old number until then, needs a small code change.
 3. **His hands at cutover (no decision):** the ~3 warm-up days on a linked device, one message from his personal WhatsApp to the Bona number, Dana off on the Team page before the switch (and back on later), the Ads Manager check and the FB/IG WhatsApp button, merging the PR.
 4. **WhatsApp calls to the Bona number.** The AI line answers phone calls only; the FAQ and the notice now say so and ask callers on WhatsApp to write instead. Default: leave WhatsApp calls ringing (runbook B2 creates the instance with `"rejectCall":false`), so a call he or the team picks up by hand still works. The alternative, `"rejectCall":true` with a `"msgCall"` text (Evolution declines every WhatsApp call and sends that text), also blocks the calls he would take himself.
 
