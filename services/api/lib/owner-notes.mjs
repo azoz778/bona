@@ -468,11 +468,37 @@ function createLedgerNotes({
     return false;
   }
 
-  // Only an answer WhatsApp took: a `pending` row is still in flight (and may yet fail). Its time is
-  // when it was TAKEN (the row's `updated`, written as it turns `accepted`: lib/wa-send.mjs, or the
-  // poller matching WhatsApp's copy; an accepted row is never written again), not when it began.
-  const firstAnswerSince = (leadId, since) => prep(`SELECT MIN(updated) AS t FROM wa_outbox
-      WHERE lead_id = ? AND sender_kind = 'dana' AND status = 'accepted' AND created >= ?`).get(String(leadId), Math.trunc(since))?.t ?? null;
+  /*
+   * When the assistant first ANSWERED the client, at or after `since`, or null. A hand-over line (or
+   * any other holding line) is no answer, though it is a `dana` outbox row WhatsApp took like one:
+   * the client still waits for a person. So the row alone never says so; the answer-specific signals:
+   *   - the lead's `first_reply_ts`, which lib/dana-wa.mjs stamps only for a real answer WhatsApp
+   *     took (`send(…, { answer: true })`), once ever, never for the hand-over line. A person's reply
+   *     stamps it too (lib/wa-send.mjs, the poller), so it is the assistant's only with one of its
+   *     `dana` rows taken (`accepted`) by then and no person's message in between;
+   *   - a `dana` row the reply guard passed (`guarded = 1`: only a brain turn's bubbles, DESIGN
+   *     §11.1, never a line code sends), at its `updated` (written as it turns `accepted`, by
+   *     lib/wa-send.mjs or the poller matching WhatsApp's copy; never again). It still tells a
+   *     returning lead's answer (G13), whose `first_reply_ts` an earlier conversation stamped.
+   * A `pending` row is still in flight (and may yet fail): never an answer.
+   */
+  function firstAnswerSince(leadId, since) {
+    const id = String(leadId);
+    const from = Math.trunc(since);
+    let at = null;
+    const fr = Number(prep('SELECT first_reply_ts FROM leads WHERE lead_id = ?').get(id)?.first_reply_ts ?? NaN);
+    if (Number.isFinite(fr) && fr >= from) {
+      const taken = prep(`SELECT 1 FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana' AND status = 'accepted'
+                          AND created >= ? AND updated <= ? LIMIT 1`).get(id, from, fr);
+      const person = prep(`SELECT 1 FROM wa_messages WHERE lead_id = ? AND direction = 'out' AND sender_kind <> 'dana'
+                           AND ts >= ? AND ts <= ? LIMIT 1`).get(id, from, fr);
+      if (taken && !person) at = fr;
+    }
+    const guarded = prep(`SELECT MIN(updated) AS t FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana' AND status = 'accepted'
+                          AND guarded = 1 AND created >= ?`).get(id, from)?.t ?? null;
+    if (Number.isFinite(guarded) && (at === null || guarded < at)) at = guarded;
+    return at;
+  }
   const firstClientMessage = (leadId, since) => prep(`SELECT text, media_type, ts FROM wa_messages
       WHERE lead_id = ? AND direction = 'in' AND ts >= ? ORDER BY ts ASC, rowid ASC LIMIT 1`).get(String(leadId), Math.trunc(since)) ?? null;
   const lastClientMessage = (leadId, upTo) => (Number.isFinite(upTo)

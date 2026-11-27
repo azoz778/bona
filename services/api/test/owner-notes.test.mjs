@@ -121,8 +121,31 @@ async function settled(p, label, ms = 5_000) {
   const late = new Promise((_, reject) => { guard = setTimeout(() => reject(new Error(`${label}: still pending after ${ms} ms`)), ms); });
   try { return await Promise.race([p, late]); } finally { clearTimeout(guard); }
 }
+/**
+ * The assistant's real answer taken by WhatsApp, as lib/dana-wa.mjs `send(…, { answer: true })` leaves it: the lead's
+ * `first_reply_ts`, stamped once, ever (a hand-over line or a person's reply never comes through here).
+ */
+const answerTaken = (h, lead) => { if (h.db.getLead(lead.lead_id).first_reply_ts == null) h.db.updateLead(lead.lead_id, { first_reply_ts: h.now() }); };
 /** The assistant's answer, as the one sender leaves it once Evolution took it (`accepted`); `pending` = still in flight. */
-const danaAnswered = (h, lead, sendId, coversTs, status = 'accepted') => h.inbox.insertOutbox({ send_id: sendId, lead_id: lead.lead_id, jid: lead.wa_jid, text: 'Of course.', sender_kind: 'dana', covers_ts: coversTs, status });
+const danaAnswered = (h, lead, sendId, coversTs, status = 'accepted') => {
+  const r = h.inbox.insertOutbox({ send_id: sendId, lead_id: lead.lead_id, jid: lead.wa_jid, text: 'Of course.', sender_kind: 'dana', covers_ts: coversTs, status });
+  if (status === 'accepted') answerTaken(h, lead);
+  return r;
+};
+/**
+ * The assistant's hand-over (lib/dana-wa.mjs `handover`): the flag, then the one line, which WhatsApp took. The same
+ * sender kind as an answer, but no `first_reply_ts`: the client still waits for a person.
+ */
+const danaHandedOver = (h, lead, sendId, coversTs) => {
+  h.inbox.setNeedsHuman(lead.lead_id, 1);
+  return h.inbox.insertOutbox({ send_id: sendId, lead_id: lead.lead_id, jid: lead.wa_jid, text: 'Thank you — a member of the Bona team will reply to you shortly.', sender_kind: 'dana', covers_ts: coversTs, status: 'accepted' });
+};
+/** A person's reply (lib/wa-send.mjs, staff): the message, the flag cleared, and the reply clock stamped if it was not. */
+const personReplied = (h, lead, key, text = 'Hello, this is the Bona team.') => {
+  h.inbox.upsertMessage({ key_id: key, lead_id: lead.lead_id, jid: lead.wa_jid, direction: 'out', sender_kind: 'staff', text, ts: h.now(), status: 'sent' });
+  h.inbox.setNeedsHuman(lead.lead_id, 0);
+  answerTaken(h, lead);
+};
 
 /* ---------------- 1. the ledger ---------------- */
 
@@ -217,10 +240,82 @@ test('the first answer counts from when WhatsApp TOOK it, not from when its send
     danaAnswered(h, lead, `SND-ACC-${tickEvery}`, NOW, 'pending');
     await h.runUntil(NOW + 15_000, { tickEvery });
     h.inbox.updateOutbox(`SND-ACC-${tickEvery}`, { status: 'accepted', key_id: `KEY-ACC-${tickEvery}` });
+    answerTaken(h, lead);
     await h.runUntil(NOW + 10 * MIN, { tickEvery });
     assert.deepEqual(h.sentAt, [NOW + 35_000], `tick every ${tickEvery} ms`);
     assert.match(h.sent[0], /\nAI: answered in 15 s\n/);
   }
+});
+
+test('a hand-over line WhatsApp took is not an answer: taken at +12 s, the note still waits for first message + 3 min and says the client was handed over', async () => {
+  for (const tickEvery of [0, 5_000]) {
+    const h = harness({ timers: true });
+    const lead = addLead(h, { name: 'Sara Example' });
+    h.autoIds.add(lead.lead_id);
+    clientSays(h, lead, `IN-HO-${tickEvery}`, NOW, 'Hello');
+    await h.notes.leadEvent(lead, { why: 'wa', created: true, ts: NOW });
+    await h.runUntil(NOW + 12_000, { tickEvery });
+    danaHandedOver(h, lead, `SND-HO-${tickEvery}`, NOW);
+    await h.runUntil(NOW + 10 * MIN, { tickEvery });
+    assert.deepEqual(h.sentAt, [NOW + 3 * MIN], `tick every ${tickEvery} ms: never brought forward to +32 s`);
+    assert.match(h.sent[0], /\nAI: not answered: handed to you\n/);
+    assert.doesNotMatch(h.sent[0], /answered in/);
+  }
+});
+
+test('after a hand-over line, the assistant\'s real answer is the answer: line at +12 s, answer taken at +45 s → due at +65 s, "answered in 45 s"', async () => {
+  const h = harness({ timers: true });
+  const lead = addLead(h, { name: 'Sara Example' });
+  h.autoIds.add(lead.lead_id);
+  clientSays(h, lead, 'IN-HA-0001', NOW, 'Hello');
+  await h.notes.leadEvent(lead, { why: 'wa', created: true, ts: NOW });
+  await h.runUntil(NOW + 12_000);
+  danaHandedOver(h, lead, 'SND-HA-0001', NOW);
+  await h.runUntil(NOW + 30_000);
+  clientSays(h, lead, 'IN-HA-0002', NOW + 30_000, 'How big is the garden?');
+  await h.runUntil(NOW + 45_000);
+  danaAnswered(h, lead, 'SND-HA-0002', NOW + 30_000);
+  await h.runUntil(NOW + 10 * MIN);
+  assert.deepEqual(h.sentAt, [NOW + 65_000]);
+  assert.match(h.sent[0], /\nAI: answered in 45 s\n/);
+});
+
+test('a person\'s reply is not the AI\'s answer, though it stamps the reply clock too: line at +12 s, a person at +60 s → the note at +3 min, "not answered"', async () => {
+  const h = harness({ timers: true });
+  const lead = addLead(h, { name: 'Sara Example' });
+  h.autoIds.add(lead.lead_id);
+  clientSays(h, lead, 'IN-PR-0001', NOW, 'Hello');
+  await h.notes.leadEvent(lead, { why: 'wa', created: true, ts: NOW });
+  await h.runUntil(NOW + 12_000);
+  danaHandedOver(h, lead, 'SND-PR-0001', NOW);
+  await h.runUntil(NOW + 60_000);
+  personReplied(h, lead, 'OUT-PR-0001');
+  assert.equal(h.db.getLead(lead.lead_id).first_reply_ts, NOW + 60_000);
+  await h.runUntil(NOW + 10 * MIN);
+  assert.deepEqual(h.sentAt, [NOW + 3 * MIN]);
+  assert.match(h.sent[0], /\nAI: not answered: /);
+  assert.doesNotMatch(h.sent[0], /answered in/);
+});
+
+test('a returning lead (its reply clock stamped in an earlier conversation, G13): a hand-over line is not an answer; a reply the reply guard passed (guarded = 1) is', async () => {
+  const h = harness({ timers: true });
+  const back = addLead(h, { name: 'Sara Example', first_reply_ts: NOW - DAY + HOUR });
+  const asks = addLead(h, { name: 'Omar Example', first_reply_ts: NOW - DAY + HOUR });
+  for (const l of [back, asks]) h.autoIds.add(l.lead_id);
+  clientSays(h, back, 'IN-RT-0001', NOW, 'Hello again');
+  clientSays(h, asks, 'IN-RT-0002', NOW, 'Is the villa still available?');
+  await h.notes.leadEvent(back, { why: 'joined', ts: NOW });
+  await h.notes.leadEvent(asks, { why: 'joined', ts: NOW });
+  await h.runUntil(NOW + 8_000);
+  danaHandedOver(h, back, 'SND-RT-0001', NOW);
+  h.inbox.insertOutbox({ send_id: 'SND-RT-0002', lead_id: asks.lead_id, jid: asks.wa_jid, text: 'Yes, it is.', sender_kind: 'dana', covers_ts: NOW, status: 'accepted' });
+  h.db.db.prepare("UPDATE wa_outbox SET guarded = 1 WHERE send_id = 'SND-RT-0002'").run();
+  await h.runUntil(NOW + 10 * MIN);
+  assert.deepEqual(h.sentAt, [NOW + 28_000, NOW + 3 * MIN]);
+  assert.match(h.sent[0], /Name: Omar Example/);
+  assert.match(h.sent[0], /\nAI: answered in 8 s\n/);
+  assert.match(h.sent[1], /Name: Sara Example/);
+  assert.match(h.sent[1], /\nAI: not answered: handed to you\n/);
 });
 
 /* ---------------- 2. merging and pacing ---------------- */
