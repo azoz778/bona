@@ -1666,7 +1666,7 @@ test('clearHumanHold clears only a hold that waits for a person; a timed hold an
   s.close();
 });
 
-test("clearHumanHold with the answer's time ends the hold only when the answer is newer than every other message and every assistant send of the chat (Codex T07 r2)", () => {
+test("clearHumanHold with the answer's time ends the hold only when the answer is newer than every assistant send of the chat; client messages never keep it (Codex T07 r2, r3)", () => {
   const { s, inbox, at } = harness();
   const held = () => s.getLead('L-1').dana_hold_reason;
   const hold = () => s.updateLead('L-1', { dana_hold_reason: 'send_failed', dana_hold_until: null });
@@ -1680,26 +1680,53 @@ test("clearHumanHold with the answer's time ends the hold only when the answer i
   inbox.updateOutbox('SND-d', { status: 'failed' });
   hold();
   at(NOW);
-  // The answer's own stored row is left out; another chat's messages and sends count for nothing.
+  // The answer's own stored row and another chat's messages count for nothing.
   inbox.upsertMessage(msg({ key_id: 'H-old', direction: 'out', sender_kind: 'owner_number', ts: NOW - 240_000 }));
   inbox.upsertMessage(msg({ key_id: 'X-1', lead_id: 'L-2', ts: NOW + 60_000 }));
-  for (const [label, ts] of [['before the client message', NOW - 240_000], ['before the send was written', NOW - 150_000],
+  for (const [label, ts] of [['before the client message and the send', NOW - 240_000], ['before the send was written', NOW - 150_000],
     ['before the send failed', NOW - 90_000], ['the same moment it failed', NOW - 60_000], ['no number', NaN], ['null', null]]) {
-    assert.equal(inbox.clearHumanHold('L-1', { ts, keyId: 'H-old' }), false, label);
+    assert.equal(inbox.clearHumanHold('L-1', { ts }), false, label);
     assert.equal(held(), 'send_failed', label);
   }
-  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 30_000, keyId: 'H-old' }), true, 'after everything');
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 30_000 }), true, 'after everything');
   assert.equal(held(), null);
-  // A message of the chat newer than the answer (read out of order) leaves the hold too.
+  // A client message newer than the answer, stored before the answer was found (Codex T07 r3),
+  // does not keep the hold: what set it is the assistant's send, and the answer is newer than that.
   hold();
   inbox.upsertMessage(msg({ key_id: 'C-2', ts: NOW - 10_000 }));
-  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 20_000, keyId: 'H-new' }), false);
-  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 5_000, keyId: 'H-new' }), true);
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 20_000 }), true, 'a newer client message blocks nothing');
+  assert.equal(held(), null);
+  // Nor does another person's message stored after it: only the assistant's sends bound the hold.
+  hold();
+  inbox.upsertMessage(msg({ key_id: 'H-4', direction: 'out', sender_kind: 'owner_number', ts: NOW - 2_000 }));
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 20_000 }), true, 'a newer human message blocks nothing');
+  // Another chat's assistant send counts for nothing.
+  hold();
+  at(NOW - 1_000);
+  inbox.insertOutbox(out({ send_id: 'SND-x', lead_id: 'L-2', jid: '966500000002@s.whatsapp.net', sender_kind: 'dana', user_id: null }));
+  at(NOW);
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 20_000 }), true, "another chat's send");
+  // An assistant send of the chat newer than the answer keeps it: by when it failed, or when it was written.
+  for (const [label, written, failed, before, after] of [
+    ['failed after the answer', NOW - 25_000, NOW - 15_000, NOW - 20_000, NOW - 10_000],
+    ['written after the answer', NOW - 5_000, null, NOW - 7_000, NOW - 3_000]]) {
+    hold();
+    at(written);
+    inbox.insertOutbox(out({ send_id: `SND-${written}`, sender_kind: 'dana', user_id: null }));
+    if (failed !== null) {
+      at(failed);
+      inbox.updateOutbox(`SND-${written}`, { status: 'failed' });
+    }
+    at(NOW);
+    assert.equal(inbox.clearHumanHold('L-1', { ts: before }), false, label);
+    assert.equal(held(), 'send_failed', label);
+    assert.equal(inbox.clearHumanHold('L-1', { ts: after }), true, `${label}: a newer answer ends it`);
+  }
   // A staff send is a person's, not the assistant's: it never bounds the hold.
   hold();
   at(NOW + 30_000);
   inbox.insertOutbox(out({ send_id: 'SND-s' }));
-  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW, keyId: 'H-3' }), true);
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW }), true);
   // Without a time, as before.
   hold();
   assert.equal(inbox.clearHumanHold('L-1'), true);

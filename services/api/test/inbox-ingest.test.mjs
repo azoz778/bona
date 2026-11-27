@@ -1070,6 +1070,90 @@ test('a human reply ends an until-human hold only when it is newer than the hold
   staff.s.close();
 });
 
+test('a human reply found late ends an until-human hold although a newer client message was stored first; one from before the failed send, or one with no time, leaves it (Codex T07 r3)', async () => {
+  const MIN = 60_000;
+  const hold = (h) => [h.lead(LEAD_ID).dana_hold_reason, h.lead(LEAD_ID).dana_hold_until];
+  /**
+   * NOW is 10:00. The client wrote at 09:58; the assistant's answer, written at 09:59:55, failed
+   * at 10:00, and it held the chat until a person writes (send_failed).
+   */
+  const heldAt10 = () => {
+    const h = testChat({ client: { needs_human: 1 } });
+    h.at(NOW - 2 * MIN + 2000);
+    assert.equal(h.ingest(h.lead(LEAD_ID), rec({ id: 'C-1', ts: NOW - 2 * MIN })).senderKind, 'client');
+    h.at(NOW - 5000);
+    h.inbox.insertOutbox({ send_id: 'SND-f', lead_id: LEAD_ID, jid: PHONE_JID, text: 'From the assistant', sender_kind: 'dana' });
+    h.at(NOW);
+    h.inbox.updateOutbox('SND-f', { status: 'failed', error: 'evolution_500' });
+    h.s.updateLead(LEAD_ID, { dana_hold_reason: 'send_failed', dana_hold_until: null });
+    return h;
+  };
+  /** The client's follow-up at 10:02, which the poller stores before the reply is found. */
+  const followUp = (h) => {
+    h.at(NOW + 2 * MIN + 2000);
+    assert.equal(h.ingest(h.lead(LEAD_ID), rec({ id: 'C-2', ts: NOW + 2 * MIN })).senderKind, 'client');
+    assert.deepEqual(hold(h), ['send_failed', null], 'the client writing again is no person answering');
+  };
+  /** WhatsApp's copy of a reply, as a refresh at 10:05 reads it from the chat's history. */
+  const readLate = (h, over) => {
+    h.at(NOW + 5 * MIN);
+    return h.ingest(h.lead(LEAD_ID), rec({ fromMe: true, jid: LID, jidAlt: PHONE_JID, ...over }));
+  };
+  /** Each way a person's reply typed at `at` reaches ingest late; `write` runs at `at`, `copy` is the late record. */
+  const REPLIES = {
+    // The dashboard: the 2xx stored the reply (wa-send.mjs `reply`); the copy, read late, ends the hold.
+    async dashboard_2xx(h, at, ts = at) {
+      h.at(at);
+      const sent = await senderFor(h, { key: 'WA-STAFF-L1', answerAt: at + 2000 })
+        .reply({ sendId: 'sid_staff_late_000001', leadId: LEAD_ID, userId: h.staff.user_id, text: REPLY, seenRev: h.inbox.revision(LEAD_ID) });
+      assert.equal(sent.ok, true, JSON.stringify(sent));
+      return { copy: { id: 'WA-STAFF-L1', text: REPLY, ts }, kind: 'staff', inserted: false };
+    },
+    // The dashboard: the 2xx never came (the row went uncertain); the copy alone stores the reply, matched by its words.
+    async dashboard_uncertain(h, at, ts = at) {
+      h.at(at);
+      h.inbox.insertOutbox({ send_id: 'SND-staff-u', lead_id: LEAD_ID, jid: PHONE_JID, text: REPLY, user_id: h.staff.user_id, sender_kind: 'staff' });
+      h.inbox.updateOutbox('SND-staff-u', { status: 'uncertain', error: 'network' });
+      return { copy: { id: 'WA-STAFF-U1', text: REPLY, ts }, kind: 'staff', inserted: true };
+    },
+    // Typed on the Fold; the poller missed it.
+    async phone(h, at, ts = at) {
+      return { copy: { id: 'WA-PHONE-1', text: TYPED, ts }, kind: 'owner_number', inserted: true };
+    },
+  };
+  for (const [label, write] of Object.entries(REPLIES)) {
+    // Codex's order: hold at 10:00, the reply at 10:01, the client's follow-up at 10:02 stored first, the reply found at 10:05.
+    const h = heldAt10();
+    const { copy, kind, inserted } = await write(h, NOW + MIN);
+    followUp(h);
+    assert.deepEqual(readLate(h, copy), { stored: true, inserted, senderKind: kind }, label);
+    assert.deepEqual(hold(h), [null, null], `${label}: a reply after the hold ends it, whatever the client wrote since`);
+    assert.equal(h.lead(LEAD_ID).needs_human, 0, label);
+    assertCleanT(h.logs);
+    h.s.close();
+  }
+  for (const [label, write] of Object.entries(REPLIES)) {
+    if (label === 'dashboard_2xx') continue; // a 2xx before the failed send would have stored it then; its copy is the untimed case below
+    // A reply typed at 09:59:58 — after the client, while the assistant's send was on its way, before it failed — found late.
+    const h = heldAt10();
+    const { copy } = await write(h, NOW - 2000);
+    followUp(h);
+    assert.equal(readLate(h, copy).stored, true, label);
+    assert.deepEqual(hold(h), ['send_failed', null], `${label}: a reply from before the failed send does not end the hold`);
+    h.s.close();
+  }
+  for (const [label, write] of Object.entries(REPLIES)) {
+    if (label === 'dashboard_uncertain') continue; // no time: the words cannot match it to the row, so it is the owner's phone case
+    // The same order, but the record carries no time of its own: it says nothing of when it was written.
+    const h = heldAt10();
+    const { copy } = await write(h, NOW + MIN, null);
+    followUp(h);
+    assert.equal(readLate(h, copy).stored, true, label);
+    assert.deepEqual(hold(h), ['send_failed', null], `${label}: an untimed record does not end the hold`);
+    h.s.close();
+  }
+});
+
 test('a brochure the assistant sent comes back as a document: matched by its caption, else by the fallback (same lead, 2 min) → dana, never owner_number', () => {
   const doc = (over = {}) => rec({ id: 'DOC-1', fromMe: true, jid: LID, jidAlt: PHONE_JID, media: '[document: BONA-W003.pdf]', text: 'BONA-W003 brochure', ts: NOW + 1000, ...over });
   const docRow = (h, over = {}) => h.inbox.insertOutbox({

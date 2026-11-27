@@ -596,18 +596,19 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
    * `dana_hold_until`, db v8) is over. A timed hold stays until its end. True when one was cleared.
    *
    * With `ts` (the answer's own WhatsApp time; ingest.mjs always hands it in), only an answer
-   * written AFTER the hold ends it (Codex T07 r2): a refresh or a catch-up can find, long after,
-   * a reply the poller missed, and one typed before the hold went on is no answer to it. The
-   * hold's own start is not stored (db v8 keeps its reason and its end only), so it is bounded
-   * by what the chat holds: the assistant holds a chat only while it handles it, after the client
-   * message it answers and after its own send attempts (a failed send, the loop guard's message).
-   * So the answer must be newer than every other stored message of the chat (`keyId`, its own
-   * row, left out) and than every assistant send's `created` and `updated`. An answer read after
-   * a newer message (out of order) leaves the hold as well; the next one, or the dashboard's
-   * "Let the AI answer again", ends it. A `ts` that is no number ends nothing. Without `ts` (a
-   * caller with no message, like the button), as before.
+   * written after what set the hold ends it (Codex T07 r2): a refresh or a catch-up can find,
+   * long after, a reply the poller missed, and one typed before the hold went on is no answer to
+   * it. The hold's own start is not stored (db v8 keeps its reason and its end only); what puts
+   * a chat on such a hold is the assistant's own send in it (`send_failed` after a failed send,
+   * `booking_unconfirmed` after a confirmation that did not go), so the answer must be newer than
+   * every assistant send of the chat, by its `created` and by its `updated`. Client messages
+   * never keep the hold, older or newer (DESIGN §6.3, "until a human writes"; Codex T07 r3): a
+   * follow-up the poller stored before a refresh found the reply says nothing of when the reply
+   * was written. A `loop` hold, set on the client's messages with no send of its own, is bounded
+   * the same way: a reply newer than the assistant's last send ends it. A `ts` that is no number
+   * ends nothing. Without `ts` (a caller with no message, like the button), as before.
    */
-  function clearHumanHold(leadId, { ts, keyId = null } = {}) {
+  function clearHumanHold(leadId, { ts } = {}) {
     const id = String(leadId ?? '');
     if (ts === undefined) {
       return prep(`UPDATE leads SET dana_hold_reason = NULL, dana_hold_until = NULL
@@ -617,9 +618,8 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
     const at = toTs(ts);
     return prep(`UPDATE leads SET dana_hold_reason = NULL, dana_hold_until = NULL
                  WHERE lead_id = ? AND dana_hold_reason IS NOT NULL AND dana_hold_until IS NULL
-                   AND NOT EXISTS (SELECT 1 FROM wa_messages WHERE lead_id = ? AND key_id <> ? AND ts >= ?)
                    AND NOT EXISTS (SELECT 1 FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana' AND (created >= ? OR updated >= ?))`)
-      .run(id, id, String(keyId ?? ''), at, id, at, at).changes === 1;
+      .run(id, id, at, at).changes === 1;
   }
 
   /**

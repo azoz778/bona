@@ -86,8 +86,9 @@
  *     owner-notes ledger is not raised again;
  *   - a human message seen for the first time also ends a hold that waits for a person
  *     (`dana_hold_reason` with no `dana_hold_until`), when it was written after the hold: newer
- *     than every other message of the chat and every assistant send (store.mjs clearHumanHold),
- *     so an old reply a refresh finds only now leaves it; a timed hold runs to its end. So does
+ *     than every assistant send of the chat (store.mjs clearHumanHold), so an old reply a
+ *     refresh finds only now leaves it, and a client message stored before it was found never
+ *     keeps the hold; a timed hold runs to its end. So does
  *     WhatsApp's copy of a dashboard reply, matched by its key to the staff row, though the
  *     sender stored the reply on its 2xx before the copy came (the same freshness bound);
  *   - a brochure the assistant sent (a Dana row with media_kind 'document') is found by its id,
@@ -454,8 +455,10 @@ export function createIngest({
       }
 
       // A hold that waits for a person ends with one written after it (store.mjs
-      // clearHumanHold: an older reply a refresh finds now leaves it, and a record with no
-      // time of its own says nothing of when it was written); a timed hold runs to its end.
+      // clearHumanHold: newer than every assistant send of the chat; an older reply a refresh
+      // finds now leaves it, a client message stored before the reply was found does not keep
+      // it, and a record with no time of its own says nothing of when it was written); a timed
+      // hold runs to its end.
       // A human message seen for the first time asks; so does WhatsApp's copy of a dashboard
       // reply, matched by its key to the staff row, though it is already stored: wa-send.mjs
       // `reply` stores it on the 2xx, before the poller reads the copy, and does not end the
@@ -464,7 +467,7 @@ export function createIngest({
       const dashboardCopy = !inserted && senderKind === 'staff' && match?.via === 'key';
       if ((inserted || dashboardCopy) && HUMAN_SENDERS.has(senderKind)
           && current.dana_hold_reason && current.dana_hold_until == null) {
-        inbox.clearHumanHold?.(current.lead_id, { ts: Number.isFinite(rec.ts) ? rec.ts : NaN, keyId: rec.id });
+        inbox.clearHumanHold?.(current.lead_id, { ts: Number.isFinite(rec.ts) ? rec.ts : NaN });
       }
       if (inserted && HUMAN_SENDERS.has(senderKind)) {
         inbox.noteHumanOutbound(current.lead_id, ts);
