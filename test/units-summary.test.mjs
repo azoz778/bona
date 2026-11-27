@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { unitSummary, sheetAgeDays, MAX_SHEET_AGE_DAYS, isSheetCurrent, liveSummary, localFaq, sheetVars, sheetDateText } from '../src/lib/units-summary.mjs';
+import { unitSummary, sheetAgeDays, MAX_SHEET_AGE_DAYS, isSheetCurrent, liveSummary, localFaq, sheetVars, sheetDateText, unitsSummaryData } from '../src/lib/units-summary.mjs';
 
 const u = (beds, cls, areaSqm, cash) => ({ beds, class: cls, areaSqm, price: { cash } });
 const fixture = { listingId: 'BONA-W999', delivery: '2028-06', updated: '2026-09-02', units: [
@@ -104,4 +104,25 @@ test('an impossible delivery is dropped from the summary, so no invented date is
   const vars = sheetVars(unitSummary({ ...fixture, delivery: '2028-13' }), 'en');
   const faq = [{ id: 'h', q: { en: 'When?', ar: 'متى؟' }, a: { en: ['Handover {delivery}.'], ar: ['التسليم {delivery}.'] } }];
   assert.deepEqual(localFaq(faq, 'en', vars), [], 'the handover answer is dropped, not filled with a made-up month');
+});
+
+test('unitsSummaryData: the data-units-summary attribute is the summary the table prints, key by key, and nothing else', () => {
+  const s = unitSummary(fixture);
+  const d = unitsSummaryData(s, 'BONA-W999');
+  assert.deepEqual(Object.keys(d).sort(), ['areaMax', 'areaMin', 'cashFrom', 'count', 'delivery', 'listingId', 'rows', 'updated']);
+  assert.deepEqual(d, {
+    listingId: 'BONA-W999', count: 7, areaMin: 58, areaMax: 130, cashFrom: 750000, delivery: '2028-06', updated: '2026-09-02',
+    rows: s.rows.map((r) => ({ label: r.label, count: r.count, areaMin: r.areaMin, areaMax: r.areaMax, cashFrom: r.cashFrom })),
+  });
+  for (const r of d.rows) {
+    assert.deepEqual(Object.keys(r).sort(), ['areaMax', 'areaMin', 'cashFrom', 'count', 'label']);
+    assert.deepEqual(Object.keys(r.label).sort(), ['ar', 'en']);
+  }
+  // Built afresh: the sheet's units, refs and plan prices never ride along, even when the summary object carries more.
+  const padded = { ...s, units: fixture.units, plans: ['half'], rows: s.rows.map((r) => ({ ...r, ref: 'B00-00', twoYear: 1 })) };
+  const json = JSON.stringify(unitsSummaryData(padded, 'BONA-W999'));
+  assert.equal(json, JSON.stringify(d));
+  assert.doesNotMatch(json, /"(key|ref|units|plan|plans|cash|half|year|twoYear|price[^"]*)"\s*:/);
+  assert.doesNotMatch(json, /\bB\d{2}-\d+\b/);
+  assert.equal(unitsSummaryData(null, 'BONA-W999'), null, 'no live sheet: no attribute');
 });
