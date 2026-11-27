@@ -40,9 +40,10 @@
  * HTTP error, a network error, a timeout, a rate-limit retry); one never sent (a runaway stop, no
  * time left) does not. A turn with no answer call left starts no backup and makes no retry.
  *
- * State (§4.1): quota/auth → `out` for 10 min (no call; the next turn after that tries; the free
+ * State (§4.1): quota/auth → `out` for 10 min (no call; then one half-open trial, a turn or a
+ * classification, while the others get the out code with no call until it answers; the free
  * GET /v1/models probe clears `auth` early), with the restart-safe `brain_out` marker and one
- * `brain_out` alert. After a restart with the marker set, the next turn tries at once, but
+ * `brain_out` alert. After a restart with the marker set, the next turn is the trial at once, but
  * `health().ok` stays false until a turn or a classification works: the marker is a bare instant
  * (team.mjs), so it cannot say whether the outage was `auth` (a probe would prove the fix) or
  * `quota` (a probe proves nothing), and a key swap plus restart (§2.3) stays red until a client
@@ -249,6 +250,8 @@ export function createBrain(deps = {}) {
     // A marker from before a restart: not ok until a call works, but the next turn tries at once.
     outCode: configured && /^\d+$/.test(setting('brain_out')) ? 'restored' : null,
     outUntil: 0,
+    /** The one request after the out window (or after a restart with the marker): the half-open trial, else null. */
+    outTrial: null,
     breaker: { fails: [], open: false, openUntil: 0, trial: false },
     rate: { events: [], cooldownUntil: 0 },
     bugs: [],
@@ -269,11 +272,33 @@ export function createBrain(deps = {}) {
     }
     state.outCode = code;
     state.outUntil = t + limits.outMs;
+    state.outTrial = null;
   }
   function clearOut() {
     if (state.outCode !== null || setting('brain_out') !== '') store('brain_out', '');
     state.outCode = null;
     state.outUntil = 0;
+    state.outTrial = null;
+  }
+  /**
+   * The out gate (§4.1), for a turn and a classification alike: the code to fail with and make no call, or null.
+   * Inside the 10 minutes nobody calls; after them (or after a restart with the marker) exactly one caller is the
+   * half-open trial (`takeOutTrial`) and the others fail until it answers: an answer clears `out`, a quota or auth
+   * answer starts another 10 minutes, anything else (no answer, a throw of ours) frees it for the next caller.
+   * A restored marker does not say quota or auth, so the others get `down`, as the open breaker's do.
+   */
+  function outBlocked(t) {
+    if (state.outCode === null || (t >= state.outUntil && !state.outTrial)) return null;
+    return state.outCode === 'restored' ? 'down' : state.outCode;
+  }
+  /** Past the gate while `out`: this caller is the trial. Its token, freed with `freeOutTrial` when the caller ends. */
+  function takeOutTrial() {
+    if (state.outCode === null) return null;
+    state.outTrial = {};
+    return state.outTrial;
+  }
+  function freeOutTrial(token) {
+    if (token && state.outTrial === token) state.outTrial = null;
   }
   const inCooldown = (t) => t < state.rate.cooldownUntil;
   function noteRate(model) {
@@ -602,20 +627,24 @@ export function createBrain(deps = {}) {
     };
     // Gates that make no model call: the runaway stops, `out`, the open breaker, a cooling main model without a backup.
     if (overBudget()) return end(fail('budget'));
-    if (state.outCode !== null && started < state.outUntil) return end(fail(state.outCode));
+    const outCode = outBlocked(started);
+    if (outCode) return end(fail(outCode));
     const b = state.breaker;
+    if (b.open && (started < b.openUntil || b.trial)) return end(fail('down'));
     let trial = null;
     if (b.open) {
-      if (started < b.openUntil || b.trial) return end(fail('down'));
       trial = {};
       b.trial = trial;
     }
+    const outTrial = takeOutTrial();
     try {
       return await modelTurn(input, { route, language, system, leadId, logLead, started, end, wasTrial: trial !== null });
     } finally {
       // A throw before settle() (a bug of ours, never the provider) frees the trial, so the next
       // turn is the trial again instead of `down` with no call until a restart.
       if (trial && b.trial === trial) endTrial(undefined);
+      // settle() has moved `out` on by now (cleared, or another 10 minutes); any other end frees the out trial.
+      freeOutTrial(outTrial);
     }
   }
 
@@ -684,11 +713,13 @@ export function createBrain(deps = {}) {
     const b = state.breaker;
     let trial = null;
     let trialCode;
+    let outTrial = null;
     try {
       if (!configured || typeof prompts.classify !== 'string' || !prompts.classify.trim()) return { error: 'off' };
       if (overBudget()) return { error: 'budget' };
       const t = now();
-      if (state.outCode !== null && t < state.outUntil) return { error: state.outCode };
+      const outCode = outBlocked(t);
+      if (outCode) return { error: outCode };
       if (b.open) {
         // Half-open after the 5 min: this call may be the one trial (once email is live, WhatsApp
         // may be quiet for hours; without this every mail would stay listed after a recovery).
@@ -696,6 +727,7 @@ export function createBrain(deps = {}) {
         trial = {};
         b.trial = trial;
       }
+      outTrial = takeOutTrial(); // the out trial too, the same way
       // Each part is masked before it is clipped, so a phone across a cut leaves no digit.
       const masked = (v) => minimise(String(v ?? ''));
       const user = minimise(`From: ${oneLine(masked(input.fromName), 80)} (${oneLine(masked(input.fromDomain), 120)})\nSubject: ${oneLine(masked(input.subject), 200)}\n\n${clipChars(masked(input.text ?? input.text600), 600)}`);
@@ -719,6 +751,7 @@ export function createBrain(deps = {}) {
       return { error: 'bad_response' };
     } finally {
       if (trial && b.trial === trial) endTrial(trialCode);
+      freeOutTrial(outTrial);
     }
   }
 

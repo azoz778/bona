@@ -435,6 +435,88 @@ test('402 is quota; 401/403 are auth (no backup); the free /v1/models probe clea
   assert.deepEqual(await q.brain.turn(turnArgs()), { ok: false, code: 'quota' }, 'a models list says nothing about credit: quota stays out');
 });
 
+/** A provider answer held until `open()`, so a test keeps one request in flight while other turns start. */
+function held(answer) {
+  let open;
+  const gate = new Promise((resolve) => { open = resolve; });
+  return { step: async () => { await gate; return answer; }, open: () => open() };
+}
+async function untilCalls(h, n) {
+  for (let i = 0; i < 200 && h.calls.length < n; i += 1) await new Promise((resolve) => setImmediate(resolve));
+}
+
+test('after the 10 out minutes exactly one turn is the trial: turns meanwhile get the out code with no call; a quota trial restarts the window, a good one ends the outage', { timeout: 5_000 }, async () => {
+  const stillOut = held(QUOTA);
+  const back = held(reply('Back.'));
+  const h = harness({ script: [QUOTA, stillOut.step, back.step, reply('A.'), reply('B.')] });
+  assert.equal((await h.brain.turn(turnArgs())).code, 'quota');
+  h.advance(10 * MIN + 1);
+  const trial = h.brain.turn(turnArgs());
+  const others = await Promise.all([h.brain.turn(turnArgs({ leadId: LEAD2 })), h.brain.turn(turnArgs({ leadId: LEAD2 }))]);
+  assert.deepEqual(others, [{ ok: false, code: 'quota' }, { ok: false, code: 'quota' }], 'the outage path while the trial is pending');
+  await untilCalls(h, 2);
+  assert.equal(h.calls.length, 2, 'one trial request, none for the turns meanwhile');
+  stillOut.open();
+  assert.deepEqual(await trial, { ok: false, code: 'quota' });
+  assert.equal(h.alerts.length, 1, 'still one alert for the outage');
+  h.advance(9 * MIN);
+  assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'quota' });
+  assert.equal(h.calls.length, 2, 'the failed trial restarted the 10 minutes');
+  h.advance(MIN + 1);
+  const trial2 = h.brain.turn(turnArgs());
+  assert.deepEqual(await h.brain.turn(turnArgs({ leadId: LEAD2 })), { ok: false, code: 'quota' });
+  await untilCalls(h, 3);
+  assert.equal(h.calls.length, 3);
+  back.open();
+  assert.equal((await trial2).ok, true, 'the trial worked');
+  assert.equal(h.team.getSetting('brain_out'), '');
+  const both = await Promise.all([h.brain.turn(turnArgs()), h.brain.turn(turnArgs({ leadId: LEAD2 }))]);
+  assert.deepEqual(both.map((r) => r.ok), [true, true], 'the outage is over: turns call side by side again');
+  assert.equal(h.calls.length, 5);
+});
+
+test('an auth trial is one turn too; a trial that ends without a quota/auth answer (a refusal, a throw of ours) frees it, so the next turn is the trial again', { timeout: 5_000 }, async () => {
+  const auth = held(http(401, {}));
+  const h = harness({ script: [http(401, {}), auth.step, { status: 200, json: { choices: [{ message: { content: null, refusal: 'No.' } }] } }, reply('Draft.'), reply('Fine.')] });
+  let throwing = false;
+  const brain = createBrain({ ...h.deps, guard: { checkReply: () => { if (throwing) throw new Error('guard bug'); return { ok: true, hits: [] }; } } });
+  assert.equal((await brain.turn(turnArgs())).code, 'auth');
+  h.advance(10 * MIN + 1);
+  const trial = brain.turn(turnArgs());
+  assert.deepEqual(await brain.turn(turnArgs({ leadId: LEAD2 })), { ok: false, code: 'auth' });
+  await untilCalls(h, 2);
+  auth.open();
+  assert.deepEqual(await trial, { ok: false, code: 'auth' });
+  h.advance(10 * MIN + 1);
+  assert.deepEqual(await brain.turn(turnArgs()), { ok: false, code: 'refusal' }, 'the trial got a refusal');
+  assert.equal(h.calls.length, 3);
+  throwing = true;
+  assert.deepEqual(await brain.turn(turnArgs()), { ok: false, code: 'bad_response' }, 'the next turn was the trial again; then our guard threw');
+  assert.equal(h.calls.length, 4);
+  throwing = false;
+  assert.equal((await brain.turn(turnArgs())).ok, true, 'a throw frees the trial too');
+  assert.equal(h.calls.length, 5);
+  assert.equal(brain.ops().out, false);
+});
+
+test('after a restart with the brain_out marker, one turn is the trial: turns meanwhile get down with no call (the marker does not say quota or auth)', { timeout: 5_000 }, async () => {
+  const stillOut = held(QUOTA);
+  const h = harness({ script: [stillOut.step, reply('Back.')] });
+  h.team.setSetting('brain_out', String(T0 - MIN), { by: 'system' });
+  const brain = h.rebuild();
+  assert.equal(brain.health().ok, false);
+  const trial = brain.turn(turnArgs());
+  assert.deepEqual(await brain.turn(turnArgs({ leadId: LEAD2 })), { ok: false, code: 'down' });
+  await untilCalls(h, 1);
+  assert.equal(h.calls.length, 1);
+  stillOut.open();
+  assert.deepEqual(await trial, { ok: false, code: 'quota' });
+  assert.deepEqual(await brain.turn(turnArgs()), { ok: false, code: 'quota' }, 'out for 10 minutes now');
+  assert.equal(h.calls.length, 1);
+  h.advance(10 * MIN + 1);
+  assert.equal((await brain.turn(turnArgs())).ok, true);
+});
+
 test('a rate limit: one retry when retry-after is at most 3 s, else the backup model; 3 in 5 min put the main model in a 60 s cooldown', async () => {
   const short = harness({ script: [http(429, { error: { type: 'rate_limit_exceeded' } }, { 'retry-after': '1' }), reply('Ok.')] });
   const a = await short.brain.turn(turnArgs());
@@ -971,6 +1053,31 @@ test('after the breaker\'s 5 minutes a mail classification is the half-open tria
   assert.equal(h.brain.ops().breaker, false, 'closed');
   assert.equal((await h.brain.turn(turnArgs())).ok, true);
   assert.equal(h.calls.length, 6, 'the next turn calls at once');
+});
+
+test('after the 10 out minutes a classification and a turn share the one out trial: whichever goes first, the other gets the out code with no call', { timeout: 5_000 }, async () => {
+  const mailTrial = held(QUOTA);
+  const turnTrial = held(reply('Back.'));
+  const h = harness({ promptDir: promptDirWithClassifier(), script: [QUOTA, mailTrial.step, turnTrial.step, reply('{"class":"client","wants":"x"}')] });
+  assert.equal((await h.brain.turn(turnArgs())).code, 'quota');
+  h.advance(10 * MIN + 1);
+  const mail = h.brain.classify(MAIL);
+  assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'quota' }, 'a turn while the classification is the trial');
+  assert.deepEqual(await h.brain.classify(MAIL), { error: 'quota' }, 'a second classification too');
+  await untilCalls(h, 2);
+  assert.equal(h.calls.length, 2);
+  mailTrial.open();
+  assert.deepEqual(await mail, { error: 'quota' }, 'the trial: still out');
+  assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'quota' }, 'another 10 minutes');
+  h.advance(10 * MIN + 1);
+  const turn = h.brain.turn(turnArgs());
+  assert.deepEqual(await h.brain.classify(MAIL), { error: 'quota' }, 'a classification while the turn is the trial');
+  await untilCalls(h, 3);
+  assert.equal(h.calls.length, 3);
+  turnTrial.open();
+  assert.equal((await turn).ok, true);
+  assert.deepEqual(await h.brain.classify(MAIL), { class: 'client', wants: 'x' }, 'the outage is over');
+  assert.equal(h.calls.length, 4);
 });
 
 test('masking comes before every clip: a phone across the 300-character row cut, the 4,000-character batch cut or the 600-character mail cut sends no digit', async () => {

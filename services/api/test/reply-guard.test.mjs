@@ -224,6 +224,47 @@ test('a currency (never a scale) is shared across a spaced dash, a slash and "or
   assert.deepEqual(checkReply('Villa 2 – 3.2 million', { toolResults: [JSON.stringify({ results: [{ price_cash: 3_200_000 }] })] }), { ok: true, hits: [] });
 });
 
+test('a full currency name ("ريال سعودي", "Saudi riyals", "ر س") is one currency: it is shared across or/أو/و/a dash/a slash, and the tool\'s own figures pass', () => {
+  const cur = (s) => findAmounts(s).map((a) => [a.raw, a.currency]);
+  const upper = [JSON.stringify({ results: [{ id: 'BONA-902', price_en: 'SAR 90,000 / year' }] })];
+  const twoFigures = [JSON.stringify({ results: [{ rent: 90_000 }, { rent_cash: 85_000 }] })];
+  const names = [
+    'ريال سعودي', 'ريال  سعودي', 'ريال سعودية', 'ريالاً سعودياً', 'ريالًا سعوديًا', 'ريال سعودى', 'ريالات سعودية', 'ريالاً', 'ريالًا',
+    'Saudi riyals', 'Saudi Riyal', 'saudi riyal', 'SR', 'S.R.', 'S.R', 'S. R.', 'ر.س', 'ر. س', 'ر س', 'ر.س.',
+  ];
+  const joins = [' أو ', ' او ', ' or ', ' و', ' و ', ' and ', ' - ', ' – ', ' / ', '/'];
+  for (const name of names) {
+    assert.deepEqual(cur(`الإيجار 90,000 ${name} سنوياً`), [[90_000, 'SAR']], name);
+    assert.deepEqual(checkReply(`الإيجار 90,000 ${name} سنوياً`, { toolResults: upper }), { ok: true, hits: [] }, `${name}: the tool's own figure`);
+    assert.deepEqual(checkReply(`Rent is 90,000 ${name} a year.`, { toolResults: upper }), { ok: true, hits: [] }, `${name}: the tool's own figure (en)`);
+    for (const j of joins) {
+      const discount = `الإيجار 90,000 ${name}${j}85,000 دفعة وحدة`;
+      assert.deepEqual(cur(discount), [[90_000, 'SAR'], [85_000, 'SAR']], discount);
+      assert.deepEqual(checkReply(discount, { toolResults: upper }).hits, [{ kind: 'amount' }], `${discount}: a second figure no tool returned`);
+      assert.deepEqual(checkReply(discount, { toolResults: twoFigures }), { ok: true, hits: [] }, `${discount}: both figures returned`);
+      const lowerFirst = `Rent is 85,000${j}90,000 ${name} a year.`;
+      assert.deepEqual(cur(lowerFirst), [[85_000, 'SAR'], [90_000, 'SAR']], lowerFirst);
+      assert.deepEqual(checkReply(lowerFirst, { toolResults: upper }).hits, [{ kind: 'amount' }], `${lowerFirst}: a lower figure no tool returned`);
+    }
+  }
+  for (const name of ['ريال سعودي', 'ريالات سعودية', 'ر س']) {
+    const glued = `الإيجار 90,000 ${name}-85,000 دفعة وحدة`;
+    assert.deepEqual(cur(glued), [[90_000, 'SAR'], [85_000, 'SAR']], glued);
+  }
+  for (const name of ['Saudi riyals', 'SR', 'S.R.', 'ر.س', 'ر س', 'ريال سعودي']) {
+    const s = `Rent is ${name} 90,000 or 85,000 in one payment.`;
+    assert.deepEqual(cur(s), [[90_000, 'SAR'], [85_000, 'SAR']], s);
+    assert.deepEqual(checkReply(s, { toolResults: upper }).hits, [{ kind: 'amount' }], s);
+  }
+  // A tool that writes the full name allows the figure in any SAR spelling.
+  const arTool = [JSON.stringify({ results: [{ id: 'BONA-902', price_ar: '90,000 ريال سعودي سنوياً' }] })];
+  for (const s of ['Rent is SAR 90,000 a year.', 'الإيجار 90,000 ر.س سنوياً', 'Rent is 90,000 Saudi riyals a year.']) {
+    assert.deepEqual(checkReply(s, { toolResults: arTool }), { ok: true, hits: [] }, s);
+  }
+  // "ر س" only on its own: the last letter of a word and a lone س are no currency.
+  assert.deepEqual(cur('عشر س 90'), []);
+});
+
 test('"SR" is riyals; a spelled-out thousand after a number word, or before a currency, is an amount of unknown value; idioms and areas are not', () => {
   const [sr] = findAmounts('Rent SR 85,000 a year');
   assert.deepEqual([sr.raw, sr.currency], [85_000, 'SAR']);

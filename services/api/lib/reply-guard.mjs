@@ -38,8 +38,17 @@ export const REPAIR_NOTE = "Your draft quoted an amount or unit that no tool ret
 /** Approximate SAR rates, for comparing a reply's amount with a tool's (inventory.mjs uses the same). */
 const SAR_RATE = Object.freeze({ SAR: 1, AED: 1.02, USD: 3.75, EUR: 4.05, GBP: 4.75, OMR: 9.75 });
 
+/** "ريال", "ريالا", "ريالاً", "ريالًا" (a mark on a letter stays in every form, minimise.mjs `readable`), "ريالات". */
+const RIYAL_AR = String.raw`(?:ريالات|ريال\p{M}*ا?\p{M}*)`;
+/** "سعودي", "سعودية", "سعوديه", "سعودياً", "سعوديًا", "سعودى". */
+const SAUDI_AR = String.raw`(?:سعود(?:ي[ةه]?|ى)\p{M}*ا?\p{M}*)`;
+/**
+ * A full name is one currency, tried before its first word, so the amount ends after it and the number joined to it
+ * is read from there: in "90,000 ريال سعودي أو 85,000" the "أو 85,000" follows the currency, "سعودي" is not in the way.
+ * "ر س" without a dot stands on its own (never the last letter of a word and a lone "س").
+ */
 const CURRENCIES = [
-  ['SAR', String.raw`sar|s\.r\.|sr|riyals?|ريالات|ريالاً|ريال|ر\.\s?س\.?|﷼`],
+  ['SAR', String.raw`${RIYAL_AR}\s{0,2}${SAUDI_AR}|saudi\s{0,2}riyals?|sar|s\.\s?r\.?|sr|riyals?|${RIYAL_AR}|ر\.\s?س\.?|(?<![\p{L}\p{M}])ر\sس\.?|﷼`],
   ['AED', String.raw`aed|dhs|dirhams?|درهم|دراهم|د\.\s?إ\.?`],
   ['USD', String.raw`usd|us\$|\$|dollars?|دولارات|دولار`],
   ['EUR', String.raw`eur|€|euros?|يورو`],
