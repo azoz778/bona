@@ -1530,6 +1530,90 @@ test('a start freed by an owner DELETE and a move (12:00 deleted, Google 404; th
   } finally { h.db.close(); }
 });
 
+test('a booking over by its stored times that the owner deleted after the reconcile (a 404 in the calendar its id records, the access probe passed) is no booking wherever it is read: slots() and the worker cancel the row and its task, validate() (writing nothing) passes, and the client books again; an id with no calendar keeps the hold rule', async () => {
+  const WED = '2026-12-09T10:00+03:00';
+  const tagged = () => Object.assign(fakeGcal(), { calendarTag: calendarTag('calendar-a@example.com') });
+  /** A books Sunday 10:00, the morning reconcile finds it, the owner deletes it at 07:00, and the clock is past its stored end. */
+  async function deletedAfterReconcile() {
+    const clock = { t: NOW };
+    const h = setup({ gcal: tagged(), clock });
+    const lead = h.lead('LEAD-20261201-0000aaaa');
+    const first = await h.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.equal(calendarTagOf(first.eventId), h.gcal.calendarTag);
+    clock.t = R(2026, 12, 6, 5);
+    assert.deepEqual(await h.viewing.reconcile(), { checked: 1, moved: 0, cancelled: 0, held: 0 }, 'the morning reconcile');
+    h.gcal.events.delete(first.eventId); // Google answers 404 (or 410) for it now
+    clock.t = R(2026, 12, 6, 11, 5);
+    return { h, clock, lead, first, rowOf: (id) => h.rows().find((r) => r.booking_id === id) };
+  }
+
+  // 1. The client asks for slots first: slots() reads the event (settle()), cancels the row and its task, and offers.
+  {
+    const { h, lead, first, rowOf } = await deletedAfterReconcile();
+    try {
+      // validate() before any read: no booking, and it writes nothing and calls nothing.
+      const before = JSON.stringify(h.rows());
+      const calls = h.gcal.calls.length;
+      assert.equal(h.viewing.validate({ lead, listingId: 'BONA-W902', slotId: WED }).ok, true);
+      assert.equal(JSON.stringify(h.rows()), before, 'validate writes nothing');
+      assert.equal(h.gcal.calls.length, calls, 'validate calls nothing');
+      const offer = await h.viewing.slots({ lead, listingId: 'BONA-W902' });
+      assert.equal(offer.bookable, true, JSON.stringify(offer));
+      assert.equal(rowOf(first.bookingId).status, 'cancelled', 'slots cancels the deleted booking');
+      assert.equal(taskFor(h, first.bookingId).status, 'cancelled', 'and its task');
+      assert.equal(h.logs.some((l) => l.evt === 'viewing.event_missing'), false, 'a deletion is not a missing event');
+      assert.deepEqual(h.viewing.health(), { enabled: true, gcal: { configured: true, ok: true, lastErrorCode: null } });
+      assert.equal(h.viewing.validate({ lead, listingId: 'BONA-W902', slotId: WED }).ok, true);
+      const got = await h.viewing.commitBooking({ lead, listingId: 'BONA-W902', slotId: WED });
+      assert.equal(got.ok, true, JSON.stringify(got));
+    } finally { h.db.close(); }
+  }
+
+  // 2. The worker runs first: its settle() cancels the row and its task, so validate() and slots() see no booking,
+  //    and the commit books. An id with no calendar (written before ids did), over by its stored times and a 404 in
+  //    the same run, keeps the hold rule: booked, flagged missing, still the lead's booking.
+  {
+    const { h, lead, first, rowOf } = await deletedAfterReconcile();
+    try {
+      const old = h.lead('LEAD-20261201-0000eeee');
+      const legacy = insertRow(h.db, { id: 'bk-legacy', leadId: old.lead_id, start: R(2026, 12, 6, 8) });
+      assert.equal(calendarTagOf(legacy), null);
+      const out = await h.viewing.tick();
+      assert.deepEqual([out.cancelled, out.done, out.moved], [1, 0, 0]);
+      assert.equal(rowOf(first.bookingId).status, 'cancelled');
+      assert.equal(taskFor(h, first.bookingId).status, 'cancelled');
+      assert.equal(h.logs.some((l) => l.evt === 'viewing.event_missing' && l.bookingId === first.bookingId), false);
+      assert.equal(h.viewing.validate({ lead, listingId: 'BONA-W902', slotId: WED }).ok, true, 'no missing flag blocks the lead');
+      assert.equal((await h.viewing.slots({ lead, listingId: 'BONA-W902' })).bookable, true);
+      const got = await h.viewing.commitBooking({ lead, listingId: 'BONA-W902', slotId: WED });
+      assert.equal(got.ok, true, JSON.stringify(got));
+      // The older id: held as before.
+      assert.equal(rowOf('bk-legacy').status, 'booked');
+      assert.equal(h.logs.filter((l) => l.evt === 'viewing.event_missing' && l.bookingId === 'bk-legacy').length, 1);
+      assert.equal(h.viewing.validate({ lead: old, listingId: 'BONA-W902', slotId: '2026-12-10T10:00+03:00' }).reason, 'active_booking');
+      assert.deepEqual(await h.viewing.slots({ lead: old, listingId: 'BONA-W902' }), { bookable: false, reason: 'active_booking' });
+      assert.equal(h.viewing.health().gcal.lastErrorCode, 'not_found');
+    } finally { h.db.close(); }
+  }
+
+  // 3. A calendar the robot cannot manage answers 404 for every event too: no 404 is read before the probe passes.
+  {
+    const { h, lead, first, rowOf } = await deletedAfterReconcile();
+    try {
+      h.gcal.fail.access = 'not_found';
+      await h.viewing.tick();
+      assert.deepEqual(await h.viewing.slots({ lead, listingId: 'BONA-W902' }), { bookable: false, reason: 'calendar', code: 'not_found' });
+      assert.equal(rowOf(first.bookingId).status, 'booked');
+      assert.equal(taskFor(h, first.bookingId).status, 'confirmed');
+      delete h.gcal.fail.access;
+      assert.equal((await h.viewing.tick()).cancelled, 1);
+      assert.equal(rowOf(first.bookingId).status, 'cancelled');
+      assert.equal(taskFor(h, first.bookingId).status, 'cancelled');
+    } finally { h.db.close(); }
+  }
+});
+
 test('the same DELETE and move with bookings whose ids record no calendar (written before ids did): the commit cancels nothing on a 404 and answers busy, as before; the next reconcile settles it and the start books', async () => {
   const THU = { start: R(2026, 12, 3, 0), end: R(2026, 12, 4, 0) };
   const gcal = fakeGcal({ busy: () => [THU, ...calendarBusy(gcal)] });

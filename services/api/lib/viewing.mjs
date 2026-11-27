@@ -45,10 +45,12 @@
  * back. While any booking or queued deletion was made in another calendar, nothing is offered or
  * booked either (reason 'calendar_mismatch'): that calendar's busy time is not the owner's, and a
  * client's name and phone never go to it. In the calendar an event was made in, a 404 after the access
- * probe passed is the owner deleting it: reconcile cancels the row and its task, and so does a commit
- * for the rows it reads (before their moves, so a start the deleted booking kept is free at once). Ids
- * written before carry no calendar and keep the earlier rule (a 404 counts only when a reconcile run
- * found other events; a commit never reads it as a deletion).
+ * probe passed is the owner deleting it, wherever it is read (deletedHere()): reconcile cancels the row
+ * and its task, and so do settle() (the worker, slots) and a commit for the rows it reads (before their
+ * moves, so a start the deleted booking kept is free at once). Such a row is never flagged missing, so
+ * validate(), which reads nothing, sees no booking either. Ids written before carry no calendar and keep
+ * the earlier rule (a 404 counts only when a reconcile run found other events; settle() and a commit
+ * never read it as a deletion, and the row stays the lead's booking, flagged missing).
  *
  * For PR-INT (index.mjs): pass `inventory` (the shared one; without it no listing is bookable),
  * and `fetchImpl` for the tests' fake fetch.
@@ -200,6 +202,17 @@ export function createViewing(deps = {}) {
   /** The event was made in the calendar configured now (its id says so). */
   const madeHere = (eventId) => calendarTagOf(eventId) !== null && !madeElsewhere(eventId);
   /**
+   * The 404s of a read (readEvents(), readForCommit()) that are the owner deleting the event: read after the
+   * run's access probe passed, for an event made in the calendar configured now. One rule for reconcile,
+   * settle() and a commit. Their rows are cancelled by the caller's apply()/follow(); none stays flagged
+   * missing (validate() reads that flag), so if that write does not land the next read cancels them.
+   */
+  const deletedHere = (res) => {
+    const judged = res.probed ? res.gone.filter((r) => madeHere(r.event_id)) : [];
+    for (const r of judged) missing.delete(r.booking_id);
+    return judged;
+  };
+  /**
    * A booking or a queued deletion whose event was made in another calendar than the one configured now
    * (a restart on another BONA_GCAL_CALENDAR_ID). Until it is resolved (the right calendar back), nothing is
    * offered or booked: this calendar's busy time is not the owner's, and the client's name and phone must
@@ -208,9 +221,10 @@ export function createViewing(deps = {}) {
   const calendarMismatch = () => prep("SELECT event_id FROM viewing_bookings WHERE status IN ('booked','cancel_pending')").all()
     .some((r) => madeElsewhere(r.event_id));
   /**
-   * Booked rows over by their stored times whose event no read confirmed (a 404/410, or an event
-   * with no times): never done on that, since the owner may have moved it later in a calendar the
-   * robot no longer reads (another calendar id, say). They stay the lead's booking, health says
+   * Booked rows over by their stored times whose event no read confirmed (a 404/410 of an id that
+   * records no calendar, or an event with no times; a 404 in the calendar the id records is a
+   * deletion, deletedHere(), never missing): never done on that, since the owner may have moved it
+   * later in a calendar the robot no longer reads (another calendar id, say). They stay the lead's booking, health says
    * not_found, the journal has one line each, and every later read tries again. In memory: after a
    * restart the first read finds them again.
    */
@@ -220,7 +234,8 @@ export function createViewing(deps = {}) {
   /**
    * The lead's one booking (DESIGN §8.4): any live `booked` row of it, by status, once the lead's rows
    * over by their stored times were read (`settled`, in slots() and commit() after settle()). Before
-   * that read (validate() calls nothing), such a row counts only when its event was missing: the
+   * that read (validate() calls nothing), such a row counts only when its event was missing (never
+   * one the owner deleted in its own calendar: deletedHere() cancels it and flags nothing): the
    * commit reads it first, and the row follows its event.
    */
   function leadBooked(leadId, t, settled = false) {
@@ -370,7 +385,7 @@ export function createViewing(deps = {}) {
     // A 404 read after the run's access probe passed, for an event made in this calendar, is the owner
     // deleting it (reconcile's rule): follow() cancels that row before the moves, so a start it kept is
     // free for the row the owner moved onto it. An id that records no calendar keeps its row until reconcile.
-    const judged = res.gone.filter((r) => res.probed && madeHere(r.event_id));
+    const judged = deletedHere(res);
     unconfirmed([...res.gone.filter((r) => !judged.includes(r)), ...res.unread], t0);
     if (res.code) {
       apply(res.plans, judged);
@@ -610,7 +625,7 @@ export function createViewing(deps = {}) {
 
   /**
    * The rows read take their events' state in ONE write transaction. Cancellations go first (the
-   * events deleted in Google, and the 404s reconcile judged deleted): they free their starts. Then
+   * events deleted in Google, and the 404s the caller judged deleted): they free their starts. Then
    * the real times, and `done` where the real end is past; a moved row's task takes its new start.
    * A row that stays `booked` on a new start takes it only when no other booked row keeps that start,
    * so a swap or a rotation the owner made resolves: those rows first go to a temporary start no row
@@ -692,9 +707,9 @@ export function createViewing(deps = {}) {
   }
 
   /**
-   * Reads each row's event (no write): `plans` for the events found, `gone` for the 404s (for
-   * reconcile to judge; settle() never reads one as over), `unread` for an event with no times. A
-   * calendar that cannot answer leaves the rest unread, with `code`. Rows a commit in this process
+   * Reads each row's event (no write): `plans` for the events found, `gone` for the 404s (for the
+   * caller to judge, deletedHere(): a deletion or a missing event, never over), `unread` for an
+   * event with no times. A calendar that cannot answer leaves the rest unread, with `code`. Rows a commit in this process
    * holds are skipped. `probe: false` only for a further read in a run whose access probe passed.
    */
   async function readEvents(op, rows, t, { probe = true } = {}) {
@@ -743,7 +758,10 @@ export function createViewing(deps = {}) {
   /**
    * Bookings over by their stored times (every one, or one lead's): a row is done only once a read of
    * its event shows its real end is past, since the owner may have moved it later after the last
-   * reconcile. A 404 or a failed read leaves it booked, so the lead keeps one booking (`code` for a
+   * reconcile. A 404 in the calendar the event was made in, after the access probe passed, is the owner
+   * deleting it (deletedHere(), as reconcile and a commit read it): the row and its task are cancelled in
+   * the same transaction as the other reads, so the lead can book again at once (slots(), the worker).
+   * Any other 404, or a failed read, leaves it booked, so the lead keeps one booking (`code` for a
    * calendar that cannot answer; a missing event is flagged). Rows with no task are the stranded
    * sweep's, never read here.
    */
@@ -752,8 +770,9 @@ export function createViewing(deps = {}) {
       ? prep("SELECT * FROM viewing_bookings WHERE status = 'booked' AND task_id IS NOT NULL AND end_ts < ? ORDER BY updated, booking_id LIMIT ?").all(t, WORKER_BATCH)
       : prep("SELECT * FROM viewing_bookings WHERE status = 'booked' AND task_id IS NOT NULL AND end_ts < ? AND lead_id = ? ORDER BY end_ts, booking_id").all(t, String(leadId));
     const res = await readEvents('settle', rows, t);
-    const did = apply(res.plans);
-    unconfirmed([...res.gone, ...res.unread], t);
+    const judged = deletedHere(res);
+    const did = apply(res.plans, judged);
+    unconfirmed([...res.gone.filter((r) => !judged.includes(r)), ...res.unread], t);
     return { checked: res.checked, ...did, code: res.code };
   }
 
@@ -827,7 +846,8 @@ export function createViewing(deps = {}) {
     // only after the run's access probe passed (readEvents()). In the calendar the event was made in, it is a
     // deletion; an id that records no calendar counts only when the run found other events here. Never the
     // 404 of an event made in another calendar: this one cannot show it (health says not_found).
-    const judged = res.gone.filter((r) => res.probed && (madeHere(r.event_id) || (res.found > 0 && calendarTagOf(r.event_id) === null)));
+    const here = deletedHere(res);
+    const judged = res.gone.filter((r) => here.includes(r) || (res.probed && res.found > 0 && calendarTagOf(r.event_id) === null));
     const left = res.gone.filter((r) => !judged.includes(r));
     const did = apply(res.plans, judged);
     Object.assign(out, { checked: res.checked, moved: did.moved, cancelled: did.cancelled });
