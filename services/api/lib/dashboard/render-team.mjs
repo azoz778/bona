@@ -10,8 +10,9 @@
  *
  * The assistant has no client-facing name (brain migration, 27 Nov): this page calls it "the
  * AI assistant", and its copy holds on either engine (the Retell agent or the AI service)
- * and with bookings on or off. The Retell funds banner keeps today's words for the website
- * chat, which stays on Retell until T28.
+ * and with bookings on or off. The Retell funds banner keeps today's Retell wording (credit
+ * ran out, top up Retell) for the website chat, which stays on Retell until T28, but here
+ * without the name; only the inbox list's one-argument form still draws today's words.
  */
 import { esc, fullPhone, dateTime, layout, scrollTable, knownError, messageFor } from './render.mjs';
 import { TZ_OFFSET_MS } from './stats.mjs';
@@ -38,16 +39,21 @@ const isInstant = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0;
 /**
  * The red banners, or '' while all is fine. `fundsOut` is when Retell started refusing for
  * lack of credit (ms); `brainOut` is when the AI service stopped answering (the `brain_out`
- * marker, ms). The AI-service banner comes first. Also drawn on the owners' inbox list, where
- * a tapped funds alert lands (render-inbox.mjs), which still passes `fundsOut` alone.
+ * marker, ms). The AI-service banner comes first. `nameless` (the Team page) words the Retell
+ * banner without the name, and true on either engine: only the chats still on the Retell
+ * agent depend on its credit. Also drawn on the owners' inbox list, where a tapped funds
+ * alert lands (render-inbox.mjs), which still passes `fundsOut` alone and so keeps today's
+ * words byte for byte.
  */
-export function fundsBanner(fundsOut, { brainOut = null } = {}) {
+export function fundsBanner(fundsOut, { brainOut = null, nameless = false } = {}) {
   const brain = isInstant(brainOut)
     ? `<div class="err">The AI service has not answered since ${esc(riyadh(brainOut))}. Until it is back, clients get a line saying the team will reply.</div>`
     : '';
-  const retell = isInstant(fundsOut)
-    ? `<div class="err">Dana can’t answer: Retell credit ran out at ${esc(riyadh(fundsOut))}. Top up Retell and she resumes by herself; until then clients get the hand-over line.</div>`
-    : '';
+  const at = isInstant(fundsOut) ? esc(riyadh(fundsOut)) : null;
+  const retell = at === null ? ''
+    : nameless === true
+      ? `<div class="err">The AI assistant can’t answer the chats on the Retell agent: Retell credit ran out at ${at}. Top up Retell and it resumes by itself; until then clients get the hand-over line.</div>`
+      : `<div class="err">Dana can’t answer: Retell credit ran out at ${at}. Top up Retell and she resumes by herself; until then clients get the hand-over line.</div>`;
   return brain + retell;
 }
 
@@ -194,7 +200,7 @@ export function teamPage({ me, users = [], never = [], sendingEnabled = true, re
 ${post('/v1/admin/settings', isOn ? turnOff : turnOn, { [key]: isOn ? '0' : '1' })}`;
   }).join('\n');
 
-  const body = `${fundsBanner(fundsOut, { brainOut })}${flash}
+  const body = `${fundsBanner(fundsOut, { brainOut, nameless: true })}${flash}
 <h2>People</h2>
 <p class="sub">Everyone here logs in with a 6-digit code sent to their own WhatsApp from Bona's WhatsApp number, and sees the same dashboard you do. Only owners see this page.</p>
 ${scrollTable('<th>Name</th><th>WhatsApp</th><th>Role</th><th>Status</th><th>Last login</th><th></th>', people, 'Nobody yet.')}

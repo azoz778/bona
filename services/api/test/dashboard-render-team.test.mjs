@@ -125,8 +125,17 @@ test('the assistant copy is nameless and true on either engine: no personal name
       assert.doesNotMatch(section, /viewing/i, 'no viewing promise: it depends on the booking switch');
     }
   }
-  // Nowhere on the page, banners aside: the Retell funds banner keeps today's words until T28.
-  assert.doesNotMatch(teamPage({ me: OWNER, users: [OWNER], danaEnabled: true, danaConfigured: true }), /Dana/);
+  // Nowhere on the page, banners included: both outage banners are nameless too. (Only the
+  // inbox list, render-inbox.mjs, still draws today's Retell words through the one-argument form.)
+  const out = Date.UTC(2026, 9, 3, 9, 30);
+  for (const page of [
+    teamPage({ me: OWNER, users: [OWNER], danaEnabled: true, danaConfigured: true }),
+    teamPage({ me: OWNER, users: [OWNER], danaEnabled: true, danaConfigured: true, fundsOut: out, brainOut: out }),
+    teamPage({ me: OWNER, users: [OWNER], fundsOut: out }),
+  ]) {
+    assert.match(page, /<h2>People<\/h2>/);
+    assert.doesNotMatch(page, /Dana|دانة|\b[Ss]he\b|\b[Hh]er(?:self)?\b/);
+  }
 });
 
 test('the Team page\'s "Off" line does not deny a test the owner armed', () => {
@@ -137,12 +146,15 @@ test('the Team page\'s "Off" line does not deny a test the owner armed', () => {
   assert.match(teamPage({ me: OWNER, users: [OWNER] }), /Off\. The AI assistant answers nobody on WhatsApp\. To try it/, 'the default is no tests');
 });
 
-test('a red banner at the top of the Team page while Retell is out of credit, with the time in Riyadh; none otherwise (2026-10-05 R2)', () => {
+test('a red banner at the top of the Team page while Retell is out of credit, nameless, with the time in Riyadh; none otherwise (2026-10-05 R2)', () => {
   // 2026-10-03 09:30 UTC is 12:30 in Riyadh (UTC+3, no DST).
   const at = Date.UTC(2026, 9, 3, 9, 30);
   const html = teamPage({ me: OWNER, users: [OWNER], fundsOut: at, ok: 'setting' });
-  const banner = /<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time\. Top up Retell and she resumes by herself; until then clients get the hand-over line\.<\/div>/;
+  // Today's Retell wording (credit ran out, top up Retell) without the name (brain migration):
+  // true on either engine, since only the chats still on the Retell agent depend on its credit.
+  const banner = /<div class="err">The AI assistant can’t answer the chats on the Retell agent: Retell credit ran out at 2026-10-03 12:30 Riyadh time\. Top up Retell and it resumes by itself; until then clients get the hand-over line\.<\/div>/;
   assert.match(html, banner);
+  assert.doesNotMatch(html, /Dana can’t answer|resumes by herself/, 'not the inbox list\'s named words');
   assert.ok(html.indexOf('Retell credit ran out') < html.indexOf('<h2>People</h2>'), 'at the top');
   assert.ok(html.indexOf('Retell credit ran out') < html.indexOf('class="ok"'), 'above the flash too');
   for (const fine of [null, undefined, 0, NaN, '1790', 'x']) {
@@ -267,10 +279,11 @@ test('the AI-service banner: "the AI service has not answered" with the time in 
   for (const fine of [null, undefined, 0, NaN, '1790', 'x']) {
     assert.doesNotMatch(teamPage({ me: OWNER, users: [OWNER], brainOut: fine }), /AI service has not answered/, String(fine));
   }
-  // Both out: both banners, the AI service first; the Retell words are today's (the website chat stays on Retell until T28).
+  // Both out: both banners, the AI service first; the Retell one keeps today's Retell wording without the name
+  // (the website chat stays on Retell until T28).
   const both = teamPage({ me: OWNER, users: [OWNER], brainOut: at, fundsOut: at });
   assert.match(both, banner);
-  assert.match(both, /<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time\. Top up Retell and she resumes by herself; until then clients get the hand-over line\.<\/div>/);
+  assert.match(both, /<div class="err">The AI assistant can’t answer the chats on the Retell agent: Retell credit ran out at 2026-10-03 12:30 Riyadh time\. Top up Retell and it resumes by itself; until then clients get the hand-over line\.<\/div>/);
   assert.ok(both.indexOf('The AI service has not answered') < both.indexOf('Retell credit ran out'));
 });
 
@@ -280,6 +293,12 @@ test('fundsBanner keeps its one-argument form for the inbox list: the Retell ban
   assert.equal(fundsBanner(null), '');
   assert.equal(fundsBanner(null, { brainOut: at }), '<div class="err">The AI service has not answered since 2026-10-03 12:30 Riyadh time. Until it is back, clients get a line saying the team will reply.</div>');
   assert.equal(fundsBanner(null, {}), '');
+  assert.equal(fundsBanner(at, { brainOut: at }), '<div class="err">The AI service has not answered since 2026-10-03 12:30 Riyadh time. Until it is back, clients get a line saying the team will reply.</div>' +
+    '<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time. Top up Retell and she resumes by herself; until then clients get the hand-over line.</div>', 'without `nameless`, today\'s words');
+  // The Team page's form: `nameless` swaps in the nameless Retell banner and changes nothing else.
+  assert.equal(fundsBanner(at, { nameless: true }), '<div class="err">The AI assistant can’t answer the chats on the Retell agent: Retell credit ran out at 2026-10-03 12:30 Riyadh time. Top up Retell and it resumes by itself; until then clients get the hand-over line.</div>');
+  assert.equal(fundsBanner(null, { nameless: true }), '');
+  assert.equal(fundsBanner(null, { brainOut: at, nameless: true }), fundsBanner(null, { brainOut: at }));
 });
 
 test('the Ops panel renders an injected ops() result: a placeholder while it is empty, escaped rows otherwise', () => {

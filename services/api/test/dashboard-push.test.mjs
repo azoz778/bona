@@ -513,7 +513,8 @@ test('funds: the Team page carries the red banner only while the flag is set; /h
     assert.doesNotMatch(await page(), /Retell credit ran out/);
     assert.equal((await (await fetch(h.base + '/health')).json()).dana.fundsOut, false);
     outOfCredit(h, Date.UTC(2026, 9, 3, 9, 30));
-    assert.match(await page(), /<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time\./);
+    // The Team page's banner is nameless (PLAN T04); the inbox list above keeps today's words.
+    assert.match(await page(), /<div class="err">The AI assistant can’t answer the chats on the Retell agent: Retell credit ran out at 2026-10-03 12:30 Riyadh time\./);
     assert.equal((await (await fetch(h.base + '/health')).json()).dana.fundsOut, true);
     h.team.setSetting('retell_funds_out', '');
     assert.doesNotMatch(await page(), /Retell credit ran out/);
