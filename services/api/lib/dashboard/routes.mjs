@@ -110,11 +110,24 @@ const SYSTEM_CODES = new Set([
     .map((c) => `SQLITE_${c}`),
   'ERR_SQLITE_ERROR', 'ERR_INVALID_STATE', 'ERR_INVALID_ARG_TYPE', 'ERR_INVALID_ARG_VALUE', 'ERR_OUT_OF_RANGE', 'ABORT_ERR',
 ]);
-/** What a failed hook is logged as: a known system code, else a built-in class name, else `Error`. */
+/**
+ * What a failed hook is logged as: a known system code, else a built-in class name, else
+ * `Error`. Each property is read once, so the value checked is the value logged; and an error
+ * that throws when read (a getter, a Proxy) is plain `Error`, so naming a failure never fails,
+ * not in a catch and not in a rejection handler.
+ */
 const errorLabel = (err) => {
-  if (typeof err?.code === 'string' && SYSTEM_CODES.has(err.code)) return err.code;
-  return typeof err?.name === 'string' && ERROR_CLASSES.has(err.name) ? err.name : 'Error';
+  try {
+    const code = err?.code;
+    if (typeof code === 'string' && SYSTEM_CODES.has(code)) return code;
+    const name = err?.name;
+    return typeof name === 'string' && ERROR_CLASSES.has(name) ? name : 'Error';
+  } catch {
+    return 'Error';
+  }
 };
+/** The kinds of function whose body does not run, or does not finish, when it is called. */
+const NOT_SYNC_FUNCTIONS = new Set(['[object AsyncFunction]', '[object GeneratorFunction]', '[object AsyncGeneratorFunction]']);
 /** After an owner's join, Dana answers the waiting message only when it is this recent (U5). */
 export const MOVE_ANSWER_WINDOW_MS = 6 * 3_600_000;
 /**
@@ -235,14 +248,19 @@ export function readBody(req, maxBytes, { drainTo = 0 } = {}) {
  * onSettingChanged, onTaskChange and ops never decide the owner's action: they run after the
  * write, and one that throws or rejects is logged as `dash.hook_failed` while the action goes
  * through as it would without it. onLeadLeaving is the one gate (DESIGN §8.4: the purge marks
- * first, then deletes; like the store's onPurge): it must be synchronous, since it only writes
- * rows and never calls the network, and it runs inside the transaction of the step that takes
- * the chat out. When it throws, or returns a promise, nothing of that step is kept: the chat
- * stays in with its transcript, a new colleague or never-list number is not added, no audit
+ * first, then deletes; like the store's onPurge): it must be a plain synchronous function, since
+ * it only writes rows and never calls the network, and it runs inside the transaction of the step
+ * that takes the chat out. When it throws (whatever it throws), nothing of that step is kept: the
+ * chat stays in with its transcript, a new colleague or never-list number is not added, no audit
  * row is written, the hook's own row writes go back, and the request fails (500); the owner can
- * simply try again. That holds because `team`, `inbox` and `audit` are built on this same `db`
- * (index.mjs). Every failure is logged by hook name, target id and a known class or system
- * code only, never with the error's words.
+ * simply try again. That holds because `team` and `inbox` are built on this same `db`
+ * (index.mjs); the step's audit rows are written once it has committed, best-effort as
+ * everywhere (lib/audit.mjs). An async or generator function is refused the same way before it
+ * is called, so none of its work starts. A plain function that returns a promise is refused
+ * too, but only what it wrote before returning goes back: the rollback covers synchronous
+ * writes, and refusing the promise cannot cancel work it has already started. Every failure is
+ * logged by hook name, target id and a known class or system code only, never with the error's
+ * words.
  */
 export function createDashboardRoutes({
   db, cfg = {}, inventory = null, fanout = null, app = null,
@@ -281,14 +299,19 @@ export function createDashboardRoutes({
   /**
    * Run one injected hook, sync or async, without letting it decide the owner's action: a
    * throw or a rejection is logged and swallowed. `self` is the object the hook came from,
-   * so a method keeps its `this`. Returns what the hook returned, or undefined when it threw.
+   * so a method keeps its `this`. Returns what the hook returned, or undefined when it threw
+   * or returned a promise (nothing here waits for one). Its `then` is read once, here, so a
+   * caller never reads the hook's result outside this guard to ask again.
    */
   function callHook(hook, target, fn, self, args) {
     if (typeof fn !== 'function') return undefined;
     try {
       const out = fn.apply(self, args);
-      if (out && typeof out.then === 'function') out.then(null, (err) => hookFailed(hook, target, err));
-      return out;
+      if (out === null || (typeof out !== 'object' && typeof out !== 'function')) return out;
+      const then = out.then;
+      if (typeof then !== 'function') return out;
+      then.call(out, null, (err) => hookFailed(hook, target, err));
+      return undefined;
     } catch (err) {
       hookFailed(hook, target, err);
       return undefined;
@@ -300,26 +323,37 @@ export function createDashboardRoutes({
    * runs inside the transaction of the step it guards (`inboxOut`, `addPerson`, the never
    * list's add): a throw is logged by name and rethrown in fixed words (the 500's `dash.failed`
    * line never carries the hook's own), so the purge after it does not run and every row the
-   * step wrote so far, the hook's own marks included, goes back.
+   * step wrote so far, the hook's own marks included, goes back. Whether it threw is kept apart
+   * from what it threw: `throw undefined` (or null, 0, '', false) blocks the step like an Error.
    *
-   * A hook that returns a promise broke the synchronous contract. Its work cannot be waited
-   * for here, so nothing says it has marked anything: it is refused like a throw (logged as a
-   * TypeError), and how it settles later is dropped, never an unhandled rejection.
+   * A hook that is not a plain synchronous function broke the contract, and is refused like a
+   * throw (logged as a TypeError). An async or generator function is refused before it is
+   * called, so none of its work starts: an async body would write its marks after the step's
+   * rollback, a generator body never. A plain function that returns a promise is refused once
+   * it has returned, since nothing says it has marked anything; only its synchronous writes go
+   * back, and how the promise settles later is dropped, never an unhandled rejection.
    */
   function beforeLeadLeaves(leadId) {
-    const fn = hooks?.onLeadLeaving;
-    if (typeof fn !== 'function') return;
-    let failure = null;
+    let threw = false;
+    let failure;
+    const refuse = (err) => { if (!threw) { threw = true; failure = err; } };
     try {
-      const out = fn.call(hooks, leadId);
-      if (out !== null && (typeof out === 'object' || typeof out === 'function') && typeof out.then === 'function') {
-        failure = new TypeError('onLeadLeaving returned a promise');
-        out.then(null, () => {});
+      const fn = hooks?.onLeadLeaving;
+      if (typeof fn !== 'function') return;
+      if (NOT_SYNC_FUNCTIONS.has(Object.prototype.toString.call(fn))) {
+        refuse(new TypeError('onLeadLeaving is not a synchronous function'));
+      } else {
+        const out = fn.call(hooks, leadId);
+        const then = out !== null && (typeof out === 'object' || typeof out === 'function') ? out.then : undefined;
+        if (typeof then === 'function') {
+          refuse(new TypeError('onLeadLeaving returned a promise'));
+          then.call(out, null, () => {});
+        }
       }
     } catch (err) {
-      failure ??= err;
+      refuse(err);
     }
-    if (failure) {
+    if (threw) {
       hookFailed('onLeadLeaving', leadId, failure);
       throw new Error('onLeadLeaving failed; the chat stays in the inbox');
     }
@@ -778,10 +812,13 @@ export function createDashboardRoutes({
     }));
   }
 
-  /** The Ops panel's counts; a failing `ops()` is logged and the page opens with the placeholder. */
+  /**
+   * The Ops panel's counts; a failing `ops()` is logged and the page opens with the placeholder.
+   * callHook has already turned a promise into undefined, so nothing of the result is read here.
+   */
   function opsCounts() {
     const out = callHook('ops', null, ops, undefined, []);
-    return out && typeof out === 'object' && typeof out.then !== 'function' ? out : {};
+    return out !== null && typeof out === 'object' ? out : {};
   }
 
   function teamView({ res, url, me }) {
@@ -1007,33 +1044,40 @@ export function createDashboardRoutes({
    * A number that has just become a colleague's or a never-list one is never a client
    * (§3.5, P2-7): the chat stored under it, if any, leaves the inbox and its transcript
    * goes now, not at the next daily upkeep, and it leaves the owner's list of real-estate
-   * chats to check (D17). Audited by lead id only. Built without the inbox (older tests,
-   * tools), there is nothing stored to take out.
+   * chats to check (D17). Built without the inbox (older tests, tools), there is nothing
+   * stored to take out. Returns the id of the lead it took out, or null; the caller audits it
+   * (`inbox_out`, by lead id only) once the step has committed.
    *
    * Its caller runs it in the same transaction as the write that made the number excluded,
    * so the two are one step: when the viewing seam refuses, the new account or never-list row
    * goes back with the rest, and the owner's retry is a clean first try (no `duplicate_phone`,
-   * no excluded chat left for the daily sweep to purge without its marks).
+   * no excluded chat left for the daily sweep to purge without its marks). The audit rows stay
+   * outside it: lib/audit.mjs swallows a failed insert, and an error that makes SQLite roll the
+   * whole transaction back (SQLITE_FULL, SQLITE_IOERR) must not undo, or half undo, the step
+   * that already happened.
    */
-  function leaveInboxFor(digits, me) {
-    if (!inbox || !digits) return;
+  function leaveInboxFor(digits) {
+    if (!inbox || !digits) return null;
     inbox.removeCandidatesFor({ phone: digits, jid: `${digits}@s.whatsapp.net` });
     const lead = db.getLeadByPhone(digits) ?? db.getLeadByJid(`${digits}@s.whatsapp.net`);
-    if (!lead || lead.inbox_state === 'out') return;
+    if (!lead || lead.inbox_state === 'out') return null;
     // Before the purge, so the viewing seam still finds what it must cancel (DESIGN §8.4, T10);
     // when it throws, the whole step goes back and the request fails.
     beforeLeadLeaves(lead.lead_id);
     inbox.leaveInbox(lead.lead_id);
-    audit?.record({ userId: me.user_id, action: 'inbox_out', target: lead.lead_id });
+    return lead.lead_id;
   }
 
   function addPerson(ctx) {
     const { fields, me } = ctx;
-    return teamWrite(ctx, () => db.transaction(() => {
-      const u = team.addUser({ name: asText(fields.name), phone: asText(fields.phone), role: fields.role === 'owner' ? 'owner' : 'staff' });
+    return teamWrite(ctx, () => {
+      const { u, left } = db.transaction(() => {
+        const added = team.addUser({ name: asText(fields.name), phone: asText(fields.phone), role: fields.role === 'owner' ? 'owner' : 'staff' });
+        return { u: added, left: leaveInboxFor(added.phone_e164) };
+      });
       audit?.record({ userId: me.user_id, action: 'team_add', target: u.user_id, meta: { role: u.role } });
-      leaveInboxFor(u.phone_e164, me);
-    }), 'added');
+      if (left) audit?.record({ userId: me.user_id, action: 'inbox_out', target: left });
+    }, 'added');
   }
 
   /**
@@ -1078,11 +1122,14 @@ export function createDashboardRoutes({
         audit?.record({ userId: me.user_id, action: 'never_remove' });
       }, 'never_removed');
     }
-    return teamWrite(ctx, () => db.transaction(() => {
-      const row = team.addNever({ phone: asText(fields.phone), note: asText(fields.note), by: me.user_id });
+    return teamWrite(ctx, () => {
+      const left = db.transaction(() => {
+        const row = team.addNever({ phone: asText(fields.phone), note: asText(fields.note), by: me.user_id });
+        return leaveInboxFor(row.phone_e164);
+      });
       audit?.record({ userId: me.user_id, action: 'never_add' });
-      leaveInboxFor(row.phone_e164, me);
-    }), 'never_added');
+      if (left) audit?.record({ userId: me.user_id, action: 'inbox_out', target: left });
+    }, 'never_added');
   }
 
   /**
@@ -1556,13 +1603,13 @@ export function createDashboardRoutes({
     // back on its own — only the owner's Move or Add brings it in again. The viewing seam
     // hears first, while the lead is still as it was (DESIGN §8.4, T10), in one transaction
     // with the purge: when either fails, the chat stays in with its transcript, the marks go
-    // back with it, and the request fails, rather than lose one half of the pair.
+    // back with it, and the request fails, rather than lose one half of the pair. The audit
+    // row follows the commit, as on main (see leaveInboxFor).
     const purged = db.transaction(() => {
       beforeLeadLeaves(leadId);
-      const counts = inbox.leaveInbox(leadId);
-      audit?.record({ userId: me.user_id, action: 'inbox_out', target: leadId });
-      return counts;
+      return inbox.leaveInbox(leadId);
     });
+    audit?.record({ userId: me.user_id, action: 'inbox_out', target: leadId });
     log({ evt: 'dash.inbox_out', leadId, messages: purged.messages });
     const back = lead.inbox_state === 'in' ? '/dashboard/inbox?ok=out' : '/dashboard/inbox?tab=unsure&ok=out';
     return answer(res, { form, back, status: 200, payload: { ok: true, purged } });

@@ -1936,6 +1936,174 @@ test('Not a client marks and purges in one step: a purge that fails after the ho
   });
 });
 
+test('an onLeadLeaving that throws a falsy value (undefined, null, 0, \'\', false) stops the step like any throw', async () => {
+  let inbox;
+  let k = 0;
+  const falsy = [undefined, null, 0, '', false];
+  await withTeamRoutes(async ({ db, team, audit, postForm, login, logs }) => {
+    const cookie = await login(OWNER_PHONE);
+    const leadId = seedLead(db, { phone: '966500000085', inboxState: 'in' });
+    seedMessage(inbox, leadId, 'K-85');
+    const colleague = seedLead(db, { id: 'LEAD-20260908-aaaa0007', phone: '966500000086', inboxState: 'in' });
+    seedMessage(inbox, colleague, 'K-86');
+    const cousin = seedLead(db, { id: 'LEAD-20260908-aaaa0008', phone: '966500000087', inboxState: 'in' });
+    seedMessage(inbox, cousin, 'K-87');
+    const auditBefore = audit.recent(500).length;
+    for (const value of falsy) {
+      const res = await postForm(`/v1/admin/inbox/${leadId}/out`, { _dash: '1' }, { cookie });
+      assert.equal(res.status, 500, `Not a client, throw ${String(value)}`);
+      assert.equal(db.getLead(leadId).inbox_state, 'in');
+      assert.equal(inbox.countMessages(leadId), 1, 'the transcript is still there');
+    }
+    const add = await postForm('/v1/admin/team', { _dash: '1', name: 'Omar', phone: '0500000086', role: 'staff' }, { cookie });
+    assert.equal(add.status, 500);
+    assert.equal(team.getUserByPhone('966500000086'), null);
+    assert.equal(inbox.countMessages(colleague), 1);
+    const never = await postForm('/v1/admin/never', { _dash: '1', phone: '0500000087' }, { cookie });
+    assert.equal(never.status, 500);
+    assert.equal(team.isExcludedPhone('966500000087'), false);
+    assert.equal(inbox.countMessages(cousin), 1);
+    assert.equal(audit.recent(500).length, auditBefore);
+    const failed = logs.filter((l) => l.evt === 'dash.hook_failed');
+    assert.deepEqual(failed.map((l) => [l.hook, l.error]), Array(falsy.length + 2).fill(['onLeadLeaving', 'Error']));
+  }, ({ db }) => {
+    inbox = createInboxStore(db);
+    return { inbox, hooks: { onLeadLeaving: () => { throw falsy[k++ % falsy.length]; } } };
+  });
+});
+
+test('an async or generator onLeadLeaving is refused before it is called: none of its work can land after the step is rolled back', async () => {
+  let inbox;
+  let store;
+  let ran = 0;
+  const hooks = {};
+  // Each would write its mark only after the route has answered: an async body after an await,
+  // a generator body never (nobody steps it), so the purge would go ahead with no mark at all.
+  const mark = () => store.setSetting('owner_summary_day', '2026-11-27');
+  const variants = [
+    async function onLeadLeaving() { ran += 1; await null; mark(); },
+    async () => { ran += 1; await null; mark(); },
+    function* onLeadLeaving() { ran += 1; mark(); },
+    async function* onLeadLeaving() { ran += 1; mark(); },
+  ];
+  await withTeamRoutes(async ({ db, team, audit, postForm, login, logs }) => {
+    const cookie = await login(OWNER_PHONE);
+    const leadId = seedLead(db, { phone: '966500000088', inboxState: 'in' });
+    seedMessage(inbox, leadId, 'K-88');
+    const colleague = seedLead(db, { id: 'LEAD-20260908-aaaa0009', phone: '966500000089', inboxState: 'in' });
+    seedMessage(inbox, colleague, 'K-89');
+    const auditBefore = audit.recent(500).length;
+    for (const fn of variants) {
+      hooks.onLeadLeaving = fn;
+      const res = await postForm(`/v1/admin/inbox/${leadId}/out`, { _dash: '1' }, { cookie });
+      assert.equal(res.status, 500);
+      await settle();
+      assert.equal(db.getLead(leadId).inbox_state, 'in');
+      assert.equal(inbox.countMessages(leadId), 1);
+    }
+    hooks.onLeadLeaving = variants[0];
+    const add = await postForm('/v1/admin/team', { _dash: '1', name: 'Omar', phone: '0500000089', role: 'staff' }, { cookie });
+    assert.equal(add.status, 500);
+    await settle();
+    assert.equal(team.getUserByPhone('966500000089'), null);
+    assert.equal(inbox.countMessages(colleague), 1);
+    assert.equal(ran, 0, 'never called, so nothing of it started');
+    assert.equal(team.getSetting('owner_summary_day'), '', 'and no mark was written after the rollback');
+    assert.equal(audit.recent(500).length, auditBefore);
+    const failed = logs.filter((l) => l.evt === 'dash.hook_failed');
+    assert.deepEqual(failed.map((l) => [l.hook, l.error]), Array(variants.length + 1).fill(['onLeadLeaving', 'TypeError']));
+  }, ({ db, team }) => {
+    inbox = createInboxStore(db);
+    store = team;
+    return { inbox, hooks };
+  });
+});
+
+test('dash.hook_failed reads an error\'s code and name once each, and an error that throws when read is logged as Error, never a 500 or an unhandled rejection', async () => {
+  let reads = 0;
+  const secret = 'cal-secret 966500000000';
+  const made = [
+    // SQLITE_BUSY while it is checked, the secret when it is logged: one read decides both.
+    () => { throw Object.defineProperty(new Error('x'), 'code', { get: () => (++reads <= 2 ? 'SQLITE_BUSY' : secret) }); },
+    () => { throw Object.defineProperty(new Error('x'), 'code', { get() { throw new Error(secret); } }); },
+    () => { throw new Proxy(new Error('x'), { get() { throw new Error(secret); } }); },
+    () => Promise.reject(Object.defineProperty(new Error('x'), 'name', { get() { throw new Error(secret); } })),
+  ];
+  let i = 0;
+  await withTeamRoutes(async ({ postForm, login, logs }) => {
+    const cookie = await login(OWNER_PHONE);
+    for (let k = 0; k < made.length; k += 1) {
+      const res = await postForm('/v1/admin/settings', { _dash: '1', email_replies: k % 2 ? '0' : '1' }, { cookie });
+      assert.equal(res.headers.get('location'), '/dashboard/team?ok=setting', `error ${k}`);
+    }
+    await settle();
+    const failed = logs.filter((l) => l.evt === 'dash.hook_failed');
+    assert.deepEqual(failed.map((l) => l.error), ['SQLITE_BUSY', 'Error', 'Error', 'Error']);
+    assert.doesNotMatch(JSON.stringify(logs), /cal-secret/);
+  }, { onSettingChanged: () => made[i++]() });
+});
+
+test('an ops() result is checked for a promise once, inside the guard: a value that throws when read again still opens the Team page', async () => {
+  let thenReads = 0;
+  const counts = new Proxy({ answers_24h: 5 }, {
+    get(target, key, receiver) {
+      if (key === 'then' && thenReads++ > 0) throw new Error('ops-secret 966500000000');
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  await withTeamRoutes(async ({ get, login, logs }) => {
+    const cookie = await login(OWNER_PHONE);
+    const res = await get('/dashboard/team', { cookie });
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /<td>answers_24h<\/td><td>5<\/td>/);
+    assert.doesNotMatch(JSON.stringify(logs), /ops-secret/);
+  }, { ops: () => counts });
+});
+
+test('the audit rows of Not a client, Add a person and the never list are written after their step commits: an audit error that rolls the transaction back cannot undo the step', async () => {
+  let inbox;
+  // SQLITE_FULL, SQLITE_IOERR or SQLITE_NOMEM can make SQLite roll the whole transaction back on
+  // its own, and lib/audit.mjs swallows the insert's error (logged as audit.failed). This audit
+  // does just that for the three actions, so the step must not be inside the transaction it ends.
+  const lost = new Set(['inbox_out', 'team_add', 'never_add']);
+  await withTeamRoutes(async ({ db, team, postForm, login }) => {
+    const cookie = await login(OWNER_PHONE);
+    const leadId = seedLead(db, { phone: '966500000090', inboxState: 'in' });
+    seedMessage(inbox, leadId, 'K-90');
+    const colleague = seedLead(db, { id: 'LEAD-20260908-aaaa0010', phone: '966500000091', inboxState: 'in' });
+    seedMessage(inbox, colleague, 'K-91');
+    const cousin = seedLead(db, { id: 'LEAD-20260908-aaaa0011', phone: '966500000092', inboxState: 'in' });
+    seedMessage(inbox, cousin, 'K-92');
+    const out = await postForm(`/v1/admin/inbox/${leadId}/out`, { _dash: '1' }, { cookie });
+    assert.equal(out.headers.get('location'), '/dashboard/inbox?ok=out', 'as on main: the chat left, its audit row is lost');
+    assert.equal(db.getLead(leadId).inbox_state, 'out');
+    assert.equal(inbox.countMessages(leadId), 0);
+    const add = await postForm('/v1/admin/team', { _dash: '1', name: 'Omar', phone: '0500000091', role: 'staff' }, { cookie });
+    assert.equal(add.headers.get('location'), '/dashboard/team?ok=added');
+    assert.ok(team.getUserByPhone('966500000091'), 'the account is kept');
+    assert.equal(db.getLead(colleague).inbox_state, 'out');
+    assert.equal(inbox.countMessages(colleague), 0);
+    const never = await postForm('/v1/admin/never', { _dash: '1', phone: '0500000092' }, { cookie });
+    assert.equal(never.headers.get('location'), '/dashboard/team?ok=never_added');
+    assert.equal(team.isExcludedPhone('966500000092'), true);
+    assert.equal(db.getLead(cousin).inbox_state, 'out');
+    assert.equal(inbox.countMessages(cousin), 0);
+  }, ({ db, audit }) => {
+    inbox = createInboxStore(db);
+    return {
+      inbox,
+      audit: {
+        ...audit,
+        record(entry) {
+          if (!lost.has(entry.action)) return audit.record(entry);
+          try { db.db.exec('ROLLBACK'); } catch { /* no transaction to end: the insert alone failed */ }
+          return undefined;
+        },
+      },
+    };
+  });
+});
+
 test('without hooks the routes behave exactly as before: the defaults are no-ops', async () => {
   await withTeamRoutes(async ({ db, postForm, login, logs }) => {
     const leadId = seedLead(db, { phone: '966500000078', inboxState: 'in' });
