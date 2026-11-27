@@ -30,14 +30,16 @@ export const ROLES = ['owner', 'staff'];
  * code state, never buttons: `owner_summary_day` (the daily summary's day), `mail_cursor`
  * and `mail_since` (the mail poller), `mail_from_ok` (the reply sender checked),
  * `dana_month_alerted` / `brain_month_alerted` (the month alerts), `brain_out` (since when
- * the AI service has not answered) and the restart-safe spend counters `brain_usd_day` /
- * `brain_usd_month` (micro-USD).
+ * the AI service has not answered), the restart-safe spend counters `brain_usd_day` /
+ * `brain_usd_month` (micro-USD), and `owner_command_ts`, the time of the newest owner
+ * `#dana …` command applied to each switch (lib/owner-test.mjs, PR-A2: `<switch>:<ms>`
+ * pairs, comma-separated), so a restart never lets an older command undo a newer one.
  */
 export const SETTINGS_DEFAULTS = {
   sending_enabled: '1', inbox_replies: '0', dana_enabled: '0', retell_funds_out: '', retell_funds_alerted: '',
   own_inbox: '0', owner_as_client: '0', calendar_booking: '0', owner_notes: '1', email_replies: '0', owner_mail_copy: '1', dana_brain: '0',
   owner_summary_day: '', mail_cursor: '', mail_since: '', mail_from_ok: '', dana_month_alerted: '',
-  brain_out: '', brain_usd_day: '', brain_usd_month: '', brain_month_alerted: '',
+  brain_out: '', brain_usd_day: '', brain_usd_month: '', brain_month_alerted: '', owner_command_ts: '',
 };
 /**
  * A stored instant: `''` (none) or a whole ms timestamp. The Retell funds watch
@@ -76,6 +78,8 @@ export const SETTINGS_ALLOWED = {
   brain_month_alerted: new RegExp(`^(?:|${MONTH}(?::(?:80|100))?)$`),
   brain_usd_day: new RegExp(`^(?:|${DAY}:${COUNT})$`),
   brain_usd_month: new RegExp(`^(?:|${MONTH}:${COUNT})$`),
+  // `<switch>:<ms>` pairs, comma-separated, one per switch a command has set (six today).
+  owner_command_ts: /^(?:|[a-z_]{1,32}:\d{1,16}(?:,[a-z_]{1,32}:\d{1,16}){0,15})$/,
 };
 /** The owner's on/off switches: each one is '0' or '1' and nothing else, and fails closed. */
 export const SWITCH_KEYS = Object.keys(SETTINGS_ALLOWED).filter((k) => SETTINGS_ALLOWED[k] === SWITCH);

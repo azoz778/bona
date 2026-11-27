@@ -85,12 +85,15 @@
  *     chats count too, so a restart forgets nothing, and a day's alert already in the
  *     owner-notes ledger is not raised again;
  *   - a human message seen for the first time also ends a hold that waits for a person
- *     (`dana_hold_reason` with no `dana_hold_until`); a timed hold runs to its end;
+ *     (`dana_hold_reason` with no `dana_hold_until`), when it was written after the hold: newer
+ *     than every other message of the chat and every assistant send (store.mjs clearHumanHold),
+ *     so an old reply a refresh finds only now leaves it; a timed hold runs to its end;
  *   - a brochure the assistant sent (a Dana row with media_kind 'document') is found by its id,
  *     by its caption (a document record's text, matched to such rows only, never to a staff or
  *     text send with the same words, and a text record never to a brochure), or by the fallback:
  *     the lead's oldest unresolved such row within two minutes (`via: 'document'`). It is Dana's,
- *     never the owner's.
+ *     never the owner's. A photo's or a video's caption matches no send at all: only a plain
+ *     text record is matched to a text send by its words.
  *
  * Nothing here logs text, a phone number, a lid or a name — ids and field names only.
  */
@@ -125,6 +128,8 @@ const riyadhDay = (t) => Math.floor((t + RIYADH_OFFSET_MS) / DAY_MS);
 
 /** A record whose media is a document (lib/evolution.mjs `mediaOf`: `[document]` or `[document: name]`). */
 const isDocument = (rec) => typeof rec?.media === 'string' && rec.media.startsWith('[document');
+/** A plain text record: no media of any kind (a photo's or a video's caption is not a text send). */
+const isPlainText = (rec) => rec?.media === null || rec?.media === undefined;
 
 /** Outbound senders that are a person answering — as opposed to Dana. */
 const HUMAN_SENDERS = new Set(['staff', 'owner_number']);
@@ -221,15 +226,17 @@ export function createIngest({
    * `resolveUncertain` returns the oldest match, so when that one is too new, all are. A
    * record with no time of its own is never matched by text: `ts` is then now(), and a send
    * written in the last two minutes would match a record that could be days old. A document's
-   * caption is matched to a Dana brochure row only, and any other record's text to a text row
+   * caption is matched to a Dana brochure row only, and a plain text record's text to a text row
    * only (store.mjs `resolveUncertain`'s `document`): a PDF whose caption is an unsure staff
-   * reply's words is not that reply. `byKey` is the row the caller already looked up by the
-   * record's id.
+   * reply's words is not that reply. Any other media (a photo, a video: only the phone sends
+   * them) matches nothing by its caption, so a photo captioned with an unsure dashboard text's
+   * words neither settles that text nor reads as the staff member's. `byKey` is the row the
+   * caller already looked up by the record's id.
    */
   function outboxRowFor(leadId, rec, body, ts, byKey) {
     if (byKey) return { row: byKey, via: 'key' };
     if (!Number.isFinite(rec.ts) || inbox.messageByKey(rec.id)) return null;
-    if (body) {
+    if (body && (isPlainText(rec) || isDocument(rec))) {
       const byText = inbox.resolveUncertain({ leadId, text: body, ts, windowMs: RESOLVE_WINDOW_MS, document: isDocument(rec) });
       if (byText && ts >= byText.created - SEND_SKEW_MS) return { row: byText, via: 'text' };
     }
@@ -447,8 +454,12 @@ export function createIngest({
       if (inserted && HUMAN_SENDERS.has(senderKind)) {
         inbox.noteHumanOutbound(current.lead_id, ts);
         if (current.needs_human) inbox.setNeedsHuman(current.lead_id, 0);
-        // A hold that waits for a person ends with one; a timed hold runs to its end.
-        if (current.dana_hold_reason && current.dana_hold_until == null) inbox.clearHumanHold?.(current.lead_id);
+        // A hold that waits for a person ends with one written after it (store.mjs
+        // clearHumanHold: an older reply a refresh finds now leaves it, and a record with no
+        // time of its own says nothing of when it was written); a timed hold runs to its end.
+        if (current.dana_hold_reason && current.dana_hold_until == null) {
+          inbox.clearHumanHold?.(current.lead_id, { ts: Number.isFinite(rec.ts) ? rec.ts : NaN, keyId: rec.id });
+        }
         if (!current.handler_user_id) {
           const handler = senderKind === 'staff' ? senderUserId : ownerUserId();
           if (handler) inbox.setHandler(current.lead_id, handler);

@@ -574,6 +574,20 @@ test('owner_summary_day takes \'\' or a YYYY-MM-DD day only', () => {
   s.close();
 });
 
+test("owner_command_ts (PR-A2) takes '' or comma-separated <switch>:<ms> pairs only, and is no switch", () => {
+  const { s, team } = teamHarness();
+  assert.equal(SETTINGS_DEFAULTS.owner_command_ts, '');
+  for (const ok of ['', `owner_as_client:${NOW}`, `owner_as_client:${NOW},dana_enabled:${NOW + 1}`]) {
+    assert.equal(team.setSetting('owner_command_ts', ok), ok);
+  }
+  for (const bad of ['owner_as_client', `owner_as_client:${NOW},`, `,owner_as_client:${NOW}`, `Owner:${NOW}`, 'own_inbox:-1', 'own_inbox:1.5',
+    'own_inbox:12345678901234567', `own_inbox:${NOW} `, `own_inbox:${NOW};dana_enabled:1`]) {
+    assert.equal(codeOf(() => team.setSetting('owner_command_ts', bad)), 'bad_setting_value', bad);
+  }
+  assert.equal(team.isOn('owner_command_ts'), false, 'a marker is never a switch');
+  s.close();
+});
+
 test('brain_usd_day / brain_usd_month take only YYYY-MM-DD:<int> / YYYY-MM:<int> micro-USD counters (or \'\')', () => {
   const { s, team } = teamHarness();
   assert.equal(SETTINGS_DEFAULTS.brain_usd_day, '');

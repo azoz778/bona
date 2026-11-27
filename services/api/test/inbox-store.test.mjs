@@ -1666,6 +1666,46 @@ test('clearHumanHold clears only a hold that waits for a person; a timed hold an
   s.close();
 });
 
+test("clearHumanHold with the answer's time ends the hold only when the answer is newer than every other message and every assistant send of the chat (Codex T07 r2)", () => {
+  const { s, inbox, at } = harness();
+  const held = () => s.getLead('L-1').dana_hold_reason;
+  const hold = () => s.updateLead('L-1', { dana_hold_reason: 'send_failed', dana_hold_until: null });
+  chat(s, 'L-1');
+  chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net' });
+  // The client at NOW - 3 min; the assistant's send written at NOW - 2 min, failed at NOW - 1 min; then the hold.
+  inbox.upsertMessage(msg({ key_id: 'C-1', ts: NOW - 180_000 }));
+  at(NOW - 120_000);
+  inbox.insertOutbox(out({ send_id: 'SND-d', sender_kind: 'dana', user_id: null }));
+  at(NOW - 60_000);
+  inbox.updateOutbox('SND-d', { status: 'failed' });
+  hold();
+  at(NOW);
+  // The answer's own stored row is left out; another chat's messages and sends count for nothing.
+  inbox.upsertMessage(msg({ key_id: 'H-old', direction: 'out', sender_kind: 'owner_number', ts: NOW - 240_000 }));
+  inbox.upsertMessage(msg({ key_id: 'X-1', lead_id: 'L-2', ts: NOW + 60_000 }));
+  for (const [label, ts] of [['before the client message', NOW - 240_000], ['before the send was written', NOW - 150_000],
+    ['before the send failed', NOW - 90_000], ['the same moment it failed', NOW - 60_000], ['no number', NaN], ['null', null]]) {
+    assert.equal(inbox.clearHumanHold('L-1', { ts, keyId: 'H-old' }), false, label);
+    assert.equal(held(), 'send_failed', label);
+  }
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 30_000, keyId: 'H-old' }), true, 'after everything');
+  assert.equal(held(), null);
+  // A message of the chat newer than the answer (read out of order) leaves the hold too.
+  hold();
+  inbox.upsertMessage(msg({ key_id: 'C-2', ts: NOW - 10_000 }));
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 20_000, keyId: 'H-new' }), false);
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 5_000, keyId: 'H-new' }), true);
+  // A staff send is a person's, not the assistant's: it never bounds the hold.
+  hold();
+  at(NOW + 30_000);
+  inbox.insertOutbox(out({ send_id: 'SND-s' }));
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW, keyId: 'H-3' }), true);
+  // Without a time, as before.
+  hold();
+  assert.equal(inbox.clearHumanHold('L-1'), true);
+  s.close();
+});
+
 test('pruneCandidates({ phones: true }) also deletes every OPEN row with a number; dismissed and lid-only rows stay; without it, as before', () => {
   const { s, inbox, at } = harness();
   const withPhone = inbox.noteCandidate({ phone: '966500000001', jid: JID, ts: NOW - DAY, words: ['villa'], dir: 'in' });

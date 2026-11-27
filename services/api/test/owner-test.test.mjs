@@ -61,10 +61,11 @@ function harness({ env = ENV, identity = true, wired = true, brainHealth = { con
   const viewing = { cancelled: [], cancelForLead(id) { this.cancelled.push(id); return 0; } };
   const link = { identity, identityOk() { return this.identity; }, linkOk: () => true };
   const brain = { health: () => brainHealth };
-  ot = createOwnerTest({
+  const build = () => createOwnerTest({
     cfg: { env }, team, wa: waConfig(env), link, log: (e) => logs.push(e), now,
     ...(wired ? { db: s, inbox, notes: () => notes, viewing: () => viewing, brain: () => brain } : {}),
   });
+  ot = build();
   let n = 0;
   /** A command the owner sends from his phone, a little after the last one (the clock moves on 10 s). */
   const send = (text, over = {}) => {
@@ -78,6 +79,8 @@ function harness({ env = ENV, identity = true, wired = true, brainHealth = { con
   return {
     s, team, ot, owner, colleague, inbox, notes, viewing, link, logs, send, setting, audits,
     now, at: (t) => { clock = t; }, tick: (ms) => { clock += ms; },
+    /** The service restarts: a new module over the same store (whatever it kept in memory is gone). */
+    restart() { ot = build(); this.ot = ot; return ot; },
   };
 }
 
@@ -455,6 +458,38 @@ test('a command that changes nothing writes nothing: the switch keeps its update
   h.tick(MIN);
   assert.equal(h.send('#dana test off'), true);
   assert.deepEqual([h.setting('owner_as_client').value, h.setting('owner_as_client').updated], ['0', h.now() - 2000]);
+  assertClean(h.logs);
+  h.s.close();
+});
+
+test('the newest command on a switch is kept in the store: after a restart, a delayed older command still never undoes a repeat that changed nothing (Codex T07 r2)', () => {
+  const h = harness();
+  const base = { jid: OWNER_JID, jidAlt: null, fromMe: false };
+  ownerLead(h, { inbox_state: 'in', inbox_since: NOW, history_from: NOW, needs_human: 0, dana_off: 0, dana_hold_until: null, dana_hold_reason: null });
+  const t0 = h.now() + MIN;
+  // 10:00 the test goes on; 10:01 he sends `test off`, 10:02 `test on` again. The repeat is read first.
+  h.at(t0 + 1000);
+  assert.equal(h.ot.command({ ...base, id: 'ON', ts: t0, text: '#dana test on' }), true);
+  h.inbox.setInboxState(OWNER_LEAD, 'in');
+  h.inbox.upsertMessage({ key_id: 'K-1', lead_id: OWNER_LEAD, jid: OWNER_JID, direction: 'in', sender_kind: 'client', text: 'test villa', ts: t0 + 30_000 });
+  h.at(t0 + 2 * MIN + 1000);
+  assert.equal(h.ot.command({ ...base, id: 'REPEAT', ts: t0 + 2 * MIN, text: '#dana test on' }), true);
+  assert.equal(h.setting('owner_as_client').updated, t0, 'the repeat left the floor where it was');
+  // The service restarts, then the delayed `test off` comes in: inside 10 min, a new id, newer than the stamp.
+  h.restart();
+  h.tick(MIN);
+  assert.equal(h.ot.command({ ...base, id: 'LATE-OFF', ts: t0 + MIN, text: '#dana test off' }), true, 'consumed');
+  assert.equal(h.team.getSetting('owner_as_client'), '1', "the owner's last word (the repeat) stands");
+  assert.deepEqual([h.s.getLead(OWNER_LEAD).inbox_state, h.inbox.countMessages(OWNER_LEAD)], ['in', 1], 'the test chat is not purged');
+  assert.deepEqual(h.viewing.cancelled, []);
+  assert.equal(h.notes.commands.at(-1).recId, 'REPEAT', 'the ignored one gets no answer');
+  assert.ok(h.logs.some((e) => e.evt === 'owner_test.command_ignored' && e.cmd === 'test_off' && e.reason === 'older_than_setting'));
+  // A newer command after the restart is applied as before, and one switch's newest command says nothing of another's.
+  h.tick(1000);
+  assert.equal(h.ot.command({ ...base, id: 'OFF', ts: h.now() - 500, text: '#dana test off' }), true);
+  assert.equal(h.team.getSetting('owner_as_client'), '0');
+  assert.equal(h.ot.command({ ...base, id: 'LIVE', ts: t0 + MIN, text: '#dana live on' }), true);
+  assert.equal(h.team.getSetting('own_inbox'), '1', 'own_inbox had no newer command');
   assertClean(h.logs);
   h.s.close();
 });

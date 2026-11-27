@@ -1006,14 +1006,68 @@ test('a human message clears a hold that waits for a person (and needs_human, as
   not.inbox.updateOutbox('SND-d', { status: 'accepted', key_id: 'H-4' });
   assert.equal(not.ingest(not.lead(LEAD_ID), rec({ id: 'H-4', fromMe: true, jid: PHONE_JID, jidAlt: null, text: 'From the assistant' })).senderKind, 'dana');
   assert.equal(not.lead(LEAD_ID).dana_hold_reason, 'send_failed');
-  // A human message read again (a refresh) is not a new one.
-  not.ingest(not.lead(LEAD_ID), rec({ id: 'H-5', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED }));
+  // A person's reply after them ends it; the same message read again (a refresh) is not a new one.
+  not.ingest(not.lead(LEAD_ID), rec({ id: 'H-5', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED, ts: NOW + 1000 }));
   assert.equal(not.lead(LEAD_ID).dana_hold_reason, null);
   not.inbox.setNeedsHuman(LEAD_ID, 0);
   not.s.updateLead(LEAD_ID, { dana_hold_reason: 'loop' });
-  not.ingest(not.lead(LEAD_ID), rec({ id: 'H-5', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED }));
+  not.ingest(not.lead(LEAD_ID), rec({ id: 'H-5', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED, ts: NOW + 1000 }));
   assert.equal(not.lead(LEAD_ID).dana_hold_reason, 'loop');
   not.s.close();
+});
+
+test('a human reply ends an until-human hold only when it is newer than the hold: an older one a refresh finds later leaves it (Codex T07 r2)', () => {
+  const MIN = 60_000;
+  const hold = (h) => [h.lead(LEAD_ID).dana_hold_reason, h.lead(LEAD_ID).dana_hold_until];
+  /**
+   * The client wrote at `clientAt`; the assistant answered it, both its sends failed (the last at
+   * `failedAt`), and it held the chat until a person writes (send_failed). The clock is then NOW.
+   */
+  const heldChat = ({ clientAt, failedAt }) => {
+    const h = testChat({ client: { needs_human: 1 } });
+    h.at(clientAt + 2000);
+    assert.equal(h.ingest(h.lead(LEAD_ID), rec({ id: 'C-1', ts: clientAt })).senderKind, 'client');
+    for (const [i, at] of [[1, failedAt - 30_000], [2, failedAt]]) {
+      h.at(at - 5000);
+      h.inbox.insertOutbox({ send_id: `SND-f${i}`, lead_id: LEAD_ID, jid: PHONE_JID, text: 'From the assistant', sender_kind: 'dana' });
+      h.at(at);
+      h.inbox.updateOutbox(`SND-f${i}`, { status: 'failed', error: 'evolution_500' });
+    }
+    h.s.updateLead(LEAD_ID, { dana_hold_reason: 'send_failed', dana_hold_until: null });
+    h.at(NOW);
+    return h;
+  };
+  const typed = (over) => rec({ id: 'H-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED, ...over });
+  // A reply typed before the client's last message, which the poller missed and a dashboard refresh finds now
+  // (from the chat's history floor): stored as before, the human clock and the hand-over flag as before; the hold stays.
+  const old = heldChat({ clientAt: NOW - 6 * MIN, failedAt: NOW - 5 * MIN });
+  assert.deepEqual(old.ingest(old.lead(LEAD_ID), typed({ ts: NOW - 10 * MIN })), { stored: true, inserted: true, senderKind: 'owner_number' });
+  assert.deepEqual(hold(old), ['send_failed', null], 'a reply older than the hold does not end it');
+  assert.deepEqual([old.lead(LEAD_ID).last_human_out_ts, old.lead(LEAD_ID).needs_human], [NOW - 10 * MIN, 0], 'the rest as before');
+  old.s.close();
+  // A backlog answer: the client's message is older than the missed reply, but the assistant's failed sends are newer.
+  const backlog = heldChat({ clientAt: NOW - 50 * MIN, failedAt: NOW - 5 * MIN });
+  backlog.ingest(backlog.lead(LEAD_ID), typed({ ts: NOW - 20 * MIN }));
+  assert.deepEqual(hold(backlog), ['send_failed', null], 'a reply older than the failed sends does not end it');
+  // A reply newer than everything the chat had: the hold is over.
+  assert.equal(backlog.ingest(backlog.lead(LEAD_ID), typed({ id: 'H-2', ts: NOW - MIN })).senderKind, 'owner_number');
+  assert.deepEqual(hold(backlog), [null, null], 'a reply after the hold ends it');
+  backlog.s.close();
+  // A record with no time of its own says nothing about when it was written: it is stored at now, and leaves the hold.
+  const untimed = heldChat({ clientAt: NOW - 6 * MIN, failedAt: NOW - 5 * MIN });
+  assert.equal(untimed.ingest(untimed.lead(LEAD_ID), typed({ id: 'H-untimed', ts: null })).stored, true);
+  assert.deepEqual(hold(untimed), ['send_failed', null], 'an untimed record does not end it');
+  untimed.s.close();
+  // The same by a staff reply from the dashboard, found by its message id, after the client wrote again during the hold.
+  const staff = heldChat({ clientAt: NOW - 6 * MIN, failedAt: NOW - 5 * MIN });
+  staff.ingest(staff.lead(LEAD_ID), rec({ id: 'C-2', ts: NOW - 4 * MIN }));
+  assert.deepEqual(hold(staff), ['send_failed', null], 'the client writing again is no person answering');
+  staff.inbox.insertOutbox({ send_id: 'SND-staff', lead_id: LEAD_ID, jid: PHONE_JID, text: REPLY, user_id: staff.staff.user_id, sender_kind: 'staff' });
+  staff.inbox.updateOutbox('SND-staff', { status: 'accepted', key_id: 'H-3' });
+  assert.equal(staff.ingest(staff.lead(LEAD_ID), rec({ id: 'H-3', fromMe: true, jid: PHONE_JID, jidAlt: null, text: REPLY, ts: NOW - 3 * MIN })).senderKind, 'staff');
+  assert.deepEqual(hold(staff), [null, null]);
+  assertCleanT(staff.logs);
+  staff.s.close();
 });
 
 test('a brochure the assistant sent comes back as a document: matched by its caption, else by the fallback (same lead, 2 min) → dana, never owner_number', () => {
@@ -1105,6 +1159,36 @@ test('a caption finds only a brochure row and a text only a text row: a Dana PDF
   assert.equal(d.ingest(d.lead(LEAD_ID), typed()).senderKind, 'owner_number');
   assert.deepEqual(status(d), [null, 'uncertain']);
   d.s.close();
+});
+
+test('a photo or a video never settles a text send by its caption: only a plain text matches a text row (Codex T07 r2)', () => {
+  const WORDS = 'Here are the details';
+  const unsure = (h, over = {}) => h.inbox.insertOutbox({
+    send_id: 'SND-unsure', lead_id: LEAD_ID, jid: PHONE_JID, text: WORDS, user_id: h.staff.user_id, sender_kind: 'staff', status: 'uncertain', ...over,
+  });
+  for (const media of ['[image]', '[video]']) {
+    for (const [label, row] of [['a staff text', {}], ['an assistant text', { sender_kind: 'dana', user_id: null }]]) {
+      // The Fold sends a photo with those words as its caption, in the same chat, within two minutes.
+      const h = testChat({ client: { needs_human: 1 } });
+      unsure(h, row);
+      const out = h.ingest(h.lead(LEAD_ID), rec({ id: 'MEDIA-1', fromMe: true, jid: PHONE_JID, jidAlt: null, media, text: WORDS, ts: NOW + 2000 }));
+      assert.deepEqual(out, { stored: true, inserted: true, senderKind: 'owner_number' }, `${media}, ${label}`);
+      assert.deepEqual([h.inbox.getOutbox('SND-unsure').status, h.inbox.getOutbox('SND-unsure').key_id], ['uncertain', null], `${media}, ${label}: the send stays unsure`);
+      assert.equal(h.inbox.messageByKey('MEDIA-1').sender_user_id, null, `${media}, ${label}: nobody on the staff`);
+      // The text's own copy, read next, is still that send.
+      assert.equal(h.ingest(h.lead(LEAD_ID), rec({ id: 'TEXT-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: WORDS, ts: NOW + 3000 })).senderKind,
+        row.sender_kind ?? 'staff', `${media}, ${label}: the plain text still matches`);
+      assert.equal(h.inbox.getOutbox('SND-unsure').key_id, 'TEXT-1');
+      h.s.close();
+    }
+    // In the owner's test chat the photo is an untracked Fold message: not admitted, and the send stays unsure.
+    const t = testChat();
+    t.inbox.insertOutbox({ send_id: 'SND-t-unsure', lead_id: T_LEAD, jid: T_OWNER_JID, text: WORDS, user_id: t.staff.user_id, sender_kind: 'staff', status: 'uncertain' });
+    assert.deepEqual(t.ingest(t.lead(), toOwner({ id: 'T-MEDIA', media, text: WORDS, ts: NOW + 2000 })), { stored: false, reason: 'test_chat_untracked' }, media);
+    assert.equal(t.inbox.getOutbox('SND-t-unsure').status, 'uncertain', media);
+    assert.equal(t.inbox.countMessages(T_LEAD), 0, media);
+    t.s.close();
+  }
 });
 
 test('a `#dana` text is never a message, in any chat, either way it went, whichever read brings it (poller, join history, refresh)', async () => {

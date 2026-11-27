@@ -318,6 +318,8 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
    * (the record is a document) looks at Dana rows with media_kind 'document', anything else at
    * rows with no media_kind. Otherwise a Dana PDF whose caption is an unsure staff reply's words
    * would settle that reply and be stored as a person's answer, and a typed text the brochure.
+   * Only a plain text or a document's caption is ever asked for (ingest.mjs `outboxRowFor`): a
+   * photo's or a video's caption is no send of ours.
    */
   function resolveUncertain({ leadId, text, ts, windowMs = 120_000, document = false } = {}) {
     if (!leadId || text === null || text === undefined || text === '' || !hasNumber(ts)) return null;
@@ -592,10 +594,33 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
   /**
    * A person answered the chat: a hold that waits for one (`dana_hold_reason` with no
    * `dana_hold_until`, db v8) is over. A timed hold stays until its end. True when one was cleared.
+   *
+   * With `ts` (the answer's own WhatsApp time; ingest.mjs always hands it in), only an answer
+   * written AFTER the hold ends it (Codex T07 r2): a refresh or a catch-up can find, long after,
+   * a reply the poller missed, and one typed before the hold went on is no answer to it. The
+   * hold's own start is not stored (db v8 keeps its reason and its end only), so it is bounded
+   * by what the chat holds: the assistant holds a chat only while it handles it, after the client
+   * message it answers and after its own send attempts (a failed send, the loop guard's message).
+   * So the answer must be newer than every other stored message of the chat (`keyId`, its own
+   * row, left out) and than every assistant send's `created` and `updated`. An answer read after
+   * a newer message (out of order) leaves the hold as well; the next one, or the dashboard's
+   * "Let the AI answer again", ends it. A `ts` that is no number ends nothing. Without `ts` (a
+   * caller with no message, like the button), as before.
    */
-  const clearHumanHold = (leadId) => prep(`UPDATE leads SET dana_hold_reason = NULL, dana_hold_until = NULL
-                                           WHERE lead_id = ? AND dana_hold_reason IS NOT NULL AND dana_hold_until IS NULL`)
-    .run(String(leadId ?? '')).changes === 1;
+  function clearHumanHold(leadId, { ts, keyId = null } = {}) {
+    const id = String(leadId ?? '');
+    if (ts === undefined) {
+      return prep(`UPDATE leads SET dana_hold_reason = NULL, dana_hold_until = NULL
+                   WHERE lead_id = ? AND dana_hold_reason IS NOT NULL AND dana_hold_until IS NULL`).run(id).changes === 1;
+    }
+    if (!hasNumber(ts)) return false;
+    const at = toTs(ts);
+    return prep(`UPDATE leads SET dana_hold_reason = NULL, dana_hold_until = NULL
+                 WHERE lead_id = ? AND dana_hold_reason IS NOT NULL AND dana_hold_until IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM wa_messages WHERE lead_id = ? AND key_id <> ? AND ts >= ?)
+                   AND NOT EXISTS (SELECT 1 FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana' AND (created >= ? OR updated >= ?))`)
+      .run(id, id, String(keyId ?? ''), at, id, at, at).changes === 1;
+  }
 
   /**
    * The owner's test switch went on (DESIGN §3.2, PR-A2): his lead starts again as a stranger's
