@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
-  createWaLink, PROBE_EVERY_MS, IDENTITY_STALE_MS, LINK_DOWN_AFTER, LINK_STABLE_MS,
+  createWaLink, PROBE_EVERY_MS, IDENTITY_STALE_MS, IDENTITY_DOWN_AFTER, LINK_DOWN_AFTER, LINK_STABLE_MS,
 } from '../lib/wa-link.mjs';
 
 const NOW = 1_790_700_000_000;
@@ -27,10 +27,11 @@ const without = (key) => Object.fromEntries(Object.entries(ENV).filter(([k]) => 
  * Evolution 2.3.7 and Kuma as one fake fetch. fetchInstances answers as the live server does
  * (verify/T00.md step 2: an array of one instance, its API key `token` next to `ownerJid`);
  * whatsappNumbers answers `[{ jid, exists, number, name }]`, or 400 "Connection Closed" when the
- * companion is logged out. `state` is what the test changes between probes.
+ * companion is logged out. `state` is what the test changes between probes; `hold` stalls every
+ * request, `linkHold` only the whatsappNumbers one.
  */
 function fakeEvolution() {
-  const state = { ownerJid: `${OWN}@s.whatsapp.net`, identity: 'ok', link: 'ok', exists: true, hold: null, kuma: 'ok' };
+  const state = { ownerJid: `${OWN}@s.whatsapp.net`, identity: 'ok', link: 'ok', exists: true, hold: null, linkHold: null, kuma: 'ok' };
   const calls = [];
   const resp = (status, body) => ({ ok: status >= 200 && status < 300, status, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)) });
   const fetchImpl = async (url, init = {}) => {
@@ -41,6 +42,7 @@ function fakeEvolution() {
     };
     calls.push(call);
     if (state.hold) await state.hold;
+    if (state.linkHold && u.pathname.startsWith('/chat/whatsappNumbers/')) await state.linkHold;
     if (u.pathname.startsWith('/api/push/')) {
       if (state.kuma === 'throw') throw Object.assign(new Error(`connect ECONNREFUSED ${url}`), { name: 'TypeError' });
       return state.kuma === 'http' ? resp(500, 'boom') : resp(200, { ok: true });
@@ -214,6 +216,34 @@ test("ownerJid digits equal to BONA_WA_INSTANCE_JID's → true; different → fa
   assert.deepEqual(s.pushes, ['identity_mismatch', 'identity_mismatch']);
 });
 
+test('a mismatch closes the guard at once: a link probe that stalls in the same round does not keep it open', async () => {
+  const s = scene();
+  s.link.start();
+  await s.settle();
+  assert.equal(s.link.identityOk(), true);
+  let release;
+  s.evo.state.linkHold = new Promise((r) => { release = r; });
+  s.evo.state.ownerJid = `${OWNER}@s.whatsapp.net`;
+  const [timer] = s.pending();
+  timer.fired = true;
+  s.tick(timer.ms);
+  timer.fn();
+  for (let i = 0; i < 50 && s.evo.linkCalls().length < 2; i += 1) await new Promise((r) => setImmediate(r));
+  assert.equal(s.evo.linkCalls().length, 2, 'the link probe is out, and stalls');
+  assert.equal(s.link.identityOk(), false, 'Evolution has answered with another number: false now, not when the link probe is done');
+  assert.deepEqual(s.link.health(), { linkOk: true, identityOk: false });
+  assert.deepEqual(s.pushes, ['identity_mismatch'], 'the owner hears it at once');
+  assert.equal(s.evo.beats().at(-1), 'down:identity_mismatch', 'and so does Kuma');
+  const beats = s.evo.kumaCalls().length;
+  release();
+  s.evo.state.linkHold = null;
+  await s.settle();
+  assert.equal(s.link.identityOk(), false);
+  assert.equal(s.evo.kumaCalls().length, beats, 'still one Kuma beat a round');
+  assert.deepEqual(s.pushes, ['identity_mismatch']);
+  assert.equal(s.pending().length, 1, 'the next probe is armed');
+});
+
 test('a mismatch, the identity check passing again, and the link going down are logged as events without a number', async () => {
   const s = scene();
   s.link.start();
@@ -280,12 +310,20 @@ test('an error keeps the last value for up to 30 minutes after the last answer, 
 });
 
 test('an error before any answer leaves identity false; an instance with no number keeps the last value like an error', async () => {
+  assert.equal(IDENTITY_DOWN_AFTER, 2);
   const s = scene();
   s.evo.state.identity = 'http';
   s.link.start();
   await s.settle();
   assert.equal(s.link.identityOk(), false);
-  assert.deepEqual(s.evo.beats(), ['down:identity_unknown']);
+  assert.deepEqual(s.evo.beats(), ['up:identity_pending'], 'one failed check is no outage: Kuma hears DOWN after two (DESIGN §14)');
+  await s.fire();
+  assert.equal(s.link.identityOk(), false);
+  assert.deepEqual(s.evo.beats(), ['up:identity_pending', 'down:identity_unknown'], 'two in a row');
+  s.evo.state.identity = 'ok';
+  await s.fire();
+  assert.equal(s.link.identityOk(), true);
+  assert.equal(s.evo.beats().at(-1), 'up:ok');
   assert.deepEqual(s.pushes, []);
 
   const t = scene();
@@ -437,6 +475,30 @@ test('stop ends the loop; a probe in flight at stop changes nothing; start again
   assert.equal(t.pending().length, 1);
 });
 
+test("a start after a stop forgets the last answer: false until this run's first check succeeds, however recent the old one", async () => {
+  const s = scene();
+  s.link.start();
+  await s.settle();
+  assert.equal(s.link.identityOk(), true);
+  s.link.stop();
+  assert.equal(s.link.identityOk(), true, 'stopped: what is known stays readable');
+  let release;
+  s.evo.state.hold = new Promise((r) => { release = r; });
+  s.evo.state.identity = 'network';
+  s.link.start();
+  assert.equal(s.evo.identityCalls().length, 2, 'the new run asks at once');
+  assert.equal(s.link.identityOk(), false, "the previous run's answer is not this run's");
+  assert.deepEqual(s.link.health(), { linkOk: true, identityOk: false });
+  release();
+  s.evo.state.hold = null;
+  await s.settle();
+  assert.equal(s.link.identityOk(), false, 'the first check of this run failed: still false, though the old answer is not 30 min old');
+  assert.equal(s.evo.beats().at(-1), 'up:identity_pending');
+  s.evo.state.identity = 'ok';
+  await s.fire();
+  assert.equal(s.link.identityOk(), true, 'a fresh check opens it');
+});
+
 test('health() is booleans only; nothing in it, the log or a Kuma push carries a number, a key or the push token', async () => {
   const s = scene();
   s.link.start();
@@ -455,7 +517,7 @@ test('health() is booleans only; nothing in it, the log or a Kuma push carries a
   for (const c of s.evo.kumaCalls()) {
     assert.deepEqual(Object.keys(c.query).sort(), ['msg', 'status']);
     assert.match(c.query.status, /^(up|down)$/);
-    assert.match(c.query.msg, /^(ok|link_down|identity_mismatch|identity_unknown|misconfigured)$/);
+    assert.match(c.query.msg, /^(ok|identity_pending|link_down|identity_mismatch|identity_unknown|misconfigured)$/);
     assert.equal(c.redirect, 'error', 'a push URL that redirects is never followed');
     assert.equal(c.host, 'kuma.example.com');
   }

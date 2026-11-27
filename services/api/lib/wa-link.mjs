@@ -18,12 +18,15 @@
  * (`identity_mismatch`) and a Kuma DOWN.
  *
  * When it runs: `start()` probes at once, then every 10 min (PROBE_EVERY_MS), one round at a time.
- *   - A mismatch makes it false at once, plus one owner alert (web push `identity_mismatch`, Kuma
- *     DOWN) per incident; never a note through another instance.
+ * Each round checks the identity first and records the answer before it asks the link.
+ *   - A mismatch makes it false at once, whatever the link probe then does, plus one owner alert
+ *     (web push `identity_mismatch`, Kuma DOWN) per incident; never a note through another instance.
  *   - An error or timeout (or an instance with no number at the moment) keeps the last value for
  *     up to 30 min after the last answer (IDENTITY_STALE_MS), then it fails closed. No web push:
  *     Kuma reads it as `identity_unknown`.
- *   - Until the first answer after a start it is false.
+ *   - Until the first answer after a start it is false: `start()` forgets the answer of a run that
+ *     stop() ended. Kuma hears that as `identity_pending` (up) after one failed check and as
+ *     `identity_unknown` (DOWN) after two in a row (IDENTITY_DOWN_AFTER).
  * A whatsappNumbers answer proves the link only (any instance answers it), so it never counts as
  * identity.
  *
@@ -34,9 +37,10 @@
  * `linkStable()` is DESIGN §6.4's "the link has held for 10 min", for the backlog rule: two good
  * probes in a row that span LINK_STABLE_MS (a failed probe starts the count again); false before.
  *
- * The Kuma push "Bona WhatsApp link" (BONA_KUMA_WA_LINK_PUSH, DESIGN §14) hears every round: `up`
- * when the link is up and the identity checked out, else `down`, with a fixed code as the message
- * (`link_down`, `identity_mismatch`, `identity_unknown`, `misconfigured`). The URL carries the push
+ * The Kuma push "Bona WhatsApp link" (BONA_KUMA_WA_LINK_PUSH, DESIGN §14) hears every round once:
+ * `up` when the link is up and the identity checked out (`ok`) or has not answered once since the
+ * start (`identity_pending`), else `down`, with a fixed code as the message (`link_down`,
+ * `identity_mismatch`, `identity_unknown`, `misconfigured`). The URL carries the push
  * token: it must be https (or http to this machine), never with credentials, and it is never
  * logged.
  *
@@ -54,6 +58,8 @@ import { PERSONAL_INSTANCE } from './config.mjs';
 export const PROBE_EVERY_MS = 10 * 60_000;
 /** How long an identity answer holds while the probes fail (DESIGN §5.3). */
 export const IDENTITY_STALE_MS = 30 * 60_000;
+/** Failed identity checks in a row, with no answer since the start, before Kuma hears DOWN (DESIGN §14). */
+export const IDENTITY_DOWN_AFTER = 2;
 /** Failed link probes in a row before the link is down (DESIGN §5.3). */
 export const LINK_DOWN_AFTER = 2;
 /** How long the link must have answered before backlog may be answered (DESIGN §6.4). */
@@ -118,8 +124,8 @@ const codeOf = (err) => (PROBE_CODES.has(err?.code) ? err.code : 'bad_response')
  * @property {() => boolean} identityOk  the instance is Bona's own, checked number (false until a probe has answered)
  * @property {() => boolean} linkOk      WhatsApp answers through the instance (true until two probes in a row fail)
  * @property {() => boolean} linkStable  the link has answered for 10 min (DESIGN §6.4; false until two good probes span it)
- * @property {() => void} start          probe now, then every 10 min (a second call does nothing)
- * @property {() => void} stop           no more probes; a round in flight changes nothing
+ * @property {() => void} start          forget the last answer, probe now, then every 10 min (a second call does nothing)
+ * @property {() => void} stop           no more probes; a round in flight changes nothing more
  * @property {() => Promise<void>} probe one round now (the one in flight, if any); never rejects
  * @property {() => Promise<void>} flush waits for every round and the start's alert
  * @property {() => { linkOk: boolean, identityOk: boolean }} health  booleans only
@@ -145,6 +151,8 @@ export function createWaLink({
 
   // The newest identity answer, { match, at } (`at` = when it came back); null = none since start.
   let identity = null;
+  // Failed identity checks in a row (any run); a good answer sets it back to 0.
+  let idFails = 0;
   let mismatchAlerted = false;
   let fails = 0;
   let linkUp = true;
@@ -211,24 +219,45 @@ export function createWaLink({
     }
   }
 
-  /** One round: both probes, then the state, the alerts and the Kuma beat. A round outlived by stop() changes nothing. */
+  /**
+   * One round: the identity check, then the link probe, then one Kuma beat. The identity answer is
+   * recorded before the link is asked, so a mismatch closes the guard (and its alert and Kuma beat
+   * go out) however long the link probe then takes. From the moment stop() is called, a round still
+   * in flight changes nothing more.
+   */
   async function round(g) {
     const ac = new AbortController();
     controller = ac;
     const fresh = () => g === gen;
     const id = await askIdentity(ac.signal);
     if (!fresh()) return;
-    const ln = await askLink(ac.signal);
-    if (!fresh()) return;
 
-    const due = [];
     if (id.error) {
+      idFails += 1;
       say({ level: 'warn', evt: 'wa.link.probe_failed', probe: 'identity', code: id.error });
     } else {
+      idFails = 0;
       identity = { match: id.match, at: now() };
-      if (!id.match && !mismatchAlerted) { mismatchAlerted = true; due.push('identity_mismatch'); }
       if (id.match) mismatchAlerted = false;
     }
+    const idNow = identityOk();
+    if (idNow !== loggedIdentity) {
+      const why = idNow ? 'match' : identity?.match === false ? 'mismatch' : identity ? 'stale' : 'unknown';
+      say({ level: idNow ? 'info' : 'error', evt: 'wa.identity', ok: idNow, why });
+      loggedIdentity = idNow;
+    }
+    // The newest answer is another number (this round's, or the last one, kept through an error).
+    const mismatched = identity?.match === false;
+    if (mismatched) {
+      if (!mismatchAlerted) { mismatchAlerted = true; await push('identity_mismatch'); }
+      if (!fresh()) return;
+      await beat('down', 'identity_mismatch');
+      if (!fresh()) return;
+    }
+
+    const ln = await askLink(ac.signal);
+    if (!fresh()) return;
+    let downDue = false; // this round took the link down: one web push per outage
     if (ln.ok) {
       fails = 0;
       const t = now();
@@ -244,19 +273,19 @@ export function createWaLink({
         linkUp = false;
         say({ level: 'error', evt: 'wa.link', ok: false });
       }
-      if (!linkUp && !downAlerted) { downAlerted = true; due.push('wa_link_down'); }
+      if (!linkUp && !downAlerted) { downAlerted = true; downDue = true; }
     }
-    const idNow = identityOk();
-    if (idNow !== loggedIdentity) {
-      const why = idNow ? 'match' : identity?.match === false ? 'mismatch' : identity ? 'stale' : 'unknown';
-      say({ level: idNow ? 'info' : 'error', evt: 'wa.identity', ok: idNow, why });
-      loggedIdentity = idNow;
+    if (downDue) {
+      await push('wa_link_down');
+      if (!fresh()) return;
     }
-    for (const reason of due) await push(reason);
-    if (identity?.match === false) await beat('down', 'identity_mismatch');
-    else if (!linkUp) await beat('down', 'link_down');
-    else if (!idNow) await beat('down', 'identity_unknown');
-    else await beat('up', 'ok');
+    if (mismatched) return; // Kuma has heard this round already
+    // An identity the start has not seen answered yet is DOWN after two failed checks in a row, as
+    // the link is (DESIGN §14); one that answered and has gone stale is DOWN at once.
+    if (!linkUp) await beat('down', 'link_down');
+    else if (identityOk()) await beat('up', 'ok');
+    else if (identity !== null || idFails >= IDENTITY_DOWN_AFTER) await beat('down', 'identity_unknown');
+    else await beat('up', 'identity_pending');
   }
 
   function probe() {
@@ -280,6 +309,8 @@ export function createWaLink({
   function start() {
     if (started) return;
     started = true;
+    // Every start fails closed: an answer from before a stop() is not this run's first check.
+    identity = null;
     if (kuma.invalid) say({ level: 'error', evt: 'wa.link.kuma_invalid' });
     if (!canProbe) {
       say({ level: setup.alert ? 'error' : 'warn', evt: 'wa.link.off', why: setup.why ?? 'no_fetch' });
