@@ -76,6 +76,47 @@ test('a comma decimal ("2,5 مليون") or dot thousands ("2.950.000") is read 
   for (const text of ['the villa is 6.700.000 ريال', 'سعرها 6,7 مليون']) assert.deepEqual(checkReply(text, { toolResults: [villa] }), { ok: true, hits: [] }, text);
 });
 
+test('a number right after a colon ("Price:2,950,000 SAR") is an amount; a time ("10:30") is not', () => {
+  for (const [s, raw] of [
+    ['Price:2,950,000 SAR', 2_950_000], ['السعر:2,950,000 ريال', 2_950_000], ['السعر:٢٬٩٥٠٬٠٠٠ ريال', 2_950_000], ['Price:2.5M', 2_500_000],
+    ['السعر:2.5 مليون', 2_500_000], ['rent:85,000 SAR', 85_000], ['Price:SAR 2,950,000', 2_950_000],
+  ]) {
+    assert.deepEqual(amounts(s), [raw], s);
+    assert.deepEqual(checkReply(`The villa is ${s}.`, { toolResults: [villa] }), { ok: false, hits: [{ kind: 'amount' }] }, s);
+    assert.deepEqual(checkReply(`The villa is ${s}.`, { toolResults: [JSON.stringify({ results: [{ price_cash: raw }] })] }), { ok: true, hits: [] }, s);
+  }
+  for (const [s, raw] of [['B08-19:3,100,000 SAR', 3_100_000], ['BONA-W012:2950000', 2_950_000]]) assert.deepEqual(amounts(s), [raw], `${s}: a digit before the colon is not a time`);
+  for (const s of ['10:00–19:00', 'at 10:30', '2026-11-29 10:30', 'Time:10:30', 'الساعة:10:30', '10:30:00', 'Floors:3', 'Tel:0500000000']) assert.deepEqual(findAmounts(s), [], s);
+});
+
+test('a half or a quarter next to a million word ("مليون ونص", "نص مليون", "half a million") is an amount of unknown value', () => {
+  const tools = [JSON.stringify({ results: [{ price_cash: 1_000_000 }, { price_cash: 2_000_000 }] })];
+  for (const s of ['مليون ونص', 'مليون و نصف ريال', 'مليونين ونص', 'نص مليون', 'بنص مليون', 'ربع مليون', 'مليون إلا ربع', '2 مليون ونص', '2 ونص مليون',
+    'half a million', 'a quarter of a million', 'a million and a half', 'a million-and-a-half', '1 million and a half', 'half-a-million']) {
+    assert.deepEqual(amounts(s), [null], s);
+    assert.deepEqual(checkReply(`السعر ${s}`, { toolResults: tools }).hits, [{ kind: 'amount' }], s);
+  }
+  for (const [s, raw] of [['مليون', 1_000_000], ['مليون ريال', 1_000_000], ['a million', 1_000_000], ['2 مليون', 2_000_000], ['1.5 مليون', 1_500_000]]) {
+    assert.deepEqual(amounts(s), [raw], s);
+  }
+});
+
+test('a range reads its lower bound with the upper bound\'s scale ("between 2 and 3 million" is 2M and 3M)', () => {
+  for (const [s, raws] of [
+    ['between 2 and 3 million', [2_000_000, 3_000_000]], ['2.9–3.1 million', [2_900_000, 3_100_000]], ['من 2 إلى 3 مليون', [2_000_000, 3_000_000]],
+    ['بين 2 و3 ملايين', [2_000_000, 3_000_000]], ['2-3 million SAR', [2_000_000, 3_000_000]], ['2-3m', [2_000_000, 3_000_000]],
+    ['500-900k', [500_000, 900_000]], ['SAR 2 to 3 million', [2_000_000, 3_000_000]], ['from SAR 2,950,000 to SAR 3,100,000', [2_950_000, 3_100_000]],
+    ['SAR 2.5M-3M', [2_500_000, 3_000_000]], ['2m-3m', [2_000_000, 3_000_000]], ['500k-900k', [500_000, 900_000]],
+  ]) assert.deepEqual(amounts(s), raws, s);
+  for (const s of ['2 to 3 bedrooms', '2-3 floors', '200-500m from the beach', '29-11-2026', '10:00-19:00', '2-3 million m²']) assert.deepEqual(findAmounts(s), [], s);
+  assert.deepEqual(amounts('Villa 3-2.5 million'), [2_500_000], 'a lower "bound" above the upper one is not a range');
+  for (const s of ['Villa 2 – 3.2 million', 'Option 2 - 3.2 million', '1- 3.2 مليون']) assert.deepEqual(amounts(s), [3_200_000], `${s}: a spaced dash is a list line, not a range`);
+  const upper = [JSON.stringify({ results: [{ price_cash: 3_000_000 }] })];
+  assert.deepEqual(checkReply('between 2 and 3 million', { toolResults: upper }).hits, [{ kind: 'amount' }], 'the lower bound is checked too');
+  assert.equal(checkReply('between 2 and 3 million', { toolResults: [JSON.stringify({ results: [{ price_cash: 2_000_000 }, { price_cash: 3_000_000 }] })] }).ok, true);
+  assert.equal(checkReply('It is 2.9–3.1 million.', { toolResults: [JSON.stringify({ price_en: 'SAR 2.9–3.1 million' })] }).ok, true, 'a range a tool returned may be quoted back');
+});
+
 test('"SR" is riyals; a spelled-out thousand after a number word, or before a currency, is an amount of unknown value; idioms and areas are not', () => {
   const [sr] = findAmounts('Rent SR 85,000 a year');
   assert.deepEqual([sr.raw, sr.currency], [85_000, 'SAR']);

@@ -366,6 +366,9 @@ test('the dispatcher refuses a tool the route does not offer (create_lead, show_
   assert.deepEqual(h.logs.filter((e) => e.evt === 'brain.bad_tool'), [{ evt: 'brain.bad_tool', name: 'create_lead' }, { evt: 'brain.bad_tool', name: 'show_property' }]);
   assert.deepEqual(r.toolCalls.map((c) => [c.name, c.ok]), [['create_lead', false], ['show_property', false]]);
   assert.deepEqual(r.messages, [{ role: 'agent', content: 'How can I help?' }], 'a refused call is not a Retell invocation (extractActions would read create_lead as a lead)');
+  const made = harness({ script: [toolCalls(['lookup_0500000000', {}]), reply('How can I help?')] });
+  await made.brain.turn(turnArgs());
+  assert.deepEqual(made.logs.filter((e) => e.evt === 'brain.bad_tool'), [{ evt: 'brain.bad_tool', name: 'unknown' }], 'a made-up name with digits never reaches the journal');
   const narrowed = harness({ script: [toolCalls(['request_human', { reason: 'person' }]), reply('Okay.')] });
   await narrowed.brain.turn(turnArgs({ toolNames: ['search_properties'] }));
   assert.deepEqual(narrowed.calls[0].body.tools.map((t) => t.function.name), ['search_properties'], 'toolNames narrows the offer');
@@ -782,6 +785,15 @@ test('masking comes before every clip: a phone across the 300-character row cut,
   await mail.brain.classify({ ...MAIL, fromName: `${'n'.repeat(75)} 0500000002`, subject: `${'s'.repeat(195)} 0500000003`, text: `${'z'.repeat(595)} 0500000004` });
   const user = mail.calls[0].body.messages[1].content;
   for (const d of ['05000', '00000', '0500000002', '0500000003', '0500000004']) assert.equal(user.includes(d), false, d);
+});
+
+test('every history row is clipped to 300 characters after masking, also when the caller did not build the history with historyFromInbox', async () => {
+  const h = harness({ script: [reply('Hello.')] });
+  await h.brain.turn(turnArgs({ history: [{ role: 'user', content: `${'x'.repeat(295)} 0500000000 ${'x'.repeat(4000)}` }, { role: 'team', content: 'y'.repeat(400) }] }));
+  const m = h.calls[0].body.messages;
+  assert.deepEqual([m[1].role, m[1].content.length, /\d/.test(m[1].content)], ['user', 300, false], 'masked, then clipped');
+  assert.deepEqual([m[2].role, m[2].content], ['assistant', `[Bona team member] ${'y'.repeat(300)}`]);
+  assert.equal(m[3].content.includes('Do you have villas?'), true, 'then the client turn');
 });
 
 /* ---------------- health, ops, journal ---------------- */

@@ -53,9 +53,10 @@ const scaleOf = (s) => {
  * decided in `readNumber`, so "2,5", "2.950.000" and "6,700,000.00" are each one token.
  */
 const NUM = String.raw`\d+(?:[.,]\d+)*`;
-// currency? number attached-k/m? scale-word? currency?
+// currency? number attached-k/m? scale-word? currency?  After a colon only the two-digit minutes or
+// seconds of a time ("10:30", "10:30:00") are skipped; "Price:2,950,000" and "B08-19:3,100,000" are amounts.
 const AMOUNT_RE = new RegExp(
-  String.raw`(?<![A-Za-z])(?<cur1>${CUR})?\s{0,2}(?<![\d.,:])(?<num>${NUM})(?![\d])(?<att>[km](?![\p{L}\d]))?` +
+  String.raw`(?<![A-Za-z])(?<cur1>${CUR})?\s{0,2}(?<![\d.,])(?!(?<=\d:)\d{2}(?!\d|[.,]\d))(?<num>${NUM})(?![\d])(?<att>[km](?![\p{L}\d]))?` +
   String.raw`(?:\s{0,2}(?<word>${SCALE})(?![\p{L}]))?(?:\s{0,2}(?<cur2>${CUR})(?![\p{L}]))?`,
   'dgiu',
 );
@@ -72,6 +73,20 @@ const EN_NUMBER_WORDS = String.raw`one|two|three|four|five|six|seven|eight|nine|
 const NUMBER_WORD_BEFORE_RE = new RegExp(String.raw`(?:^|[^\p{L}])[وفبكل]?(?:${AR_NUMBER_WORDS}|${EN_NUMBER_WORDS})[\s-]{1,3}$`, 'iu');
 const CURRENCY_AFTER_RE = new RegExp(String.raw`^\s{0,2}(?:${CUR})(?![\p{L}])`, 'iu');
 const DIGIT_BEFORE_RE = /\d\s{0,2}$/;
+/** A half or a quarter before a scale word ("نص مليون", "بربع مليون", "half a million", "a quarter of a million"). */
+const FRACTION_BEFORE_RE = /(?:^|[^\p{L}])[وفبكل]?(?:نص|نصف|ربع|ثلث|ثلاث\s?(?:أرباع|ارباع)|half|quarter|three\s+quarters)(?:[\s-]+of)?(?:[\s-]+an?)?[\s-]{1,2}$/iu;
+/** "and a half" / "and a quarter" after a scale word ("مليون ونص", "مليون و نصف", "مليون إلا ربع", "a million and a half"). */
+const FRACTION_AFTER_RE = /^[\s-]{0,2}(?:و|and[\s-]+(?:an?[\s-]+)?|(?:إلا|الا)\s{0,2})\s{0,2}(?:نص|نصف|ربع|half|quarter)(?![\p{L}])/iu;
+/**
+ * The upper bound of a range right after a number: "2 and 3 million", "2.9–3.1 million", "2 إلى 3 مليون",
+ * "2 و3 ملايين", "2-3m", "500-900k". The lower bound takes the upper bound's scale. A dash counts only
+ * glued on both sides: "Villa 2 – 3.2 million" and "1- 2.5 مليون" are list lines, not ranges.
+ */
+const RANGE_AFTER_RE = new RegExp(
+  String.raw`^(?:[-–—~]|\s{0,2}(?:to|and|or|till|until|إلى|الى|حتى|لين|لـ?|و|أو|او)\s{0,2})(?:(?<cur1>${CUR})\s{0,2})?(?<num>${NUM})(?![\d])` +
+  String.raw`(?<att>[km](?![\p{L}\d]))?(?:\s{0,2}(?<word>${SCALE})(?![\p{L}]))?(?:\s{0,2}(?<cur2>${CUR})(?![\p{L}]))?`,
+  'iu',
+);
 const AREA_AFTER_RE = /^\s{0,2}(?:m²|m2\b|sqm|sq\.?\s?m|square\s+met|sq\.?\s?ft|م²|م2|متر|مترا|أمتار|امتار)/iu;
 const PERCENT_AFTER_RE = /^\s{0,2}(?:%|٪|percent|per\s?cent|بالمية|بالمئة|في\s?المية|في\s?المئة)/iu;
 const URL_RE = /https?:\/\/[^\s<>"'`]+/giu;
@@ -109,6 +124,23 @@ function readNumber(num) {
 }
 
 /**
+ * The scale a range's lower bound takes from the upper bound right after it ("2 and 3 million" → 1e6,
+ * "500-900k" → 1e3), or 1. A "lower bound" that is not below the upper one is no range ("Villa 3-2.5
+ * million"), and an area ("2-3 million m²") or metres ("200-500m") give 1, as they do for the upper bound.
+ */
+function rangeScale(value, after) {
+  const r = RANGE_AFTER_RE.exec(after);
+  if (!r) return 1;
+  const upper = readNumber(r.groups.num);
+  if (upper === null || !(value < upper) || AREA_AFTER_RE.test(after.slice(r[0].length))) return 1;
+  if (r.groups.word) return scaleOf(r.groups.word);
+  const att = r.groups.att?.toLowerCase();
+  if (att === 'k') return 1e3;
+  if (att === 'm' && (upper < 100 || currencyOf(r.groups.cur1) || currencyOf(r.groups.cur2))) return 1e6;
+  return 1;
+}
+
+/**
  * The money amounts in a text.
  * @returns {{ raw: number|null, sar: number|null, currency: string|null }[]}  raw = the number × its
  *   scale word in its own currency; sar = raw at the approximate rate; both null for an amount whose
@@ -127,13 +159,16 @@ export function findAmounts(text) {
     const head = s.slice(Math.max(0, numStart - 12), numStart);
     if (!cur1 && /[A-Za-z]/.test(before)) continue; // W012, B08, NOBAL5
     if (before === '+') continue; // +966…
-    if (/[A-Za-z]\d*-$/.test(head)) continue; // BONA-014, B08-19
+    if (/(?<![\d.,])[A-Za-z]\d*-$/.test(head)) continue; // BONA-014, B08-19 (never the "M" of "2.5M-3M")
     const after = s.slice(numEnd);
     if (PERCENT_AFTER_RE.test(after)) continue;
     if (AREA_AFTER_RE.test(after)) continue;
     if (/^:\d/.test(after)) continue; // 10:00
     const currency = currencyOf(cur1) ?? currencyOf(cur2);
     if (word && !currency && AREA_AFTER_RE.test(s.slice(m.index + m[0].length))) { use(); continue; } // "85 ألف متر": an area
+    if (word && FRACTION_AFTER_RE.test(s.slice(m.indices.groups.word[1]))) { // "2 مليون ونص": a value the guard cannot read
+      use(); out.push({ raw: null, sar: null, currency, at: numStart }); continue;
+    }
     const value = readNumber(num);
     if (value === null) {
       // A grouping that cannot be read is money of unknown value next to a currency or a scale.
@@ -147,6 +182,7 @@ export function findAmounts(text) {
       else if (value < 100 || currency) scale = 1e6;
       else continue; // "500m from the beach": metres
     }
+    if (!word && !att) scale = rangeScale(value, after); // "between 2 and 3 million": the 2 is 2,000,000
     if (bare && !currency && scale === 1 && (num.length >= 9 || /^0\d/.test(num))) continue; // a phone, an ID or a licence number
     if (!Number.isFinite(value) || value <= 0) { use(); continue; }
     const raw = Math.round(value * scale);
@@ -159,8 +195,10 @@ export function findAmounts(text) {
     if (used.has(at) || AREA_AFTER_RE.test(s.slice(end))) continue;
     const w = m.groups.word.toLowerCase();
     let raw = null;
-    // After a digit no amount used ("+5 مليون"), the word alone says nothing of the value.
-    if (!DIGIT_BEFORE_RE.test(s.slice(Math.max(0, m.index - 6), m.index))) {
+    // After a digit no amount used ("+5 مليون"), or next to a half or a quarter ("مليون ونص", "نص مليون",
+    // "half a million"), the word alone says nothing of the value.
+    const fraction = FRACTION_BEFORE_RE.test(s.slice(Math.max(0, m.index - 24), m.index)) || FRACTION_AFTER_RE.test(s.slice(end));
+    if (!fraction && !DIGIT_BEFORE_RE.test(s.slice(Math.max(0, m.index - 6), m.index))) {
       if (w === 'مليون') raw = 1e6;
       else if (w === 'مليونين') raw = 2e6;
       else if (w === 'million' && /(?:^|\s)(?:a|one)\s+$/i.test(s.slice(Math.max(0, m.index - 5), m.index))) raw = 1e6;

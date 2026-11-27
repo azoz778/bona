@@ -31,7 +31,9 @@
  * call, 40 s per turn. The reply guard checks the final text; one repair call (the draft is
  * dropped, the note follows the last user/tool message), then `guard`. A `rate`, `down`,
  * `timeout` or `bad_response` restarts the whole turn on the backup model when at least 12 s
- * remain and BONA_BRAIN_BACKUP_MODE is `answer`; a refusal is never retried elsewhere.
+ * remain and BONA_BRAIN_BACKUP_MODE is `answer`; a refusal is never retried elsewhere. The call
+ * and tool caps hold per attempt: the backup restart (§3.4) gets its own 4 + 1 calls and 6 tools,
+ * inside the same 40 s turn and the same $ stops (tools only read, so running them again is safe).
  *
  * State (§4.1): quota/auth → `out` for 10 min (no call; the next turn after that tries; the free
  * GET /v1/models probe clears `auth` early), with the restart-safe `brain_out` marker and one
@@ -89,7 +91,8 @@ const CONTEXT_ROWS = 10;
 const ROW_CHARS = 300;
 const DAY_MS = 86_400_000;
 const LEAD_ID_RE = /^LEAD-[A-Za-z0-9-]{1,60}$/;
-const TOOL_NAME_RE = /^[a-z][a-z0-9_]{0,39}$/;
+/** A tool name the journal may carry (`brain.bad_tool`): no digits, so a made-up name never logs a number. */
+const TOOL_NAME_RE = /^[a-z][a-z_]{0,39}$/;
 const OFF = Object.freeze({ ok: false, code: 'off' });
 const fail = (code) => ({ ok: false, code });
 
@@ -505,7 +508,11 @@ export function createBrain(deps = {}) {
     }
   }
 
-  /** The conversation so far as chat messages: minimised, the newest 3,000 characters, same roles merged. */
+  /**
+   * The conversation so far as chat messages: each row minimised, then clipped to 300 characters (also
+   * when the caller did not build the history with historyFromInbox), the newest 3,000 characters, same
+   * roles merged.
+   */
   function historyMessages(history) {
     const kept = [];
     let size = 0;
@@ -513,7 +520,8 @@ export function createBrain(deps = {}) {
       const role = h?.role;
       const text = typeof h?.content === 'string' ? h.content.trim() : '';
       if (!text || !['user', 'assistant', 'team'].includes(role)) continue;
-      const content = minimise(role === 'team' ? `${TEAM_PREFIX}${text}` : text);
+      const body = clipChars(minimise(text), ROW_CHARS);
+      const content = role === 'team' ? `${TEAM_PREFIX}${body}` : body;
       if (kept.length && size + content.length > limits.historyChars) break;
       size += content.length;
       kept.unshift({ role: role === 'team' ? 'assistant' : role, content });
