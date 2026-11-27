@@ -292,6 +292,45 @@ test('T06-1/6 a joining record whose store fails is retried without a second joi
   }
 });
 
+test('T06-1/6 a join is all or nothing: a failure writing inbox_via leaves the chat as it was, and the retry joins it stamped, with one "joined" note', async () => {
+  for (const owner of [false, true]) {
+    const h = harness({ state: owner ? { active: true } : { ownInbox: true }, owner });
+    const realUpdate = h.db.updateLead;
+    let fails = 1;
+    h.db.updateLead = (id, patch = {}) => {
+      if (fails > 0 && patch.inbox_via !== undefined) { fails -= 1; throw new Error('store busy'); }
+      return realUpdate(id, patch);
+    };
+    const rec = owner
+      ? msg({ id: 'J1', jid: OWNER, pushName: 'Owner Example', text: 'Hi' })
+      : msg({ id: 'J1', text: 'Hi' });
+    h.push([rec]);
+    const first = await h.tick(); // eslint-disable-line no-await-in-loop
+    const what = owner ? 'owner test' : 'own number';
+    assert.equal(fails, 0, `${what}: the marker write failed once`);
+    assert.equal(first.joined, 0, `${what}: no join on the first attempt`);
+    assert.equal(h.messages(), 0, `${what}: nothing stored on the first attempt`);
+    const [before] = h.leads();
+    assert.equal(before.inbox_via, null, what);
+    // The own-number chat is not left `in` without its marker (a proof join's look); the owner's
+    // test lead is `in` from its creation (lib/leads.mjs OWNER_METHODS), its floor not moved yet.
+    if (!owner) {
+      assert.equal(before.inbox_state, null, `${what}: the state went back with the marker`);
+      assert.equal(before.history_from, null, `${what}: and the floor too`);
+    }
+    h.push([rec]);
+    const second = await h.tick(); // eslint-disable-line no-await-in-loop
+    assert.equal(second.joined, 1, `${what}: the retry joins`);
+    assert.equal(second.stored, 1, `${what}: and stores`);
+    const [lead] = h.leads();
+    assert.equal(lead.inbox_state, 'in', what);
+    assert.equal(lead.inbox_via, owner ? 'owner_test' : 'own_number', `${what}: stamped`);
+    assert.equal(h.calls.leadEvent.length, 1, `${what}: one "joined" note`);
+    assert.equal(h.calls.wake.length, 1, `${what}: woken once`);
+    h.close();
+  }
+});
+
 /* ---------------- 3: chats nobody is a client in ---------------- */
 
 test('T06-3 newsletter, group, broadcast and status are ignored under the own rule', async () => {
@@ -615,6 +654,38 @@ test('T06-7 fail closed at retry time: a record judged under the own rule or the
     assert.equal(lead.inbox_via, null, `${what}: never stamped`);
     if (!owner) assert.equal(lead.inbox_state, 'unsure', 'today\'s rule: a "Hi" with no signal from a known lead goes to Unsure');
     assert.deepEqual(h.calls.wake, [], what);
+    assert.deepEqual(h.calls.leadEvent, [], what);
+    h.close();
+  }
+});
+
+test('T06-7 fail closed at retry time: the switches are read again too, so a retry after "#dana live off" (or the test going off) joins nothing', async () => {
+  for (const owner of [false, true]) {
+    const h = harness({ state: owner ? { active: true } : { ownInbox: true }, owner });
+    const realSet = h.inbox.setInboxState;
+    let fails = 1;
+    h.inbox.setInboxState = (...a) => {
+      if (fails > 0) { fails -= 1; throw new Error('store busy'); }
+      return realSet(...a);
+    };
+    const rec = owner
+      ? msg({ id: 'J1', jid: OWNER, pushName: 'Owner Example', text: 'Hi' })
+      : msg({ id: 'J1', text: 'Hi' });
+    h.push([rec]);
+    const first = await h.tick(); // eslint-disable-line no-await-in-loop
+    const what = owner ? 'owner test' : 'own number';
+    assert.equal(first.joined, 0, `${what}: the join failed on the first attempt`);
+    // The identity check still passes; only the switch changed in between.
+    if (owner) h.state.active = false; else h.state.ownInbox = false;
+    h.push([rec]);
+    const second = await h.tick(); // eslint-disable-line no-await-in-loop
+    assert.equal(second.joined, 0, `${what}: no join on the retry`);
+    assert.equal(h.messages(), 0, `${what}: nothing stored`);
+    const leads = h.leads();
+    assert.equal(leads.length, 1, what);
+    assert.equal(leads[0].inbox_via, null, `${what}: never stamped`);
+    if (!owner) assert.equal(leads[0].inbox_state, 'unsure', 'today\'s rule: a "Hi" with no signal from a known lead goes to Unsure');
+    assert.deepEqual(h.calls.wake, [], `${what}: Dana is not woken`);
     assert.deepEqual(h.calls.leadEvent, [], what);
     h.close();
   }
@@ -1093,5 +1164,61 @@ test('T06-16d on Bona\'s number the cleanup of a chat whose lead is not in remov
     assert.deepEqual(h.candidates().map((r) => [r.cand_id, r.state]), [['CND-a', 'dismissed']],
       `${what}: the mark stays; the open row of a lead's chat goes`);
     h.close();
+  }
+});
+
+test('T06-16e on Bona\'s number a mark holds by the ids of the lead a record resolves to: a lid-only record of a lead whose number was dismissed (or a number record of one whose lid was) joins nothing, inbound or fromMe', async () => {
+  const LID_A = '400000000000151@lid';
+  const LID_B = '400000000000152@lid';
+  const cases = [
+    {
+      // The owner dismissed the chat by its number; a web form then made a lead for that number,
+      // and WhatsApp later paired it with a lid and shows the chat by that lid alone.
+      name: 'number dismissed, lid-only record', jid: LID_A, candId: 'CND-phone',
+      seed: (h) => {
+        seedDismissed(h, { candId: 'CND-phone', phone: digitsOf(151), jid: jidOf(151), at: LINKED_AT - DAY });
+        seedLead(h, 'LEAD-x', 151, { wa_jid: null, wa_lid: LID_A, match_method: 'form', channel: 'form' });
+      },
+    },
+    {
+      // A hidden-number chat dismissed by its lid; a lead with a number, paired with that lid
+      // later, writes by its number alone.
+      name: 'lid dismissed, number record', jid: jidOf(152), candId: 'CND-lid',
+      seed: (h) => {
+        seedDismissed(h, { candId: 'CND-lid', lid: LID_B, at: LINKED_AT - DAY });
+        seedLead(h, 'LEAD-x', 152, { wa_lid: LID_B, match_method: 'form', channel: 'form' });
+      },
+    },
+  ];
+  for (const state of [{ ownInbox: true }, { ownInbox: false }]) {
+    for (const c of cases) {
+      for (const fromMe of [false, true]) {
+        const h = harness({ state });
+        seedSession(h);
+        c.seed(h);
+        h.push(fromMe
+          ? [
+            msg({ id: 'X1', jid: c.jid, fromMe: true, pushName: null, ts: NOW - 90_000, text: `${SITE}/properties/bona-w003/` }),
+            msg({ id: 'X2', jid: c.jid, fromMe: true, pushName: null, ts: NOW - 80_000, text: 'BONA-W005 is still available' }),
+          ]
+          : [
+            msg({ id: 'X1', jid: c.jid, ts: NOW - 90_000, text: 'Hi' }),
+            msg({ id: 'X2', jid: c.jid, ts: NOW - 80_000, text: 'Hello\nRef BONA-W003 · K7Q2XR' }),
+          ]);
+        const tally = await h.tick(); // eslint-disable-line no-await-in-loop
+        const what = `${JSON.stringify(state)} ${c.name} ${fromMe ? 'fromMe' : 'inbound'}`;
+        assert.equal(tally.joined, 0, what);
+        assert.equal(tally.held, 2, `${what}: both records held`);
+        assert.deepEqual(h.leads().map((l) => [l.lead_id, l.inbox_state, l.inbox_via]), [['LEAD-x', null, null]],
+          `${what}: no lead made, the lead keeps its state`);
+        assert.equal(h.messages(), 0, `${what}: nothing stored`);
+        assert.deepEqual(h.calls.wake, [], `${what}: Dana is not woken`);
+        assert.deepEqual(h.calls.leadEvent, [], what);
+        assert.deepEqual(h.candidates().map((r) => [r.cand_id, r.state]), [[c.candId, 'dismissed']], `${what}: the mark stays`);
+        assert.deepEqual(h.calls.alert, state.ownInbox && !fromMe ? [['old_out_wrote', { candId: c.candId }]] : [],
+          `${what}: a mark from before the move is noted once when the client writes under the own rule`);
+        h.close();
+      }
+    }
   }
 });

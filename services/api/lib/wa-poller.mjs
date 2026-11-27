@@ -80,8 +80,8 @@
  *     (`pruneCandidates({ phones: true })`, PR-A2);
  *   - whatever the switches say, a chat the owner marked *Not a client* on that list
  *     (`dismissedCandidateFor`, PR-A2) is held: no lead, no join, nothing stored, by its phone,
- *     jid or lid, whichever rule would have taken it, in either direction (a `fromMe` Bona link
- *     too), and the mark is never removed by the poller;
+ *     jid or lid (the record's or its lead's), whichever rule would have taken it, in either
+ *     direction (a `fromMe` Bona link too), and the mark is never removed by the poller;
  *   - whatever the switches say, a chat with no number anywhere (an `@lid` with no phone alt, and
  *     no lead with a phone for it) never makes a lead or joins, whatever it carries (a Ref, ad
  *     evidence, a keyword, a click);
@@ -656,6 +656,11 @@ export function createPoller({
    * the move is noted for the owner when the chat writes (an inbound message only: noise is no
    * message of its own). The store's `dismissedCandidateFor` is PR-A2's; until it is there nothing
    * is held.
+   *
+   * The ids asked are the record's AND those of the lead it resolves to (`findLead`), which every
+   * branch below judges the record by: a lid-only record of a lead whose number the owner
+   * dismissed before a web form made that lead (and WhatsApp later paired it with the lid) is
+   * held, as is a number record of a lead paired with a dismissed hidden-number chat's lid.
    * @returns {boolean} held
    */
   function heldAsDismissed(rec) {
@@ -664,7 +669,13 @@ export function createPoller({
     if (!jids.phone && !jids.waJid && !jids.waLid) return false;
     const lead = findLead(jids);
     if (lead?.inbox_state === 'in') return false;
-    const row = inboxStore.dismissedCandidateFor({ phone: jids.phone, jid: jids.waJid, lid: jids.waLid });
+    let row = inboxStore.dismissedCandidateFor({ phone: jids.phone, jid: jids.waJid, lid: jids.waLid });
+    if (!row && lead) {
+      // Only the lead's ids the record does not carry already: those were just asked.
+      const other = (v, seen) => (v && v !== seen ? v : null);
+      const ids = { phone: other(lead.phone_e164, jids.phone), jid: other(lead.wa_jid, jids.waJid), lid: other(lead.wa_lid, jids.waLid) };
+      if (ids.phone || ids.jid || ids.lid) row = inboxStore.dismissedCandidateFor(ids);
+    }
     if (!row) return false;
     if (!rec.fromMe && !rec.noise && ownRuleOn(jids) && !isOwnerChat(jids, lead) && beforeLink(row.updated)) oldOutWrote({ candId: row.cand_id });
     return true;
@@ -968,15 +979,20 @@ export function createPoller({
   async function join(leadId, ts, via, tally, extra = {}, { inboxVia = null, floor = null } = {}) {
     const testFloor = Number.isFinite(floor) ? floor : null;
     // The history floor goes with the state: nothing of this chat from before the 24 h is
-    // ever stored, whichever read brings it (lib/inbox/ingest.mjs).
-    inboxStore.setInboxState(leadId, 'in', { since: ts, historyFrom: testFloor ?? ts - JOIN_HISTORY_MS });
-    if (inboxVia || testFloor !== null) {
-      const current = db.getLead(leadId);
-      const patch = {};
-      if (inboxVia && current && current.inbox_via == null) patch.inbox_via = inboxVia;
-      if (testFloor !== null) patch.history_from = testFloor;
-      if (Object.keys(patch).length) db.updateLead(leadId, patch);
-    }
+    // ever stored, whichever read brings it (lib/inbox/ingest.mjs). The state, the marker and the
+    // test floor are one transaction (the inbox store writes through this same db): a failure
+    // part-way leaves the chat as it was, never `in` without the marker the rollback guard reads,
+    // which a retry (finding it `in` already) would not write again.
+    db.transaction(() => {
+      inboxStore.setInboxState(leadId, 'in', { since: ts, historyFrom: testFloor ?? ts - JOIN_HISTORY_MS });
+      if (inboxVia || testFloor !== null) {
+        const current = db.getLead(leadId);
+        const patch = {};
+        if (inboxVia && current && current.inbox_via == null) patch.inbox_via = inboxVia;
+        if (testFloor !== null) patch.history_from = testFloor;
+        if (Object.keys(patch).length) db.updateLead(leadId, patch);
+      }
+    });
     if (backfill && testFloor === null) {
       const got = await backfill.history(db.getLead(leadId), { sinceTs: ts - JOIN_HISTORY_MS, untilTs: ts });
       if (got?.error) {
@@ -1019,8 +1035,9 @@ export function createPoller({
    * 'joined') before the record is stored, so a store failure retried later cannot lose it. A
    * chat stamped either way is left alone while the identity check fails (the rollback guard).
    * The rule a record was judged under is asked again here, not trusted from its first attempt
-   * (fail closed): a retry after the identity check lapsed is today's rule, and the owner's own
-   * message once his test is no longer in force is a colleague's (held, never stored).
+   * (fail closed): the identity check AND the switch behind it, so a retry after the identity
+   * check lapsed, or after the own rule went off (`#dana live off`), is today's rule, and the
+   * owner's own message once his test is no longer in force is a colleague's (held, never stored).
    *
    * A chat with no number anywhere (`numberless`) does not join, whatever the message carries: it
    * keeps its state (an undecided one goes to Unsure, as any guess), and nothing is stored unless
@@ -1030,7 +1047,9 @@ export function createPoller({
     const lead = db.getLead(seen.lead_id);
     if (!lead) return;
     if (lead.inbox_via && !ownNumberOk()) { tally.held += 1; return; }
-    const own = ownThen && ownNumberOk();
+    // `ownRuleOn` = the identity check and `ownRuleFor` (own_inbox) as they are now; `testActive`
+    // = the identity check and the test switch as they are now.
+    const own = ownThen && ownRuleOn(jidsOf(rec));
     const isTest = testThen && testActive();
     if (testThen && !isTest) { tally.held += 1; return; }
     const text = typeof rec.text === 'string' ? rec.text : '';
