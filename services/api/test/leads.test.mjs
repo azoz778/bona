@@ -31,8 +31,8 @@ function harness() {
 
 test('the channel and match vocabularies are the ones the spec names', () => {
   assert.deepEqual(CHANNELS, ['whatsapp', 'form', 'concierge_chat', 'concierge_voice', 'manual']);
-  assert.deepEqual(MATCH_METHODS, ['ref', 'phone', 'keyword', 'time_window', 'concierge', 'form', 'ad_meta', 'owner_outbound', 'owner_added']);
-  assert.deepEqual([...OWNER_METHODS], ['owner_outbound', 'owner_added']);
+  assert.deepEqual(MATCH_METHODS, ['ref', 'phone', 'keyword', 'time_window', 'concierge', 'form', 'ad_meta', 'owner_outbound', 'owner_added', 'own_number', 'owner_test']);
+  assert.deepEqual([...OWNER_METHODS], ['owner_outbound', 'owner_added', 'owner_test']);
 });
 
 test('a WhatsApp lead with a Ref inherits the session: source from the last touch, both touches, consent', () => {
@@ -451,5 +451,33 @@ test('a message older than the owner\'s add, read late, neither starts the clock
   const late = createOrMergeLead(h.db, { phone: '0500000063' }, { channel: 'whatsapp', matchMethod: 'phone', now: NOW - 86_400_000 });
   assert.equal(late.lead.lead_id, form.lead.lead_id);
   assert.equal(late.lead.first_inbound_ts, NOW - 86_400_000);
+  h.cleanup();
+});
+
+/* ---------------- PR-F2b (DESIGN §3.1-3.2, §11.1): the own-number and owner-test match methods ---------------- */
+
+test("'own_number' is stored as itself and is a client's own enquiry: reported to the ad queue, no inbox state from here", () => {
+  const h = harness();
+  const { lead, created } = createOrMergeLead(h.db, { phone: '0500000071', waJid: '966500000071@s.whatsapp.net' }, { channel: 'whatsapp', matchMethod: 'own_number', now: NOW, dataDir: h.dataDir });
+  assert.equal(created, true);
+  assert.equal(lead.match_method, 'own_number', 'a known method, not the phone fallback');
+  assert.equal(lead.inbox_state, null, 'the poller decides the inbox state (PR-A1)');
+  assert.equal(lead.first_inbound_ts, NOW, 'the client wrote in');
+  assert.equal(lead.first_reply_ts, null);
+  assert.equal(h.db.fanoutCounts().pending, 4);
+  h.cleanup();
+});
+
+test("'owner_test' (the owner's own test chat) is an owner method: in from birth, already answered, never an ad lead", () => {
+  const h = harness();
+  const { lead, created } = createOrMergeLead(h.db, { phone: '0500000072', waJid: '966500000072@s.whatsapp.net' }, { channel: 'whatsapp', matchMethod: 'owner_test', now: NOW, dataDir: h.dataDir });
+  assert.equal(created, true);
+  assert.equal(lead.match_method, 'owner_test');
+  assert.equal(lead.inbox_state, 'in');
+  assert.equal(lead.history_from, NOW - 24 * 3_600_000, 'the automatic-join floor; PR-A1 sets the test floor itself');
+  assert.equal(lead.first_inbound_ts, null);
+  assert.equal(lead.first_reply_ts, NOW, 'the Hermes watchdog never waits on the owner');
+  assert.equal(h.db.fanoutCounts().pending, 0, 'the owner testing is no ad conversion');
+  assert.equal(h.db.countWaitingLeads(), 0);
   h.cleanup();
 });

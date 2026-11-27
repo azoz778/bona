@@ -21,7 +21,12 @@ import { JOIN_HISTORY_MS, OWNER_HISTORY_MS } from './inbox/store.mjs';
 export const LEAD_FIELDS = ['name', 'phone', 'interest', 'budget', 'timeline', 'notes', 'language', 'district', 'listingId'];
 
 export const CHANNELS = ['whatsapp', 'form', 'concierge_chat', 'concierge_voice', 'manual'];
-export const MATCH_METHODS = ['ref', 'phone', 'keyword', 'time_window', 'concierge', 'form', 'ad_meta', 'owner_outbound', 'owner_added'];
+/**
+ * How a lead was matched. `own_number` (PR-A1, DESIGN §3.1): a chat that joined because it wrote
+ * to Bona's own number, under the own-number rule. `owner_test` (PR-A2, §3.2): the owner's own
+ * chat, joined under his test switch. JS-only vocabulary: there is no CHECK on the column.
+ */
+export const MATCH_METHODS = ['ref', 'phone', 'keyword', 'time_window', 'concierge', 'form', 'ad_meta', 'owner_outbound', 'owner_added', 'own_number', 'owner_test'];
 /**
  * Chats the owner started rather than the client: `owner_outbound` when the poller sees him
  * send a Bona link, brochure or listing number to a new number, `owner_added` when he adds a
@@ -30,8 +35,10 @@ export const MATCH_METHODS = ['ref', 'phone', 'keyword', 'time_window', 'concier
  * first reply and the Hermes `bona-unanswered-leads` watchdog must not flag them. Vouching
  * is not answering, though: once an `owner_added` client writes in, the merge below opens
  * the reply clock again (an `owner_outbound` client is answering him, so it stays shut).
+ * `owner_test` is the owner's own chat under his test switch: no ad conversion either, and
+ * nobody waiting on a reply from him.
  */
-export const OWNER_METHODS = new Set(['owner_outbound', 'owner_added']);
+export const OWNER_METHODS = new Set(['owner_outbound', 'owner_added', 'owner_test']);
 
 /** Where a lead came from when there is no session to say better. */
 const DEFAULT_SOURCE = { whatsapp: 'whatsapp_organic', form: 'form', concierge_chat: 'concierge', concierge_voice: 'concierge', manual: 'manual' };
@@ -114,7 +121,7 @@ const asRef = (v) => { const s = oneLine(v, 8)?.toUpperCase(); return s && /^[A-
  * @param {ReturnType<import('./db.mjs').openDb>} db
  * @param {{ name?, phone?, waJid?, waLid?, interest?, budget?, timeline?, district?, listingId?, language?, notes?, snippet? }} input
  * @param {{ channel: 'whatsapp'|'form'|'concierge_chat'|'concierge_voice'|'manual',
- *           matchMethod?: 'ref'|'phone'|'keyword'|'time_window'|'concierge'|'form'|'ad_meta'|'owner_outbound'|'owner_added',
+ *           matchMethod?: 'ref'|'phone'|'keyword'|'time_window'|'concierge'|'form'|'ad_meta'|'owner_outbound'|'owner_added'|'own_number'|'owner_test',
  *           sessionId?, anonId?, ref?, eventId?, adMeta?, now?: number,
  *           dataDir?: string, raw?: object }} meta
  *   `dataDir` is where the raw log lives (defaults to the directory of the db file);

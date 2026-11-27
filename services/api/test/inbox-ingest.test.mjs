@@ -711,3 +711,28 @@ test('a human outbound stored for the first time stamps last_human_out_ts; Dana 
   assert.equal(h.lead().last_human_out_ts, NOW - 40_000);
   assertClean(h.logs);
 });
+
+/* -------------------- PR-F2b (DESIGN §7.1, critic C2): an owner note is refused by its key -------------------- */
+
+test("an owner note coming back in a chat is refused by its outbox key, sent or received, before anything is written or learned", () => {
+  // The owner's own chat joins only under the test switch (PR-A2); our notes to him sit in it.
+  // A note's outbox row has no lead and no text, so only its message id can name it.
+  const h = harness({ lead: { phone_e164: null, wa_jid: null } });
+  const note = '*Bona — new enquiry*\nName: Sara\nPhone: +966500000002';
+  h.inbox.insertOutbox({ send_id: 'SND-note-1', jid: PHONE_JID, sender_kind: 'note' });
+  h.inbox.updateOutbox('SND-note-1', { status: 'accepted', key_id: 'NOTE-1' });
+  const before = h.inbox.getOutbox('SND-note-1');
+  assert.deepEqual(
+    h.ingest(h.lead(), rec({ id: 'NOTE-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: note })),
+    { stored: false, reason: 'note' },
+  );
+  // Filed as received (a lid chat, an Evolution quirk): refused before the lead learns a number from it.
+  assert.deepEqual(h.ingest(h.lead(), rec({ id: 'NOTE-1', text: note })), { stored: false, reason: 'note' });
+  assert.equal(h.inbox.hasMessages(LEAD_ID), false);
+  assert.deepEqual(h.inbox.getOutbox('SND-note-1'), before, 'the row is not touched');
+  assert.equal(h.lead().phone_e164, null, 'nothing is learned from a note');
+  assert.equal(h.lead().handler_user_id, null, 'a note makes nobody the handler');
+  assert.equal(h.lead().last_msg_ts, null);
+  assertClean(h.logs);
+  h.s.close();
+});

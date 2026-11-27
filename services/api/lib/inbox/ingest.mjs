@@ -33,6 +33,11 @@
  *     written or learned. A send that went uncertain never recorded an id, and the daily
  *     upkeep prunes code rows, so a record whose text is a login code's own message is
  *     refused as well, whichever way it went.
+ *   - nor is an owner note (DESIGN §7.1, critic C2): our notes to the owner sit in his own
+ *     chat, which joins the inbox under his test switch (PR-A2). Its outbox row has no lead and
+ *     no text, so it is recognised by its message id alone, exactly like a code's, and refused
+ *     before anything is written or learned. (One whose send went uncertain never recorded an
+ *     id; the poller's own-note header check, wa-poller.mjs `OWN_NOTE_RE`, is that case's net.)
  *   - who sent an outbound record (P2-17). The dashboard's own sends are found by the
  *     WhatsApp message id their send came back with. A send that never came back
  *     (`uncertain`, or `pending` when a restart cut it off) is found by its exact text within
@@ -230,7 +235,7 @@ export function createIngest({
   /**
    * @param {object|null} lead  a `leads` row; only its `lead_id` is trusted, the row is read again
    * @param {import('../evolution.mjs').NormalisedRecord} rec
-   * @returns {{ stored: false, reason: 'not_in_inbox'|'excluded'|'no_id'|'noise'|'before_floor'|'code' }
+   * @returns {{ stored: false, reason: 'not_in_inbox'|'excluded'|'no_id'|'noise'|'before_floor'|'code'|'note' }
    *          | { stored: true, inserted: boolean, senderKind: 'client'|'staff'|'dana'|'owner_number' }}
    */
   function ingest(lead, rec) {
@@ -259,6 +264,8 @@ export function createIngest({
       // learned from. The row is reused below to find who sent an outbound record.
       const byKey = inbox.outboxByKey(rec.id);
       if (byKey?.sender_kind === 'code') return { stored: false, reason: 'code' };
+      // An owner note, by the same id rule: never a bubble in the owner's test chat.
+      if (byKey?.sender_kind === 'note') return { stored: false, reason: 'note' };
 
       const direction = rec.fromMe ? 'out' : 'in';
       const ts = Number.isFinite(rec.ts) ? rec.ts : now();
