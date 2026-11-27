@@ -2,9 +2,12 @@
 /* Units-and-prices summary + key facts for a listing backed by a developer unit sheet
    (src/data/units.json). Renders nothing when the listing has no sheet, is not available, or the sheet's
    date is impossible or in the future. An OLD sheet stays, with its date printed (owner decision). Spec:
-   docs/superpowers/specs/2026-10-02-project-details-seo-design.md */
+   docs/superpowers/specs/2026-10-02-project-details-seo-design.md
+   The table's container carries data-units-summary: the summary the table prints, as JSON (unitsSummaryData).
+   bona-api's search_units quotes exactly that from the live page (DESIGN §4.5), so what a client hears is what
+   this page shows; everything in it is already printed below. */
 import unitsData from '../data/units.json';
-import { liveSummary, recordFor, sheetDateText } from '../lib/units-summary.mjs';
+import { liveSummary, recordFor, sheetDateText, unitsSummaryData } from '../lib/units-summary.mjs';
 import { t, ui, fill, formatNumber, formatPrice, type Locale } from '../lib/i18n';
 import type { Listing } from '../lib/listings';
 
@@ -26,7 +29,7 @@ const facts = summary ? [
 {summary && (
   <section id="units" class={`scroll-mt-28 ${cls}`} aria-labelledby={`units-${l.id}`} data-project-details>
     <h2 id={`units-${l.id}`} class="label text-stone-2">{t(ui.unitsAndPrices, locale)}</h2>
-    <div class="mt-5 overflow-x-auto">
+    <div class="mt-5 overflow-x-auto" data-units-summary={JSON.stringify(unitsSummaryData(summary, l.id))}>
       <table class="w-full text-sm md:text-[15px]">
         <thead>
           <tr class="border-b border-ink/15 text-start text-xs text-stone-2">
