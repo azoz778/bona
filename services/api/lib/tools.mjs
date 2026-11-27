@@ -179,6 +179,11 @@ export function createToolHandlers({
     if (units && fullUnitRowSources.includes(source)) return unitRows(args, ctx, listingId);
 
     const listing = inventory.find(listingId);
+    // Both must hold: the inventory lists this exact id as available AND the live page shows the table. The live page
+    // is the ceiling: we never quote more than it shows. The local available/sold status can only remove a quote,
+    // never add one, so a sold listing is not quoted from a page that has not rebuilt yet (a delayed or failed Pages
+    // deploy). Kept on purpose (PR #86 review round 6); pinned by the tools.test.mjs test "a listing the inventory
+    // does not list as available".
     const available = listing?.id === listingId && listing.status === 'available';
     const live = available ? await published.get(listing) : null;
     if (!live) return { count: 0, summary: null, note: UNITS_NOT_PUBLISHED_NOTE };

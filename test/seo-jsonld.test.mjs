@@ -451,8 +451,129 @@ for (const [route, lang] of [['/properties/darco-prime-waterfront-al-shati/', 'e
 // Every comparison is a boolean (figures stay out of the log).
 
 const UNITS_ATTR_RE = /\sdata-units-summary="([^"]*)"/g;
-const numText = (n) => new Intl.NumberFormat('en-US').format(n);
-const areaText = (lo, hi) => (lo === hi ? numText(lo) : `${numText(lo)}–${numText(hi)}`);
+
+// Every figure the units block prints is parsed out of its WHOLE cell and compared exactly with the attribute's value.
+// A substring check would let a cell "SAR 1,700,000" pass for an attribute saying 700,000, and search_units would
+// quote 700,000. The parsing is written here, not borrowed from the page's formatters, so it checks them too.
+const NUM = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?`;
+const toNum = (s) => Number(s.replace(/,/g, ''));
+/** A cell that is one number and nothing else, else null. */
+const cellNumber = (cell) => (new RegExp(`^${NUM}$`).test(cell) ? toNum(cell) : null);
+/** An area cell, "80.5" or "80.5–95" and nothing else, as [min, max], else null. */
+function cellArea(cell) {
+  const m = cell.match(new RegExp(`^(${NUM})(?:–(${NUM}))?$`));
+  return m ? [toNum(m[1]), toNum(m[2] ?? m[1])] : null;
+}
+/** A cash cell, "SAR 700,000" / "700,000 ر.س" and nothing else, as a number, else null. The summary search_units
+    quotes carries no currency (the unit sheet is in SAR), so the page must print SAR. */
+function cellCash(cell, lang) {
+  const m = cell.match(lang === 'ar' ? new RegExp(`^(${NUM}) ر\\.س$`) : new RegExp(`^SAR (${NUM})$`));
+  return m ? toNum(m[1]) : null;
+}
+/** Month names as sheetDateText prints them, January first. */
+const MONTHS = Object.fromEntries(['en', 'ar'].map((lang) => [lang,
+  Array.from({ length: 12 }, (_, i) => sheetDateText(`2000-${String(i + 1).padStart(2, '0')}`, lang).replace(/ 2000$/, ''))]));
+const dateCore = (lang) => `(?:(\\d{1,2}) )?(${MONTHS[lang].join('|')}) (\\d{4})`;
+const isoOf = (m, lang) => {
+  const mm = String(MONTHS[lang].indexOf(m[2]) + 1).padStart(2, '0');
+  return m[1] ? `${m[3]}-${mm}-${m[1].padStart(2, '0')}` : `${m[3]}-${mm}`;
+};
+/** Every date written in a text ("2 September 2026", "June 2028"), as the ISO date it names ("2026-09-02", "2028-06"). */
+const datesIn = (s, lang) => [...s.matchAll(new RegExp(`(?<![\\d.,])${dateCore(lang)}(?!\\d)`, 'g'))].map((m) => isoOf(m, lang));
+/** A cell that is one date and nothing else, as its ISO date, else null. */
+const cellDate = (cell, lang) => { const m = cell.match(new RegExp(`^${dateCore(lang)}$`)); return m ? isoOf(m, lang) : null; };
+const HANDOVER_LABEL = { en: 'Expected handover', ar: 'التسليم المتوقع' }; // ui.factHandover in src/lib/i18n.ts
+
+/** What a units block (the data-project-details section's inner HTML) prints differently from its
+    data-units-summary: a list of labels such as 'row 0 "from" price', never a figure. */
+function unitsBlockMismatches(block, data, lang) {
+  const out = [];
+  const body = block.match(/<tbody>([\s\S]*?)<\/tbody>/)?.[1] ?? '';
+  const rows = [...body.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].map((m) => [...m[1].matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g)].map((c) => text(c[1])));
+  if (rows.length !== data.rows.length + 1) return ['row count'];
+  const expect = [...data.rows.map((r) => [r.label[lang], r]), [null, data]];
+  expect.forEach(([label, r], i) => {
+    const name = label === null ? 'total row' : `row ${i}`;
+    if (rows[i].length !== 4) { out.push(`${name} cells`); return; }
+    const [cLabel, cArea, cCash, cCount] = rows[i];
+    if (label !== null && cLabel !== label) out.push(`${name} label`);
+    const area = cellArea(cArea);
+    if (!area || area[0] !== r.areaMin || area[1] !== r.areaMax) out.push(`${name} area`);
+    if (cellCash(cCash, lang) !== r.cashFrom) out.push(`${name} "from" price`);
+    if (cellNumber(cCount) !== r.count) out.push(`${name} count`);
+  });
+  // The note under the table names exactly one date, the sheet's; the handover fact is exactly that date.
+  const note = block.match(/<p[^>]*data-units-note[^>]*>([\s\S]*?)<\/p>/)?.[1];
+  if (!isDeepStrictEqual(note == null ? [] : datesIn(text(note), lang), data.updated ? [data.updated] : [])) out.push('sheet date');
+  const handover = [...block.matchAll(/<dt[^>]*>([\s\S]*?)<\/dt>\s*<dd[^>]*>([\s\S]*?)<\/dd>/g)]
+    .filter((m) => text(m[1]) === HANDOVER_LABEL[lang]).map((m) => cellDate(text(m[2]), lang));
+  if (!isDeepStrictEqual(handover, data.delivery ? [data.delivery] : [])) out.push('handover');
+  return out;
+}
+
+// The checker itself, on a units block in ProjectDetails.astro's markup with example figures: the exact block passes
+// and every wrong figure is caught, including a cell that merely contains the attribute's figure (1,700,000 vs 700,000).
+const EXAMPLE_UNITS = {
+  listingId: 'BONA-W000', count: 4, areaMin: 80.5, areaMax: 140, cashFrom: 700000, delivery: '2028-06', updated: '2026-09-02',
+  rows: [
+    { label: { en: '1 bedroom', ar: 'غرفة نوم واحدة' }, count: 3, areaMin: 80.5, areaMax: 95, cashFrom: 700000 },
+    { label: { en: '2 bedrooms', ar: 'غرفتا نوم' }, count: 1, areaMin: 140, areaMax: 140, cashFrom: 1250000 },
+  ],
+};
+const EXAMPLE_CELLS = {
+  en: {
+    rows: [['1 bedroom', '80.5–95', 'SAR 700,000', '3'], ['2 bedrooms', '140', 'SAR 1,250,000', '1'], ['All units', '80.5–140', 'SAR 700,000', '4']],
+    note: 'Cash prices and availability from the developer’s unit sheet dated 2 September 2026. The developer also offers instalment plans.',
+    handover: 'June 2028',
+  },
+  ar: {
+    rows: [['غرفة نوم واحدة', '80.5–95', '700,000 ر.س', '3'], ['غرفتا نوم', '140', '1,250,000 ر.س', '1'], ['جميع الوحدات', '80.5–140', '700,000 ر.س', '4']],
+    note: 'أسعار الكاش والتوافر من كشف وحدات المطور بتاريخ 2 سبتمبر 2026. يقدم المطور أيضاً خطط تقسيط.',
+    handover: 'يونيو 2028',
+  },
+};
+function unitsBlockHtml(lang, { rows, note, handover }) {
+  const tr = rows.map(([l, a, ...more]) => `<tr class="border-b"><th scope="row" class="py-3">${l}</th><td class="py-3"><span dir="ltr">${a}</span></td>${more.map((c) => `<td class="py-3">${c}</td>`).join('')}</tr>`).join('');
+  return `<h2 class="label">Units</h2><div class="mt-5" data-units-summary="{}"><table><thead><tr><th scope="col">Type</th></tr></thead><tbody>${tr}</tbody></table></div>`
+    + (note == null ? '' : `<p class="mt-4" data-units-note>${note}</p>`) + '<dl><div><dt>Developer</dt><dd>Example Developer</dd></div>'
+    + (handover == null ? '' : `<div><dt class="text-xs">${HANDOVER_LABEL[lang]}</dt><dd class="mt-1">${handover}</dd></div>`) + '</dl>';
+}
+const withCell = (cells, i, j, v) => ({ ...cells, rows: cells.rows.map((r, ri) => (ri === i ? r.map((c, ci) => (ci === j ? v : c)) : r)) });
+
+test('the units-block check compares every printed figure exactly: a cell saying SAR 1,700,000 is not 700,000', () => {
+  for (const lang of ['en', 'ar']) {
+    assert.deepEqual(unitsBlockMismatches(unitsBlockHtml(lang, EXAMPLE_CELLS[lang]), EXAMPLE_UNITS, lang), [], `${lang}: the exact block`);
+  }
+  const { en, ar } = EXAMPLE_CELLS;
+  const cases = [
+    ['en', withCell(en, 0, 2, 'SAR 1,700,000'), ['row 0 "from" price']],
+    ['en', withCell(en, 2, 2, 'SAR 1,700,000'), ['total row "from" price']],
+    ['ar', withCell(ar, 0, 2, '1,700,000 ر.س'), ['row 0 "from" price']],
+    ['en', withCell(en, 0, 2, 'SAR 700,000.5'), ['row 0 "from" price']],
+    ['en', withCell(en, 0, 2, 'SAR 700,000 / month'), ['row 0 "from" price']],
+    ['en', withCell(en, 0, 2, 'AED 700,000'), ['row 0 "from" price']],
+    ['en', withCell(en, 0, 0, '1 bedrooms'), ['row 0 label']],
+    ['en', withCell(en, 0, 1, '180.5–95'), ['row 0 area']],
+    ['en', withCell(en, 0, 1, '80.5–95.5'), ['row 0 area']],
+    ['en', withCell(en, 1, 1, '1,140'), ['row 1 area']],
+    ['en', withCell(en, 0, 3, '13'), ['row 0 count']],
+    ['en', withCell(en, 2, 3, '14'), ['total row count']],
+    ['en', { ...en, rows: en.rows.slice(1) }, ['row count']],
+    ['en', { ...en, note: en.note.replace('2 September', '12 September') }, ['sheet date']],
+    ['ar', { ...ar, note: ar.note.replace('2 سبتمبر', '12 سبتمبر') }, ['sheet date']],
+    ['en', { ...en, note: en.note.replace('2026', '20261') }, ['sheet date']],
+    ['en', { ...en, handover: '30 June 2028' }, ['handover']],
+    ['ar', { ...ar, handover: '30 يونيو 2028' }, ['handover']],
+    ['en', { ...en, note: null }, ['sheet date']],
+    ['en', { ...en, handover: null }, ['handover']],
+    ['en', en, ['handover'], { ...EXAMPLE_UNITS, delivery: null }],
+    ['en', { ...en, handover: null }, [], { ...EXAMPLE_UNITS, delivery: null }],
+    ['en', { ...en, rows: [...en.rows.slice(0, 2), [...en.rows[2], '4']] }, ['total row cells']],
+  ];
+  for (const [lang, cells, want, data = EXAMPLE_UNITS] of cases) {
+    assert.deepEqual(unitsBlockMismatches(unitsBlockHtml(lang, cells), data, lang), want, `${lang}: ${want.join(', ') || 'no mismatch'}`);
+  }
+});
 
 test('data-units-summary is on every units table and nowhere else, says what the table\'s cells say, and the API reads it back', () => {
   let withTable = 0;
@@ -477,21 +598,9 @@ test('data-units-summary is on every units table and nowhere else, says what the
     assert.ok(data.listingId === listing.id, `${p.route}: the attribute names this page's listing`);
     assert.ok(!/"(key|ref|units|plan|plans|cash|half|year|twoYear|price[^"]*)"\s*:/.test(json), `${p.route}: a unit, plan or instalment key in the attribute`);
     assert.ok(!/\bB\d{2}-\d+\b/.test(json), `${p.route}: a unit reference in the attribute`);
-    // The table's body rows, cell by cell: one per summary row, then the total.
-    const body = sections[0][1].match(/<tbody>([\s\S]*?)<\/tbody>/)?.[1] ?? '';
-    const rows = [...body.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].map((m) => [...m[1].matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g)].map((c) => text(c[1])));
-    assert.equal(rows.length, data.rows.length + 1, `${p.route}: one table row per summary row, plus the total`);
+    // The table's body rows cell by cell (one per summary row, then the total), the sheet date and the handover.
     const lang = p.lang === 'ar' ? 'ar' : 'en';
-    const expect = [...data.rows.map((r) => [r.label[lang], r]), [null, data]];
-    expect.forEach(([label, r], i) => {
-      const [cLabel, cArea, cCash, cCount] = rows[i];
-      if (label !== null) assert.ok(cLabel === label, `${p.route}: row ${i} label`);
-      assert.ok(cArea === areaText(r.areaMin, r.areaMax), `${p.route}: row ${i} area`);
-      assert.ok(cCash.includes(numText(r.cashFrom)), `${p.route}: row ${i} "from" price`);
-      assert.ok(cCount === numText(r.count), `${p.route}: row ${i} count`);
-    });
-    assert.ok(text(p.html).includes(sheetDateText(data.updated, lang)), `${p.route}: the sheet date the page prints`);
-    if (data.delivery) assert.ok(text(p.html).includes(sheetDateText(data.delivery, lang)), `${p.route}: the handover the page prints`);
+    assert.deepEqual(unitsBlockMismatches(sections[0][1], data, lang), [], `${p.route}: the units block prints what data-units-summary says`);
     // bona-api's reader takes exactly this from the built page. It refuses a row label that is not a whole bedroom
     // count (a malformed sheet: "null bedrooms"); that only makes search_units say "not published", so it does not
     // fail the deploy, but any other refusal or difference is a format drift between the page and the API.
