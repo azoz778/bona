@@ -127,10 +127,39 @@ function cleanName(raw, fallback = '') {
 
 /**
  * @param {ReturnType<import('./db.mjs').openDb>} store
- * @param {{ now?: () => number, log?: (e: object) => void }} [o]
+ * @param {{ now?: () => number, log?: (e: object) => void,
+ *           ownerTest?: object|(() => object|null)|null }} [o]
+ *   `ownerTest` is lib/owner-test.mjs (2026-11-27 DESIGN §3.2, PR-A2), or a function that returns
+ *   it: index.mjs builds it after the team, which it reads. While its `active()` is true, the
+ *   owner's own number (its `ownerDigits()`, BONA_OWNER_JID) and his users-row lid (its
+ *   `ownerLid()`) are not excluded, so his test chat is a client's chat; every other team number,
+ *   another owner-role account included, stays excluded, and the never list still wins. Left
+ *   out, or answering anything but true, nothing changes.
  */
-export function createTeam(store, { now = () => Date.now(), log = () => {} } = {}) {
+export function createTeam(store, { now = () => Date.now(), log = () => {}, ownerTest = null } = {}) {
   const { db, transaction } = store;
+  /** The test switch, read on every call; a missing one, or one that throws, is no switch. */
+  const testSwitch = () => {
+    try {
+      const t = typeof ownerTest === 'function' ? ownerTest() : ownerTest;
+      return t && t.active?.() === true ? t : null;
+    } catch { return null; }
+  };
+  /** The owner's digits while his test is in force, else null (fail closed: he stays excluded). */
+  function exceptPhone() {
+    const t = testSwitch();
+    if (!t) return null;
+    try { return normalisePhone(t.ownerDigits?.() ?? '') ?? null; } catch { return null; }
+  }
+  /** The owner's users-row lid while his test is in force, else null (isExcludedLead below reads it). */
+  function exceptLid() {
+    const t = testSwitch();
+    if (!t) return null;
+    try {
+      const lid = t.ownerLid?.();
+      return typeof lid === 'string' && lid ? lid : null;
+    } catch { return null; }
+  }
   const stmts = new Map();
   const prep = (sql) => {
     let s = stmts.get(sql);
@@ -262,12 +291,15 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
   /**
    * True for any team number (active or not) and any never-list number. Normalises
    * whatever it is given first, so a loosely formatted number still matches; anything
-   * that does not parse as a phone number is `false`, never a thrown error.
+   * that does not parse as a phone number is `false`, never a thrown error. The one
+   * exception is the owner's own number while his test switch is in force (`ownerTest`
+   * above): then only the never list counts for it.
    */
   function isExcludedPhone(phone) {
     const digits = normalisePhone(phone);
     if (!digits) return false;
-    return Boolean(prep('SELECT 1 FROM users WHERE phone_e164 = ?').get(digits) || prep('SELECT 1 FROM never_list WHERE phone_e164 = ?').get(digits));
+    const member = digits !== exceptPhone() && prep('SELECT 1 FROM users WHERE phone_e164 = ?').get(digits);
+    return Boolean(member || prep('SELECT 1 FROM never_list WHERE phone_e164 = ?').get(digits));
   }
 
   /* -------------------- switches -------------------- */
@@ -319,7 +351,7 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
 
   return {
     ensureOwner, getUser, getUserByPhone, listUsers, addUser, deactivateUser, reactivateUser, setRole, touchLogin,
-    addNever, removeNever, listNever, isExcludedPhone,
+    addNever, removeNever, listNever, isExcludedPhone, exceptLid,
     getSetting, setSetting, sendingEnabled, repliesEnabled, danaEnabled,
     isOn, ownInboxEnabled, ownerAsClientEnabled, calendarBookingEnabled, ownerNotesEnabled, emailRepliesEnabled,
     ownerMailCopyEnabled, danaBrainEnabled, brainOutSince,
@@ -396,7 +428,9 @@ function phoneOfJid(jid) {
  * a colleague's by `learnTeamLid`. The Bona inbox's one exclusion test (§3.5, P2-7): the
  * dashboard routes refuse such a chat, ingest refuses its records, and the daily upkeep
  * takes it out of the inbox. A lid's own digits are an opaque id, never read as a phone
- * number.
+ * number. While the owner's test switch is in force, his own users-row lid is not a
+ * colleague's (`team.exceptLid()`, 2026-11-27 DESIGN §3.2): the same exception his number gets
+ * in `isExcludedPhone`. isTeamLid itself is unchanged.
  *
  * It decides from the identifier fields of the object it is handed — `phone_e164`,
  * `wa_jid`, `wa_lid` — and nothing else: it never reads the row again by `lead_id`.
@@ -409,7 +443,8 @@ function phoneOfJid(jid) {
  */
 export function isExcludedLead(team, store, lead) {
   if (!lead) return false;
-  return team.isExcludedPhone(lead.phone_e164)
-    || team.isExcludedPhone(phoneOfJid(lead.wa_jid))
-    || isTeamLid(store, lead.wa_lid);
+  if (team.isExcludedPhone(lead.phone_e164) || team.isExcludedPhone(phoneOfJid(lead.wa_jid))) return true;
+  if (!isTeamLid(store, lead.wa_lid)) return false;
+  const except = typeof team.exceptLid === 'function' ? team.exceptLid() : null;
+  return !(except && lead.wa_lid === except);
 }

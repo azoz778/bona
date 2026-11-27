@@ -1565,3 +1565,131 @@ test('createInboxStore without onPurge purges exactly as before (the default is 
   assert.deepEqual(inbox.purgeLead('L-1'), { messages: 1, outbox: 0, gaps: 0, reads: 0 });
   s.close();
 });
+
+/* ---------------- PR-A2 (PLAN T07 tests 7, 11, 12, 15, 16; DESIGN §3.1-3.2) ---------------- */
+
+const T_OWNER = '966500000010';
+const T_OWNER_JID = `${T_OWNER}@s.whatsapp.net`;
+
+test("reopenOwnerTest resets the owner's lead for a new test, and refuses any lead whose phone is not his", () => {
+  const { s, inbox } = harness();
+  const held = {
+    phone_e164: T_OWNER, wa_jid: T_OWNER_JID, inbox_state: 'out', inbox_via: 'owner_test', history_from: NOW - DAY,
+    needs_human: 1, dana_off: 1, dana_hold_until: NOW + DAY, dana_hold_reason: 'loop', last_human_out_ts: NOW - 60_000,
+    dana_chat_id: 'chat_old', dana_chat_ts: NOW - 60_000,
+  };
+  lead(s, 'L-owner', held);
+  lead(s, 'L-client', { ...held, phone_e164: '966500000001', wa_jid: JID });
+  lead(s, 'L-nophone', { ...held, phone_e164: null, wa_jid: T_OWNER_JID });
+  assert.equal(inbox.reopenOwnerTest('L-client', { ownerPhone: T_OWNER }), false, "a client's lead is never touched");
+  assert.equal(inbox.reopenOwnerTest('L-nophone', { ownerPhone: T_OWNER }), false, 'the guard is the phone, not the jid');
+  assert.equal(inbox.reopenOwnerTest('L-owner', { ownerPhone: null }), false, 'no owner number: nothing');
+  assert.equal(inbox.reopenOwnerTest('L-owner', {}), false);
+  assert.equal(inbox.reopenOwnerTest('L-nope', { ownerPhone: T_OWNER }), false);
+  for (const id of ['L-client', 'L-nophone']) assert.equal(s.getLead(id).dana_off, 1, id);
+  assert.equal(inbox.reopenOwnerTest('L-owner', { ownerPhone: T_OWNER }), true);
+  const l = s.getLead('L-owner');
+  assert.deepEqual(
+    [l.inbox_state, l.inbox_since, l.history_from, l.needs_human, l.dana_off, l.dana_hold_until, l.dana_hold_reason, l.last_human_out_ts, l.dana_chat_id, l.dana_chat_ts],
+    [null, null, null, 0, 0, null, null, null, null, null],
+  );
+  assert.equal(l.inbox_via, 'owner_test', 'stamped at the join, never rewritten');
+  assert.equal(s.getLead('L-owner').updated, NOW);
+  s.close();
+});
+
+test('clearHumanHold clears only a hold that waits for a person; a timed hold and other leads stay', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1', { dana_hold_reason: 'loop', dana_hold_until: null });
+  chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net', dana_hold_reason: 'cap_chat', dana_hold_until: NOW + 60_000 });
+  chat(s, 'L-3', { wa_jid: '966500000003@s.whatsapp.net', dana_hold_reason: 'send_failed', dana_hold_until: null });
+  assert.equal(inbox.clearHumanHold('L-1'), true);
+  assert.equal(inbox.clearHumanHold('L-1'), false, 'nothing left to clear');
+  assert.equal(inbox.clearHumanHold('L-2'), false);
+  assert.deepEqual([s.getLead('L-1').dana_hold_reason, s.getLead('L-2').dana_hold_reason, s.getLead('L-3').dana_hold_reason], [null, 'cap_chat', 'send_failed']);
+  assert.equal(inbox.clearHumanHold(null), false);
+  s.close();
+});
+
+test('pruneCandidates({ phones: true }) also deletes every OPEN row with a number; dismissed and lid-only rows stay; without it, as before', () => {
+  const { s, inbox, at } = harness();
+  const withPhone = inbox.noteCandidate({ phone: '966500000001', jid: JID, ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  const jidOnly = inbox.noteCandidate({ jid: '966500000002@s.whatsapp.net', ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  const lidOnly = inbox.noteCandidate({ lid: '100000000000001@lid', name: 'Sara', ts: NOW - DAY, words: ['lid-only'], dir: 'in' });
+  const phoneAndLid = inbox.noteCandidate({ phone: '966500000004', lid: '100000000000004@lid', ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  const dismissed = inbox.noteCandidate({ phone: '966500000005', ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  at(NOW - 1000);
+  inbox.dismissCandidate(dismissed.cand_id);
+  at(NOW);
+  // Without the option: the cutoffs alone, exactly the old results.
+  assert.deepEqual(inbox.pruneCandidates({ openBefore: NOW - 30 * DAY, dismissedBefore: NOW - 365 * DAY }), { open: 0, dismissed: 0 });
+  assert.equal(inbox.countCandidates(), 4);
+  assert.deepEqual(inbox.pruneCandidates({ phones: true }), { open: 0, dismissed: 0, phones: 3 });
+  assert.equal(inbox.getCandidate(withPhone.cand_id), null);
+  assert.equal(inbox.getCandidate(jidOnly.cand_id), null, 'a phone jid is a number too');
+  assert.equal(inbox.getCandidate(phoneAndLid.cand_id), null);
+  assert.ok(inbox.getCandidate(lidOnly.cand_id), 'a hidden-number row stays');
+  assert.equal(inbox.getCandidate(dismissed.cand_id).state, 'dismissed', "the owner's Not a client stays");
+  assert.deepEqual(inbox.pruneCandidates({ phones: true }), { open: 0, dismissed: 0, phones: 0 }, 'once is enough');
+  // `phones` must be exactly true: anything else is the old call.
+  inbox.noteCandidate({ phone: '966500000006', ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  assert.deepEqual(inbox.pruneCandidates({ phones: 'yes' }), { open: 0, dismissed: 0 });
+  assert.equal(inbox.countCandidates(), 2);
+  s.close();
+});
+
+test('dismissedCandidateFor: the dismissed row that holds any of the ids, by phone, jid or lid; an open row or no id → null', () => {
+  const { s, inbox } = harness();
+  const byPhone = inbox.noteCandidate({ phone: '966500000001', jid: JID, ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  const byLid = inbox.noteCandidate({ lid: '100000000000002@lid', ts: NOW - DAY, words: ['lid-only'], dir: 'in' });
+  const open = inbox.noteCandidate({ phone: '966500000003', lid: '100000000000003@lid', ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  inbox.dismissCandidate(byPhone.cand_id);
+  inbox.dismissCandidate(byLid.cand_id);
+  assert.equal(inbox.dismissedCandidateFor({ phone: '966500000001' })?.cand_id, byPhone.cand_id);
+  assert.equal(inbox.dismissedCandidateFor({ jid: JID })?.cand_id, byPhone.cand_id);
+  assert.equal(inbox.dismissedCandidateFor({ phone: '966500000099', jid: null, lid: '100000000000002@lid' })?.cand_id, byLid.cand_id, 'any of them');
+  assert.equal(inbox.dismissedCandidateFor({ phone: '966500000001', lid: '100000000000002@lid' })?.cand_id, byPhone.cand_id, 'the number first');
+  const row = inbox.dismissedCandidateFor({ lid: '100000000000002@lid' });
+  assert.deepEqual([row.state, row.name, row.hits], ['dismissed', null, 0], 'a dismissed row keeps its ids only');
+  assert.equal(inbox.dismissedCandidateFor({ phone: '966500000003' }), null, 'an open row is not a dismissal');
+  assert.equal(inbox.dismissedCandidateFor({ lid: '100000000000003@lid' }), null);
+  assert.equal(inbox.dismissedCandidateFor({ phone: '', jid: '  ', lid: null }), null, 'no id');
+  assert.equal(inbox.dismissedCandidateFor(), null);
+  assert.equal(open.state, 'open');
+  // One prepared statement per id, cached like findCandidate's: a second call prepares nothing.
+  let prepares = 0;
+  const real = s.db.prepare.bind(s.db);
+  s.db.prepare = (sql) => { prepares += 1; return real(sql); };
+  inbox.dismissedCandidateFor({ phone: '966500000088', jid: '966500000088@s.whatsapp.net', lid: '100000000000088@lid' });
+  assert.equal(prepares, 0, 'the three statements were prepared by the calls above');
+  s.db.prepare = real;
+  s.close();
+});
+
+test("an outbox row keeps its media kind ('document' or none); resolveUncertainDocument finds a lead's oldest open document send near a time", () => {
+  const { s, inbox, at } = harness();
+  chat(s, 'L-1');
+  chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net' });
+  assert.equal(inbox.insertOutbox(out({ send_id: 'SND-t', sender_kind: 'dana', user_id: null })).row.media_kind, null);
+  assert.equal(inbox.insertOutbox(out({ send_id: 'SND-d1', sender_kind: 'dana', user_id: null, media_kind: 'document', status: 'uncertain', text: 'BONA-W003 brochure' })).row.media_kind, 'document');
+  at(NOW + 10_000);
+  inbox.insertOutbox(out({ send_id: 'SND-d2', sender_kind: 'dana', user_id: null, media_kind: 'document', status: 'pending', text: 'BONA-W004 brochure' }));
+  inbox.insertOutbox(out({ send_id: 'SND-d3', lead_id: 'L-2', sender_kind: 'dana', user_id: null, media_kind: 'document', status: 'uncertain' }));
+  assert.throws(() => inbox.insertOutbox(out({ send_id: 'SND-bad', sender_kind: 'dana', media_kind: 'location' })), RangeError);
+  assert.equal(inbox.getOutbox('SND-bad'), null);
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-1', ts: NOW + 60_000 })?.send_id, 'SND-d1', 'the oldest');
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-1', ts: NOW + 125_000 })?.send_id, 'SND-d2', 'the first is out of the window by then');
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-1', ts: NOW + 131_000 }), null);
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-2', ts: NOW + 10_000 })?.send_id, 'SND-d3');
+  inbox.updateOutbox('SND-d1', { status: 'accepted', key_id: 'K-D1' });
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-1', ts: NOW + 60_000 })?.send_id, 'SND-d2', 'a resolved row is not open');
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-1', ts: 'x' }), null);
+  assert.equal(inbox.resolveUncertainDocument({ leadId: null, ts: NOW }), null);
+  // A staff row is never one (a brochure is the assistant's).
+  inbox.insertOutbox(out({ send_id: 'SND-s', lead_id: 'L-2', media_kind: 'document', status: 'uncertain' }));
+  inbox.updateOutbox('SND-d3', { status: 'accepted', key_id: 'K-D3' });
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-2', ts: NOW + 10_000 }), null);
+  // A note or a code keeps no media kind, as it keeps no text.
+  assert.equal(inbox.insertOutbox({ send_id: 'SND-n', jid: OWNER_JID, sender_kind: 'note', media_kind: 'document' }).row.media_kind, null);
+  s.close();
+});

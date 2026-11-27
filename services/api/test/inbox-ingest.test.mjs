@@ -6,10 +6,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../lib/db.mjs';
-import { createTeam, learnTeamLid } from '../lib/team.mjs';
+import { createTeam, learnTeamLid, isExcludedLead as isExcludedLeadOf } from '../lib/team.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
 import { createIngest, RESOLVE_WINDOW_MS, SEND_SKEW_MS } from '../lib/inbox/ingest.mjs';
 import { codeMessage } from '../lib/dashboard/auth.mjs';
+import { createBackfill } from '../lib/inbox/backfill.mjs';
 
 const NOW = Date.UTC(2026, 8, 28, 12, 0, 0);
 const LEAD_ID = 'LEAD-20260928-0000aaaa';
@@ -753,5 +754,305 @@ test('a note record that also names an excluded number (the owner\'s own chat, f
   assert.deepEqual(h.ingest(h.lead(), rec({ id: 'IN-EXCL', text: TEXT })), { stored: false, reason: 'excluded' });
   assert.deepEqual([h.lead().phone_e164, h.lead().wa_jid], [PHONE, PHONE_JID]);
   assertClean(h.logs);
+  h.s.close();
+});
+
+/* ---------------- PR-A2 (PLAN T07 tests 9-14; DESIGN §3.2): the test chat, commands, holds, media, the rollback guard ---------------- */
+
+/** The owner (BONA_OWNER_JID), Bona's own number, the owner's test lead and another client's lead: test numbers only. */
+const T_OWNER = '966500000010';
+const T_OWNER_JID = `${T_OWNER}@s.whatsapp.net`;
+const T_INSTANCE = '966500000020';
+const T_INSTANCE_JID = `${T_INSTANCE}@s.whatsapp.net`;
+const T_LEAD = 'LEAD-20261127-0000test';
+const T_THIRD = 'LEAD-20261127-0000cccc';
+const T_THIRD_JID = '966500000003@s.whatsapp.net';
+const GREETING = 'Thank you for contacting Bona. We will reply as soon as we can.';
+const T_DAY = 86_400_000;
+const T_PERSONAL = [...PERSONAL, T_OWNER, T_INSTANCE, '966500000003', 'Owner Example', GREETING];
+
+/**
+ * The test switch the way lib/owner-test.mjs answers ingest and the team: `ok` is ownNumberOk
+ * (Bona's own number, identity checked), `on` the test switch.
+ */
+function fakeSwitch({ ok = true, on = true } = {}) {
+  return {
+    ok, on,
+    ownNumberOk() { return this.ok; },
+    active() { return this.on && this.ok; },
+    ownerDigits: () => T_OWNER,
+    ownerLid: () => null,
+  };
+}
+
+/**
+ * The owner's test lead (inbox_via 'owner_test') and a client's chat (LEAD, joined by proof),
+ * both `in`. The team reads the test switch (index.mjs hands it in), so while the test is on
+ * the owner's number is a client's chat; ingest gets the switch and the notes.
+ */
+function testChat({ sw = fakeSwitch(), lead = {}, client = {}, withSwitch = true } = {}) {
+  const s = openDb(':memory:');
+  let clock = NOW;
+  const now = () => clock;
+  const team = createTeam(s, { now, ownerTest: sw });
+  const owner = team.ensureOwner({ phone: T_OWNER, name: 'Owner Example' });
+  const staff = team.addUser({ name: 'Sara Staff', phone: '0500000009', role: 'staff' });
+  const inbox = createInboxStore(s, { now });
+  const logs = [];
+  const alerts = [];
+  const notes = { alert: (code, meta) => { alerts.push({ code, meta: meta ?? null, at: clock }); return { queued: true }; } };
+  const make = () => createIngest({
+    db: s, inbox, ownerUserId: () => owner.user_id, ownerPhone: T_INSTANCE, notes, log: (o) => logs.push(o), now,
+    isExcludedLead: (l) => isExcludedLeadOf(team, s, l),
+    ...(withSwitch ? { ownerTest: sw } : {}),
+  });
+  s.insertLead({
+    lead_id: T_LEAD, created: NOW - T_DAY, updated: NOW - T_DAY, phone_e164: T_OWNER, wa_jid: T_OWNER_JID, channel: 'whatsapp',
+    match_method: 'owner_test', inbox_via: 'owner_test', stage: 'new', inbox_state: 'in', inbox_since: NOW - 3_600_000, history_from: NOW - 3_600_000, ...lead,
+  });
+  s.insertLead({ ...LEAD, ...client });
+  return {
+    s, team, owner, staff, inbox, logs, alerts, sw, notes, ingest: make().ingest, restart() { this.ingest = make().ingest; },
+    lead: (id = T_LEAD) => s.getLead(id), at: (t) => { clock = t; }, now,
+  };
+}
+/** An outbound record of the owner's test chat (Bona's number writing to him). */
+const toOwner = (over = {}) => rec({ id: 'T-OUT', fromMe: true, jid: T_OWNER_JID, jidAlt: null, text: 'Sent from the Fold', ts: NOW - 30_000, ...over });
+
+function assertCleanT(logs) {
+  const out = JSON.stringify(logs);
+  for (const needle of T_PERSONAL) assert.equal(out.includes(needle), false, 'a log line carries personal data');
+}
+
+test("the owner's test chat stores a sent record only when a staff or Dana outbox row is its send; anything else is test_chat_untracked", () => {
+  const h = testChat({ lead: { needs_human: 1 } });
+  // Typed on the Fold, a command confirmation, a note whose send went uncertain: none is his chat.
+  assert.deepEqual(h.ingest(h.lead(), toOwner()), { stored: false, reason: 'test_chat_untracked' });
+  assert.deepEqual(h.ingest(h.lead(), toOwner({ id: 'T-NOTE', text: '*Bona — test mode* ON' })), { stored: false, reason: 'test_chat_untracked' });
+  // The poller's call alert from bona2 (call_alert.py, critic C3): no outbox row, a listing in it.
+  const callAlert = '📞 Bona line call — missed\nListings: BONA-W012';
+  assert.deepEqual(h.ingest(h.lead(), toOwner({ id: 'T-CALL', text: callAlert })), { stored: false, reason: 'test_chat_untracked' });
+  // Critic I2 for real: nothing of it reached the chat's human clock, its hand-over flag or its handler.
+  assert.deepEqual([h.lead().last_human_out_ts, h.lead().needs_human, h.lead().handler_user_id, h.inbox.countMessages(T_LEAD)], [null, 1, null, 0]);
+  // A staff reply (by its id, and an uncertain one by its text) and a Dana send are his chat's.
+  h.inbox.insertOutbox({ send_id: 'SND-t-staff', lead_id: T_LEAD, jid: T_OWNER_JID, text: 'From the dashboard', user_id: h.staff.user_id, sender_kind: 'staff' });
+  h.inbox.updateOutbox('SND-t-staff', { status: 'accepted', key_id: 'T-STAFF' });
+  assert.deepEqual(h.ingest(h.lead(), toOwner({ id: 'T-STAFF', text: 'From the dashboard' })), { stored: true, inserted: true, senderKind: 'staff' });
+  h.inbox.insertOutbox({ send_id: 'SND-t-unsure', lead_id: T_LEAD, jid: T_OWNER_JID, text: 'Not sure it went', user_id: h.staff.user_id, sender_kind: 'staff', status: 'uncertain' });
+  assert.equal(h.ingest(h.lead(), toOwner({ id: 'T-UNSURE', text: 'Not sure it went', ts: NOW + 1000 })).senderKind, 'staff');
+  h.inbox.insertOutbox({ send_id: 'SND-t-dana', lead_id: T_LEAD, jid: T_OWNER_JID, text: 'Hello from the assistant', sender_kind: 'dana' });
+  h.inbox.updateOutbox('SND-t-dana', { status: 'accepted', key_id: 'T-DANA' });
+  assert.deepEqual(h.ingest(h.lead(), toOwner({ id: 'T-DANA', text: 'Hello from the assistant' })), { stored: true, inserted: true, senderKind: 'dana' });
+  // His own messages are the client's.
+  assert.deepEqual(h.ingest(h.lead(), rec({ id: 'T-IN', jid: T_OWNER_JID, jidAlt: null, text: 'Is the villa free?' })), { stored: true, inserted: true, senderKind: 'client' });
+  assert.deepEqual(h.inbox.messagesFor(T_LEAD).map((m) => m.sender_kind).sort(), ['client', 'dana', 'staff', 'staff']);
+  // Any other chat is as before: an untracked sent record is the owner's number.
+  assert.deepEqual(h.ingest(h.lead(LEAD_ID), rec({ id: 'C-OUT', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED })), { stored: true, inserted: true, senderKind: 'owner_number' });
+  assertCleanT(h.logs);
+  h.s.close();
+});
+
+test('the Greeting/Away detector: one untracked sent text in two chats within 24 h → one greeting_away alert a day', () => {
+  const h = testChat();
+  h.s.insertLead({ ...LEAD, lead_id: T_THIRD, phone_e164: '966500000003', wa_jid: T_THIRD_JID, wa_lid: null });
+  // The test chat's copy is dropped, the client's is stored: both count.
+  h.ingest(h.lead(), toOwner({ id: 'G-1', text: GREETING, ts: NOW - 60_000 }));
+  assert.deepEqual(h.alerts, []);
+  // The same chat again is one chat.
+  h.ingest(h.lead(), toOwner({ id: 'G-1b', text: GREETING, ts: NOW - 50_000 }));
+  assert.deepEqual(h.alerts, []);
+  assert.equal(h.ingest(h.lead(LEAD_ID), rec({ id: 'G-2', fromMe: true, jid: PHONE_JID, jidAlt: null, text: `  ${GREETING}`, ts: NOW - 30_000 })).senderKind, 'owner_number');
+  assert.deepEqual(h.alerts.map((a) => a.code), ['greeting_away']);
+  assert.equal(JSON.stringify(h.alerts).includes(GREETING), false, 'the alert carries no text');
+  // A third chat the same (Riyadh) day: still one.
+  h.ingest(h.lead(T_THIRD), rec({ id: 'G-3', fromMe: true, jid: T_THIRD_JID, jidAlt: null, text: GREETING, ts: NOW - 10_000 }));
+  assert.equal(h.alerts.length, 1);
+  // The next Riyadh day (NOW is 15:00 there), two chats again: one more.
+  h.at(NOW + 12 * 3_600_000);
+  h.ingest(h.lead(LEAD_ID), rec({ id: 'G-4', fromMe: true, jid: PHONE_JID, jidAlt: null, text: GREETING, ts: h.now() - 20_000 }));
+  h.ingest(h.lead(T_THIRD), rec({ id: 'G-5', fromMe: true, jid: T_THIRD_JID, jidAlt: null, text: GREETING, ts: h.now() - 10_000 }));
+  assert.equal(h.alerts.length, 2);
+  assertCleanT(h.logs);
+  h.s.close();
+
+  // Not a greeting: a short reply, a tracked send, an old record (a join's history), two days apart.
+  const n = testChat();
+  n.s.insertLead({ ...LEAD, lead_id: T_THIRD, phone_e164: '966500000003', wa_jid: T_THIRD_JID, wa_lid: null });
+  n.ingest(n.lead(LEAD_ID), rec({ id: 'S-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: 'Ok, thanks', ts: NOW - 20_000 }));
+  n.ingest(n.lead(T_THIRD), rec({ id: 'S-2', fromMe: true, jid: T_THIRD_JID, jidAlt: null, text: 'Ok, thanks', ts: NOW - 10_000 }));
+  for (const [id, leadId, jid] of [['D-1', LEAD_ID, PHONE_JID], ['D-2', T_THIRD, T_THIRD_JID]]) {
+    n.inbox.insertOutbox({ send_id: `SND-${id}`, lead_id: leadId, jid, text: GREETING, sender_kind: 'dana' });
+    n.inbox.updateOutbox(`SND-${id}`, { status: 'accepted', key_id: id });
+    n.ingest(n.lead(leadId), rec({ id, fromMe: true, jid, jidAlt: null, text: GREETING, ts: NOW - 5_000 }));
+  }
+  n.ingest(n.lead(LEAD_ID), rec({ id: 'O-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: `${GREETING} (old)`, ts: NOW - 3 * T_DAY }));
+  n.ingest(n.lead(T_THIRD), rec({ id: 'O-2', fromMe: true, jid: T_THIRD_JID, jidAlt: null, text: `${GREETING} (old)`, ts: NOW - 30_000 }));
+  assert.deepEqual(n.alerts, []);
+  n.s.close();
+});
+
+test("the Greeting/Away detector survives a restart: the stored copy counts, and a day's alert already in the ledger is not sent again", () => {
+  const h = testChat();
+  h.s.insertLead({ ...LEAD, lead_id: T_THIRD, phone_e164: '966500000003', wa_jid: T_THIRD_JID, wa_lid: null });
+  h.ingest(h.lead(LEAD_ID), rec({ id: 'R-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: GREETING, ts: NOW - 3_600_000 }));
+  h.restart();
+  h.ingest(h.lead(T_THIRD), rec({ id: 'R-2', fromMe: true, jid: T_THIRD_JID, jidAlt: null, text: GREETING, ts: NOW - 60_000 }));
+  assert.deepEqual(h.alerts.map((a) => a.code), ['greeting_away']);
+  // Restarted again: today's alert row (the ledger's `al:greeting_away:<hour>`) is there, so no second one today.
+  const hour = Math.floor(NOW / 3_600_000);
+  h.s.db.prepare(`INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, meta, created, updated)
+                  VALUES ('NOTE-1', 'alert', NULL, ?, ?, 'sent', '{"alert":"greeting_away"}', ?, ?)`).run(`al:greeting_away:${hour}`, NOW, NOW, NOW);
+  h.restart();
+  h.ingest(h.lead(LEAD_ID), rec({ id: 'R-3', fromMe: true, jid: PHONE_JID, jidAlt: null, text: GREETING, ts: NOW - 20_000 }));
+  assert.equal(h.alerts.length, 1);
+  h.s.close();
+});
+
+test('a human message clears a hold that waits for a person (and needs_human, as before); a timed hold stays until its end', () => {
+  const human = [
+    ['a staff reply', (h) => {
+      h.inbox.insertOutbox({ send_id: 'SND-h', lead_id: LEAD_ID, jid: PHONE_JID, text: REPLY, user_id: h.staff.user_id, sender_kind: 'staff' });
+      h.inbox.updateOutbox('SND-h', { status: 'accepted', key_id: 'H-1' });
+      return rec({ id: 'H-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: REPLY });
+    }],
+    ["the owner's phone", () => rec({ id: 'H-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED })],
+  ];
+  for (const [label, make] of human) {
+    const h = testChat({ client: { needs_human: 1, dana_hold_reason: 'loop', dana_hold_until: null } });
+    assert.equal(h.ingest(h.lead(LEAD_ID), make(h)).stored, true, label);
+    assert.deepEqual([h.lead(LEAD_ID).dana_hold_reason, h.lead(LEAD_ID).dana_hold_until, h.lead(LEAD_ID).needs_human], [null, null, 0], label);
+    h.s.close();
+  }
+  // Timed: it stays (its end lets the assistant answer again).
+  const timed = testChat({ client: { dana_hold_reason: 'cap_chat', dana_hold_until: NOW + 3_600_000 } });
+  timed.ingest(timed.lead(LEAD_ID), rec({ id: 'H-2', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED }));
+  assert.deepEqual([timed.lead(LEAD_ID).dana_hold_reason, timed.lead(LEAD_ID).dana_hold_until], ['cap_chat', NOW + 3_600_000]);
+  timed.s.close();
+  // Neither the client nor the assistant is a person answering.
+  const not = testChat({ client: { dana_hold_reason: 'send_failed', dana_hold_until: null } });
+  not.ingest(not.lead(LEAD_ID), rec({ id: 'H-3' }));
+  not.inbox.insertOutbox({ send_id: 'SND-d', lead_id: LEAD_ID, jid: PHONE_JID, text: 'From the assistant', sender_kind: 'dana' });
+  not.inbox.updateOutbox('SND-d', { status: 'accepted', key_id: 'H-4' });
+  assert.equal(not.ingest(not.lead(LEAD_ID), rec({ id: 'H-4', fromMe: true, jid: PHONE_JID, jidAlt: null, text: 'From the assistant' })).senderKind, 'dana');
+  assert.equal(not.lead(LEAD_ID).dana_hold_reason, 'send_failed');
+  // A human message read again (a refresh) is not a new one.
+  not.ingest(not.lead(LEAD_ID), rec({ id: 'H-5', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED }));
+  assert.equal(not.lead(LEAD_ID).dana_hold_reason, null);
+  not.inbox.setNeedsHuman(LEAD_ID, 0);
+  not.s.updateLead(LEAD_ID, { dana_hold_reason: 'loop' });
+  not.ingest(not.lead(LEAD_ID), rec({ id: 'H-5', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED }));
+  assert.equal(not.lead(LEAD_ID).dana_hold_reason, 'loop');
+  not.s.close();
+});
+
+test('a brochure the assistant sent comes back as a document: matched by its caption, else by the fallback (same lead, 2 min) → dana, never owner_number', () => {
+  const doc = (over = {}) => rec({ id: 'DOC-1', fromMe: true, jid: LID, jidAlt: PHONE_JID, media: '[document: BONA-W003.pdf]', text: 'BONA-W003 brochure', ts: NOW + 1000, ...over });
+  const docRow = (h, over = {}) => h.inbox.insertOutbox({
+    send_id: 'SND-doc', lead_id: LEAD_ID, jid: PHONE_JID, text: 'BONA-W003 brochure', sender_kind: 'dana', status: 'uncertain', media_kind: 'document', ...over,
+  });
+  // By its caption.
+  const a = testChat();
+  docRow(a);
+  assert.deepEqual(a.ingest(a.lead(LEAD_ID), doc()), { stored: true, inserted: true, senderKind: 'dana' });
+  assert.deepEqual([a.inbox.getOutbox('SND-doc').status, a.inbox.getOutbox('SND-doc').key_id], ['accepted', 'DOC-1']);
+  assert.ok(a.logs.some((e) => e.evt === 'inbox.outbox.resolved' && e.via === 'text'));
+  a.s.close();
+  // No caption came back (or another one): the fallback, the oldest such row of the lead.
+  for (const text of ['', 'brochure']) {
+    const b = testChat();
+    docRow(b);
+    docRow(b, { send_id: 'SND-doc-2' });
+    b.at(NOW + 5000);
+    assert.equal(b.ingest(b.lead(LEAD_ID), doc({ text, ts: NOW + 90_000 })).senderKind, 'dana', JSON.stringify(text));
+    assert.deepEqual([b.inbox.getOutbox('SND-doc').status, b.inbox.getOutbox('SND-doc-2').status], ['accepted', 'uncertain']);
+    assert.ok(b.logs.some((e) => e.evt === 'inbox.outbox.resolved' && e.via === 'document'));
+    b.s.close();
+  }
+  // Not the fallback: 2 min + 1 ms, another lead's row, a text row, an image, a record read again.
+  const misses = [
+    ['too late', {}, { text: '', ts: NOW + RESOLVE_WINDOW_MS + 1 }],
+    ['another lead', { lead_id: OTHER_LEAD_ID }, { text: '' }],
+    ['a text row', { media_kind: null, text: 'Here is the link' }, { text: '' }],
+    ['an image', {}, { text: '', media: '[image]' }],
+  ];
+  for (const [label, row, over] of misses) {
+    const c = testChat();
+    docRow(c, row);
+    assert.equal(c.ingest(c.lead(LEAD_ID), doc(over)).senderKind, 'owner_number', label);
+    assert.equal(c.inbox.getOutbox('SND-doc').status, 'uncertain', label);
+    c.s.close();
+  }
+  // In the owner's test chat a brochure send is his chat's too, not dropped.
+  const t = testChat();
+  t.inbox.insertOutbox({ send_id: 'SND-doc', lead_id: T_LEAD, jid: T_OWNER_JID, text: 'BONA-W003 brochure', sender_kind: 'dana', status: 'uncertain', media_kind: 'document' });
+  assert.equal(t.ingest(t.lead(), toOwner({ id: 'T-DOC', media: '[document: BONA-W003.pdf]', text: '', ts: NOW + 1000 })).senderKind, 'dana');
+  t.s.close();
+});
+
+test('a `#dana` text is never a message, in any chat, either way it went, whichever read brings it (poller, join history, refresh)', async () => {
+  const h = testChat();
+  for (const [id, text] of [['C-1', '#dana test on'], ['C-2', '  #DANA off'], ['C-3', '#dana foo'], ['C-4', '#Dana\tstatus']]) {
+    assert.deepEqual(h.ingest(h.lead(LEAD_ID), rec({ id, text })), { stored: false, reason: 'command' }, text);
+    assert.deepEqual(h.ingest(h.lead(LEAD_ID), rec({ id: `${id}-out`, fromMe: true, jid: PHONE_JID, jidAlt: null, text })), { stored: false, reason: 'command' }, `${text} sent`);
+    assert.deepEqual(h.ingest(h.lead(), rec({ id: `${id}-t`, jid: T_OWNER_JID, jidAlt: null, text })), { stored: false, reason: 'command' }, `${text} in the test chat`);
+  }
+  // Not a command: the word inside a sentence, or a longer word.
+  assert.equal(h.ingest(h.lead(LEAD_ID), rec({ id: 'N-1', text: 'is #dana the agent?' })).stored, true);
+  assert.equal(h.ingest(h.lead(LEAD_ID), rec({ id: 'N-2', text: '#danavilla' })).stored, true);
+  assert.equal(h.inbox.countMessages(T_LEAD), 0);
+  // Through the join history and a thread refresh (lib/inbox/backfill.mjs hands every record to ingest).
+  const records = [
+    rec({ id: 'B-1', jid: PHONE_JID, jidAlt: null, text: '#dana test on', ts: NOW - 120_000 }),
+    rec({ id: 'B-2', jid: PHONE_JID, jidAlt: null, text: 'A real question', ts: NOW - 60_000 }),
+  ];
+  const backfill = createBackfill({
+    db: h.s, inbox: h.inbox, now: h.now, ingest: (l, r) => h.ingest(l, r),
+    find: async ({ where }) => {
+      const hits = records.filter((r) => (where.key.remoteJidAlt ? r.jidAlt === where.key.remoteJidAlt : r.jid === where.key.remoteJid));
+      return { records: hits, total: hits.length, pages: 1 };
+    },
+  });
+  await backfill.history(h.lead(LEAD_ID), { sinceTs: NOW - T_DAY });
+  assert.deepEqual(h.inbox.messagesFor(LEAD_ID).map((m) => m.key_id).filter((k) => k.startsWith('B-')), ['B-2']);
+  records.push(rec({ id: 'B-3', jid: PHONE_JID, jidAlt: null, text: '#dana live on', ts: NOW - 30_000 }));
+  await backfill.refresh(h.lead(LEAD_ID), { minIntervalMs: 0 });
+  assert.equal(h.inbox.messageByKey('B-3'), null);
+  assertCleanT(h.logs);
+  h.s.close();
+});
+
+test('the rollback guard: a lead that joined by the own rule or the test is refused (rule_off) while ownNumberOk is false, by ingest and by a refresh', async () => {
+  for (const via of ['own_number', 'owner_test']) {
+    const h = testChat({ sw: fakeSwitch({ ok: false }), client: { inbox_via: via } });
+    assert.deepEqual(h.ingest(h.lead(LEAD_ID), rec({ id: 'RB-1' })), { stored: false, reason: 'rule_off' }, via);
+    assert.deepEqual(h.ingest(h.lead(LEAD_ID), rec({ id: 'RB-2', fromMe: true, jid: PHONE_JID, jidAlt: null, text: TYPED })), { stored: false, reason: 'rule_off' }, `${via} sent`);
+    const backfill = createBackfill({
+      db: h.s, inbox: h.inbox, now: h.now, ingest: (l, r) => h.ingest(l, r),
+      find: async ({ where }) => (where.key.remoteJid === PHONE_JID
+        ? { records: [rec({ id: 'RB-3', jid: PHONE_JID, jidAlt: null, ts: NOW - 60_000 })], total: 1, pages: 1 }
+        : { records: [], total: 0, pages: 0 }),
+    });
+    await backfill.refresh(h.lead(LEAD_ID), { minIntervalMs: 0 });
+    assert.equal(h.inbox.countMessages(LEAD_ID), 0, `${via}: nothing stored by the refresh either`);
+    // Once Bona's number checks out again, the chat is served as before.
+    h.sw.ok = true;
+    assert.equal(h.ingest(h.lead(LEAD_ID), rec({ id: 'RB-4' })).stored, true, via);
+    h.s.close();
+  }
+  // A lead joined by proof (inbox_via NULL) is not this guard's.
+  const proof = testChat({ sw: fakeSwitch({ ok: false }) });
+  assert.equal(proof.ingest(proof.lead(LEAD_ID), rec({ id: 'RB-5' })).stored, true);
+  // The owner's test lead too, and before the exclusion check (with ok false the test is not active).
+  assert.deepEqual(proof.ingest(proof.lead(), rec({ id: 'RB-6', jid: T_OWNER_JID, jidAlt: null })), { stored: false, reason: 'rule_off' });
+  proof.s.close();
+  // No test switch handed in: fail closed.
+  const bare = testChat({ withSwitch: false, client: { inbox_via: 'own_number' } });
+  assert.deepEqual(bare.ingest(bare.lead(LEAD_ID), rec({ id: 'RB-7' })), { stored: false, reason: 'rule_off' });
+  bare.s.close();
+});
+
+test("with the test switch off, the owner's test lead is the owner's number again: excluded, nothing stored", () => {
+  const h = testChat({ sw: fakeSwitch({ on: false }) });
+  assert.deepEqual(h.ingest(h.lead(), rec({ id: 'X-1', jid: T_OWNER_JID, jidAlt: null })), { stored: false, reason: 'excluded' });
   h.s.close();
 });

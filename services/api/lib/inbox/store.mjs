@@ -38,7 +38,11 @@ const SEND_DAY_MS = 86_400_000;
 /**
  * A real-estate chat to check (D17) is kept this long after its last property message, and
  * a dismissed one (the owner's "Not a client") this long after he dismissed it, only so it
- * is not listed again. The privacy page states both.
+ * is not listed again (and, on Bona's own number, so the chat stays out: PR-A1). The
+ * shared-number text states both (services/deploy/vps/rollback/privacy-shared-number.json, on
+ * the page only after a PR-D1r, the personal-number rollback). Bona's own number keeps no open
+ * row with a phone (`pruneCandidates({ phones: true })`, PR-A1), only a dismissed chat's ids,
+ * for the year D1 names.
  */
 export const CANDIDATE_KEEP_MS = 30 * 86_400_000;
 export const DISMISSED_KEEP_MS = 365 * 86_400_000;
@@ -94,6 +98,8 @@ const UNSURE_CHAT = "(l.inbox_state = 'unsure' OR l.inbox_state IS NULL) AND (l.
 
 /** The outbox kinds that keep no text (and, from the sender, no lead): a login code, an owner note. */
 const TEXTLESS_KINDS = new Set(['code', 'note']);
+/** `wa_outbox.media_kind` (db v8): null is a text; a brochure goes as a 'document' and keeps sender_kind 'dana'. */
+export const OUTBOX_MEDIA_KINDS = ['document'];
 
 /**
  * @param {ReturnType<import('../db.mjs').openDb>} store
@@ -247,22 +253,25 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
    * is left exactly as it is: a double submit gets the row the first submit made. A new
    * staff or Dana row of a chat moves that chat's revision on (`revision`). An owner note's
    * row belongs to no chat whatever the caller passes (DESIGN §7.1): a note about client X
-   * never sits under X.
+   * never sits under X. `media_kind` is null for a text, 'document' for a brochure (its `text`
+   * is the caption); a code or a note keeps none, as it keeps no text.
    *
    * @returns {{ inserted: boolean, row: object }}
    */
-  function insertOutbox({ send_id, lead_id = null, jid, text = null, user_id = null, sender_kind, status = 'pending', covers_ts = null } = {}) {
+  function insertOutbox({ send_id, lead_id = null, jid, text = null, user_id = null, sender_kind, status = 'pending', covers_ts = null, media_kind = null } = {}) {
     if (!send_id) throw new RangeError('send_id is required');
     if (!jid) throw new RangeError('jid is required');
     if (!OUTBOX_KINDS.includes(sender_kind)) throw new RangeError(`unknown outbox kind ${sender_kind}`);
     if (!OUTBOX_STATUSES.includes(status)) throw new RangeError(`unknown outbox status ${status}`);
+    if (media_kind !== null && media_kind !== undefined && !OUTBOX_MEDIA_KINDS.includes(media_kind)) throw new RangeError(`unknown media kind ${media_kind}`);
     const t = now();
     const stored = TEXTLESS_KINDS.has(sender_kind) ? null : capText(text);
     const chatId = sender_kind === 'note' ? null : str(lead_id);
+    const media = TEXTLESS_KINDS.has(sender_kind) ? null : (media_kind ?? null);
     return transaction(() => {
-      const { changes } = prep(`INSERT OR IGNORE INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts)
-                                VALUES (?,?,?,?,?,?,?,NULL,?,?,NULL,?)`)
-        .run(String(send_id), chatId, String(jid), stored, str(user_id), sender_kind, status, t, t, hasNumber(covers_ts) ? toTs(covers_ts) : null);
+      const { changes } = prep(`INSERT OR IGNORE INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts, media_kind)
+                                VALUES (?,?,?,?,?,?,?,NULL,?,?,NULL,?,?)`)
+        .run(String(send_id), chatId, String(jid), stored, str(user_id), sender_kind, status, t, t, hasNumber(covers_ts) ? toTs(covers_ts) : null, media);
       if (changes === 1 && chatId !== null && (sender_kind === 'staff' || sender_kind === 'dana')) bump(chatId);
       return { inserted: changes === 1, row: getOutbox(send_id) };
     });
@@ -304,6 +313,21 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
                          AND text = ? AND ABS(created - ?) <= ?
                        ORDER BY created ASC, rowid ASC LIMIT 1`)
       .get(String(leadId), capText(text), toTs(ts), num(windowMs)));
+  }
+
+  /**
+   * The brochure an outbound DOCUMENT record most likely is, when neither its key nor its caption
+   * found it (PLAN T07 test 12): the oldest unresolved Dana row of the same LEAD with media_kind
+   * 'document', created within `windowMs` of the record either way. Read-only, like
+   * `resolveUncertain`; the caller decides to resolve it.
+   */
+  function resolveUncertainDocument({ leadId, ts, windowMs = 120_000 } = {}) {
+    if (!leadId || !hasNumber(ts)) return null;
+    return plain(prep(`SELECT * FROM wa_outbox
+                       WHERE lead_id = ? AND sender_kind = 'dana' AND media_kind = 'document'
+                         AND status IN ('uncertain','pending') AND key_id IS NULL AND ABS(created - ?) <= ?
+                       ORDER BY created ASC, rowid ASC LIMIT 1`)
+      .get(String(leadId), toTs(ts), num(windowMs)));
   }
 
   /** Staff and Dana sends of one chat that did not (surely) go: the newest 20, oldest first. */
@@ -549,6 +573,31 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
     if (!hasNumber(ts)) return false;
     return prep('UPDATE leads SET last_human_out_ts = MAX(COALESCE(last_human_out_ts, 0), ?) WHERE lead_id = ?')
       .run(toTs(ts), String(leadId ?? '')).changes === 1;
+  }
+
+  /**
+   * A person answered the chat: a hold that waits for one (`dana_hold_reason` with no
+   * `dana_hold_until`, db v8) is over. A timed hold stays until its end. True when one was cleared.
+   */
+  const clearHumanHold = (leadId) => prep(`UPDATE leads SET dana_hold_reason = NULL, dana_hold_until = NULL
+                                           WHERE lead_id = ? AND dana_hold_reason IS NOT NULL AND dana_hold_until IS NULL`)
+    .run(String(leadId ?? '')).changes === 1;
+
+  /**
+   * The owner's test switch went on (DESIGN §3.2, PR-A2): his lead starts again as a stranger's
+   * chat would. Out of any inbox state (a sticky `out` from an earlier test would block this
+   * one), no floor (the join sets it: PR-A1), no hand-over, no stop, no hold, no human clock, no
+   * Retell chat. `inbox_via` stays: it is stamped at the join and never rewritten. Guarded to
+   * the lead whose PHONE is the owner's digits (`ownerPhone`): any other lead is refused.
+   * @returns {boolean} true when his lead was reset
+   */
+  function reopenOwnerTest(leadId, { ownerPhone = null } = {}) {
+    const phone = typeof ownerPhone === 'string' && /^\d{8,15}$/.test(ownerPhone) ? ownerPhone : null;
+    if (!leadId || !phone) return false;
+    return prep(`UPDATE leads SET inbox_state = NULL, inbox_since = NULL, history_from = NULL, needs_human = 0, dana_off = 0,
+                   dana_hold_until = NULL, dana_hold_reason = NULL, last_human_out_ts = NULL, dana_chat_id = NULL, dana_chat_ts = NULL,
+                   updated = ?
+                 WHERE lead_id = ? AND phone_e164 = ?`).run(now(), String(leadId), phone).changes === 1;
   }
 
   /**
@@ -846,22 +895,51 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
    * dismissed before `dismissedBefore`. Exactly at a cutoff is not older than it; a cutoff
    * that is not a number deletes nothing.
    *
-   * @returns {{ open: number, dismissed: number }}
+   * With `phones: true` (PR-A1 calls it once per start while the configured number is Bona's
+   * own: DESIGN §3.1, "no property-word record on Bona's own number"), every OPEN row that
+   * holds a number (a phone, or a phone jid) goes too, counted as `phones`. A dismissed row stays
+   * (its ids carry the owner's "Not a client"), and so does a lid-only row. Without it the
+   * results are the old ones.
+   *
+   * @returns {{ open: number, dismissed: number, phones?: number }}
    */
-  function pruneCandidates({ openBefore, dismissedBefore } = {}) {
-    return transaction(() => ({
-      open: prep("DELETE FROM inbox_candidates WHERE state = 'open' AND last_ts < ?").run(num(openBefore)).changes,
-      dismissed: prep("DELETE FROM inbox_candidates WHERE state = 'dismissed' AND updated < ?").run(num(dismissedBefore)).changes,
-    }));
+  function pruneCandidates({ openBefore, dismissedBefore, phones = false } = {}) {
+    return transaction(() => {
+      const out = {
+        open: prep("DELETE FROM inbox_candidates WHERE state = 'open' AND last_ts < ?").run(num(openBefore)).changes,
+        dismissed: prep("DELETE FROM inbox_candidates WHERE state = 'dismissed' AND updated < ?").run(num(dismissedBefore)).changes,
+      };
+      if (phones === true) {
+        out.phones = prep("DELETE FROM inbox_candidates WHERE state = 'open' AND (phone_e164 IS NOT NULL OR jid IS NOT NULL)").run().changes;
+      }
+      return out;
+    });
+  }
+
+  /**
+   * The dismissed row (the owner's "Not a client" on Chats to check) that holds any of these
+   * ids, by number first, then jid, then lid; null for an open row or no id (PR-A1 keeps such a
+   * chat out under the own rule: DESIGN §3.1). One prepared statement per id, like findCandidate.
+   */
+  function dismissedCandidateFor({ phone = null, jid = null, lid = null } = {}) {
+    const ids = { phone: idOf(phone), jid: idOf(jid), lid: idOf(lid) };
+    const row = (ids.phone ? prep("SELECT * FROM inbox_candidates WHERE phone_e164 = ? AND state = 'dismissed'").get(ids.phone) : null)
+      ?? (ids.jid ? prep("SELECT * FROM inbox_candidates WHERE jid = ? AND state = 'dismissed'").get(ids.jid) : null)
+      ?? (ids.lid ? prep("SELECT * FROM inbox_candidates WHERE lid = ? AND state = 'dismissed'").get(ids.lid) : null)
+      ?? null;
+    return candidateRow(row);
   }
 
   return {
     upsertMessage, messagesFor, newestTs, revision, hasMessages, countMessages, unreadSpan, messageByKey,
-    insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, openOutboxFor, countSentSince, markStalePending, pruneCodeRows,
+    insertOutbox, getOutbox, outboxByKey, updateOutbox, resolveUncertain, resolveUncertainDocument, openOutboxFor, countSentSince,
+    markStalePending, pruneCodeRows,
     markRead, listInbox, unreadTotal, listUnsure, countUnsure, isUnsureChat, inChatsWithoutMessages, listedLeads,
     addGap, gapsFor, clearGap, clearJoinGaps,
-    setInboxState, setHandler, setNeedsHuman, noteHumanOutbound, countDanaSends, countDanaTurns, countDanaTests, humanOutboundAfter, unansweredClientMessages,
+    setInboxState, setHandler, setNeedsHuman, noteHumanOutbound, clearHumanHold, reopenOwnerTest,
+    countDanaSends, countDanaTurns, countDanaTests, humanOutboundAfter, unansweredClientMessages,
     purgeLead, leaveInbox, retentionPurge,
     noteCandidate, listCandidates, countCandidates, getCandidate, dismissCandidate, removeCandidate, removeCandidatesFor, pruneCandidates,
+    dismissedCandidateFor,
   };
 }
