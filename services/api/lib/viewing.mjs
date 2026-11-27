@@ -291,23 +291,33 @@ export function createViewing(deps = {}) {
     if (!enabled()) return { bookable: false };
     // A row a restart left untold is no booking and no busy time (as in commit()).
     sweepStranded(now());
-    const lead = leadOf(o);
-    const first = precheck(lead, o.listingId, now());
-    if (first) return { bookable: false, reason: first };
+    // The whole gate (precheck(): booking on, the lead as the database has it now, in the inbox and not excluded,
+    // auto mode, no calendar mismatch, the listing, one booking per lead, the day cap), by the clock now. It runs
+    // before the first call to Google, again after EVERY answer (booking switched off, Not a client, a mismatch or
+    // a booking of the lead may land while Google answers), and once more with no await before the return, as
+    // commit() checks again inside its reserve's transaction: what slots offers, validate() and a commit accept.
+    // `settled` once settle() read the lead's rows over by their stored times (leadBooked()).
+    let settled = false;
+    const gated = () => {
+      const why = precheck(leadOf(o), o.listingId, now(), settled);
+      return why ? { bookable: false, reason: why } : null;
+    };
+    let stop = gated();
+    if (stop) return stop;
     // The lead's booking that is over by its stored times: is it really (settle())?
-    const s = await settle(now(), lead.lead_id);
+    const s = await settle(now(), leadOf(o).lead_id);
+    settled = !s.code;
+    if ((stop = gated())) return stop;
     if (s.code) return { bookable: false, reason: 'calendar', code: s.code };
-    const t = now();
-    // The lead again: it may have left the inbox while Google answered.
-    const why = precheck(leadOf(o), o.listingId, t, true);
-    if (why) return { bookable: false, reason: why };
     const hol = await gcal.holidays();
+    if ((stop = gated())) return stop;
     if (!hol.ok) return { bookable: false, reason: 'calendar', code: hol.code };
     // The days to ask Google about, by the clock once the holidays answered (Riyadh midnight may have passed).
     const days = bookableDays(now(), { holidays: hol.dates });
     const window = searchWindow(days);
     if (!window) return { bookable: false, reason: 'none_free', timezone: TIMEZONE, slots: [] };
     const fb = await gcal.freeBusy(window);
+    if ((stop = gated())) return stop;
     if (!fb.ok) return { bookable: false, reason: 'calendar', code: fb.code };
     // The clock again once freeBusy answered: a day that turned today meanwhile is not offered (a commit would
     // answer too_soon). Only the days just queried are: a later day's busy time was never read.
@@ -316,6 +326,8 @@ export function createViewing(deps = {}) {
     const own = holds(tn).map((r) => ({ start: r.start_ts, end: r.end_ts }));
     const list = freeSlots({ now: tn, busy: [...fb.busy, ...own], holidays: hol.dates, days });
     if (!list.length) return { bookable: false, reason: 'none_free', timezone: TIMEZONE, slots: [] };
+    // The last check, nothing awaited since: no slot leaves here unless the gate passes now.
+    if ((stop = gated())) return stop;
     return { bookable: true, timezone: TIMEZONE, slots: list };
   }
 

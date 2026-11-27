@@ -2028,6 +2028,93 @@ test('slots asked late on a Wednesday whose Google calls answer after Riyadh mid
   } finally { h.db.close(); }
 });
 
+test('slots runs the whole gate again after every Google answer and right before it returns: booking switched off, Not a client, a calendar mismatch or a booking of the lead landing while settle, the holidays or freeBusy is on its way answers that reason, never a slot', async () => {
+  const WED = '2026-12-09T10:00+03:00';
+  const other = calendarTag('calendar-b@example.com');
+  /** One harness per run: a fake calendar of calendar A whose one held call waits for the test to answer. */
+  const harness = () => {
+    const gcal = Object.assign(fakeGcal(), { calendarTag: calendarTag('calendar-a@example.com') });
+    const held = { op: null, release: null };
+    for (const op of ['access', 'holidays', 'freeBusy']) {
+      const real = gcal[op];
+      gcal[op] = async (...args) => {
+        if (held.op === op) { held.op = null; await new Promise((resolve) => { held.release = resolve; }); }
+        return real(...args);
+      };
+    }
+    const h = setup({ gcal });
+    const inbox = createInboxStore(h.db, { onPurge: (id) => h.viewing.onPurge(id) });
+    return {
+      ...h,
+      inbox,
+      hold: (op) => { held.op = op; },
+      reached: async () => {
+        for (let i = 0; i < 200 && !held.release; i += 1) await new Promise((resolve) => setImmediate(resolve));
+        assert.ok(held.release, 'slots reached the held call');
+      },
+      answer: () => { const r = held.release; held.release = null; r(); },
+    };
+  };
+  // What changes while Google answers, and the reason slots must give for it.
+  const changes = {
+    'booking switched off': { reason: 'off', run: (h) => h.team.setSetting('calendar_booking', '0') },
+    // As routes.mjs runs it: the viewing seam first, then the purge, in one transaction (DESIGN §8.4).
+    'Not a client': { reason: 'not_in_inbox', run: (h, lead) => h.db.transaction(() => { h.viewing.onLeadLeaving(lead.lead_id); h.inbox.leaveInbox(lead.lead_id); }) },
+    // Another lead's booking whose event was made in calendar B (a process on another calendar id wrote it).
+    'a calendar mismatch': {
+      reason: 'calendar_mismatch',
+      run: (h) => insertRow(h.db, { id: 'bk-elsewhere', leadId: 'LEAD-20261201-0000eeee', start: R(2026, 12, 10, 14), eventId: eventIdFor('LEAD-20261201-0000eeee', R(2026, 12, 10, 14), 0, other) }),
+    },
+    // The lead's own commit (another tool call) lands meanwhile; the one held call was the slots' own.
+    'a booking of the lead': {
+      reason: 'active_booking',
+      run: async (h, lead) => {
+        const got = await h.viewing.commitBooking({ lead, listingId: 'BONA-W902', slotId: WED });
+        assert.equal(got.ok, true, JSON.stringify(got));
+      },
+    },
+  };
+  /** settle() reads only when the lead has a booking over by its stored times: one booked Sunday, the clock past its end. */
+  const ready = async (h, lead, op) => {
+    if (op !== 'access') return;
+    const first = await h.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    h.clock.t = R(2026, 12, 6, 11, 5);
+  };
+  for (const op of ['access', 'holidays', 'freeBusy']) {
+    // The control: nothing changes while the call is held, and slots are offered.
+    {
+      const h = harness();
+      try {
+        const lead = h.lead();
+        await ready(h, lead, op);
+        h.hold(op);
+        const p = h.viewing.slots({ lead, listingId: 'BONA-W901' });
+        await h.reached();
+        h.answer();
+        const got = await p;
+        assert.equal(got.bookable, true, `${op}: ${JSON.stringify(got)}`);
+        assert.ok(got.slots.length > 0, op);
+      } finally { h.db.close(); }
+    }
+    for (const [what, change] of Object.entries(changes)) {
+      const h = harness();
+      try {
+        const lead = h.lead();
+        await ready(h, lead, op);
+        h.hold(op);
+        const p = h.viewing.slots({ lead, listingId: 'BONA-W901' });
+        await h.reached();
+        await change.run(h, lead);
+        h.answer();
+        assert.deepEqual(await p, { bookable: false, reason: change.reason }, `${what} while ${op} is on its way`);
+        // validate() says the same for a slot slots would otherwise have offered.
+        assert.equal(h.viewing.validate({ lead, listingId: 'BONA-W901', slotId: '2026-12-09T14:00+03:00' }).reason, change.reason, `${what} (${op}): validate`);
+      } finally { h.db.close(); }
+    }
+  }
+});
+
 /* ---------------- the dashboard hooks, wired the way index.mjs wires them ---------------- */
 
 const OWNER = '966500000009';
