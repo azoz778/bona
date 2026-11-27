@@ -374,3 +374,39 @@ test('get and delete: 404/410 mean gone (delete is then done); delete uses sendU
   assert.deepEqual(await gcal.delete('../../calendars/x'), { ok: false, code: 'bad_response' });
   assert.equal(g.apiCalls().some((c) => c.url.pathname.includes('..')), false);
 });
+
+test('access: one events.list (maxResults=1, accessRole only) says whether the robot may change events; an unshared calendar is not_found, a reader role forbidden', async () => {
+  const state = { status: 200, role: 'writer' };
+  const { gcal, g, logs } = client({
+    routes: {
+      [`GET ${EVENTS_PATH}`]: () => (state.status === 200
+        ? json(200, state.role === undefined ? {} : { accessRole: state.role })
+        : json(state.status, { error: { code: state.status, errors: [{ reason: 'notFound' }] } })),
+    },
+  });
+  assert.deepEqual(await gcal.access(), { ok: true, role: 'writer' });
+  const call = g.apiCalls()[0];
+  assert.equal(call.method, 'GET');
+  assert.equal(call.url.searchParams.get('maxResults'), '1');
+  assert.equal(call.url.searchParams.get('fields'), 'accessRole', 'no event comes back, only the role');
+  state.role = 'owner';
+  assert.deepEqual(await gcal.access(), { ok: true, role: 'owner' });
+  assert.deepEqual(gcal.health(), { configured: true, ok: true, lastErrorCode: null });
+  // Shared for free/busy only, or read only: the robot cannot manage its events there.
+  for (const role of ['reader', 'freeBusyReader', 'none', undefined]) {
+    state.role = role;
+    assert.deepEqual(await gcal.access(), { ok: false, code: 'forbidden' }, String(role));
+    assert.deepEqual(gcal.health(), { configured: true, ok: false, lastErrorCode: 'forbidden' });
+  }
+  // Not shared with the robot any more (or another id): Google answers 404 for the calendar.
+  state.status = 404;
+  assert.deepEqual(await gcal.access(), { ok: false, code: 'not_found' });
+  assert.deepEqual(gcal.health(), { configured: true, ok: false, lastErrorCode: 'not_found' });
+  state.status = 500;
+  assert.deepEqual(await gcal.access(), { ok: false, code: 'bad_response' });
+  assert.doesNotMatch(JSON.stringify(logs), /owner-calendar|robot@/, 'an operation and a code only');
+  // Not configured: nothing is fetched.
+  const off = fakeGoogle();
+  assert.deepEqual(await createGcal({ fetchImpl: off.fetchImpl }).access(), { ok: false, code: 'auth' });
+  assert.equal(off.calls.length, 0);
+});

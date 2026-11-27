@@ -18,6 +18,9 @@
  * - insert / get / delete: events.insert with `sendUpdates=none` and a deterministic id
  *   (eventIdFor), so a retry of the same booking can be recognised: a 409 is a success only when
  *   the event there carries this lead's id. delete treats 404/410 as done.
+ * - access(): may the robot still manage events on the owner's calendar? A calendar that is no
+ *   longer shared with it answers 404 for every event too, so the worker and reconcile ask this
+ *   before they read a 404 as "already gone".
  *
  * Errors are a fixed enum (GCAL_ERROR_CODES, the /health `lastErrorCode` vocabulary), never
  * Google's words: an error text can carry a calendar id or an address. Nothing here logs a
@@ -69,9 +72,9 @@ function base32hex(buf) {
 
 /**
  * The event id of a booking: from the lead and the start, so the same booking always maps to the
- * same event (a retried insert answers 409, never a second event). `attempt` is how many earlier
- * rows that lead already has for that start (a booking cancelled and made again), because Google
- * keeps a deleted event's id: the second booking needs a new one.
+ * same event (a retried insert answers 409, never a second event). `attempt` picks another id for
+ * the same lead and start: Google keeps a deleted event's id, and an owner's move keeps the first
+ * start's id on the moved booking, so a new booking takes the first attempt no row holds yet.
  */
 export function eventIdFor(leadId, startTs, attempt = 0) {
   const seed = `${leadId}|${startTs}${attempt > 0 ? `|${attempt}` : ''}`;
@@ -308,7 +311,11 @@ export function createGcal({
     return failed('insert', codeForStatus(r.status, r.body), { uncertain: r.status >= 500 });
   }
 
-  /** One event. 404/410 → `{ ok:false, code:'not_found', gone:true }`, which is not a calendar failure. */
+  /**
+   * One event. 404/410 → `{ ok:false, code:'not_found', gone:true }`, which is not a calendar failure.
+   * Google's get returns a deleted event itself (status 'cancelled'), so a 404 says the event is not
+   * in this calendar, which is also what a calendar the robot cannot see answers (see access()).
+   */
   async function get(eventId) {
     if (!EVENT_ID_RE.test(String(eventId ?? ''))) return fail('bad_response');
     const r = await api('get', 'GET', `${calendarPath(calendarId)}/${eventId}`);
@@ -319,6 +326,25 @@ export function createGcal({
     if (r.status !== 200 || !r.parseOk || !r.body || typeof r.body !== 'object') return failed('get', r.status === 200 ? 'bad_response' : codeForStatus(r.status, r.body));
     succeeded();
     return { ok: true, event: r.body };
+  }
+
+  /**
+   * May the robot manage events on the owner's calendar? One events.list that returns only the
+   * robot's `accessRole` (no event): `writer` or `owner` is ok. A calendar not shared with it any
+   * more answers 404 (not_found); free/busy or read-only sharing is `forbidden`.
+   * @returns {Promise<{ ok: true, role: string } | { ok: false, code: string }>}
+   */
+  async function access() {
+    const r = await api('access', 'GET', calendarPath(calendarId), { query: { maxResults: '1', fields: 'accessRole' } });
+    if (r.notConfigured) return fail('auth');
+    if (r.reported) return fail(r.error);
+    if (r.error) return failed('access', r.error);
+    if (r.status !== 200) return failed('access', codeForStatus(r.status, r.body));
+    if (!r.parseOk || !r.body || typeof r.body !== 'object') return failed('access', 'bad_response');
+    const role = r.body.accessRole;
+    if (role !== 'writer' && role !== 'owner') return failed('access', 'forbidden');
+    succeeded();
+    return { ok: true, role };
   }
 
   /** Delete one event, telling nobody (`sendUpdates=none`). Already gone (404/410) is done. */
@@ -341,6 +367,7 @@ export function createGcal({
     insert,
     get,
     delete: remove,
+    access,
     /** The /health `booking.gcal` keys: ok = the last call went through; lastErrorCode = the last failure's code. */
     health: () => ({ configured, ok: configured && state.ok, lastErrorCode: configured ? state.lastErrorCode : null }),
   };

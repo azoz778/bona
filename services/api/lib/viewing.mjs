@@ -109,7 +109,8 @@ const errClass = (err) => (err && typeof err === 'object' && typeof err.name ===
  * @property {(leadId: string) => void} onLeadLeaving
  * @property {(leadId: string) => void} onPurge
  * @property {() => Promise<object>|undefined} tick  undefined when there is no calendar
- * @property {() => Promise<{ checked: number, moved: number, cancelled: number }>} reconcile
+ * @property {() => Promise<{ checked: number, moved: number, cancelled: number, held: number }>} reconcile
+ *   `held` counts the 404s left alone because the run found none of its events in the calendar
  * @property {() => { enabled: boolean, gcal: { configured: boolean, ok: boolean, lastErrorCode: string|null } }} health
  */
 
@@ -202,6 +203,10 @@ export function createViewing(deps = {}) {
   }
 
   // One booking at a time in this process (DESIGN §8.3 step 2); the partial unique indexes guard the rest.
+  // A row whose insert has not answered yet is the commit's alone: the worker and reconcile skip it,
+  // or a purge in that window would let them finish the row (a 404, since the event does not exist
+  // yet) and leave the event that lands afterwards behind with no row to delete it.
+  const inFlight = new Set();
   let chain = Promise.resolve();
   const locked = (fn) => {
     const run = chain.then(fn);
@@ -213,10 +218,14 @@ export function createViewing(deps = {}) {
   function reserve(v, t) {
     return db.transaction(() => {
       flipDone(t);
-      // Google keeps a deleted event's id, so a lead booking the same start again needs a new one.
-      const attempt = prep('SELECT COUNT(*) n FROM viewing_bookings WHERE lead_id = ? AND start_ts = ?').get(v.leadId, v.startTs).n;
+      // Google keeps a deleted event's id, and a booking the owner moved keeps the id of its first
+      // start: a lead booking that start again takes the first id no row holds yet. (Every event id
+      // the robot ever sent has a row: dropRow only removes a row whose insert never went out or
+      // was refused.)
+      const taken = prep('SELECT 1 FROM viewing_bookings WHERE event_id = ?');
+      let eventId = eventIdFor(v.leadId, v.startTs, 0);
+      for (let attempt = 1; taken.get(eventId); attempt += 1) eventId = eventIdFor(v.leadId, v.startTs, attempt);
       const bookingId = newId('bk');
-      const eventId = eventIdFor(v.leadId, v.startTs, attempt);
       prep(`INSERT INTO viewing_bookings (booking_id, lead_id, task_id, listing_id, start_ts, end_ts, event_id, status, client_told, created, updated)
             VALUES (?, ?, NULL, ?, ?, ?, ?, 'booked', 0, ?, ?)`).run(bookingId, v.leadId, v.listingId, v.startTs, v.endTs, eventId, t, t);
       return { bookingId, eventId };
@@ -241,6 +250,16 @@ export function createViewing(deps = {}) {
       log({ level: 'error', evt: 'viewing.reserve_failed', leadId: v.leadId, error: errClass(err) });
       return { ok: false, reason: 'error' };
     }
+    inFlight.add(row.bookingId);
+    try {
+      return await place(v, o, row, lead, listing, t);
+    } finally {
+      inFlight.delete(row.bookingId);
+    }
+  }
+
+  /** Steps 4-7 for a reserved row. Whatever it answers, the row ends dropped, `booked` with its task, or the worker's. */
+  async function place(v, o, row, lead, listing, t) {
     const failed = (reason, code) => {
       log({ level: 'warn', evt: 'viewing.commit_failed', bookingId: row.bookingId, reason, ...(code ? { code } : {}) });
       return code ? { ok: false, reason, code } : { ok: false, reason };
@@ -343,8 +362,15 @@ export function createViewing(deps = {}) {
   async function work() {
     const t = now();
     const out = { done: flipDone(t), cancelled: 0, failed: 0 };
-    const pending = prep("SELECT booking_id, event_id FROM viewing_bookings WHERE status = 'cancel_pending' ORDER BY updated, booking_id LIMIT ?").all(WORKER_BATCH);
-    for (const r of pending) {
+    const pending = prep("SELECT booking_id, event_id FROM viewing_bookings WHERE status = 'cancel_pending' ORDER BY updated, booking_id LIMIT ?").all(WORKER_BATCH)
+      .filter((r) => !inFlight.has(r.booking_id));
+    // A delete answers 404 on a calendar the robot cannot see as well: that is no "already gone".
+    const probe = pending.length ? await gcal.access() : null;
+    if (probe && !probe.ok) {
+      out.failed = pending.length;
+      log({ level: 'warn', evt: 'viewing.worker_stopped', code: probe.code });
+    }
+    for (const r of probe?.ok ? pending : []) {
       const res = await gcal.delete(r.event_id);
       if (res.ok) {
         out.cancelled += prep("UPDATE viewing_bookings SET status = 'cancelled', updated = ? WHERE booking_id = ? AND status = 'cancel_pending'").run(now(), r.booking_id).changes;
@@ -378,30 +404,52 @@ export function createViewing(deps = {}) {
   }
 
   const eventTime = (part) => (part?.dateTime ? Date.parse(part.dateTime) : (part?.date ? dayStart(part.date) : NaN));
+  /** 'not_found' while the last reconcile found none of its bookings' events in the calendar (health shows it). */
+  let held = null;
 
-  /** The calendar is the source of truth: a moved event moves the booking and its task; a deleted one cancels them. */
+  /**
+   * The calendar is the source of truth: a moved event moves the booking and its task; a deleted one
+   * (Google's get returns it with status 'cancelled') cancels them. A 404 means the event is not in
+   * this calendar: read as deleted only when the same run found other bookings' events there. When
+   * none was found (another calendar id, say), the run is held: nothing changes, and health says
+   * not_found until a reconcile finds the events again.
+   */
   async function reconcile() {
-    const out = { checked: 0, moved: 0, cancelled: 0 };
+    const out = { checked: 0, moved: 0, cancelled: 0, held: 0 };
     if (!configured) return out;
     const t = now();
     flipDone(t);
     const rows = prep("SELECT * FROM viewing_bookings WHERE status = 'booked' AND end_ts >= ? ORDER BY start_ts, booking_id LIMIT ?").all(t, RECONCILE_BATCH);
+    if (!rows.length) {
+      held = null;
+      log({ evt: 'viewing.reconciled', ...out });
+      return out;
+    }
+    const probe = await gcal.access();
+    if (!probe.ok) {
+      log({ level: 'warn', evt: 'viewing.reconcile_stopped', code: probe.code });
+      return out;
+    }
+    const cancel = (r) => db.transaction(() => {
+      const n = prep("UPDATE viewing_bookings SET status = 'cancelled', updated = ? WHERE booking_id = ? AND status = 'booked'").run(now(), r.booking_id).changes;
+      if (n && r.task_id) cancelBookedViewing(db, { taskId: r.task_id, bookingId: r.booking_id, now: now() });
+      out.cancelled += n;
+    });
+    const gone = [];
+    let found = 0;
+    let stopped = false;
     for (const r of rows) {
+      if (inFlight.has(r.booking_id)) continue;
       out.checked += 1;
       const got = await gcal.get(r.event_id);
-      if (got.ok ? got.event?.status === 'cancelled' : got.gone === true) {
-        db.transaction(() => {
-          const n = prep("UPDATE viewing_bookings SET status = 'cancelled', updated = ? WHERE booking_id = ? AND status = 'booked'").run(now(), r.booking_id).changes;
-          if (n && r.task_id) cancelBookedViewing(db, { taskId: r.task_id, bookingId: r.booking_id, now: now() });
-          out.cancelled += n;
-        });
-        continue;
-      }
+      if (!got.ok && got.gone === true) { gone.push(r); continue; }
       if (!got.ok) {
         log({ level: 'warn', evt: 'viewing.reconcile_failed', bookingId: r.booking_id, code: got.code });
-        if (CALENDAR_DOWN.has(got.code)) break;
+        if (CALENDAR_DOWN.has(got.code)) { stopped = true; break; }
         continue;
       }
+      found += 1;
+      if (got.event?.status === 'cancelled') { cancel(r); continue; }
       const start = eventTime(got.event.start);
       const end = eventTime(got.event.end);
       if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || (start === r.start_ts && end === r.end_ts)) continue;
@@ -417,6 +465,14 @@ export function createViewing(deps = {}) {
         log({ level: 'warn', evt: 'viewing.reconcile_conflict', bookingId: r.booking_id, error: errClass(err) });
       }
     }
+    if (found > 0) {
+      held = null;
+      for (const r of gone) cancel(r);
+    } else if (gone.length && !stopped) {
+      held = 'not_found';
+      out.held = gone.length;
+      log({ level: 'warn', evt: 'viewing.reconcile_held', gone: gone.length });
+    }
     log({ evt: 'viewing.reconciled', ...out });
     return out;
   }
@@ -424,7 +480,8 @@ export function createViewing(deps = {}) {
   function health() {
     if (!configured) return { enabled: false, gcal: { ...NOT_CONFIGURED } };
     const g = gcal.health?.() ?? {};
-    return { enabled: enabled(), gcal: { configured: true, ok: g.ok === true, lastErrorCode: g.lastErrorCode ?? null } };
+    // The client's own failure first; else a held reconcile (the calendar answers, without our events).
+    return { enabled: enabled(), gcal: { configured: true, ok: g.ok === true && !held, lastErrorCode: g.lastErrorCode ?? held ?? null } };
   }
 
   return {
