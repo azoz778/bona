@@ -60,6 +60,33 @@ test("a client's own figure is never allowed back (it is not in any tool result)
   assert.deepEqual(checkReply('Within 2.5m, yes.', { toolResults: [] }).hits, [{ kind: 'amount' }]);
 });
 
+test('a comma decimal ("2,5 مليون") or dot thousands ("2.950.000") is read as one number; a grouping that cannot be read, next to a scale word or a currency, is an amount of unknown value', () => {
+  for (const [s, raw] of [
+    ['2,5 مليون', 2_500_000], ['٢,٥ مليون', 2_500_000], ['2,95 مليون ريال', 2_950_000], ['2,5m', 2_500_000], ['price 2,5 million', 2_500_000],
+    ['2.950.000 ريال', 2_950_000], ['SAR 6.700.000', 6_700_000], ['SAR 6,700,000.00', 6_700_000], ['6.700.000,00 €', 6_700_000],
+    ['2.950 مليون', 2_950_000], ['SAR 5,000', 5_000], ['سعرها 6,7 مليون', 6_700_000],
+  ]) assert.deepEqual(amounts(s), [raw], s);
+  for (const s of ['1,23,45 مليون', 'SAR 1.2.3', '12345,678 ريال']) assert.deepEqual(amounts(s), [null], s);
+  for (const s of ['29.11.2026', '1,2,3 bedrooms', 'version 1.2.3']) assert.deepEqual(amounts(s), [], s);
+  assert.deepEqual(amounts('+5 مليون'), [null], 'a scale word counts as read only when an amount used it, never because a digit is before it');
+  for (const text of ['تمام، 2,5 مليون', 'السعر 2,5 مليون', 'السعر ٢,٥ مليون', 'price 2,5 million', 'السعر 2,95 مليون ريال', 'It is 2,5m.', 'السعر 2.950.000 ريال']) {
+    assert.deepEqual(checkReply(text, { toolResults: [] }), { ok: false, hits: [{ kind: 'amount' }] }, text);
+  }
+  assert.deepEqual(checkReply('the villa is 6,700,000 and the other is 2,5 million', { toolResults: [villa] }).hits, [{ kind: 'amount' }]);
+  for (const text of ['the villa is 6.700.000 ريال', 'سعرها 6,7 مليون']) assert.deepEqual(checkReply(text, { toolResults: [villa] }), { ok: true, hits: [] }, text);
+});
+
+test('"SR" is riyals; a spelled-out thousand after a number word, or before a currency, is an amount of unknown value; idioms and areas are not', () => {
+  const [sr] = findAmounts('Rent SR 85,000 a year');
+  assert.deepEqual([sr.raw, sr.currency], [85_000, 'SAR']);
+  assert.equal(checkReply('Rent SR 85,000 a year', { toolResults: [] }).ok, false);
+  for (const s of ['الإيجار خمسمية ألف بالسنة', 'rent is five hundred thousand riyals', 'two hundred and fifty thousand', 'بمية وخمسين ألف', 'ألف ريال', 'thousand SAR']) {
+    assert.deepEqual(amounts(s), [null], s);
+    assert.equal(checkReply(s, { toolResults: [villa] }).ok, false, s);
+  }
+  for (const s of ['ألف مبروك', 'ألف شكر', 'a thousand thanks', 'خمسة آلاف متر مربع', '85 ألف متر', '1.5 مليون متر مربع']) assert.deepEqual(findAmounts(s), [], s);
+});
+
 test('earlier replies the guard passed (guarded=1 Dana rows) allow their amounts; anything else the caller does not hand in stays a hit', () => {
   const earlier = ['الفيلا الثانية سعرها 4,100,000 ريال.'];
   assert.deepEqual(checkReply('And the second one is SAR 4,100,000.', { toolResults: [], earlierReplies: earlier }), { ok: true, hits: [] });

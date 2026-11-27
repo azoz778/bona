@@ -43,6 +43,24 @@ test('prices, areas, listing and unit ids, years and times are untouched (only t
   assert.equal(minimise('٢٬٩٥٠٬٠٠٠ ريال'), '2,950,000 ريال');
 });
 
+test('a date is never joined into an ID or a phone (a date plus a time stays as written); a phone next to it is still masked', () => {
+  for (const s of ['2026-11-29 10:30', '29-11-2026 10:30', '29.11.2026 10:30', '2026.11.29 9:00', 'from 2026-11-29 to 2026-12-03']) assert.equal(minimise(s), s, s);
+  assert.equal(minimise('2026-11-29 0500000000'), '2026-11-29 [phone]');
+  assert.equal(minimise('on 29-11-2026 call 050 000 0000'), 'on 29-11-2026 call [phone]');
+});
+
+test('a phone glued to a comma is masked: only a group that can be part of a comma price (3 digits after a comma, 1-3 before one) counts as one', () => {
+  for (const [input, want] of [
+    ['0500000000,0500000001', '[phone],[phone]'],
+    ['my number 0500000000,3 bedrooms', 'my number [phone],3 bedrooms'],
+    ['+966500000000,2', '[phone],2'],
+    ['+966 500 000 000,2', '[phone],2'],
+    ['1000000000,2', '[id-number],2'],
+    ['budget 2,950,000 and 0500000000,thanks', 'budget 2,950,000 and [phone],thanks'],
+  ]) assert.equal(minimise(input), want, input);
+  for (const s of ['from 1,500,000 to 2,950,000', 'SAR 12,500,000', '1,234,567,890 riyals']) assert.equal(minimise(s), s, s);
+});
+
 test('names stay (booking needs them); anything that is not a string is the empty string', () => {
   assert.equal(minimise('I am Sara Example from Jeddah'), 'I am Sara Example from Jeddah');
   for (const v of [null, undefined, 42, {}, []]) assert.equal(minimise(v), '');

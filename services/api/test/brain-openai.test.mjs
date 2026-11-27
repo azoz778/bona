@@ -159,6 +159,7 @@ test('the prompt: nameless identity, the channel, the channel section only, the 
   assert.ok(wa.trimEnd().endsWith('FACTS-EN-BLOCK'));
   assert.equal(wa.includes('{{'), false);
   for (const s of ['إيش', 'أبغى', 'دحين', 'من عيوني', 'within your budget', 'request_human', 'search_properties', 'search_units']) assert.ok(wa.includes(s), s);
+  assert.match(wa, /A call, or a message that only says \[message\]: say you cannot take calls here and ask them to write/, 'the call-stub line (DESIGN §4.1, §4.4)');
   assert.doesNotMatch(wa.replace('never call yourself Dana or دانة', ''), /(?<![\p{L}])(?:dana|دانة)(?![\p{L}])/iu, 'no name in the prompt');
   assert.equal(systemPrompt({ template: assistant, route: 'wa', siteFacts: 'X', identity: identity() }), systemPrompt({ template: assistant, route: 'wa', siteFacts: 'X', identity: identity() }), 'byte-stable');
   const two = `{{identity}}\nRules.\n## On WhatsApp\nWA only.\n## On email\nMAIL only.\n## Site facts\n{{site_facts}}\n`;

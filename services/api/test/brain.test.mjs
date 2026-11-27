@@ -23,6 +23,8 @@ import { loadConfig } from '../lib/config.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { answerFrom, handoffDetails } from '../lib/dana-wa.mjs';
 import { extractActions } from '../lib/actions.mjs';
+import { createApp } from '../index.mjs';
+import { DEFAULT_ORIGINS } from '../lib/cors.mjs';
 
 const KEY = 'sk-test-not-a-real-key-000000000000';
 const LEAD = 'LEAD-20261127-0000aaaa';
@@ -164,6 +166,42 @@ test('the key never reaches cfg.env; a generic OPENAI_API_KEY (env or process) o
     assert.equal(fromEnv.calls.length + wrongName.calls.length, 0);
   } finally {
     if (before === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = before;
+  }
+});
+
+test("the key file is under the HOME of the configured env, never the machine's own: an app or test built with its own env never reads a real key", async () => {
+  // The VPS once T18.0 wrote the key: deploy.sh runs the full suite as the key's owner, so the
+  // machine's HOME holds a real bona-brain.env (here a fake one).
+  const home = fs.mkdtempSync(path.join(tmpRoot, 'home-'));
+  fs.mkdirSync(path.join(home, '.secrets'));
+  fs.writeFileSync(path.join(home, '.secrets', 'bona-brain.env'), `${KEY_NAME}=${KEY}\n`, { mode: 0o600 });
+  const before = process.env.HOME;
+  process.env.HOME = home;
+  const noCall = async () => { throw new Error('no call may be made'); };
+  const base = { fetchImpl: noCall, runTool: async () => '{}', siteFacts: { ok: () => true, block: (l) => `F-${l}`, version: () => 1 } };
+  const dataDir = fs.mkdtempSync(path.join(tmpRoot, 'app-'));
+  const db = openDb(':memory:');
+  let app = null;
+  try {
+    assert.equal(os.homedir(), home);
+    assert.equal(createBrain(base).configured, false, 'no cfg: no key file at all');
+    assert.equal(createBrain({ ...base, cfg: loadConfig({ env: {}, ids: {}, home }) }).configured, false, 'an injected env without HOME');
+    assert.equal(createBrain({ ...base, cfg: loadConfig({ env: { HOME: home }, ids: {}, home }) }).configured, true, 'the service env (the unit sets HOME): the key is read');
+    assert.equal(createBrain({ ...base, home }).configured, true, 'deps.home');
+    app = createApp({
+      config: {
+        port: 0, host: '127.0.0.1', siteUrl: SITE, publicApi: 'https://api.example.com', dataDir, inventoryFile: WORKTREE_LISTINGS,
+        origins: DEFAULT_ORIGINS, toolToken: 'a'.repeat(32), retellApiKey: 'test', retellMock: true, chatAgentId: 'agent_chat', voiceAgentId: 'agent_voice',
+        maxBodyBytes: 16 * 1024, chatRatePerMin: 30, tokenRatePerMin: 6, toolRatePerMin: 600, toolAuthFailRatePerMin: 10, allowQueryToken: false,
+        maxChatsPerDay: 300, maxCallsPerDay: 60, maxTurnsPerSession: 40, dashCookieDays: 30, env: {}, ids: {}, version: '1.0.0', trustedProxies: [],
+      },
+      db, inventory, fetchImpl: noCall, probeRetell: async () => 'ok', log: () => {},
+    });
+    assert.equal(app.brain.configured, false, 'createApp with a test config (env: {}) builds no configured brain');
+  } finally {
+    if (app) { await app.dana.stop(); await app.dashboard.auth.flush(); }
+    db.close();
+    if (before === undefined) delete process.env.HOME; else process.env.HOME = before;
   }
 });
 
@@ -488,6 +526,22 @@ test('the breaker: 3 turns that fail on every model in 10 min open it for 5 min 
   assert.equal(h.brain.health().ok, true);
 });
 
+test('a turn that throws during the half-open trial frees the trial: the next turn is the trial again, never a stuck breaker', async () => {
+  let throwing = false;
+  const h = harness({ backupMode: 'handover', script: [http(500, {}), http(500, {}), http(500, {}), reply('Draft.'), reply('Fine now.')] });
+  const brain = createBrain({ ...h.deps, guard: { checkReply: () => { if (throwing) throw new Error('guard bug'); return { ok: true, hits: [] }; } } });
+  for (let i = 0; i < 3; i += 1) { assert.equal((await brain.turn(turnArgs())).code, 'down'); h.advance(MIN); }
+  h.advance(5 * MIN);
+  throwing = true;
+  assert.deepEqual(await brain.turn(turnArgs()), { ok: false, code: 'bad_response' });
+  assert.equal(h.calls.length, 4, 'the trial made its call, then the guard threw');
+  throwing = false;
+  const r = await brain.turn(turnArgs());
+  assert.equal(r.ok, true, 'the next turn is the trial again, not down with no call');
+  assert.equal(h.calls.length, 5);
+  assert.equal(brain.ops().breaker, false, 'the trial worked: closed');
+});
+
 test('3 bad responses in an hour raise one brain_bug alert', async () => {
   const h = harness({ backupMode: 'handover', script: [reply(''), reply(''), reply(''), reply('')] });
   for (let i = 0; i < 4; i += 1) await h.brain.turn(turnArgs());
@@ -625,6 +679,20 @@ test('amounts in earlier guarded replies of this lead are allowed (the caller ha
   assert.equal(h.calls.length, 1);
 });
 
+test('the guard allows only this turn\'s tool results and the earlierReplies handed in, never a priced history row (team or assistant)', async () => {
+  const h = harness({ script: [reply('It is SAR 4,100,000.'), reply('Then SAR 3,900,000.')] });
+  const r = await h.brain.turn(turnArgs({
+    history: [
+      { role: 'user', content: 'and the price?' },
+      { role: 'team', content: 'Final price SAR 4,100,000' },
+      { role: 'assistant', content: 'Unit price SAR 3,900,000' },
+    ],
+  }));
+  assert.deepEqual(r, { ok: false, code: 'guard' }, 'a negotiated team price and a pre-guard Dana price are both hits');
+  assert.equal(h.calls.length, 2, 'one repair call, then guard');
+  assert.deepEqual(h.calls[1].body.messages.at(-1), { role: 'system', content: REPAIR_NOTE });
+});
+
 /* ---------------- the classifier (DESIGN-brain §7) ---------------- */
 
 function promptDirWithClassifier(text = 'Classify the mail. Answer JSON only.') {
@@ -682,6 +750,38 @@ test('classify fails closed: garbage, a class outside the enum, a refusal, an er
   const broke = harness({ promptDir: dir });
   broke.team.setSetting('brain_usd_day', '2026-11-26:20000000');
   assert.deepEqual(await broke.brain.classify(MAIL), { error: 'budget' });
+});
+
+test('after the breaker\'s 5 minutes a mail classification is the half-open trial (WhatsApp may be quiet): a good answer closes the breaker, a down one re-opens it', async () => {
+  const h = harness({ backupMode: 'handover', promptDir: promptDirWithClassifier(), script: [http(500, {}), http(500, {}), http(500, {}), http(503, {}), reply('{"class":"client","wants":"x"}'), reply('Back.')] });
+  for (let i = 0; i < 3; i += 1) { assert.equal((await h.brain.turn(turnArgs())).code, 'down'); h.advance(MIN); }
+  assert.deepEqual(await h.brain.classify(MAIL), { error: 'down' }, 'open: no call');
+  assert.equal(h.calls.length, 3);
+  h.advance(5 * MIN);
+  assert.deepEqual(await h.brain.classify(MAIL), { error: 'down' }, 'the trial failed');
+  assert.equal(h.calls.length, 4);
+  assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'down' });
+  assert.equal(h.calls.length, 4, 'open again for 5 minutes');
+  h.advance(5 * MIN);
+  assert.deepEqual(await h.brain.classify(MAIL), { class: 'client', wants: 'x' }, 'the trial worked');
+  assert.equal(h.brain.ops().breaker, false, 'closed');
+  assert.equal((await h.brain.turn(turnArgs())).ok, true);
+  assert.equal(h.calls.length, 6, 'the next turn calls at once');
+});
+
+test('masking comes before every clip: a phone across the 300-character row cut, the 4,000-character batch cut or the 600-character mail cut sends no digit', async () => {
+  const row = `${'x'.repeat(293)} 0500000000 please call`;
+  const history = historyFromInbox([{ key_id: 'k1', direction: 'in', text: row }]);
+  assert.equal(/\d/.test(history[0].content), false, 'historyFromInbox masks, then clips');
+  const h = harness({ script: [reply('Hello.')] });
+  await h.brain.turn(turnArgs({ history: [{ role: 'user', content: row }], batchText: `${'y'.repeat(3995)} 0500000001 thanks` }));
+  const m = h.calls[0].body.messages;
+  assert.equal(m[1].role, 'user');
+  assert.equal(/\d/.test(m[2].content), false, `no digit of the batch phone: …${m[2].content.slice(-12)}`);
+  const mail = harness({ promptDir: promptDirWithClassifier(), script: [reply('{"class":"client","wants":"x"}')] });
+  await mail.brain.classify({ ...MAIL, fromName: `${'n'.repeat(75)} 0500000002`, subject: `${'s'.repeat(195)} 0500000003`, text: `${'z'.repeat(595)} 0500000004` });
+  const user = mail.calls[0].body.messages[1].content;
+  for (const d of ['05000', '00000', '0500000002', '0500000003', '0500000004']) assert.equal(user.includes(d), false, d);
 });
 
 /* ---------------- health, ops, journal ---------------- */

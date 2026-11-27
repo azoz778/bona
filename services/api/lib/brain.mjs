@@ -11,6 +11,11 @@
  * `configured: false` and every turn is `off`. A generic OPENAI_API_KEY anywhere is ignored, and
  * the key goes to no host but a PROVIDERS one.
  *
+ * `~` is the HOME of the configured environment (`cfg.env.HOME`; the bona-api unit sets it, and
+ * lib/env.mjs finds ~/.secrets through the same HOME), never `os.homedir()` on its own: an app or
+ * a test built with its own env (`env: {}`) reads no real key. deploy.sh runs the full suite on
+ * the VPS as the key's owner before every restart, so a test must never pick the key up.
+ *
  *   turn({ route:'wa'|'mail'|'web', leadId, language:'ar'|'en', autoMode, history, batchText, leadFacts,
  *          turnContext:{ firstReply }, toolNames, earlierReplies, deadlineMs = 40 000 })
  *     → { ok:true, model, backup, rounds, ms, usd, usage:{in, cached, out, reasoning},
@@ -30,9 +35,14 @@
  *
  * State (§4.1): quota/auth → `out` for 10 min (no call; the next turn after that tries; the free
  * GET /v1/models probe clears `auth` early), with the restart-safe `brain_out` marker and one
- * `brain_out` alert. 3 rate limits in 5 min → the main model cools down for 60 s (turns start on
- * the backup). 3 turns that fail on every model in 10 min (down/timeout) → the breaker opens for
- * 5 min, then one trial. 3 bad responses in an hour → one `brain_bug` alert.
+ * `brain_out` alert. After a restart with the marker set, the next turn tries at once, but
+ * `health().ok` stays false until a turn or a classification works: the marker is a bare instant
+ * (team.mjs), so it cannot say whether the outage was `auth` (a probe would prove the fix) or
+ * `quota` (a probe proves nothing), and a key swap plus restart (§2.3) stays red until a client
+ * writes (T14/T18: the Kuma "Bona AI" monitor). 3 rate limits in 5 min → the main model cools
+ * down for 60 s (turns start on the backup). 3 turns that fail on every model in 10 min
+ * (down/timeout) → the breaker opens for 5 min, then one trial (a WhatsApp turn or, when WhatsApp
+ * is quiet, a mail classification). 3 bad responses in an hour → one `brain_bug` alert.
  *
  * Money (§2.4): every response's usage × lib/brain/prices.mjs → the restart-safe markers
  * `brain_usd_day` (`YYYY-MM-DD:<micro-USD>`) and `brain_usd_month` (`YYYY-MM:<micro-USD>`),
@@ -45,7 +55,6 @@
  * brain.turn {leadId, model, backup, rounds, tools, ms, usd, code}, brain.guard {leadId, kind},
  * brain.bad_tool {name}, brain.probe {ok, code}. `turn()` and `classify()` never reject.
  */
-import os from 'node:os';
 import path from 'node:path';
 import { loadEnvFile } from './env.mjs';
 import { BRAIN_DEFAULTS } from './config.mjs';
@@ -111,10 +120,11 @@ const textOrMedia = (m) => (typeof m?.text === 'string' && m.text.trim() ? m.tex
  * The conversation so far as role turns, from the inbox rows (dana-wa's recentContext rule: the
  * last 10 rows, each at most 300 characters, together at most 3,000, the newest kept). Client
  * rows are `user`, Dana's `assistant`, every other outbound row (staff, the owner's number) `team`.
+ * Each row is masked before it is clipped, so a phone across the cut never leaves part of it.
  */
 export function historyFromInbox(rows, { exclude = new Set() } = {}) {
   const list = (Array.isArray(rows) ? rows : []).filter((m) => m && !exclude.has(m.key_id)).slice(-CONTEXT_ROWS);
-  const turns = list.map((m) => ({ role: m.direction === 'in' ? 'user' : m.sender_kind === 'dana' ? 'assistant' : 'team', content: oneLine(textOrMedia(m), ROW_CHARS) }));
+  const turns = list.map((m) => ({ role: m.direction === 'in' ? 'user' : m.sender_kind === 'dana' ? 'assistant' : 'team', content: oneLine(defaultMinimise(String(textOrMedia(m))), ROW_CHARS) }));
   const size = () => turns.reduce((n, t) => n + t.content.length, 0);
   while (turns.length > 1 && size() > LIMITS.historyChars) turns.shift();
   return turns;
@@ -147,7 +157,9 @@ const percentile = (values, p) => {
  * @param {() => number} [deps.now]
  * @param {(e: object) => void} [deps.log]
  * @param {(code: string, meta: object) => void} [deps.alert]  brain_out / brain_spend / brain_bug (T14 wires it)
- * @param {string} [deps.keyFile]  default ~/.secrets/bona-brain.env
+ * @param {string} [deps.keyFile]  default <HOME>/.secrets/bona-brain.env, HOME = deps.home, else cfg.env.HOME
+ *   (never os.homedir(): no HOME in the configured env, no key)
+ * @param {string} [deps.home]
  * @param {string} [deps.baseUrl]  default https://api.openai.com/v1; refused unless a PROVIDERS host
  * @param {object} [deps.siteFacts]  default createSiteFacts over the folder of cfg.inventoryFile
  * @param {string} [deps.promptDir]  default services/api/prompts
@@ -160,7 +172,9 @@ export function createBrain(deps = {}) {
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), minimise = defaultMinimise, guard = { checkReply }, prices = { costMicroUsd: defaultCost },
   } = deps;
   const limits = { ...LIMITS, ...(deps.limits ?? {}) };
-  const keyFile = deps.keyFile ?? path.join(deps.home ?? os.homedir(), '.secrets', KEY_FILE_NAME);
+  const envHome = typeof cfg.env?.HOME === 'string' && path.isAbsolute(cfg.env.HOME) ? cfg.env.HOME : null;
+  const home = deps.home ?? envHome;
+  const keyFile = deps.keyFile ?? (home ? path.join(home, '.secrets', KEY_FILE_NAME) : null);
   const baseUrl = String(deps.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
   const models = {
     main: cfg.brainModel ?? BRAIN_DEFAULTS.model,
@@ -183,7 +197,7 @@ export function createBrain(deps = {}) {
   const setupFailure = (() => {
     if (!providerFor(`${baseUrl}/`)) return 'host';
     if (typeof fetchImpl !== 'function' || typeof runTool !== 'function') return 'deps';
-    key = readKey(keyFile);
+    key = keyFile ? readKey(keyFile) : null;
     if (!key) return 'key';
     prompts = loadPrompts({ dir: deps.promptDir ?? PROMPT_DIR });
     if (typeof prompts.assistant !== 'string') return 'prompt';
@@ -452,6 +466,18 @@ export function createBrain(deps = {}) {
     const t = now();
     state.turns = [...state.turns.filter((x) => t - x.at < DAY_MS), { at: t, ...entry }].slice(-5000);
   }
+  /**
+   * The end of the half-open trial (a turn or a classification): down/timeout open the breaker
+   * for another 5 min, any answer from the provider closes it, and `undefined` (the trial threw
+   * before it learnt anything) only frees it, so the next caller tries again.
+   */
+  function endTrial(code) {
+    const b = state.breaker;
+    b.trial = false;
+    if (code === undefined) return;
+    if (code === 'down' || code === 'timeout') b.openUntil = now() + limits.breakerOpenMs;
+    else { b.open = false; b.fails = []; }
+  }
   /** After a turn that called a model: the out state, the breaker, the bug count. */
   function settle(code, wasTrial) {
     const t = now();
@@ -466,9 +492,7 @@ export function createBrain(deps = {}) {
     if (BACKUP_CODES.has(code) || OUT_CODES.has(code)) state.lastFailedAllAt = t;
     if (code === 'bad_response') noteBug();
     if (wasTrial) {
-      b.trial = false;
-      if (code === 'down' || code === 'timeout') b.openUntil = t + limits.breakerOpenMs;
-      else { b.open = false; b.fails = []; }
+      endTrial(code);
       return;
     }
     if (code === 'down' || code === 'timeout') {
@@ -522,18 +546,26 @@ export function createBrain(deps = {}) {
     if (overBudget()) return end(fail('budget'));
     if (state.outCode !== null && started < state.outUntil) return end(fail(state.outCode));
     const b = state.breaker;
-    let wasTrial = false;
+    let trial = null;
     if (b.open) {
       if (started < b.openUntil || b.trial) return end(fail('down'));
-      b.trial = true;
-      wasTrial = true;
+      trial = {};
+      b.trial = trial;
     }
+    try {
+      return await modelTurn(input, { route, language, system, leadId, logLead, started, end, wasTrial: trial !== null });
+    } finally {
+      // A throw before settle() (a bug of ours, never the provider) frees the trial, so the next
+      // turn is the trial again instead of `down` with no call until a restart.
+      if (trial && b.trial === trial) endTrial(undefined);
+    }
+  }
+
+  /** The part of a turn that may call a model, once runTurn's gates passed. */
+  async function modelTurn(input, { route, language, system, leadId, logLead, started, end, wasTrial }) {
     const answerBackup = backupMode === 'answer' && Boolean(models.backup) && models.backup !== models.main;
     const startOnBackup = inCooldown(started);
-    if (startOnBackup && !answerBackup) {
-      if (wasTrial) b.trial = false;
-      return end(fail('rate'));
-    }
+    if (startOnBackup && !answerBackup) return end(fail('rate'));
 
     const turnMs = Number.isFinite(input.deadlineMs) && input.deadlineMs > 0 ? Math.min(input.deadlineMs, limits.turnMs) : limits.turnMs;
     const offeredTools = toolsFor(route, Array.isArray(input.toolNames) ? input.toolNames : undefined);
@@ -548,7 +580,8 @@ export function createBrain(deps = {}) {
       base: [
         { role: 'system', content: system },
         ...historyMessages(input.history),
-        { role: 'user', content: minimise(clientTurn({ batchText: clipChars(input.batchText, limits.batchChars), leadFacts: input.leadFacts })) },
+        // Masked before the clip, so a phone across the 4,000-character cut leaves no digit.
+        { role: 'user', content: minimise(clientTurn({ batchText: clipChars(minimise(String(input.batchText ?? '')), limits.batchChars), leadFacts: input.leadFacts })) },
         { role: 'system', content: contextNote({ now: started, route, firstReply: Boolean(input.turnContext?.firstReply), autoMode: Boolean(input.autoMode) }) },
       ],
     };
@@ -587,18 +620,30 @@ export function createBrain(deps = {}) {
 
   /* ---------------- the mail classifier (DESIGN-brain §7): no tools, no site facts, fail closed ---------------- */
   async function classify(input = {}) {
+    const b = state.breaker;
+    let trial = null;
+    let trialCode;
     try {
       if (!configured || typeof prompts.classify !== 'string' || !prompts.classify.trim()) return { error: 'off' };
       if (overBudget()) return { error: 'budget' };
       const t = now();
       if (state.outCode !== null && t < state.outUntil) return { error: state.outCode };
-      if (state.breaker.open) return { error: 'down' };
-      const user = minimise(`From: ${oneLine(input.fromName, 80)} (${oneLine(input.fromDomain, 120)})\nSubject: ${oneLine(input.subject, 200)}\n\n${clipChars(input.text ?? input.text600, 600)}`);
+      if (b.open) {
+        // Half-open after the 5 min: this call may be the one trial (once email is live, WhatsApp
+        // may be quiet for hours; without this every mail would stay listed after a recovery).
+        if (t < b.openUntil || b.trial) return { error: 'down' };
+        trial = {};
+        b.trial = trial;
+      }
+      // Each part is masked before it is clipped, so a phone across a cut leaves no digit.
+      const masked = (v) => minimise(String(v ?? ''));
+      const user = minimise(`From: ${oneLine(masked(input.fromName), 80)} (${oneLine(masked(input.fromDomain), 120)})\nSubject: ${oneLine(masked(input.subject), 200)}\n\n${clipChars(masked(input.text ?? input.text600), 600)}`);
       const ctx = {
         route: 'classify', tools: [], cacheKey: 'bona-classify-v1', responseFormat: CLASSIFY_FORMAT, deadline: t + limits.callMs,
         safetyId: typeof input.senderKey === 'string' && input.senderKey ? safetyIdentifier(`mail:${input.senderKey.toLowerCase()}`) : undefined,
       };
       const res = await call(models.classify, ctx, [{ role: 'system', content: prompts.classify.trim() }, { role: 'user', content: user }], undefined, null, { noRetry: true });
+      trialCode = res.ok ? null : res.code;
       if (!res.ok) {
         if (OUT_CODES.has(res.code)) enterOut(res.code);
         return { error: res.code };
@@ -611,6 +656,8 @@ export function createBrain(deps = {}) {
       return { class: parsed.class, wants: oneLine(parsed.wants, 120) };
     } catch {
       return { error: 'bad_response' };
+    } finally {
+      if (trial && b.trial === trial) endTrial(trialCode);
     }
   }
 
