@@ -828,16 +828,30 @@ test('every form of a property word counts on its own, singular and plural, with
   }
 });
 
+/** The privacy text of the shared rule: the rollback paragraphs (DESIGN §13.2, PR-D1r), not the live page. */
+const sharedNumberText = () => {
+  const text = JSON.parse(fs.readFileSync(new URL('../../deploy/vps/rollback/privacy-shared-number.json', import.meta.url), 'utf8'));
+  assert.equal(text.section, 'whatsapp-conversations');
+  return text;
+};
+
 test('the property words are strong real-estate terms only, and the privacy page names exactly them (D17)', () => {
   assert.deepEqual(PROPERTY_WORD_FORMS, [
     'villa', 'apartment', 'rent', 'for sale', 'real estate', 'property', 'duplex', 'penthouse', 'townhouse',
     'فيلا', 'شقة', 'إيجار', 'للبيع', 'عقار', 'دوبلكس', 'بنتهاوس', 'تاون هاوس',
   ]);
   assert.ok(Object.isFrozen(PROPERTY_WORD_FORMS));
-  // The page promises that only these words keep a chat (src/data/privacy.json): it lists
-  // every one of them, in both languages, and none of the words the code no longer counts.
-  const policy = JSON.parse(fs.readFileSync(new URL('../../../src/data/privacy.json', import.meta.url), 'utf8'));
-  const s = policy.sections.find((x) => x.id === 'whatsapp-conversations');
+  // The privacy text the shared rule needs (services/deploy/vps/rollback/privacy-shared-number.json:
+  // the paragraphs a rollback to the personal number puts back on the page, DESIGN §13.2) promises
+  // that only these words keep a chat: it lists every one of them, in both languages, and none of
+  // the words the code no longer counts. Bona's own number (D1) keeps no such chats, so the live
+  // page no longer has the paragraph; the rule and its text stay in step here. That holds while
+  // own_inbox is off too (`#dana live off`), and before the identity check passes: while the
+  // configured number is Bona's own (ownNumberFrom 'instance'), the poller keeps no candidate row
+  // for a chat with a phone and deletes the open ones already there (PR #87 review rounds 1-2;
+  // PLAN T06, T07, DESIGN §3.1). Such rows exist only on the personal number, whose privacy page
+  // is this text (PR-D1r).
+  const s = sharedNumberText();
   const exception = { en: s.body.en.find((p) => p.startsWith('There is one narrow exception')), ar: s.body.ar.find((p) => p.startsWith('وهناك استثناء محدود')) };
   for (const locale of ['en', 'ar']) {
     assert.ok(exception[locale], `${locale}: the exception paragraph`);
@@ -852,8 +866,7 @@ test('the property words are strong real-estate terms only, and the privacy page
 test('the privacy page says what a property document is: a brochure, or another kind only with a property word; any kind on a document the owner sends (D17)', () => {
   // The poller's rule (wa-poller.mjs candidateWordsOf, mentionsPropertyDocument): a plan, a
   // price list or a booklet on its own keeps nothing, so the page must not suggest it does.
-  const policy = JSON.parse(fs.readFileSync(new URL('../../../src/data/privacy.json', import.meta.url), 'utf8'));
-  const s = policy.sections.find((x) => x.id === 'whatsapp-conversations');
+  const s = sharedNumberText();
   const en = s.body.en.find((p) => p.startsWith('There is one narrow exception'));
   const ar = s.body.ar.find((p) => p.startsWith('وهناك استثناء محدود'));
   assert.doesNotMatch(en, /such as a brochure, a floor plan or a price list/, 'a floor plan or a price list alone does not keep a chat');

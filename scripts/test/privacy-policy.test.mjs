@@ -3,19 +3,40 @@
 // for a missing Arabic body, so a broken entry would ship as a hole nobody sees in review.
 // The WhatsApp conversations section is what Phase 2 of the team inbox (2026-09-27 design
 // §4.6) has to say before a single transcript is stored: what is kept, who reads it, for
-// how long, where other copies stay, and how to have it deleted. Dana is left out of it on
-// purpose until she answers on WhatsApp (Phase 4) — a policy that promises what the service
-// does not do is as wrong as one that hides what it does. A dated line in *Changes* flags a
-// material change for the 30 days the page promises and is then removed: a test that asks
-// for one asks only until its 30 days are up, and the pointer test checks the page without
-// them too.
+// how long, where other copies stay, and how to have it deleted. Since D1 (the go-live of
+// Bona's AI assistant on Bona's own number, design 2026-11-26 §10) it also says what that
+// assistant does, with no personal name, and which AI provider produces its replies — a
+// policy that promises what the service does not do is as wrong as one that hides what it
+// does. A dated line in *Changes* flags a material change for the 30 days the page promises
+// and is then removed: a test that asks for one asks only until its 30 days are up, and the
+// pointer test checks the page without them too.
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const read = (rel) => JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), 'utf8'));
 const policy = read('../../src/data/privacy.json');
 const site = read('../../src/data/site.json');
+const faq = read('../../src/data/faq.json');
+// The text a rollback to the shared number (the owner's personal number) puts back in the WhatsApp
+// conversations section: the old first two paragraphs, word for word (DESIGN §13.2, PR-D1r).
+const rollback = read('../../services/deploy/vps/rollback/privacy-shared-number.json');
+/**
+ * The calendar day at `ms` in Riyadh (+03:00 all year, no DST): the day the page's readers count a dated
+ * line's 30 days in. Every live check of a dated Changes line asks for it by this day, not by the UTC one.
+ */
+const riyadhDay = (ms = Date.now()) => new Date(ms + 3 * 3_600_000).toISOString().slice(0, 10);
+const today = () => riyadhDay();
+const plusDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+// The day D1 merged, written once. Its Changes line (EN and AR) carries this date, the version dates at
+// the top of privacy.json and faq.json are on or after it, and the line stays for 30 days from it. The
+// branch carries a placeholder: at the go-live rebase this constant, both `updated` fields and both
+// Changes lines move to the merge day in one commit (PLAN §3 step 9b).
+const D1_RELEASED = '2026-11-27';
 const section = (id) => policy.sections.find((s) => s.id === id);
 const body = (s, locale) => s.body[locale].join(' ');
 
@@ -50,8 +71,12 @@ test('the WhatsApp conversations section says what is stored, who reads it, for 
   assert.match(en, /five years after its last message/);
   assert.match(en, /deleted automatically/);
   // The copies bona.db retention does not govern are named, not hidden, and the one Bona
-  // runs itself (Evolution, on its own server) is not passed off as WhatsApp's.
-  assert.match(en, /does not reach two other copies/);
+  // runs itself (Evolution, on its own server) is not passed off as WhatsApp's. Since D1 the
+  // pre-update backups are the third (review of PR #87, round 4): time-limited, and the
+  // paragraph sends the reader to the retention sentence that gives their limit.
+  assert.match(en, /does not reach three other copies/);
+  assert.doesNotMatch(en, /two other copies/);
+  assert.match(en, /and a backup copy of our records can still hold the conversation for up to 30 days after it is deleted \(see “How long we keep it” below\)\./);
   assert.match(en, /the WhatsApp gateway server that Bona runs for this number keeps its own copy/);
   assert.doesNotMatch(en, /WhatsApp service our number runs on/);
   assert.match(en, /on our phones, in WhatsApp, under WhatsApp’s own terms/);
@@ -66,7 +91,9 @@ test('the WhatsApp conversations section says what is stored, who reads it, for 
   assert.match(ar, /لوحة خاصة/);
   assert.match(ar, /خمس سنوات/);
   assert.match(ar, /تلقائي/);
-  assert.match(ar, /ولا يشمل هذا الحذف التلقائي نسختين أخريين/);
+  assert.match(ar, /ولا يشمل هذا الحذف التلقائي ثلاث نسخ أخرى/);
+  assert.doesNotMatch(ar, /نسختين أخريين/);
+  assert.match(ar, /وقد تبقى أيضاً في نسخة احتياطية من سجلاتنا مدةً تصل إلى ثلاثين يوماً بعد حذفها \(انظر «مدة الاحتفاظ بالبيانات» أدناه\)\./);
   assert.match(ar, /فخادم بوابة واتساب الذي تشغّله بونا لهذا الرقم يحتفظ بنسخته الخاصة/);
   assert.doesNotMatch(ar, /خدمة واتساب التي يعمل عليها رقمنا/);
   assert.match(ar, /على هواتفنا داخل واتساب، وفق شروط واتساب/);
@@ -120,56 +147,616 @@ test('what the WhatsApp conversations section and a dated change line point to i
   checkPointers(later);
 });
 
-test('Dana is named in that section now that she answers on WhatsApp (Phase 4, switched on 2026-10-01)', () => {
+// ---- D1: Bona's AI assistant on Bona's own number (design 2026-11-26 §10; brain/DESIGN-brain §6.3, §11.3) ----
+// What the code does (lib/dana-wa.mjs, lib/brain.mjs): it answers every enquiry chat on Bona's own
+// number, with no personal name; its first message says it is an AI; the chat and the enquiry facts
+// (never the number) go to OpenAI; it hands over on request, on an offer or on what it cannot do,
+// and keeps answering about published homes until a person writes; a team member writing quiets it
+// for 24 hours; a stop, data or deletion request stops it in that chat and a person takes over.
+
+// Whole words only ("Sadana" is a listing). Arabic writes و ف ب ل ك and ال onto the word itself.
+const NAME = {
+  en: /\bDana\b/i,
+  ar: /(?<![\p{L}\p{M}])(?:[وفبلك]?(?:ال)?)دان[ةا](?![\p{L}\p{M}])/u,
+};
+const named = (text) => NAME.en.test(text) || NAME.ar.test(text);
+/** The paragraph of the WhatsApp conversations section that says what the AI assistant does. */
+const aiParagraph = (locale) => section('whatsapp-conversations').body[locale].find((p) => p.includes(
+  locale === 'en' ? 'answers messages to our WhatsApp number at any hour' : 'على الرسائل الواردة إلى رقم واتساب بونا في أي وقت'));
+/** The sharing paragraph that lists the service providers. */
+const providersParagraph = (locale) => section('sharing').body[locale].find((p) => p.startsWith(
+  locale === 'en' ? 'Service providers include' : 'تشمل الجهات المقدّمة للخدمة'));
+
+test('the AI assistant paragraph (D1): no name, OpenAI, the hand-over, the 24 hours and the stop rules', () => {
   const s = section('whatsapp-conversations');
   assert.ok(s, 'the section is missing');
   const en = body(s, 'en');
   const ar = body(s, 'ar');
-  // What the system does (lib/dana-wa.mjs): she answers new messages when no human wrote in
-  // the chat for 24 h, discloses she is an AI, sends the chat and the enquiry facts (never the
-  // number) to Retell and its providers, quotes only published prices, hands over on request.
-  assert.match(en, /When nobody on our team has written in your WhatsApp chat with us in the last 24 hours, Dana, our AI assistant, may answer your new messages from our number/);
-  assert.match(en, /Her first message identifies her as an AI assistant/);
-  assert.match(en, /our earlier replies in it and what we hold about your enquiry \(such as your name, interest, budget and district\) are sent to Retell and the AI providers it uses/);
+  assert.ok(aiParagraph('en') && aiParagraph('ar'), 'the AI assistant paragraph in both languages');
+  assert.equal(s.body.en.indexOf(aiParagraph('en')), s.body.en.length - 1, 'it closes the section');
+  assert.match(en, /answers messages to our WhatsApp number at any hour/);
+  assert.match(en, /It is an AI system, not a person\. Its first message identifies it as an AI assistant/);
+  assert.match(en, /our earlier replies in it and what we hold about your enquiry \(such as your name, interest, budget and district\) are sent to OpenAI, the AI provider that produces the assistant’s replies, which processes them outside Saudi Arabia/);
   assert.match(en, /only prices published on this site/);
-  assert.match(en, /hands the conversation to a team member when you ask to speak to a person, ask to view a home or make an offer/);
+  assert.match(en, /when you ask to speak to a person, make an offer or ask for something it cannot do; until a team member writes, it can still answer questions about our published homes/);
+  assert.match(en, /It does not answer in a chat for 24 hours after a member of our team last wrote in it/);
+  assert.match(en, /If you ask it to stop, or ask about your data or for it to be deleted, a person takes over and it stops answering in your chat/);
   assert.match(en, /deleted from our records/);
-  assert.match(ar, /إذا لم يكتب أحد من فريقنا في محادثتك معنا عبر واتساب خلال الساعات الأربع والعشرين الماضية، فقد تردّ دانة، مساعدتنا التي تعمل بالذكاء الاصطناعي، على رسائلك الجديدة من رقمنا/);
+  assert.doesNotMatch(en, /ask to view a home/, 'a viewing is booked now, not handed over');
+  assert.match(ar, /على الرسائل الواردة إلى رقم واتساب بونا في أي وقت/);
   assert.match(ar, /في أول رسالة منها أنها مساعدة تعمل بالذكاء الاصطناعي/);
-  assert.match(ar, /وردودنا السابقة فيها وما لدينا عن استفسارك \(كاسمك واهتمامك وميزانيتك والحي\)/);
-  assert.match(ar, /إلى Retell ومزوّدي الذكاء الاصطناعي الذين تستعين بهم/);
+  assert.match(ar, /وردودنا السابقة فيها وما لدينا عن استفسارك \(كاسمك واهتمامك وميزانيتك والحي\) إلى OpenAI، مزوّد الذكاء الاصطناعي الذي يُعدّ ردود المساعدة، ويعالجها خارج المملكة/);
   assert.match(ar, /الأسعار المنشورة في هذا الموقع/);
-  assert.match(ar, /تُحيل المحادثة إلى أحد أعضاء الفريق إذا طلبت التحدث إلى شخص، أو طلبت معاينة، أو قدّمت عرضاً/);
+  assert.match(ar, /أو طلبت ما لا يمكنها القيام به؛ وإلى أن يكتب أحد أعضاء الفريق، يمكنها أن تواصل الإجابة عن أسئلتك حول منازلنا المنشورة/);
+  assert.match(ar, /ولا تردّ في محادثةٍ خلال الساعات الأربع والعشرين التي تلي آخر رسالة كتبها فيها أحد أعضاء فريقنا/);
+  assert.match(ar, /تولّى أمرك أحد أعضاء فريقنا وتوقفت المساعدة الذكية عن الرد في محادثتك/);
   assert.match(ar, /لحذف تلك الرسائل من سجلاتنا/);
-  assert.doesNotMatch(body(s, 'ar') + body(section('ai-concierge'), 'ar'), /دانا/, 'one spelling of her name, the one clients see');
+  assert.doesNotMatch(ar, /أو طلبت معاينة/);
+  assert.doesNotMatch(en + ar, /Retell/, 'the WhatsApp replies are produced with OpenAI (D1)');
+  assert.doesNotMatch(body(s, 'ar') + body(section('ai-concierge'), 'ar'), /دانا/, 'no other spelling of the old name either');
   const sharing = section('sharing');
-  assert.match(body(sharing, 'en'), /Retell and its AI service providers for the concierge and for Dana’s WhatsApp replies/);
-  assert.match(body(sharing, 'ar'), /للمساعد ولردود دانة عبر واتساب/);
-  // The concierge section no longer sells WhatsApp as the AI-free route: Dana may answer there too.
+  assert.match(body(sharing, 'en'), /Google for analytics and for Bona’s viewing calendar; Retell and its AI service providers for the website concierge; and OpenAI for the AI phone assistant and for our AI assistant’s WhatsApp replies\./);
+  assert.match(body(sharing, 'en'), /OpenAI for the AI phone assistant/);
+  assert.match(body(sharing, 'ar'), /وGoogle للتحليلات ولتقويم معاينات بونا/);
+  assert.match(body(sharing, 'ar'), /وRetell ومزوّدي خدمات الذكاء الاصطناعي لديها لمساعدة الموقع الذكية/);
+  assert.match(body(sharing, 'ar'), /OpenAI للمساعدة الهاتفية بالذكاء الاصطناعي ولردود مساعدتنا الذكية عبر واتساب/);
+  // The website concierge stays on Retell until D3 (PLAN T28), with no name; WhatsApp is no AI-free route.
   const concierge = section('ai-concierge');
-  assert.match(body(concierge, 'en'), /on WhatsApp, Dana may also answer when nobody on our team has written in the chat in the last 24 hours/);
-  assert.match(body(concierge, 'ar'), /وعلى واتساب قد تردّ دانة أيضاً إذا لم يكتب أحد من فريقنا/);
+  assert.match(body(concierge, 'en'), /Our website’s AI concierge sends your messages or voice, page context and language through Bona’s service to Retell/);
+  assert.match(body(concierge, 'en'), /our AI assistant answers there too, at any hour/);
+  assert.match(body(concierge, 'ar'), /وهناك تردّ مساعدة بونا الذكية أيضاً في أي وقت/);
+  assert.match(body(concierge, 'en'), /The website concierge is not a person/);
+  assert.match(body(concierge, 'ar'), /ومساعدة الموقع الذكية ليست شخصاً/);
   assert.doesNotMatch(body(concierge, 'en'), /Use WhatsApp instead if you do not want to use the AI concierge\./);
-  assert.ok(policy.updated >= '2026-10-01', 'the page date moved on when she went live');
+  assert.ok(policy.updated >= D1_RELEASED, 'the page date moves with D1');
 });
 
-// The page flags a material change for 30 days (like the 30 September lines): the two dated
-// lines and this test's asserts come out on or after 2026-10-31.
-test('the Changes section flags the day Dana went live, in both languages (30 days)', () => {
-  if (new Date().toISOString().slice(0, 10) >= '2026-10-31') return;
-  const changes = section('changes');
-  const line = (locale, start) => changes.body[locale].find((p) => p.startsWith(start)) ?? '';
-  assert.match(line('en', '1 October 2026:'), /Dana, our AI assistant/);
-  assert.match(line('en', '1 October 2026:'), /“WhatsApp conversations with our team”/);
-  assert.match(line('en', '1 October 2026:'), /sent to Retell/);
-  assert.match(line('ar', '1 أكتوبر 2026:'), /دانة، مساعدتنا التي تعمل بالذكاء الاصطناعي/);
-  assert.match(line('ar', '1 أكتوبر 2026:'), /«محادثات واتساب مع فريق بونا»/);
-  assert.match(line('ar', '1 أكتوبر 2026:'), /إلى Retell/);
-});
-
-test('the chats kept only to be checked are named: what is kept, for how long, and that the conversation is not (D17)', () => {
+test('Bona’s own number (D1): every one-to-one chat is an enquiry except the team’s and not-a-client chats; a chat with a hidden number is not stored', () => {
   const s = section('whatsapp-conversations');
-  assert.ok(s, 'the section is missing');
+  assert.equal(s.body.en.length, 4, 'own-number paragraph, the dashboard, how long, the AI assistant');
+  const [en, ar] = [s.body.en[0], s.body.ar[0]];
+  assert.ok(en.startsWith(`Bona’s WhatsApp number, ${site.whatsapp.display}, is Bona’s own and is used only for Bona.`), en);
+  assert.ok(ar.startsWith(`رقم واتساب بونا ${site.whatsapp.display} رقمٌ خاص ببونا ولا يُستخدم إلا لأعمالها.`), ar);
+  assert.match(en, /Every one-to-one chat with it is treated as an enquiry, except our team’s own chats and chats the owner of Bona has marked as not a Bona client, and Bona stores that conversation/);
+  assert.match(ar, /وتُعامَل كل محادثة فردية معه بوصفها استفساراً، عدا محادثات أعضاء فريقنا والمحادثات التي حدّد مالك بونا أنها لا تخص عميلاً لبونا/);
+  assert.match(en, /Group chats, broadcast lists, channels and status updates are not stored\./);
+  assert.match(ar, /ولا نحتفظ بمحادثات المجموعات ولا بقوائم البث ولا بالقنوات ولا بالحالات\./);
+  assert.match(en, /If WhatsApp does not show us the phone number a chat comes from, that conversation is not stored and our AI assistant does not answer it/);
+  assert.match(en, /until 30 days after the last one, so that the owner of Bona can answer it himself; if he marks it as not a Bona client, only those ids are kept, for up to a year/);
+  assert.match(ar, /وإذا لم يُظهر لنا واتساب رقم الهاتف الذي تصدر منه محادثةٌ ما، فلا نحتفظ بتلك المحادثة ولا تردّ عليها مساعدة بونا الذكية/);
+  assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة فيها، ليردّ عليها مالك بونا بنفسه؛ وإذا حدّد أنها لا تخص عميلاً لبونا، لا نحتفظ إلا بتلك المعرّفات، مدةً أقصاها سنة/);
+  // A "Not a client" on a chat that never became an enquiry, with its number shown (review of PR #87, rounds 3
+  // and 4): the dismissed inbox_candidates row keeps that number and the chat's ids for a year
+  // (DISMISSED_KEEP_MS), and a later message is not stored. Only a row dismissed before the move to Bona's own
+  // number (BONA_WA_LINKED_AT, 26 Nov 2026 05:25 +03:00) gets the owner's old_out_wrote alert when the chat
+  // writes again; that owner_notes row keeps the candidate's id, the code and the time, never the text
+  // (DESIGN §3.1, §7.2; PLAN T06 test 16). A row dismissed after the move stays silent, with no alert row, and
+  // a hidden-number chat's row keeps its ids only (the sentence before this one): lid-only rows exist only
+  // under Bona's own number, so every one of them is dismissed after the move.
+  assert.ok(en.endsWith(' If the owner of Bona marks a chat as not a Bona client before it becomes an enquiry, and WhatsApp shows us its number, we keep only that number and the ids WhatsApp gives the chat, for up to a year, so that it is not treated as an enquiry; if it writes to us again, its messages are not stored. If he marked it before Bona’s WhatsApp moved to this number on 26 November 2026, we also keep a record that it wrote and when, linked to that number and those ids, so that he is told.'), en);
+  assert.ok(ar.endsWith(' وإذا حدّد مالك بونا أن محادثةً لا تخص عميلاً لبونا قبل أن تصبح استفساراً، وكان واتساب يُظهر لنا رقمها، لا نحتفظ إلا بذلك الرقم ومعرّفات واتساب للمحادثة، مدةً أقصاها سنة، حتى لا تُعامَل بوصفها استفساراً؛ وإذا وردت منها رسائل بعد ذلك، فلا نحتفظ بها. وإن كان قد حدّد ذلك قبل انتقال واتساب بونا إلى هذا الرقم في 26 نوفمبر 2026، احتفظنا كذلك بسجلّ مرتبط بذلك الرقم وتلك المعرّفات يبيّن أنها راسلتنا ومتى، ليعلم مالك بونا بذلك.'), ar);
+  // The return-contact record is promised once, only for a mark made before the move, and as what that row
+  // keeps (that it wrote, and when), not as "only the day".
+  for (const [locale, text, alert, moved] of [
+    ['en', en, /we also keep a record that it wrote and when/g, 'If he marked it before Bona’s WhatsApp moved to this number on 26 November 2026, we also keep a record'],
+    ['ar', ar, /احتفظنا كذلك بسجلّ/g, 'وإن كان قد حدّد ذلك قبل انتقال واتساب بونا إلى هذا الرقم في 26 نوفمبر 2026، احتفظنا كذلك بسجلّ'],
+  ]) {
+    assert.equal(text.match(alert)?.length, 1, `${locale}: one return-contact record`);
+    assert.ok(text.includes(moved), `${locale}: the record is only for a mark made before the move`);
+    assert.doesNotMatch(text, locale === 'en' ? /only the day it wrote/ : /إلا يوم ورودها/, `${locale}: the record keeps the time, not only the day`);
+  }
+  // The property-word exception belongs to the shared rule: it left the page and waits in the rollback text.
+  // Decision (review of PR #87, rounds 1 and 2): Bona's own number keeps no property-word record at all, not
+  // even while `#dana live off` (own_inbox '0') brings the shared rule's joins back, or while the identity
+  // check has not passed yet. While the configured number is Bona's own (ownNumberFrom 'instance'), the poller
+  // stores no inbox_candidates row for a chat with a phone and deletes the open ones already there; a "Not a
+  // client" on Chats to check keeps only its ids, and that chat is not stored or answered (PLAN T06 tests
+  // 15-16, T07 tests 15-16; DESIGN §3.1). Property-word rows exist only on the personal number, whose page is
+  // the rollback text (PR-D1r), so this paragraph needs no copy here.
+  assert.ok(!s.body.en.some((p) => p.startsWith('There is one narrow exception')), 'en: the exception is gone');
+  assert.ok(!s.body.ar.some((p) => p.startsWith('وهناك استثناء محدود')), 'ar: the exception is gone');
+  assert.doesNotMatch(body(s, 'en'), /the next paragraph describes the one narrow exception/);
+  assert.doesNotMatch(body(s, 'ar'), /باستثناء محدود نبيّنه في الفقرة التالية/);
+});
+
+test('viewing-bookings comes right after the AI phone assistant: what is booked, from which calendar, and no reminders (D1)', () => {
+  const ids = policy.sections.map((x) => x.id);
+  assert.equal(ids.indexOf('viewing-bookings'), ids.indexOf('ai-phone-line') + 1);
+  const s = section('viewing-bookings');
+  assert.equal(s.heading.en, 'Viewings booked by our AI assistant');
+  assert.equal(s.heading.ar, 'المعاينات التي تحجزها مساعدتنا الذكية');
+  const en = body(s, 'en');
+  const ar = body(s, 'ar');
+  assert.match(en, /our AI assistant can book a viewing of one of our homes in Jeddah for you/);
+  assert.match(en, /Sunday to Thursday between 10:00 and 19:00 Saudi time, from the next day onwards, books a one-hour viewing/);
+  assert.match(en, /or a member of our team sends you the meeting point before the viewing/);
+  assert.match(en, /It does not send reminders\./);
+  assert.doesNotMatch(en, /date, time and place/, 'most homes have no exact meeting point on file');
+  assert.match(ar, /موعد معاينة لأحد منازلنا في جدة/);
+  assert.match(ar, /أو يرسل إليك أحد أعضاء فريقنا نقطة اللقاء قبل الموعد/);
+  assert.match(ar, /ولا ترسل تذكيرات\./);
+  // The calendar sentence: whose calendar, who provides it, what an entry holds, no invitation, deletion.
+  assert.match(en, /Bona’s viewing calendar is a Google Calendar of the owner of Bona, provided by Google, which may process it outside Saudi Arabia under its own terms\. A booking puts in it the time of the viewing, the home, your name and phone number, and a link to your enquiry in our private dashboard; it sends no invitation to you or to anyone else\./);
+  assert.match(en, /A request to delete your enquiry covers its calendar entries too\./);
+  assert.match(ar, /وتقويم معاينات بونا تقويمٌ في Google لمالك بونا، تقدّمه Google وقد تعالجه خارج المملكة وفق شروطها\./);
+  // The Arabic is the authoritative text, so it lists the same entry contents as the English, word for word.
+  assert.match(ar, /ويُدرج الحجز فيه وقت المعاينة والعقار واسمك ورقم هاتفك ورابطاً لاستفسارك في لوحتنا الخاصة، ولا يُرسل أي دعوة إليك أو إلى غيرك\./);
+  assert.match(ar, /ويشمل طلب حذف استفسارك حذف مواعيده من التقويم أيضاً\./);
+});
+
+test('the owner notes (D1): what a note carries, the quote only with a hand-over, and where the notes stay', () => {
+  const s = section('data-we-hold');
+  assert.equal(s.body.en.length, 4);
+  const [en, ar] = [s.body.en[3], s.body.ar[3]];
+  assert.match(en, /a short WhatsApp note with the client’s name and phone number, what they are looking for, their first message and a link to the enquiry in our private dashboard/);
+  assert.match(en, /whenever our AI assistant passes a conversation to the team \(with a short quote of your latest message\), books a viewing or stops answering in a chat, and one summary a day of new enquiries, viewings and conversations waiting for a reply/);
+  assert.equal(en.match(/quote/g)?.length, 1, 'only the hand-over note quotes the client (DESIGN §7.2)');
+  assert.match(en, /These notes stay in WhatsApp on his phone and on the WhatsApp gateway server Bona runs; a request to delete your enquiry covers them too\./);
+  assert.match(ar, /كلما أحالت مساعدتنا الذكية محادثةً إلى الفريق \(وفيها مقتطف قصير من آخر رسالة منك\)، أو حجزت موعد معاينة، أو توقفت عن الرد في محادثة/);
+  assert.equal(ar.match(/مقتطف/g)?.length, 1);
+  assert.match(ar, /ويشمل طلب حذف استفسارك حذفها أيضاً\./);
+});
+
+test('the rest of D1: who we are, legal basis, retention, transfers, your rights and the contact block', () => {
+  assert.ok(section('who-we-are').body.en[1].includes(`Reach us on WhatsApp at ${site.whatsapp.display}, where Bona’s AI assistant answers at any hour and our team replies Sunday to Thursday, 10:00 to 19:00.`));
+  assert.ok(section('who-we-are').body.ar[1].includes(`على الرقم ${site.whatsapp.display}، حيث تردّ مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، في أي وقت`));
+  const legal = section('legal-basis');
+  assert.match(legal.body.en[2], /they make no decision about you with legal or similarly significant effects: a member of our team decides anything that matters, and you can ask for a person at any time\./);
+  assert.match(legal.body.ar[2], /لكنها لا تتخذ بشأنك أي قرار تترتب عليه آثار نظامية أو آثار مماثلة في أهميتها/);
+  const retention = section('retention');
+  assert.match(retention.body.en[2], /A viewing booked by our AI assistant stays in Bona’s viewing calendar as the record of that viewing, and is deleted with your enquiry if you ask us to delete it\./);
+  assert.match(retention.body.ar[2], /يبقى موعد المعاينة الذي تحجزه مساعدتنا الذكية في تقويم معاينات بونا بوصفه سجلاً لتلك المعاينة/);
+  // deploy.sh snapshots the database before every restart and, when it runs, deletes snapshots older than 30 days
+  // (PR-INFRA); bona-api's daily upkeep deletes them at 29 days, so a once-a-day run never lets one pass 30 (PLAN
+  // T14, deployed before D1). The sentence promises only that limit, no schedule (review of PR #87, round 4).
+  assert.ok(retention.body.en[2].endsWith(' Before each update of our systems we keep a backup copy of our records for up to 30 days, after which it is deleted; a conversation you ask us to delete can therefore remain in a backup for up to 30 days.'), retention.body.en[2]);
+  assert.ok(retention.body.ar[2].endsWith(' ونحتفظ قبل كل تحديث لأنظمتنا بنسخة احتياطية من سجلاتنا مدةً أقصاها ثلاثون يوماً، ثم تُحذف؛ لذا قد تبقى المحادثة التي تطلب حذفها في نسخة احتياطية مدةً تصل إلى ثلاثين يوماً.'), retention.body.ar[2]);
+  assert.match(body(section('international-transfers'), 'en'), /Bona’s hosting, messaging, calendar, analytics, advertising-measurement, tour and AI providers may process data outside Saudi Arabia\./);
+  assert.match(body(section('international-transfers'), 'ar'), /قد يعالج مزوّدو الاستضافة والمراسلة والتقويم والتحليلات/);
+  const rights = section('your-rights');
+  assert.equal(rights.body.en.length, 4);
+  assert.match(rights.body.en[1], /A request about your data is always handled by a person, not by our AI assistant\./);
+  assert.match(rights.body.ar[1], /ويتولى أي طلب يتعلق ببياناتك شخصٌ من فريقنا دائماً، لا المساعدة الذكية\./);
+  assert.match(rights.body.en[2], /If you would rather receive no automatic replies, say so in the chat and we will switch the automatic replies off for your chat\./);
+  assert.match(rights.body.ar[2], /وإن كنت تفضّل ألّا تصلك ردود آلية، فأخبرنا بذلك في المحادثة وسنوقف الردود الآلية في محادثتك\./);
+  assert.match(rights.body.en[3], /Saudi Data & AI Authority \(SDAIA\)/);
+  assert.match(rights.body.ar[3], /\(سدايا\)/);
+  assert.ok(policy.contact.en.includes(`WhatsApp ${site.whatsapp.display} — Bona’s AI assistant answers at any hour, and our team replies Sunday to Thursday, 10:00–19:00; a request about your data is always handled by a person.`), policy.contact.en);
+  assert.ok(policy.contact.ar.includes(`واتساب ${site.whatsapp.display} — تردّ مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، في أي وقت`), policy.contact.ar);
+  assert.match(policy.contact.ar, /ويتولى أي طلب يتعلق ببياناتك شخصٌ من فريقنا دائماً/);
+});
+
+// The 26 November line stays word for word until its 30 days are up (2026-12-26); it is pinned by its
+// SHA-256, because it names the number it replaced and no new copy of that number is written here.
+// The D1 line is dated D1_RELEASED, the day D1 merges, so its 30 days run from that date.
+const NOV26_SHA256 = {
+  en: '6c826d4ba29bc06bb8f2bacf18fe31b4182cf6e1f321bb545ad4a9108b9f67c0',
+  ar: '3f82c03dc52eebb3405005a319892310da090f1e77a6f451a0456b38ee726faa',
+};
+const sha256 = (text) => crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+const isNov26 = (locale, text) => sha256(text) === NOV26_SHA256[locale];
+/** How the D1 line opens, after its date. */
+const D1_OPENING = {
+  en: 'Bona’s AI assistant now answers every enquiry chat on Bona’s WhatsApp number at any hour;',
+  ar: 'أصبحت مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، تردّ على كل محادثة استفسار على رقم واتساب بونا في أي وقت،',
+};
+const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const D1_LINE = {
+  en: new RegExp(`^(\\d{1,2}) (\\S+) (\\d{4}): ${reEscape(D1_OPENING.en)}`),
+  ar: new RegExp(`^(\\d{1,2}) (\\S+) (\\d{4}): ${reEscape(D1_OPENING.ar)}`),
+};
+const MONTHS = {
+  en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+  ar: ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'],
+};
+const isoOf = (m, locale) => {
+  const month = MONTHS[locale].indexOf(m[2]) + 1;
+  assert.ok(month > 0, `${locale}: ${m[2]} is no month name`);
+  return `${m[3]}-${String(month).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+};
+/** “4 December 2026” / “4 ديسمبر 2026” for 2026-12-04: how a Changes line writes its date. */
+const writtenDate = (iso, locale) => `${Number(iso.slice(8, 10))} ${MONTHS[locale][Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;
+
+/**
+ * The D1 Changes line of policy `p`, checked as of the day `on`. Its 30 days run from D1_RELEASED, not
+ * from whatever the text says: until they are up the line must be there in both languages, dated
+ * D1_RELEASED, and a rewrite its pattern no longer finds counts as a missing line. Once they are up it
+ * may come out (`undefined`). It is one line per language: a second copy fails, at any date.
+ */
+function checkD1Line(p, on) {
+  const changes = p.sections.find((x) => x.id === 'changes');
+  const lines = (locale) => changes.body[locale].filter((x) => D1_LINE[locale].test(x));
+  const [ens, ars] = [lines('en'), lines('ar')];
+  const until = plusDays(D1_RELEASED, 30);
+  if (on >= until && !ens.length && !ars.length) return undefined;
+  assert.ok(ens.length === 1 && ars.length === 1, `the D1 line in each language, once (due until ${until}; en ${ens.length}, ar ${ars.length})`);
+  const [[en], [ar]] = [ens, ars];
+  assert.equal(isoOf(en.match(D1_LINE.en), 'en'), D1_RELEASED, 'en: the D1 line carries the D1 date (D1_RELEASED)');
+  assert.equal(isoOf(ar.match(D1_LINE.ar), 'ar'), D1_RELEASED, 'ar: the D1 line carries the D1 date (D1_RELEASED)');
+  assert.ok(p.updated >= D1_RELEASED, 'the version date at the top moved with it');
+  return { en, ar };
+}
+
+/**
+ * A copy of policy `p` whose Changes carries one D1 line in each language, dated D1_RELEASED, in place of
+ * whatever D1 lines `p` has. The check's own test runs on it, so it does not lean on the live line, which
+ * comes out once its 30 days are up (and on the PR that takes it out, this test stays green).
+ */
+function withD1Line(p) {
+  const copy = structuredClone(p);
+  const changes = copy.sections.find((x) => x.id === 'changes');
+  for (const locale of ['en', 'ar']) {
+    changes.body[locale] = [...changes.body[locale].filter((x) => !D1_LINE[locale].test(x)),
+      `${writtenDate(D1_RELEASED, locale)}: ${D1_OPENING[locale]} (fixture)`];
+  }
+  if (copy.updated < D1_RELEASED) copy.updated = D1_RELEASED;
+  return copy;
+}
+
+test('the D1 Changes line stays its 30 days from D1_RELEASED, whatever day D1 merges (the check itself)', () => {
+  const fixture = withD1Line(policy);
+  const edit = (fn) => {
+    const p = structuredClone(fixture);
+    const changes = p.sections.find((x) => x.id === 'changes');
+    for (const locale of ['en', 'ar']) changes.body[locale] = fn(changes.body[locale], locale);
+    return p;
+  };
+  const lastDay = plusDays(D1_RELEASED, 29);
+  assert.equal(plusDays('2026-12-04', 30), '2027-01-03');
+  assert.equal(writtenDate('2026-12-04', 'en'), '4 December 2026');
+  assert.equal(writtenDate('2026-12-04', 'ar'), '4 ديسمبر 2026');
+  // The live checks count days in Riyadh: at 00:30 there on 3 January it is still 2 January in UTC.
+  assert.equal(riyadhDay(Date.parse('2027-01-02T21:30:00Z')), '2027-01-03');
+  assert.equal(riyadhDay(Date.parse('2027-01-02T20:59:59Z')), '2027-01-02');
+  assert.ok(checkD1Line(fixture, lastDay), 'a page with the D1 line passes on its last day');
+  // The fixture does not depend on the live page still having the line.
+  const live = structuredClone(policy);
+  const liveChanges = live.sections.find((x) => x.id === 'changes');
+  for (const locale of ['en', 'ar']) liveChanges.body[locale] = liveChanges.body[locale].filter((x) => !D1_LINE[locale].test(x));
+  assert.ok(checkD1Line(withD1Line(live), lastDay), 'the fixture also comes from a page whose D1 line is gone');
+  // Both lines removed a day early: red, even past the old fixed cutoff of 27 December.
+  const removed = edit((paras, locale) => paras.filter((x) => !D1_LINE[locale].test(x)));
+  assert.throws(() => checkD1Line(removed, lastDay), /the D1 line in each language/);
+  assert.equal(checkD1Line(removed, plusDays(D1_RELEASED, 30)), undefined, 'gone once its 30 days are up');
+  // A rewrite of both opening sentences is a missing line, not a pass.
+  const rewritten = edit((paras, locale) => paras.map((x) => (D1_LINE[locale].test(x)
+    ? x.replace(locale === 'en' ? 'now answers every enquiry chat' : 'تردّ على كل محادثة استفسار', locale === 'en' ? 'answers' : 'تردّ')
+    : x)));
+  assert.throws(() => checkD1Line(rewritten, lastDay), /the D1 line in each language/);
+  // A line dated another day than D1_RELEASED (the date moved without the constant, or the reverse).
+  const later = plusDays(D1_RELEASED, 7);
+  const moved = edit((paras, locale) => paras.map((x) => (D1_LINE[locale].test(x)
+    ? x.replace(writtenDate(D1_RELEASED, locale), writtenDate(later, locale))
+    : x)));
+  assert.throws(() => checkD1Line(moved, lastDay), /carries the D1 date/);
+  // The D1 line twice in one language is one line too many, not a pass (review of PR #87, round 3).
+  for (const locale of ['en', 'ar']) {
+    const twice = edit((paras, l) => (l === locale ? [...paras, paras.find((x) => D1_LINE[l].test(x))] : paras));
+    assert.throws(() => checkD1Line(twice, lastDay), /the D1 line in each language, once/, `${locale}: the D1 line twice`);
+  }
+});
+
+test('Changes (D1): the September and October lines are gone, the 26 November line stays word for word, and the D1 line says what changed, in both languages (30 days)', () => {
+  const changes = section('changes');
+  for (const start of ['30 September 2026:', '1 October 2026:']) assert.ok(!changes.body.en.some((p) => p.startsWith(start)), `en still has a ${start} line`);
+  for (const start of ['30 سبتمبر 2026:', '1 أكتوبر 2026:']) assert.ok(!changes.body.ar.some((p) => p.startsWith(start)), `ar still has a ${start} line`);
+  const nov26 = today() < '2026-12-26';
+  if (nov26) for (const locale of ['en', 'ar']) assert.equal(changes.body[locale].filter((p) => isNov26(locale, p)).length, 1, `${locale}: the 26 November line, word for word`);
+  const d1 = checkD1Line(policy, today());
+  if (!d1) return;
+  const { en, ar } = d1;
+  if (nov26) for (const [locale, line] of [['en', en], ['ar', ar]]) {
+    assert.equal(changes.body[locale].indexOf(line), changes.body[locale].findIndex((p) => isNov26(locale, p)) + 1, `${locale}: right after the 26 November line`);
+  }
+  assert.match(en, /its replies are now produced with OpenAI instead of Retell, and it no longer uses a personal name\./);
+  assert.match(en, /We rewrote “WhatsApp conversations with our team” for Bona’s own number, added “Viewings booked by our AI assistant” \(it can book a viewing into Bona’s viewing calendar, a Google Calendar\), and added to “The data we hold, and why” the WhatsApp notes the owner of Bona receives about new enquiries, hand-overs and bookings\./);
+  assert.match(ar, /وصارت ردودها تُعدّ باستخدام OpenAI بدلاً من Retell، ولم تعد تحمل اسماً شخصياً\./);
+  assert.match(ar, /وأعدنا كتابة قسم «محادثات واتساب مع فريق بونا» ليناسب رقم بونا الخاص، وأضفنا قسم «المعاينات التي تحجزها مساعدتنا الذكية»/);
+  assert.match(ar, /ملاحظات واتساب التي تصل مالكَ بونا عن الاستفسارات الجديدة والإحالات والحجوزات\./);
+});
+
+// The AI providers the brain may call (services/api/lib/brain/providers.mjs, PR-BR) are pinned, and
+// each one is named on the page before the code may call it: adding a provider is a privacy release
+// first (brain/DESIGN-brain §2.1, §11.3). Until PR-BR creates lib/brain/, the list is the pinned one of
+// the design. Once that directory exists, providers.mjs must be in it and export PROVIDERS as the
+// design pins it, an array of provider ids such as ['openai']: a moved or renamed module, or another
+// shape, fails here rather than letting the check fall back to the pinned list for good.
+const PROVIDER_NAMES = Object.freeze({ openai: 'OpenAI' });
+const BRAIN_DIR = new URL('../../services/api/lib/brain/', import.meta.url);
+/** PROVIDERS as DESIGN-brain §2.1 pins it: a non-empty array of lower-case provider ids. */
+function providerIds(list) {
+  assert.ok(Array.isArray(list) && list.length > 0, `PROVIDERS is a non-empty array of provider ids, not ${JSON.stringify(list)}`);
+  for (const id of list) assert.ok(typeof id === 'string' && /^[a-z][a-z0-9-]*$/.test(id), `PROVIDERS entry ${JSON.stringify(id)} is no provider id`);
+  return [...list];
+}
+async function brainProviders(dir = BRAIN_DIR) {
+  if (!fs.existsSync(dir)) return ['openai'];
+  const file = new URL('providers.mjs', dir);
+  assert.ok(fs.existsSync(file), `providers.mjs not found in ${fileURLToPath(dir)}: the provider cross-check reads PROVIDERS from it`);
+  const { PROVIDERS } = await import(file.href);
+  return providerIds(PROVIDERS);
+}
+
+test('the provider cross-check reads PROVIDERS as the design pins it, and fails closed once lib/brain/ exists (the check itself)', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-providers-'));
+  try {
+    let n = 0;
+    /** A lib/brain/ of its own for each case: an imported module is cached by its URL. */
+    const brainWith = (source) => {
+      const dir = path.join(tmp, `brain-${n += 1}`);
+      fs.mkdirSync(dir);
+      if (source !== null) fs.writeFileSync(path.join(dir, 'providers.mjs'), source);
+      return pathToFileURL(`${dir}/`);
+    };
+    assert.deepEqual(await brainProviders(pathToFileURL(`${tmp}/absent/`)), ['openai'], 'no lib/brain/ yet: the pinned list');
+    await assert.rejects(brainProviders(brainWith(null)), /providers\.mjs not found/, 'lib/brain/ without providers.mjs');
+    assert.deepEqual(await brainProviders(brainWith("export const PROVIDERS = Object.freeze(['openai']);\n")), ['openai']);
+    for (const bad of ["{ openai: 'anthropic' }", "[{ id: 'openai' }]", "['OpenAI']", '[]', "'openai'"]) {
+      await assert.rejects(brainProviders(brainWith(`export const PROVIDERS = ${bad};\n`)), /PROVIDERS/, bad);
+    }
+    await assert.rejects(brainProviders(brainWith('export const OTHER = 1;\n')), /PROVIDERS is a non-empty array/, 'no PROVIDERS export');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+/** AI vendors the page must never name: none of them gets a Bona chat (brain/DESIGN-brain §2.1). */
+const EXCLUDED_VENDORS = [/deepseek/i, /\bxAI\b/i, /\bgrok\b/i, /\banthropic\b/i];
+
+/** The concierge section's opening sentence: the one place in it that names Retell. */
+const CONCIERGE_RETELL = {
+  en: 'Our website’s AI concierge sends your messages or voice, page context and language through Bona’s service to Retell and the AI providers used for the conversation.',
+  ar: 'ترسل مساعدة الموقع الذكية رسائلك أو صوتك وسياق الصفحة ولغتك عبر خدمة بونا إلى Retell ومزوّدي الذكاء الاصطناعي المستخدمين في المحادثة.',
+};
+/** The D1 line's clause that names Retell, as history. */
+const D1_RETELL = { en: 'its replies are now produced with OpenAI instead of Retell', ar: 'وصارت ردودها تُعدّ باستخدام OpenAI بدلاً من Retell' };
+
+/**
+ * Where privacy.json `p` may name Retell, which still runs the website concierge until D3 (PLAN T28): the
+ * concierge section's opening sentence and the sharing clause, each once and about the website concierge, and
+ * in Changes the D1 line's "instead of Retell", once. A Retell claim added anywhere else, or a second one in
+ * those sections (such as "Retell also produces the WhatsApp replies"), fails.
+ */
+function checkRetell(p) {
+  const sec = (id) => p.sections.find((x) => x.id === id);
+  for (const s of p.sections) {
+    if (!['ai-concierge', 'sharing', 'changes'].includes(s.id)) assert.doesNotMatch(JSON.stringify(s), /Retell/, `${s.id} names Retell`);
+  }
+  for (const locale of ['en', 'ar']) {
+    const concierge = sec('ai-concierge');
+    assert.equal(body(concierge, locale).match(/Retell/g)?.length, 1, `${locale}: ai-concierge names Retell once`);
+    assert.ok(concierge.body[locale][0].startsWith(CONCIERGE_RETELL[locale]), `${locale}: ai-concierge names Retell in its opening sentence about the website concierge`);
+    // At most once in all of Changes: two D1-shaped lines would each pass the per-line checks below.
+    assert.ok((body(sec('changes'), locale).match(/Retell/g)?.length ?? 0) <= 1, `${locale}: Changes names Retell more than once`);
+    for (const para of sec('changes').body[locale].filter((x) => x.includes('Retell'))) {
+      assert.ok(D1_LINE[locale].test(para), `${locale}: Changes names Retell outside the D1 line: ${para.slice(0, 80)}`);
+      assert.equal(para.match(/Retell/g).length, 1, `${locale}: the D1 line names Retell once`);
+      assert.ok(para.includes(D1_RETELL[locale]), `${locale}: the D1 line names Retell only as what OpenAI replaced`);
+    }
+  }
+  for (const locale of ['en', 'ar']) {
+    const providers = sec('sharing').body[locale].find((x) => x.startsWith(
+      locale === 'en' ? 'Service providers include' : 'تشمل الجهات المقدّمة للخدمة'));
+    const sharing = sec('sharing').body[locale].filter((x) => x.includes('Retell'));
+    assert.deepEqual(sharing, [providers], `${locale}: sharing names Retell in the providers paragraph only`);
+    // Once, and in its concierge clause: a second Retell claim added to the same paragraph fails too.
+    assert.equal(body(sec('sharing'), locale).match(/Retell/g)?.length, 1, `${locale}: sharing names Retell once`);
+    assert.ok(providers.includes(locale === 'en'
+      ? 'Retell and its AI service providers for the website concierge;'
+      : 'وRetell ومزوّدي خدمات الذكاء الاصطناعي لديها لمساعدة الموقع الذكية،'), `${locale}: Retell, for the website concierge`);
+  }
+  assert.doesNotMatch(p.contact.en + p.contact.ar, /Retell/);
+}
+
+/** Every string in a JSON value, with where it sits: [['sections[3].body.en[0]', '…'], …]. */
+const stringsOf = (x, where = '') => typeof x === 'string' ? [[where, x]]
+  : Array.isArray(x) ? x.flatMap((v, i) => stringsOf(v, `${where}[${i}]`))
+  : x && typeof x === 'object' ? Object.entries(x).flatMap(([k, v]) => stringsOf(v, where ? `${where}.${k}` : k))
+  : [];
+
+/**
+ * privacy.json `p` names the assistant nowhere but in the 26 November line, which is history: matched by its
+ * hash AND by where it sits, a paragraph of Changes in its own language. Moved into another section, into the
+ * other language or into the contact block, the same words fail.
+ */
+function checkNoName(p) {
+  const changesAt = p.sections.findIndex((x) => x.id === 'changes');
+  for (const [where, text] of stringsOf(p).filter(([, x]) => named(x))) {
+    const at = /^sections\[(\d+)\]\.body\.(en|ar)\[\d+\]$/.exec(where);
+    const history = at !== null && Number(at[1]) === changesAt && isNov26(at[2], text);
+    assert.ok(history, `privacy.json ${where} names the assistant: ${text.slice(0, 120)}`);
+  }
+}
+
+test('every AI provider the assistant may call is named where the page says who gets the chat; no other AI vendor is named; Retell only where it still runs (D1)', async () => {
+  const providers = await brainProviders();
+  assert.ok(providers.length > 0, 'the brain names at least one provider');
+  for (const id of providers) {
+    const name = Object.hasOwn(PROVIDER_NAMES, id) ? PROVIDER_NAMES[id] : undefined;
+    assert.ok(name, `${id}: name this provider on the privacy page (WhatsApp paragraph and sharing, EN and AR) before the code may call it`);
+    for (const locale of ['en', 'ar']) {
+      assert.ok(aiParagraph(locale)?.includes(name), `${locale}: the WhatsApp paragraph names ${name}`);
+      assert.ok(providersParagraph(locale)?.includes(name), `${locale}: sharing names ${name}`);
+    }
+  }
+  for (const re of EXCLUDED_VENDORS) assert.doesNotMatch(JSON.stringify(policy) + JSON.stringify(faq), re);
+  checkRetell(policy);
+  assert.doesNotMatch(JSON.stringify(faq), /Retell/);
+});
+
+test('the Retell and no-name checks catch a Retell claim added to the concierge text or Changes, and the old name moved out of Changes (the checks themselves)', () => {
+  checkRetell(policy);
+  checkNoName(policy);
+  const edited = (id, locale, fn) => {
+    const p = structuredClone(policy);
+    const s = p.sections.find((x) => x.id === id);
+    s.body[locale] = fn(s.body[locale]);
+    return p;
+  };
+  const claim = { en: ' Retell also produces our AI assistant’s WhatsApp replies.', ar: ' وتُعدّ Retell أيضاً ردود مساعدتنا الذكية عبر واتساب.' };
+  for (const locale of ['en', 'ar']) {
+    for (const id of ['ai-concierge', 'changes']) {
+      const p = edited(id, locale, (paras) => paras.map((x, i) => (i === paras.length - 1 ? x + claim[locale] : x)));
+      assert.throws(() => checkRetell(p), /names Retell/, `${locale}: a Retell claim added to ${id}`);
+    }
+  }
+  // The D1 line twice in one language names Retell twice in Changes: each copy alone looks right, the two do
+  // not (review of PR #87, round 3). On a fixture line, so the case still runs once the live line is out.
+  for (const locale of ['en', 'ar']) {
+    const p = withD1Line(policy);
+    const changes = p.sections.find((x) => x.id === 'changes');
+    const at = changes.body[locale].findIndex((x) => D1_LINE[locale].test(x));
+    changes.body[locale][at] = `${writtenDate(D1_RELEASED, locale)}: ${D1_OPENING[locale]} ${D1_RETELL[locale]}.`;
+    checkRetell(p);
+    changes.body[locale].push(changes.body[locale][at]);
+    assert.throws(() => checkRetell(p), /names Retell/, `${locale}: the D1 line twice`);
+  }
+  // The 26 November line names the old assistant; it is allowed in Changes, in its own language, and nowhere else.
+  for (const locale of ['en', 'ar']) {
+    const line = section('changes').body[locale].find((x) => isNov26(locale, x));
+    if (!line) continue; // taken out after its 30 days: nothing left to move
+    const other = locale === 'en' ? 'ar' : 'en';
+    const moved = structuredClone(policy);
+    const changes = moved.sections.find((x) => x.id === 'changes');
+    changes.body[locale] = changes.body[locale].filter((x) => x !== line);
+    moved.sections.find((x) => x.id === 'whatsapp-conversations').body[locale].push(line);
+    assert.throws(() => checkNoName(moved), /names the assistant/, `${locale}: the 26 November line moved into another section`);
+    const swapped = structuredClone(policy);
+    swapped.sections.find((x) => x.id === 'changes').body[other].push(line);
+    assert.throws(() => checkNoName(swapped), /names the assistant/, `${locale}: the 26 November line in the ${other} text`);
+    const contact = structuredClone(policy);
+    contact.contact[locale] += ` ${line}`;
+    assert.throws(() => checkNoName(contact), /names the assistant/, `${locale}: the 26 November line appended to the contact block`);
+  }
+});
+
+test('no personal name (D1): Bona’s AI assistant is nameless on the privacy page, in the FAQ, in the concierge strings and in site.json', async () => {
+  // The one exception is history: the 26 November Changes line, verbatim until 2026-12-26.
+  checkNoName(policy);
+  for (const [file, data] of [['faq.json', faq], ['site.json', site]]) {
+    assert.deepEqual(stringsOf(data).filter(([, x]) => named(x)).map(([where]) => where), [], `${file} names the assistant`);
+  }
+  assert.deepEqual(site.concierge.name, { en: 'Bona’s AI assistant', ar: 'مساعدة بونا الذكية' }, 'the panel label (Concierge.astro falls back to the old name without it)');
+  const { ui } = await import('../../src/lib/i18n.ts');
+  const concierge = Object.entries(ui).filter(([k]) => k.startsWith('concierge'));
+  assert.ok(concierge.length >= 40, 'the concierge strings');
+  for (const [k, v] of concierge) assert.ok(!named(v.en) && !named(v.ar), `ui.${k} names the assistant: ${v.en} / ${v.ar}`);
+  // The matcher itself: whole words, with the Arabic prefixes, and not a listing that contains the letters.
+  for (const yes of ['Dana', 'dana.', 'دانة', 'ودانة', 'مع دانة', 'دانا']) assert.ok(named(yes), yes);
+  for (const no of ['Sadana Townhouse', 'سدانة', 'ميدانا']) assert.ok(!named(no), no);
+});
+
+test('the personal-number rollback page (PR-D1r) needs no D1 revert: the old shared-rule paragraphs plus D1’s others name OpenAI, and neither Retell nor a name', async () => {
+  assert.equal(rollback.section, 'whatsapp-conversations');
+  const page = structuredClone(policy);
+  const s = page.sections.find((x) => x.id === rollback.section);
+  for (const locale of ['en', 'ar']) {
+    assert.equal(rollback.body[locale].length, 2, `${locale}: the old first paragraph and the property-word exception`);
+    s.body[locale] = [...rollback.body[locale], ...s.body[locale].slice(1)];
+  }
+  const providers = await brainProviders();
+  for (const locale of ['en', 'ar']) {
+    const text = body(s, locale);
+    for (const id of providers) assert.ok(text.includes(PROVIDER_NAMES[id]), `${locale}: the rollback page names ${PROVIDER_NAMES[id]}`);
+    assert.doesNotMatch(text, /Retell/, `${locale}: the rollback page names Retell`);
+    assert.ok(!named(text), `${locale}: the rollback page names the assistant`);
+  }
+  // Its pointers still lead to real headings, the same ones in both languages.
+  checkPointers(page);
+});
+
+test('the FAQ (D1): 14 questions or more; a viewing is booked on WhatsApp for homes in Jeddah; who answers there; how to reach a person', () => {
+  assert.ok(faq.items.length >= 14, `${faq.items.length} questions`);
+  assert.ok(faq.updated >= D1_RELEASED, 'the FAQ date moves with D1');
+  const item = (id) => faq.items.find((x) => x.id === id);
+  for (const id of ['contact', 'viewing', 'whatsapp-assistant', 'speak-to-a-person']) {
+    assert.ok(item(id), id);
+    assert.equal(item(id).a.en.length, item(id).a.ar.length, `${id}: the Arabic says what the English does`);
+  }
+  const contact = item('contact');
+  assert.match(contact.a.en[0], /Bona’s AI assistant answers there at any hour, in Arabic or English, and says that it is an AI; our team replies Sunday to Thursday, 10:00 to 19:00 Saudi time/);
+  assert.match(contact.a.ar[0], /تردّ عليك هناك مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، في أي وقت/);
+  assert.equal(contact.a.en[2], 'Send the listing reference with your message and you will get a straight answer about that home.');
+  assert.equal(contact.a.ar[2], 'أرسل رقم العقار مع رسالتك لتحصل على إجابة مباشرة عن ذلك المنزل.');
+  const viewing = item('viewing');
+  assert.deepEqual(viewing.q, { en: 'How do I book a viewing with Bona?', ar: 'كيف أحجز معاينة مع بونا؟' });
+  assert.match(viewing.a.en[0], /For our homes in Jeddah, our AI assistant offers you the free times — Sunday to Thursday, 10:00 to 19:00, from the next day onwards — books the one you choose as a one-hour viewing and confirms it in the chat; for our homes elsewhere, a member of our team arranges it with you\./);
+  assert.match(viewing.a.ar[0], /ولمنازلنا في جدة تعرض عليك مساعدتنا الذكية/);
+  assert.match(viewing.a.en[1], /If the home’s owner needs another time, or the home is no longer available, we tell you in the same chat/);
+  const assistant = item('whatsapp-assistant');
+  assert.deepEqual(assistant.q, { en: 'Who answers when I write to Bona on WhatsApp?', ar: 'من يردّ عليّ عندما أراسل بونا عبر واتساب؟' });
+  assert.match(assistant.a.en[0], /Usually Bona’s AI assistant, at any hour\. It is not a person, and its first message says so\./);
+  assert.match(assistant.a.en[1], /when one of us writes in it, the assistant steps back for 24 hours/);
+  assert.match(assistant.a.ar[1], /توقفت المساعدة الذكية عن الرد مدة أربع وعشرين ساعة/);
+  const person = item('speak-to-a-person');
+  assert.deepEqual(person.q, { en: 'Can I speak to a person instead of the AI assistant?', ar: 'هل يمكنني التحدث إلى شخص بدلاً من المساعدة الذكية؟' });
+  assert.match(person.a.en[0], /the assistant passes the conversation to our team, who reply Sunday to Thursday, 10:00 to 19:00; until then it can still answer questions about our published homes/);
+  assert.match(person.a.en[0], /If you would rather receive no automatic replies at all, say so and we will switch them off for your chat\./);
+  assert.match(person.a.ar[0], /وإن كنت تفضّل ألّا تصلك ردود آلية أصلاً، فأخبرنا بذلك وسنوقفها لمحادثتك\./);
+  // The Arabic FAQ keeps the left-to-right mark in front of every +966 number.
+  for (const it of faq.items) for (const p of it.a.ar) for (const m of p.matchAll(/(.)\+966/gu)) assert.equal(m[1], '‎', `${it.id}: +966 without U+200E`);
+});
+
+test('the site copy around the assistant (D1): nameless, it answers at any hour, the cookie link lands on a real section', async () => {
+  const { ui } = await import('../../src/lib/i18n.ts');
+  const EXPECT = {
+    contactBandText: ['WhatsApp is the fastest way to reach us. Bona’s AI assistant answers at any hour, and a principal follows up personally.', 'واتساب أسرع طريقة للوصول إلينا. تردّ مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، في أي وقت، ويتابع معك أحد شركاء الدار بنفسه.'],
+    enquiryPanelText: ['One message: Bona’s AI assistant answers straight away, and a principal follows up personally.', 'رسالة واحدة: تردّ مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، فوراً، ويتابع معك أحد شركاء الدار بنفسه.'],
+    privacyMetaDesc: ['How Bona handles the personal information you share with us, on this site, on WhatsApp and by phone.', 'كيف تتعامل بونا مع المعلومات الشخصية التي تشاركها معنا، على هذا الموقع وعبر واتساب والهاتف.'],
+    conciergeOfflineText: ['The concierge is not reachable at the moment. Write to us on WhatsApp; ask for a person there and one of us will reply.', 'الكونسيرج غير متاح في هذه اللحظة. راسلنا عبر واتساب، واطلب التحدث إلى شخص ليردّ عليك أحدنا.'],
+    conciergeConversation: ['Conversation with Bona’s AI assistant', 'المحادثة مع مساعدة بونا الذكية'],
+    conciergeTyping: ['Bona’s assistant is typing', 'مساعدة بونا تكتب'],
+    conciergeInputLabel: ['Write to Bona’s assistant', 'اكتب إلى مساعدة بونا'],
+    conciergeOfflineTitle: ['Bona’s assistant is resting', 'مساعدة بونا في استراحة'],
+    conciergeAskDana: ['Ask the AI assistant', 'اسأل المساعدة الذكية'],
+    conciergeAskAboutHome: ['Ask the AI assistant about this home', 'اسأل المساعدة الذكية عن هذا المنزل'],
+    conciergeCallLive: ['Bona’s assistant is listening', 'مساعدة بونا تستمع إليك'],
+    conciergeCallSpeaking: ['Bona’s assistant is speaking', 'مساعدة بونا تتحدّث'],
+    conciergeAiNote: ['This is Bona’s AI assistant, an AI concierge. Conversations may be recorded and transcribed for quality.', 'مساعدة بونا الذكية تعمل بالذكاء الاصطناعي. قد تُسجَّل المحادثات وتُفرَّغ نصياً لأغراض الجودة.'],
+  };
+  for (const [k, [en, ar]] of Object.entries(EXPECT)) assert.deepEqual(ui[k], { en, ar }, `ui.${k}`);
+  // The consent banner's privacy link opens the section that describes the site's own records.
+  const consent = fs.readFileSync(new URL('../../src/components/Consent.astro', import.meta.url), 'utf8');
+  const anchor = consent.match(/localePath\(locale, '\/privacy\/'\)\}#([\w-]+)`/)?.[1];
+  assert.equal(anchor, 'what-this-site-collects');
+  assert.ok(section(anchor), `#${anchor} is a section of the policy`);
+  const meta = read('../../marketing/page-meta.json')['/privacy/'].description;
+  assert.equal(meta.en, 'How Bona handles your personal data under the Saudi PDPL: what this site collects, WhatsApp enquiries and AI replies, viewing bookings, retention, sharing and your rights.');
+  assert.equal(meta.ar, 'كيف تتعامل بونا مع بياناتك الشخصية وفق نظام حماية البيانات الشخصية السعودي: ما يجمعه الموقع، واستفسارات واتساب والردود الآلية، وحجز المعاينات، والاحتفاظ، والمشاركة، وحقوقك.');
+  // The /contact/ entry of llms.txt and llms-full.txt (gen-llms.mjs reads it): WhatsApp is answered at any
+  // hour, and the office hours are the team's (review of PR #87, round 2; test/llms-knowledge.test.mjs checks the built files).
+  const contact = read('../../marketing/page-meta.json')['/contact/'].description;
+  assert.ok(contact.en.includes(`Bona’s AI assistant answers WhatsApp at any hour; our team replies ${site.hours.en}.`), contact.en);
+  assert.ok(contact.ar.includes('تردّ مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، على واتساب في أي وقت، ويردّ فريقنا من الأحد إلى الخميس'), contact.ar);
+  // The Arabic hours are site.json's too, not only the weekdays (review of PR #87, round 3).
+  const [, opens, closes] = /(\d{2}:\d{2}) – (\d{2}:\d{2})/.exec(site.hours.en) ?? [];
+  assert.ok(opens && site.hours.ar.includes(`${opens} – ${closes}`), 'site.json: the same hours in both languages');
+  assert.ok(contact.ar.includes(`ويردّ فريقنا من الأحد إلى الخميس، ${opens}–${closes}.`), contact.ar);
+  assert.doesNotMatch(contact.en, /WhatsApp or by phone, Sunday to Thursday/);
+});
+
+// The shared rule (the owner's personal number) keeps a short record of chats that use a property
+// word. Bona's own number does not (D1; and, by the review decision above, not while own_inbox is off
+// either), so that text left the page; it waits, word for word, in the rollback json (DESIGN §13.2,
+// PR-D1r), and these asserts pin it there.
+// The rollback paragraphs are the section's first two as published before D1 (13e4954), byte for byte:
+// any edit, such as another lookback than 30 days, is a new privacy text and fails here first. Pinned by
+// SHA-256 like the 26 November line, so this file holds no second copy of them.
+const SHARED_NUMBER_SHA256 = {
+  en: ['0b2f4130a36840b08af4c3c01b09a39ca308f37812aad7dd54bbdee1cbfe97f5', 'ed761efe51b8c1f0a28c72a8b008348f17b42251e984ac5634563dfbf4a21d15'],
+  ar: ['1ccfe08448445ba4e01c945217e4ae9eeeaa52adc1379c816c3677d382cb49a1', '29d857e9a58e5ef02b5f4fcca7b0a4de6d513fc120746d0d4803c94b3b657411'],
+};
+test('the shared-number text (rollback) is the text published before D1, word for word, in both languages', () => {
+  for (const locale of ['en', 'ar']) {
+    assert.deepEqual(rollback.body[locale].map(sha256), SHARED_NUMBER_SHA256[locale], `${locale}: whatsapp-conversations [0] and [1] as of 13e4954`);
+  }
+  assert.match(rollback.body.en[0], /up to 30 days before it became an enquiry/);
+  assert.match(rollback.body.ar[0], /خلال مدة أقصاها ثلاثون يوماً قبل أن تصبح استفساراً/);
+});
+
+test('the shared-number text (rollback) names the chats kept only to be checked: what is kept, for how long, and that the conversation is not (D17)', () => {
+  const s = rollback;
+  assert.ok(s?.body, 'the rollback text is missing');
   const en = body(s, 'en');
   // What keeps a chat, exactly as the code decides it (lib/inbox/eligibility.mjs
   // PROPERTY_WORDS, lib/wa-poller.mjs candidateWordsOf): one of the listed property words,
@@ -217,31 +804,6 @@ test('the chats kept only to be checked are named: what is kept, for how long, a
   assert.match(ar, /ووقت هذه الرسائل وعددها ومَن أرسل آخرها/);
   assert.match(ar, /ما لم يُضفها إلى صندوق محادثات بونا أو تصبح لاحقاً استفساراً لدى بونا/);
   assert.match(ar, /لا نحتفظ إلا بالرقم ومعرّفات واتساب للمحادثة، مدةً أقصاها سنة/);
-});
-
-test('the Changes section flags the chats kept only to be checked, in both languages, for its 30 days (D17)', () => {
-  const changes = section('changes');
-  assert.ok(changes, 'the Changes section is missing');
-  // The page promises to flag a material change here for 30 days; this line comes out on
-  // or after 2026-10-30, and from then on nothing asks for it.
-  if (new Date().toISOString().slice(0, 10) >= '2026-10-30') return;
-  const en = changes.body.en.filter((p) => p.startsWith('30 September 2026:')).find((p) => p.includes('exception'));
-  assert.ok(en, 'the version date moved to 30 September for this change (the day it went public), so Changes says what changed');
-  assert.match(en, /“WhatsApp conversations with our team”/);
-  assert.match(en, /When a message sent or received on our number uses one of the property words that section lists, or mentions a property document as that section defines it, or the owner of Bona sends one of the kinds of document it lists or a document of TK Estate & Design, and the chat is not already a Bona enquiry/);
-  assert.doesNotMatch(en, /looks like a property enquiry/);
-  assert.match(en, /the number, the name WhatsApp shows and those words, not the conversation/);
-  assert.match(en, /until 30 days after the last such message/);
-  assert.match(en, /for up to a year/);
-  const ar = changes.body.ar.filter((p) => p.startsWith('30 سبتمبر 2026:')).find((p) => p.includes('استثناء'));
-  assert.ok(ar, 'the Arabic text says everything the English does');
-  assert.match(ar, /«محادثات واتساب مع فريق بونا»/);
-  assert.match(ar, /فإذا استُخدمت في رسالة مُرسلة أو واردة على رقمنا إحدى الكلمات العقارية التي يذكرها القسم، أو ذُكر فيها مستند عقاري بالمعنى الذي يحدده القسم، أو أرسل مالك بونا أحد أنواع المستندات التي يذكرها أو مستنداً لـ TK Estate & Design، ولم تكن المحادثة استفساراً لدى بونا أصلاً/);
-  assert.doesNotMatch(ar, /استفساراً عقارياً دون أن يتضح/);
-  assert.match(ar, /الرقم، والاسم الذي يُظهره واتساب، وهذه الكلمات، دون المحادثة نفسها/);
-  assert.match(ar, /حتى ثلاثين يوماً من آخر رسالة من هذا النوع/);
-  assert.match(ar, /مدةً أقصاها سنة/);
-  assert.ok(policy.updated >= '2026-09-29', 'the version date is the newest change');
 });
 
 // ---- Bona's own WhatsApp number and the AI phone line (2026-11-19, design 2026-11-16 §8/§11) ----
@@ -314,14 +876,14 @@ test('the business-partner sentence (owner OK 2026-11-26) sits with the WhatsApp
   assert.ok(body(section('whatsapp-conversations'), 'ar').includes(`تسجيل الدخول. ${ar} إليها.`));
   assert.ok(body(section('ai-phone-line'), 'ar').includes(`وقراءة النص. ${ar} إليهما.`));
   // The dated change line says so too, until its 30 days are up (on or after 2026-12-26).
-  if (new Date().toISOString().slice(0, 10) >= '2026-12-26') return;
+  if (today() >= '2026-12-26') return;
   const changes = section('changes');
   assert.ok(changes.body.en.some((p) => /^26 November 2026:.*business partner of the owner of Bona/.test(p)));
   assert.ok(changes.body.ar.some((p) => /^26 نوفمبر 2026:.*شريك أعمال لمالك بونا/.test(p)));
 });
 
 test('the 26 Nov change line mentions the call alert note (until its 30 days are up, 2026-12-26)', () => {
-  if (new Date().toISOString().slice(0, 10) >= '2026-12-26') return;
+  if (today() >= '2026-12-26') return;
   const changes = section('changes');
   assert.ok(changes.body.en.some((p) => /^26 November 2026:.*after each call, the owner of Bona gets a short WhatsApp note about it\./.test(p)));
   assert.ok(changes.body.ar.some((p) => /^26 نوفمبر 2026:.*وتصل مالكَ بونا بعد كل مكالمة ملاحظةٌ قصيرة عنها عبر واتساب\./.test(p)));
@@ -356,7 +918,7 @@ test('every number the policy writes out is site.whatsapp or site.phone, and the
 
 // The dated line comes out once its 30 days are up (on or after 2026-12-26), and this test with it.
 test('the Changes section flags the new WhatsApp number and the AI phone assistant, in both languages (30 days)', () => {
-  if (new Date().toISOString().slice(0, 10) >= '2026-12-26') return;
+  if (today() >= '2026-12-26') return;
   const changes = section('changes');
   const en = changes.body.en.find((p) => /^26 November 2026:/.test(p));
   const ar = changes.body.ar.find((p) => /^26 نوفمبر 2026:/.test(p));

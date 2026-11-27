@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-26",
+  "updated": "2026-11-27",
   "title": { "en": "Buying and selling property in Jeddah — questions we are asked", "ar": "أسئلة تُطرح علينا عن شراء وبيع العقار في جدة" },
   "intro": {
     "en": "Plain answers to the questions buyers and owners actually ask us, with the official source named wherever a rule or a figure comes from one. Where an answer depends on a specific property or a specific buyer, we say so rather than guess — send us the details on WhatsApp and we will check it for you.",
@@ -98,17 +98,17 @@
     {
       "id": "viewing",
       "q": {
-        "en": "How does a viewing with Bona work?",
-        "ar": "كيف تتم المعاينة مع بونا؟"
+        "en": "How do I book a viewing with Bona?",
+        "ar": "كيف أحجز معاينة مع بونا؟"
       },
       "a": {
         "en": [
-          "You send us the listing reference on WhatsApp, we confirm the home is still available and agree a time with the owner, and one of us meets you there — not a junior nobody has briefed. Viewings are by appointment, Sunday to Thursday, 10:00 to 19:00.",
-          "For homes with a 3D tour you can walk the whole property first and decide whether it is worth your afternoon. Several sellers on our books ask that their home is shown only to buyers whose position we already understand, so we may ask a few questions before confirming."
+          "Send us the listing reference on WhatsApp and ask for a viewing. For our homes in Jeddah, our AI assistant offers you the free times — Sunday to Thursday, 10:00 to 19:00, from the next day onwards — books the one you choose as a one-hour viewing and confirms it in the chat; for our homes elsewhere, a member of our team arranges it with you. One of us meets you there — not a junior nobody has briefed.",
+          "If the home’s owner needs another time, or the home is no longer available, we tell you in the same chat; to change or cancel, write to us there. For homes with a 3D tour you can walk the whole property first and decide whether it is worth your afternoon."
         ],
         "ar": [
-          "ترسل لنا رقم العقار على واتساب، فنؤكد أن المنزل ما يزال متاحاً ونتفق مع المالك على موعد، ثم يلقاك أحدنا هناك — لا موظف لم يُطلعه أحد على شيء. والمعاينة بموعد مسبق، من الأحد إلى الخميس، من 10:00 إلى 19:00.",
-          "وللمنازل التي لها جولة ثلاثية الأبعاد يمكنك أن تتجوّل فيها كاملة أولاً ثم تقرر إن كانت تستحق أن تُفرد لها بعد ظهرك. ويشترط عدد من البائعين لدينا ألّا يُعرض منزلهم إلا على مشترٍ نفهم وضعه سلفاً، ولذلك قد نسأل بضعة أسئلة قبل تأكيد الموعد."
+          "أرسل لنا رقم العقار على واتساب واطلب معاينة. ولمنازلنا في جدة تعرض عليك مساعدتنا الذكية، التي تعمل بالذكاء الاصطناعي، المواعيد المتاحة — من الأحد إلى الخميس، من 10:00 إلى 19:00، ابتداءً من اليوم التالي — وتحجز الموعد الذي تختاره لمعاينة مدتها ساعة، وتؤكده لك في المحادثة؛ أما منازلنا خارج جدة فيرتّب أحد أعضاء فريقنا المعاينة معك. ثم يلقاك أحدنا هناك — لا موظف لم يُطلعه أحد على شيء.",
+          "وإذا احتاج مالك العقار إلى وقت آخر، أو لم يعد العقار متاحاً، أبلغناك في المحادثة نفسها؛ ولتغيير الموعد أو إلغائه راسلنا فيها. وللمنازل التي لها جولة ثلاثية الأبعاد يمكنك أن تتجوّل فيها كاملة أولاً ثم تقرر إن كانت تستحق أن تُفرد لها بعد ظهرك."
         ]
       }
     },
@@ -205,14 +205,46 @@
       },
       "a": {
         "en": [
-          "WhatsApp is fastest: +966 57 626 7694. Our team replies Sunday to Thursday, 10:00 to 19:00 Saudi time, in Arabic or English, and a Bona principal follows up every enquiry personally.",
+          "WhatsApp is fastest: +966 57 626 7694. Bona’s AI assistant answers there at any hour, in Arabic or English, and says that it is an AI; our team replies Sunday to Thursday, 10:00 to 19:00 Saudi time, and a Bona principal follows up every enquiry personally.",
           "Phone calls to that number (not WhatsApp calls) are answered at any hour by Bona’s virtual assistant. It is an AI, says so when it answers and records the call; it can tell you about the homes on this site and their published prices, and it takes your details so that a principal can call you back. WhatsApp calls do not reach the assistant, so please write to us there instead.",
-          "Send the listing reference with your message and you will get a straight answer about that home rather than a brochure."
+          "Send the listing reference with your message and you will get a straight answer about that home."
         ],
         "ar": [
-          "واتساب أسرع وسيلة: ‎+966 57 626 7694. يردّ فريقنا من الأحد إلى الخميس، من 10:00 إلى 19:00 بتوقيت المملكة، بالعربية أو الإنجليزية، ويتابع أحد شركاء الدار كل استفسار بنفسه.",
+          "واتساب أسرع وسيلة: ‎+966 57 626 7694. تردّ عليك هناك مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، في أي وقت، بالعربية أو الإنجليزية، وتوضّح أنها تعمل بالذكاء الاصطناعي؛ ويردّ فريقنا من الأحد إلى الخميس، من 10:00 إلى 19:00 بتوقيت المملكة، ويتابع أحد شركاء الدار كل استفسار بنفسه.",
           "وتردّ على المكالمات الهاتفية إلى هذا الرقم (لا مكالمات واتساب) في أي وقت المساعدةُ الافتراضية لبونا، وهي مساعدة تعمل بالذكاء الاصطناعي تُعرّف بنفسها عند الرد وتسجّل المكالمة؛ وتُخبرك عن المنازل المنشورة في هذا الموقع وأسعارها المعلنة، وتدوّن بياناتك ليتصل بك أحد شركاء الدار. ولا تصل مكالمات واتساب إلى المساعدة، فراسلنا كتابةً عبر واتساب بدلاً من ذلك.",
-          "أرسل رقم العقار مع رسالتك لتحصل على إجابة مباشرة عن ذلك المنزل بدل أن تصلك نشرة تعريفية."
+          "أرسل رقم العقار مع رسالتك لتحصل على إجابة مباشرة عن ذلك المنزل."
+        ]
+      }
+    },
+    {
+      "id": "whatsapp-assistant",
+      "q": {
+        "en": "Who answers when I write to Bona on WhatsApp?",
+        "ar": "من يردّ عليّ عندما أراسل بونا عبر واتساب؟"
+      },
+      "a": {
+        "en": [
+          "Usually Bona’s AI assistant, at any hour. It is not a person, and its first message says so. It answers from what is published on this site — our homes, their published prices, brochures and locations — saves your enquiry and can book a viewing of our homes in Jeddah.",
+          "It does not negotiate, value a property or quote a price that is not published here. Ask for a person at any time and a member of our team takes over the chat; when one of us writes in it, the assistant steps back for 24 hours. Our privacy policy sets out what is stored and who processes it."
+        ],
+        "ar": [
+          "في الغالب مساعدة بونا الذكية، التي تعمل بالذكاء الاصطناعي، وفي أي وقت. وهي ليست شخصاً، وتوضّح ذلك في أول رسالة منها. وتجيب بما هو منشور في هذا الموقع — منازلنا وأسعارها المنشورة وكتيّباتها ومواقعها — وتحفظ استفسارك، ويمكنها أن تحجز لك موعد معاينة لمنازلنا في جدة.",
+          "ولا تفاوض ولا تقدّم تقييماً لأي عقار ولا تذكر سعراً غير منشور هنا. اطلب التحدث إلى شخص في أي وقت فيتولى أحد أعضاء فريقنا المحادثة؛ ومتى كتب فيها أحدنا توقفت المساعدة الذكية عن الرد مدة أربع وعشرين ساعة. وتبيّن سياسة الخصوصية لدينا ما نحتفظ به ومن يعالجه."
+        ]
+      }
+    },
+    {
+      "id": "speak-to-a-person",
+      "q": {
+        "en": "Can I speak to a person instead of the AI assistant?",
+        "ar": "هل يمكنني التحدث إلى شخص بدلاً من المساعدة الذكية؟"
+      },
+      "a": {
+        "en": [
+          "Yes. Write on WhatsApp that you would like to speak to a person and the assistant passes the conversation to our team, who reply Sunday to Thursday, 10:00 to 19:00; until then it can still answer questions about our published homes. If you would rather receive no automatic replies at all, say so and we will switch them off for your chat."
+        ],
+        "ar": [
+          "نعم. اكتب في واتساب أنك تريد التحدث إلى شخص، فتُحيل المساعدة الذكية المحادثة إلى فريقنا، الذي يردّ من الأحد إلى الخميس، من 10:00 إلى 19:00؛ وإلى ذلك الحين يمكنها أن تواصل الإجابة عن أسئلتك حول منازلنا المنشورة. وإن كنت تفضّل ألّا تصلك ردود آلية أصلاً، فأخبرنا بذلك وسنوقفها لمحادثتك."
         ]
       }
     }
