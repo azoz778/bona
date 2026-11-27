@@ -229,6 +229,56 @@ test('parseCommand: the exact command texts, any case and any whitespace; anythi
   for (const text of ['#danaX', 'hi #dana', '\u200Fhi #dana', '', null, 42, undefined]) assert.equal(isDanaCommandText(text), false, String(text));
 });
 
+/**
+ * Codex T07 r4: `#dana\u200Boff` matches DANA_COMMAND_RE as typed, but not once the mark is
+ * dropped (`#danaoff`), so a check of the normalised text alone stored it as client text. The
+ * refusal now reads the text as typed, as the parser reads it, and as it looks (format marks,
+ * no-break spaces, fullwidth forms); the parser stays as it was: only what it already takes
+ * from the owner is a command.
+ */
+test("a '#dana' line with a format mark, a no-break space or a fullwidth sign around 'dana' is refused, command or not; the parser is unchanged (Codex T07 r4)", () => {
+  const ZWSP = '\u200B';
+  const ZWJ = '\u200D';
+  const RLM = '\u200F';
+  const NBSP = '\u00A0';
+  const WJ = '\u2060';
+  const SHY = '\u00AD';
+  /** text \u2192 what parseCommand makes of it today (unchanged): the command, or null. */
+  const looksLike = new Map([
+    // A mark after 'dana': no command once dropped (`#danaoff`), a '#dana' line as typed.
+    [`#dana${ZWSP}off`, null], [`#dana${ZWJ}off`, null], [`#dana${RLM}off`, null], [`#dana${WJ}off`, null], [`#dana${SHY}off`, null],
+    [`#dana${NBSP}off`, COMMANDS.off], [`#dana${ZWSP}${ZWSP}test on`, null],
+    // A mark before 'dana' (after the sign), or before the sign.
+    [`#${ZWSP}dana off`, COMMANDS.off], [`#${ZWJ}dana off`, COMMANDS.off], [`#${RLM}dana off`, COMMANDS.off],
+    [`#${WJ}dana off`, null], [`#${NBSP}dana off`, null], ['# dana off', null], [`${NBSP}#dana off`, COMMANDS.off],
+    [`${ZWJ}#dana off`, COMMANDS.off], [`${RLM}${NBSP}#dana status`, COMMANDS.status], [`#d${WJ}ana off`, null],
+    // The fullwidth sign (and fullwidth letters), alone or with a mark.
+    ['\uFF03dana off', null], [`\uFF03dana${ZWSP}off`, null], [`\uFF03${ZWSP}dana off`, null], [`${RLM}\uFF03dana live on`, null],
+    ['#\uFF44\uFF41\uFF4E\uFF41 off', null], ['\uFF03\uFF24\uFF21\uFF2E\uFF21 \uFF4F\uFF46\uFF46', null], [`\uFF03${NBSP}dana off`, null],
+  ]);
+  for (const [text, command] of looksLike) {
+    assert.equal(isDanaCommandText(text), true, `refused: ${JSON.stringify(text)}`);
+    assert.equal(parseCommand(text), command, `parser unchanged: ${JSON.stringify(text)}`);
+  }
+  // Still no '#dana' line: a longer word (with or without a mark inside), the word later on, no sign.
+  for (const text of ['#danavilla', `#${ZWSP}danavilla`, '\uFF03danavilla', `\uFF03${NBSP}danavilla`, 'hi #dana', `${RLM}hi \uFF03dana`, 'dana off', '#d ana off', '#', '\uFF03']) {
+    assert.equal(isDanaCommandText(text), false, `stored: ${JSON.stringify(text)}`);
+  }
+  // From the owner: what the parser does not take is no command (not consumed, nothing set, no reply).
+  const h = harness();
+  h.team.setSetting('dana_enabled', '1');
+  for (const [text, command] of looksLike) {
+    if (command) continue;
+    assert.equal(h.send(text), false, JSON.stringify(text));
+  }
+  assert.equal(h.team.getSetting('dana_enabled'), '1');
+  assert.deepEqual(h.notes.commands, []);
+  assert.equal(h.send(`#${ZWSP}dana off`), true, 'what the parser takes still works');
+  assert.equal(h.team.getSetting('dana_enabled'), '0');
+  assertClean(h.logs);
+  h.s.close();
+});
+
 test('every switch command sets its own setting, by the owner\'s phone or his lid, and only received ones from him count', () => {
   const h = harness();
   const cases = [

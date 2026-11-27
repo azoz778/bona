@@ -66,9 +66,10 @@
  *     refused (`rule_off`) while `ownerTest.ownNumberOk()` is false (no switch handed in reads as
  *     false), so the poller and a thread refresh alike stop storing it the moment Bona's own
  *     number is not checked, or the personal-number rollback is in place (DESIGN §13.2);
- *   - an owner command (`#dana …`, owner-test.mjs isDanaCommandText: DANA_COMMAND_RE once the
- *     invisible marks parseCommand drops are gone) is never a message, in any chat, either way
- *     it went (`command`), whichever read brings it;
+ *   - an owner command (`#dana …`) is never a message, in any chat, either way it went
+ *     (`command`), whichever read brings it; nor is any `#dana` line the parser does not take
+ *     (owner-test.mjs isDanaCommandText: DANA_COMMAND_RE on the text as typed and as the parser
+ *     reads it, and a `#dana` line through format marks, no-break spaces or fullwidth forms);
  *   - in the owner's test chat (`inbox_via` 'owner_test') a sent record is stored only when a
  *     staff or Dana outbox row is its send. Anything else (a note whose send went uncertain,
  *     call_alert.py's lines, a command's confirmation, anything typed on the Fold) is
@@ -90,7 +91,11 @@
  *     refresh finds only now leaves it, and a client message stored before it was found never
  *     keeps the hold; a timed hold runs to its end. So does
  *     WhatsApp's copy of a dashboard reply, matched by its key to the staff row, though the
- *     sender stored the reply on its 2xx before the copy came (the same freshness bound);
+ *     sender stored the reply on its 2xx before the copy came (the same freshness bound). And
+ *     the hold is asked again when an unsure or cut-off assistant send is accepted here: its
+ *     bound drops from when it went unsure to when it was written, so a person's reply stored
+ *     earlier and written in between now ends it, as it would have had the copy been read
+ *     first (store.mjs recheckHumanHold; Codex T07 r4);
  *   - a brochure the assistant sent (a Dana row with media_kind 'document') is found by its id,
  *     by its caption (a document record's text, matched to such rows only, never to a staff or
  *     text send with the same words, and a text record never to a brochure), or by the fallback:
@@ -452,6 +457,13 @@ export function createIngest({
       if (match && match.row.status !== 'accepted') {
         inbox.updateOutbox(match.row.send_id, { status: 'accepted', key_id: rec.id });
         log({ evt: 'inbox.outbox.resolved', leadId: current.lead_id, sendId: match.row.send_id, via: match.via });
+        // An assistant send that went: its bound in clearHumanHold drops from when it went unsure
+        // (its `updated` before this) to when it was written, so a person's reply stored before
+        // this copy was read and written in between ends the hold now, as it would have had the
+        // copy come first (Codex T07 r4). `match.row` is the row as it was before the accept.
+        if (match.row.sender_kind === 'dana' && current.dana_hold_reason && current.dana_hold_until == null) {
+          inbox.recheckHumanHold?.(current.lead_id, { after: match.row.created, upTo: match.row.updated });
+        }
       }
 
       // A hold that waits for a person ends with one written after it (store.mjs

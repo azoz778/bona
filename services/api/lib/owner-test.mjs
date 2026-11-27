@@ -101,12 +101,27 @@ export const COMMANDS = Object.freeze({
 const INVISIBLE = /[\u200B-\u200F\u2066-\u2069\uFEFF]/g;
 
 /**
- * Ingest's refusal (DESIGN §3.2): a text that is a `#dana …` command once the same invisible
- * marks parseCommand drops are gone, so every text parseCommand could take is refused there too,
- * by any read path (the poller, the join history, a thread refresh).
+ * A `#dana` line however a keyboard spelt it: whitespace and format marks (Unicode Cf: the
+ * zero-width marks and joiners, bidi marks, the word joiner, a soft hyphen, a BOM) before the
+ * sign, between the sign and the word and inside the word, and after the word no letter, digit
+ * or underscore (DANA_COMMAND_RE's `\b`), so `#danavilla` is still no `#dana` line.
+ */
+const DANA_LINE_RE = /^[\s\p{Cf}]*#[\s\p{Cf}]*d\p{Cf}*a\p{Cf}*n\p{Cf}*a(?![A-Za-z0-9_])/iu;
+
+/**
+ * Ingest's refusal (DESIGN §3.2): a `#dana` line is never stored as a message, by any read path
+ * (the poller, the join history, a thread refresh), whether or not it is a command. It is one
+ * when DANA_COMMAND_RE matches the text as typed, or as parseCommand reads it (its invisible
+ * marks gone), so every text parseCommand could take is refused too; or when it is a `#dana`
+ * line by DANA_LINE_RE, as typed or in NFKC (a fullwidth `＃` or letters, a no-break space).
+ * As typed counts on its own (Codex T07 r4): `#dana​off` is a `#dana` line there, but once
+ * the mark is dropped it reads `#danaoff`, which is none. Only parseCommand, on the owner's
+ * text, makes a line a command; a `#dana` line it does not take is dropped here, unanswered.
  */
 export function isDanaCommandText(text) {
-  return typeof text === 'string' && DANA_COMMAND_RE.test(text.replace(INVISIBLE, ''));
+  if (typeof text !== 'string') return false;
+  return DANA_COMMAND_RE.test(text) || DANA_COMMAND_RE.test(text.replace(INVISIBLE, ''))
+    || DANA_LINE_RE.test(text) || DANA_LINE_RE.test(text.normalize('NFKC'));
 }
 
 /**

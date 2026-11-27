@@ -628,6 +628,26 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
   }
 
   /**
+   * An assistant send that was unsure or cut off has just been accepted (ingest.mjs): its bound
+   * in clearHumanHold drops from its old `updated` (`upTo`, when it went unsure) to its
+   * `created` (`after`). A person's reply stored before the copy was read, and written in
+   * between, was refused then and ends the hold now, as it would have had the copy been read
+   * first: the order a catch-up reads them in decides nothing (Codex T07 r4). Asks
+   * clearHumanHold, the same rule, with the newest stored human reply (staff/owner_number) of
+   * the chat stamped after `after` and no later than `upTo`: no other reply's verdict changed
+   * (one newer than `upTo` was never held back by this send), and a record with no time of its
+   * own, stored at its read time, comes after the span unless it was read while the send was
+   * on its way. True when the hold was cleared.
+   */
+  function recheckHumanHold(leadId, { after, upTo } = {}) {
+    if (!hasNumber(after) || !hasNumber(upTo) || toTs(upTo) <= toTs(after)) return false;
+    const id = String(leadId ?? '');
+    const newest = prep(`SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ? AND direction = 'out'
+                           AND sender_kind IN ('staff','owner_number') AND ts > ? AND ts <= ?`).get(id, toTs(after), toTs(upTo))?.ts;
+    return hasNumber(newest) ? clearHumanHold(id, { ts: newest }) : false;
+  }
+
+  /**
    * The owner's test switch went on (DESIGN §3.2, PR-A2): his lead starts again as a stranger's
    * chat would. Out of any inbox state (a sticky `out` from an earlier test would block this
    * one), no floor (the join sets it: PR-A1), no hand-over, no stop, no hold, no human clock, no
@@ -980,7 +1000,7 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
     markStalePending, pruneCodeRows,
     markRead, listInbox, unreadTotal, listUnsure, countUnsure, isUnsureChat, inChatsWithoutMessages, listedLeads,
     addGap, gapsFor, clearGap, clearJoinGaps,
-    setInboxState, setHandler, setNeedsHuman, noteHumanOutbound, clearHumanHold, reopenOwnerTest,
+    setInboxState, setHandler, setNeedsHuman, noteHumanOutbound, clearHumanHold, recheckHumanHold, reopenOwnerTest,
     countDanaSends, countDanaTurns, countDanaTests, humanOutboundAfter, unansweredClientMessages,
     purgeLead, leaveInbox, retentionPurge,
     noteCandidate, listCandidates, countCandidates, getCandidate, dismissCandidate, removeCandidate, removeCandidatesFor, pruneCandidates,

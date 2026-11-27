@@ -1775,6 +1775,66 @@ test("clearHumanHold bounds an accepted assistant send by when it was written: a
   s.close();
 });
 
+test("recheckHumanHold asks clearHumanHold again with the newest stored human reply stamped while an accepted send was unsure: after it was written, no later than it went unsure (Codex T07 r4)", () => {
+  /**
+   * The assistant's send written at NOW - 60 s, unsure at NOW - 45 s, then the hold (timed
+   * with `until`); `stored` are the chat's stored messages; `other` adds a second send, written
+   * at NOW - 55 s and unsure at NOW - 40 s, that stays unsure. A catch-up at NOW + 5 min accepts
+   * the first one, then asks again with the span it had.
+   */
+  const run = ({ stored = [], other = false, until = null, accept = true } = {}) => {
+    const { s, inbox, at } = harness();
+    chat(s, 'L-1');
+    at(NOW - 60_000);
+    inbox.insertOutbox(out({ send_id: 'SND-u', sender_kind: 'dana', user_id: null }));
+    if (other) {
+      at(NOW - 55_000);
+      inbox.insertOutbox(out({ send_id: 'SND-v', sender_kind: 'dana', user_id: null, text: 'and more' }));
+    }
+    at(NOW - 45_000);
+    inbox.updateOutbox('SND-u', { status: 'uncertain', error: 'timeout' });
+    if (other) {
+      at(NOW - 40_000);
+      inbox.updateOutbox('SND-v', { status: 'uncertain', error: 'timeout' });
+    }
+    s.updateLead('L-1', { dana_hold_reason: 'send_failed', dana_hold_until: until });
+    stored.forEach(([kind, ts], i) => inbox.upsertMessage(msg({
+      key_id: `M-${i}`, direction: kind === 'client' ? 'in' : 'out', sender_kind: kind, ts,
+    })));
+    const before = inbox.getOutbox('SND-u');
+    at(NOW + 300_000);
+    if (accept) inbox.updateOutbox('SND-u', { status: 'accepted', key_id: 'WA-D-1' });
+    const cleared = inbox.recheckHumanHold('L-1', { after: before.created, upTo: before.updated });
+    const left = s.getLead('L-1').dana_hold_reason;
+    s.close();
+    return { cleared, left };
+  };
+  const ends = { cleared: true, left: null };
+  const stays = { cleared: false, left: 'send_failed' };
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 50_000]] }), ends, "the owner's phone, in the span");
+  assert.deepEqual(run({ stored: [['staff', NOW - 50_000]] }), ends, 'a staff reply, in the span');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 45_000]] }), ends, 'the moment it went unsure');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 60_000]] }), stays, 'the moment it was written: no newer than the send');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 70_000]] }), stays, 'before it was written');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 10_000]] }), stays, 'after the span (it was asked when it was read; no time of its own, stored at its read time): not asked here');
+  assert.deepEqual(run({ stored: [['client', NOW - 50_000], ['dana', NOW - 50_000]] }), stays, "a client's message or the assistant's own is no person answering");
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 70_000], ['owner_number', NOW - 50_000], ['client', NOW - 48_000]] }), ends, 'the newest human reply in the span decides');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 50_000]], other: true }), stays, 'another send still unsure since after the reply');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 50_000]], accept: false }), stays, 'not accepted: the same rule, the unsure send still holds');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 50_000]], until: NOW + 3_600_000 }), { cleared: false, left: 'send_failed' }, 'a timed hold runs to its end');
+  // A span that is no span asks nothing.
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  s.updateLead('L-1', { dana_hold_reason: 'send_failed', dana_hold_until: null });
+  inbox.upsertMessage(msg({ key_id: 'M-1', direction: 'out', sender_kind: 'owner_number', ts: NOW }));
+  for (const span of [{}, { after: NOW - 60_000 }, { upTo: NOW }, { after: 'x', upTo: NOW }, { after: NOW, upTo: NOW }, { after: NOW + 1, upTo: NOW }]) {
+    assert.equal(inbox.recheckHumanHold('L-1', span), false, JSON.stringify(span));
+  }
+  assert.equal(inbox.recheckHumanHold('L-1'), false);
+  assert.equal(s.getLead('L-1').dana_hold_reason, 'send_failed');
+  s.close();
+});
+
 test('pruneCandidates({ phones: true }) also deletes every OPEN row with a number; dismissed and lid-only rows stay; without it, as before', () => {
   const { s, inbox, at } = harness();
   const withPhone = inbox.noteCandidate({ phone: '966500000001', jid: JID, ts: NOW - DAY, words: ['villa'], dir: 'in' });
