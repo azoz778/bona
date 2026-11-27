@@ -16,11 +16,36 @@ import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normaliseSearchArgs } from './actions.mjs';
 import { toAsciiDigits } from './inventory.mjs';
 import { ensureHandoff } from './lead-tasks.mjs';
+import { liveSummary } from './units-summary.mjs';
 
 export const TOOL_NAMES = ['search_properties', 'show_property', 'search_units', 'create_lead', 'request_human'];
 /** The WhatsApp agent's hand-over tool (Phase 4): its invocation in a completion is what lib/dana-wa.mjs looks for. */
 export const HANDOVER_TOOL = 'request_human';
 const LEAD_ID_RE = /^LEAD-[A-Za-z0-9-]{1,60}$/;
+/**
+ * search_units sources that still get today's per-unit rows (refs, floors, every payment plan's price).
+ * Empty: every source, a missing or unknown one included, gets only the published per-bedroom "from" cut
+ * (DESIGN §4.5, deny by default). The owner's veto on the website-chat cut is this one line: ['bona-web'].
+ */
+export const FULL_UNIT_ROW_SOURCES = Object.freeze([]);
+
+/** search_units notes: the published cut, and nothing published for that project. */
+export const UNITS_NOTE = "These are the published starting cash prices per bedroom count; quote them as 'from'. Unit-level prices and payment plans are not published: offer a person for those.";
+export const UNITS_NOT_PUBLISHED_NOTE = 'Unit prices for that project are not published. Answer from search_properties only, never invent a unit, a price or a payment plan, and offer a person.';
+
+/**
+ * The allow-list a client may hear (DESIGN §4.5): the listing page's per-bedroom rows (label, count, area range,
+ * lowest cash price), the delivery and the sheet date. Built key by key, so nothing new in the summary passes.
+ */
+export function publishedUnitsCut(live) {
+  if (!live) return null;
+  return {
+    rows: live.rows.map((r) => ({
+      label: { en: r.label.en, ar: r.label.ar }, count: r.count, areaMin: r.areaMin, areaMax: r.areaMax, cashFrom: r.cashFrom,
+    })),
+    delivery: live.delivery, updated: live.updated,
+  };
+}
 
 /** A duplicate `create_lead` inside this window returns the first lead's id. */
 export const LEAD_DEDUPE_MS = 10 * 60 * 1000;
@@ -107,6 +132,7 @@ export function toolArgs(body = {}) {
 export function createToolHandlers({
   inventory, units = null, store, db, dataDir, siteUrl, env = {}, sendWhatsApp, log = () => {},
   now = () => Date.now(), leadDedupeMs = LEAD_DEDUPE_MS, notifyHandoff = async () => {},
+  fullUnitRowSources = FULL_UNIT_ROW_SOURCES,
 }) {
   if (!db) throw new TypeError('createToolHandlers needs the store (db)');
   /** leadKey → { at, id }. Bounded by the dedupe window, pruned on every save. */
@@ -134,16 +160,32 @@ export function createToolHandlers({
   }
 
   /**
-   * Per-unit stock inside one project (today: Darco Prime Waterfront, BONA-W014).
-   * `search_properties` answers "which projects"; this answers "which unit, on
-   * which floor, facing where, and for how much" — the question a buyer actually
-   * asks. Prices come from the developer's own inventory sheet; the model must
-   * quote them exactly and never estimate.
+   * Unit prices inside one project (today: Darco Prime Waterfront, BONA-W014), for every source: WhatsApp,
+   * email, the website chat and a missing or unknown source. The answer is what the listing page publishes
+   * (lib/units-summary.mjs liveSummary): one row per bedroom count with its lowest cash price, or null when the
+   * page publishes nothing (listing not available, sheet date impossible or in the future). No unit refs, no
+   * per-unit prices, no payment plans: those are not published (DESIGN §4.5). The model's filters are ignored.
    */
   async function search_units(args, ctx) {
-    if (!units) return { count: 0, results: [], note: 'Unit-level stock is not loaded. Use search_properties and offer a specialist.' };
-
     const listingId = String(args.listing_id ?? args.id ?? args.property ?? 'BONA-W014').trim().toUpperCase();
+    const source = ctx.source ?? ctx.attr?.source ?? null;
+    if (units && fullUnitRowSources.includes(source)) return unitRows(args, ctx, listingId);
+
+    const record = units ? units.forListing(listingId) : null;
+    const listing = record ? inventory.find(listingId) : null;
+    const live = record && listing?.id === record.listingId ? liveSummary(record, listing, new Date(now())) : null;
+    if (!live) return { count: 0, summary: null, note: UNITS_NOT_PUBLISHED_NOTE };
+
+    // Put the project card on screen so the visitor sees what is being discussed.
+    store.addCard(ctx.conversationId, inventory.card(listing));
+    return { count: live.count, summary: publishedUnitsCut(live), note: UNITS_NOTE };
+  }
+
+  /**
+   * The owner's veto path only (FULL_UNIT_ROW_SOURCES, empty by default): today's per-unit rows, with the
+   * developer's figures for the plan asked for. Unchanged from before the cut.
+   */
+  function unitRows(args, ctx, listingId) {
     const overview = units.summary(listingId);
     if (!overview) {
       return {
@@ -178,7 +220,6 @@ export function createToolHandlers({
 
     const results = rows.map((u) => units.toRow(u, plan));
 
-    // Put the project card on screen so the visitor sees what is being discussed.
     const listing = inventory.find(listingId);
     if (listing) store.addCard(ctx.conversationId, inventory.card(listing));
 
