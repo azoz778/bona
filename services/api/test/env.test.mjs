@@ -36,10 +36,50 @@ test('later files override earlier ones', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('the four secret files are read in the documented order, marketing last', () => {
+test('the five secret files are read in the documented order, bona-vps.env last (DESIGN §5.2)', () => {
   const files = defaultEnvFiles('/home/tester');
-  assert.deepEqual(files.map((f) => path.basename(f)), ['retell.env', 'evolution-api.env', 'bona-services.env', 'bona-marketing.env']);
+  assert.deepEqual(files.map((f) => path.basename(f)), ['retell.env', 'evolution-api.env', 'bona-services.env', 'bona-marketing.env', 'bona-vps.env']);
   assert.ok(files.every((f) => f.startsWith('/home/tester/.secrets/')));
+});
+
+test('bona-vps.env is read last, so it beats bona-services.env and bona-marketing.env; process.env still wins over it', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-home-'));
+  const dir = path.join(home, '.secrets');
+  fs.mkdirSync(dir, { mode: 0o700 });
+  fs.writeFileSync(path.join(dir, 'bona-services.env'), 'BONA_WA_POLL_MS=20000\nBONA_SITE=https://from-services\nONLY_SERVICES=1\n');
+  fs.writeFileSync(path.join(dir, 'bona-marketing.env'), 'BONA_SITE=https://from-marketing\n');
+  fs.writeFileSync(path.join(dir, 'bona-vps.env'), 'BONA_WA_POLL_MS=10000\nBONA_SITE=https://from-vps\nBONA_BRAIN_MONTH_STOP_USD=50\n');
+  const merged = loadEnv({ home, base: {} });
+  assert.equal(merged.BONA_WA_POLL_MS, '10000', 'bona-vps.env beats bona-services.env');
+  assert.equal(merged.BONA_SITE, 'https://from-vps', 'and bona-marketing.env');
+  assert.equal(merged.BONA_BRAIN_MONTH_STOP_USD, '50');
+  assert.equal(merged.ONLY_SERVICES, '1', 'keys it does not name are left alone');
+  const withProcess = loadEnv({ home, base: { BONA_WA_POLL_MS: '5000' } });
+  assert.equal(withProcess.BONA_WA_POLL_MS, '5000', 'process.env (systemd) still wins');
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('a missing bona-vps.env is {}: every other file reads exactly as before', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-home-'));
+  const dir = path.join(home, '.secrets');
+  fs.mkdirSync(dir, { mode: 0o700 });
+  fs.writeFileSync(path.join(dir, 'bona-services.env'), 'BONA_WA_POLL_MS=20000\n');
+  assert.deepEqual(loadEnvFile(path.join(dir, 'bona-vps.env')), {});
+  assert.deepEqual(loadEnv({ home, base: {} }), { BONA_WA_POLL_MS: '20000' });
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('the brain key file is never one of the env files: its key reaches lib/brain only (DESIGN §5.2)', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-home-'));
+  const dir = path.join(home, '.secrets');
+  fs.mkdirSync(dir, { mode: 0o700 });
+  fs.writeFileSync(path.join(dir, 'bona-brain.env'), 'BONA_OPENAI_API_KEY=sk-test-not-a-real-key\n');
+  fs.writeFileSync(path.join(dir, 'bona-mail.env'), 'BONA_MAIL_PASSWORD=not-a-real-password\n');
+  assert.ok(defaultEnvFiles(home).every((f) => !/bona-(brain|mail)\.env$/.test(f)));
+  const merged = loadEnv({ home, base: {} });
+  assert.equal(merged.BONA_OPENAI_API_KEY, undefined);
+  assert.equal(merged.BONA_MAIL_PASSWORD, undefined);
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 test('a missing bona-marketing.env leaves every marketing key undefined (integration off)', () => {
@@ -52,7 +92,7 @@ test('a missing bona-marketing.env leaves every marketing key undefined (integra
   fs.writeFileSync(path.join(home, '.secrets', 'bona-marketing.env'), 'META_PIXEL_ID=123\nBONA_SITE=https://override\n');
   const again = loadEnv({ home, base: {} });
   assert.equal(again.META_PIXEL_ID, '123');
-  assert.equal(again.BONA_SITE, 'https://override', 'the marketing file is read last and wins over bona-services.env');
+  assert.equal(again.BONA_SITE, 'https://override', 'the marketing file is read after bona-services.env and wins over it');
   fs.rmSync(home, { recursive: true, force: true });
 });
 

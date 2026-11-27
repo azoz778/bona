@@ -298,7 +298,13 @@ never logged. `process.env` always wins over a file.
 | `~/.secrets/retell.env` | `RETELL_API_KEY` |
 | `~/.secrets/evolution-api.env` | `EVOLUTION_API_URL`, `EVOLUTION_API_KEY` |
 | `~/.secrets/bona-services.env` | everything below |
-| `~/.secrets/bona-marketing.env` | `META_PIXEL_ID`, `META_CAPI_TOKEN`, `META_TEST_EVENT_CODE`, `GA4_MEASUREMENT_ID`, `GA4_API_SECRET`, `SNAP_PIXEL_ID`, `SNAP_CAPI_TOKEN` — read last, so it wins among files; every key optional, and a missing one skips that destination rather than failing (the fan-out marks those rows `skipped`). Template: `deploy/bona-marketing.env.example`, copied there by `install.sh` |
+| `~/.secrets/bona-marketing.env` | `META_PIXEL_ID`, `META_CAPI_TOKEN`, `META_TEST_EVENT_CODE`, `GA4_MEASUREMENT_ID`, `GA4_API_SECRET`, `SNAP_PIXEL_ID`, `SNAP_CAPI_TOKEN` — read after `bona-services.env`, so it wins over it; every key optional, and a missing one skips that destination rather than failing (the fan-out marks those rows `skipped`). Template: `deploy/bona-marketing.env.example`, copied there by `install.sh` |
+| `~/.secrets/bona-vps.env` | the VPS's own `BONA_*` knobs (the full-automation keys below) — VPS only, written there (0600), read **last**, so it wins over every other file (`process.env` still wins over it). Not in `deploy/vps/lib.sh` `SECRET_FILES`, so `sync-secrets.sh` never overwrites it. Missing = `{}` |
+
+The AI key (`~/.secrets/bona-brain.env`) and the mailbox password (`~/.secrets/bona-mail.env`) are not
+in this list on purpose: each is read only by the module that needs it, so neither reaches `cfg.env`.
+`lib/config.mjs` never reads a generic `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`, and drops every
+`OPENAI_*` / `ANTHROPIC_*` / `BONA_OPENAI_*` / `BONA_ANTHROPIC_*` name from `cfg.env`.
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -336,6 +342,14 @@ never logged. `process.env` always wins over a file.
 | `BONA_RATE_EVENTS` / `BONA_RATE_ENQUIRY` | `240` / `6` | per IP per minute |
 | `BONA_FANOUT_MS` | `20000` | ad-platform fan-out worker interval; `0` turns the worker off |
 | `BONA_FANOUT_REQUIRE_CONSENT` | `1` | fan out only for a session that accepted ads (PDPL) |
+| `BONA_WA_LINKED_AT` | unset | full automation: when Bona's own number was linked, an ISO instant **with its offset** (`2026-11-26T05:25:00+03:00`); unset or anything else = the strictest warm-up tier |
+| `BONA_WA_PERSONAL_INSTANCES` | `abdulaziz-personal` | comma separated; instances that are never Bona's (the identity guard). `abdulaziz-personal` is always in the list |
+| `BONA_DANA_TURNS_MONTH_ALERT` | `1500` | a volume alert at 80% and 100% of this many turns a month |
+| `BONA_GCAL_SA_FILE` / `BONA_GCAL_CALENDAR_ID` / `BONA_GCAL_EXTRA_BUSY_IDS` | unset | the viewing calendar: the service-account key file, the calendar id, extra busy calendars (comma separated); env only, never the repo |
+| `BONA_KUMA_WA_LINK_PUSH` | unset | the Kuma push URL for the WhatsApp link probe |
+| `BONA_BRAIN_MODEL` / `_BACKUP_MODEL` / `_CLASSIFY_MODEL` | `gpt-5.6-sol` / `gpt-6.1-terra` / `gpt-6.1-terra` | the AI service's models; a value that is not a plain model id is the default |
+| `BONA_BRAIN_BACKUP_MODE` | `answer` | `answer` or `handover` (the backup is never called); any other value is `handover` |
+| `BONA_BRAIN_MONTH_ALERT_USD` / `_DAY_STOP_USD` / `_MONTH_STOP_USD` | `40` / `20` / `300` | the month check-in alert and the runaway stops, in $; a value that is not a plain positive number is the default |
 
 Inventory resolution order: `BONA_INVENTORY_FILE` → `$BONA_REPO/src/data/listings.json`
 → the checkout the service is running from. The file's mtime is checked with one cheap
@@ -1149,7 +1163,7 @@ dismissed one a year after it was dismissed (`candidatesExpired`, `dismissalsExp
 
 #### Dana on WhatsApp (Phase 4)
 
-When a client writes in a Bona inbox chat and nobody on the team has answered for 24 hours, Dana answers on WhatsApp from the instance's number (Bona's own since 2026-11-19), through the same sender as a team member's reply. She ships **off**: `settings.dana_enabled` is `'0'` until an owner turns her on from the Team page ("Dana on WhatsApp"). Before that, an owner can let her **test on one chat** from that chat's page ("Let Dana test on this chat"); anyone on the team can turn her **off for one chat** ("Turn Dana off for this chat"). Off for a chat also ends a test on it. While she is off, the Team page says how many chats are under test.
+When a client writes in a Bona inbox chat and nobody on the team has answered for 24 hours, Dana answers on WhatsApp from the instance's number (Bona's own since 2026-11-19), through the same sender as a team member's reply. She ships **off**: `settings.dana_enabled` is `'0'` until an owner turns her on from the Team page ("The AI assistant on WhatsApp", button "Turn the AI assistant on"). Before that, an owner can let her **test on one chat** from that chat's page ("Let Dana test on this chat"); anyone on the team can turn her **off for one chat** ("Turn Dana off for this chat"). Off for a chat also ends a test on it. While she is off, the Team page says how many chats are under test.
 
 She is a separate Retell LLM and chat agent (`retell/provision.mjs --whatsapp-only`; ids `waLlmId` / `waChatAgentId` in `retell/ids.json`, or `BONA_RETELL_WA_CHAT_AGENT_ID`) on the site's knowledge base, with `search_properties`, `search_units` and `request_human`. Without an agent id `/health` shows `dana.configured: false` and nothing is sent. She is never built on the Retell mock: with `BONA_RETELL_MOCK=1` she is not configured and start-up logs one `dana.mock_off` warning. On shutdown she is given up to 4 s to finish what is in flight.
 

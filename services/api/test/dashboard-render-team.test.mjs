@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { layout, loginPage } from '../lib/dashboard/render.mjs';
-import { teamPage } from '../lib/dashboard/render-team.mjs';
+import { layout, loginPage, esc } from '../lib/dashboard/render.mjs';
+import { teamPage, fundsBanner, opsPanel } from '../lib/dashboard/render-team.mjs';
 
 const OWNER = { user_id: 'USR-o', name: 'Abdulaziz Zidan', role: 'owner', phone_e164: '966593296933', active: 1, last_login: null };
 const STAFF = { user_id: 'USR-s', name: 'Sara <b>', role: 'staff', phone_e164: '966500000001', active: 1, last_login: 1_790_500_000_000 };
@@ -92,40 +92,69 @@ test('the Team page carries the owner\'s switch for replies to clients, off unti
   assert.match(teamPage({ me: OWNER, users: [OWNER], repliesEnabled: 'yes' }), /name="inbox_replies" value="1"/, 'only a real true counts as on');
 });
 
-test('the Dana switch: off by default with the way to test her on one chat, on with what she does, and a note when she is not provisioned', () => {
+test('the AI assistant switch: off by default with the way to test it on one chat, on with what it does, and a note when it is not set up', () => {
   const off = teamPage({ me: OWNER, users: [OWNER], danaEnabled: false, danaConfigured: true });
-  assert.match(off, /<h2[^>]*>Dana on WhatsApp<\/h2>/);
-  assert.match(off, /Off\. Dana answers nobody on WhatsApp/);
-  assert.match(off, /Let Dana test on this chat/);
+  assert.match(off, /<h2[^>]*>The AI assistant on WhatsApp<\/h2>/);
+  assert.match(off, /Off\. The AI assistant answers nobody on WhatsApp/);
+  assert.match(off, /open that chat and use its “test on this chat” button/);
   assert.match(off, /name="dana_enabled" value="1"/);
-  assert.match(off, /Turn Dana on/);
-  assert.doesNotMatch(off, /not provisioned/);
+  assert.match(off, /Turn the AI assistant on/);
+  assert.doesNotMatch(off, /not set up/);
   const on = teamPage({ me: OWNER, users: [OWNER], danaEnabled: true, danaConfigured: true });
-  assert.match(on, /On\. Dana answers Bona inbox chats when nobody on the team has replied for 24 hours/);
-  assert.match(on, /AI assistant/);
+  assert.match(on, /On\. The AI assistant answers Bona inbox chats when nobody on the team has replied for 24 hours/);
+  assert.match(on, /It says it is an AI assistant, quotes only published prices, and hands the chat to the team when a client asks for a person\./);
   assert.match(on, /name="dana_enabled" value="0"/);
-  assert.match(on, /Turn Dana off/);
+  assert.match(on, /Turn the AI assistant off/);
   assert.doesNotMatch(on, /name="dana_enabled" value="1"/);
   assert.match(teamPage({ me: OWNER, users: [OWNER], danaEnabled: 'yes' }), /name="dana_enabled" value="1"/, 'only a real true counts as on');
   const bare = teamPage({ me: OWNER, users: [OWNER], danaEnabled: false, danaConfigured: false });
-  assert.match(bare, /not provisioned for WhatsApp yet/);
-  assert.match(bare, /provision\.mjs --whatsapp-only/);
+  assert.match(bare, /The AI assistant is not set up for WhatsApp yet, so nothing would be sent either way\./);
+});
+
+test('the assistant copy is nameless and true on either engine: no personal name, no provider, no viewing promise', () => {
+  // DESIGN §4.1 and brain/DESIGN-brain.md: clients see "Bona's AI assistant", never a name.
+  // The same copy must hold while a chat is on the Retell agent and once it is on the AI
+  // service, with bookings on or off: so it names no provider and says nothing about viewings.
+  for (const danaEnabled of [true, false]) {
+    for (const danaConfigured of [true, false]) {
+      const html = teamPage({ me: OWNER, users: [OWNER], danaEnabled, danaConfigured, danaTests: 1 });
+      const section = html.slice(html.indexOf('The AI assistant on WhatsApp'), html.indexOf('Go-live switches'));
+      assert.ok(section.length > 100, 'the section is there');
+      assert.doesNotMatch(section, /Dana|دانة|\b[Ss]he\b|\b[Hh]er\b/, `no name, no "she" (on=${danaEnabled}, configured=${danaConfigured})`);
+      assert.doesNotMatch(section, /Retell|OpenAI|provision/i, 'no provider: the copy holds on both engines');
+      assert.doesNotMatch(section, /viewing/i, 'no viewing promise: it depends on the booking switch');
+    }
+  }
+  // Nowhere on the page, banners included: both outage banners are nameless too. (Only the
+  // inbox list, render-inbox.mjs, still draws today's Retell words through the one-argument form.)
+  const out = Date.UTC(2026, 9, 3, 9, 30);
+  for (const page of [
+    teamPage({ me: OWNER, users: [OWNER], danaEnabled: true, danaConfigured: true }),
+    teamPage({ me: OWNER, users: [OWNER], danaEnabled: true, danaConfigured: true, fundsOut: out, brainOut: out }),
+    teamPage({ me: OWNER, users: [OWNER], fundsOut: out }),
+  ]) {
+    assert.match(page, /<h2>People<\/h2>/);
+    assert.doesNotMatch(page, /Dana|دانة|\b[Ss]he\b|\b[Hh]er(?:self)?\b/);
+  }
 });
 
 test('the Team page\'s "Off" line does not deny a test the owner armed', () => {
   const page = (danaTests) => teamPage({ me: OWNER, users: [OWNER], danaEnabled: false, danaConfigured: true, danaTests });
-  assert.match(page(2), /Off\. Dana answers nobody on WhatsApp, except 2 chats under test\. To try her/);
-  assert.match(page(1), /Off\. Dana answers nobody on WhatsApp, except 1 chat under test\. To try her/);
-  assert.match(page(0), /Off\. Dana answers nobody on WhatsApp\. To try her/);
-  assert.match(teamPage({ me: OWNER, users: [OWNER] }), /Off\. Dana answers nobody on WhatsApp\. To try her/, 'the default is no tests');
+  assert.match(page(2), /Off\. The AI assistant answers nobody on WhatsApp, except 2 chats under test\. To try it/);
+  assert.match(page(1), /Off\. The AI assistant answers nobody on WhatsApp, except 1 chat under test\. To try it/);
+  assert.match(page(0), /Off\. The AI assistant answers nobody on WhatsApp\. To try it/);
+  assert.match(teamPage({ me: OWNER, users: [OWNER] }), /Off\. The AI assistant answers nobody on WhatsApp\. To try it/, 'the default is no tests');
 });
 
-test('a red banner at the top of the Team page while Retell is out of credit, with the time in Riyadh; none otherwise (2026-10-05 R2)', () => {
+test('a red banner at the top of the Team page while Retell is out of credit, nameless, with the time in Riyadh; none otherwise (2026-10-05 R2)', () => {
   // 2026-10-03 09:30 UTC is 12:30 in Riyadh (UTC+3, no DST).
   const at = Date.UTC(2026, 9, 3, 9, 30);
   const html = teamPage({ me: OWNER, users: [OWNER], fundsOut: at, ok: 'setting' });
-  const banner = /<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time\. Top up Retell and she resumes by herself; until then clients get the hand-over line\.<\/div>/;
+  // Today's Retell wording (credit ran out, top up Retell) without the name (brain migration):
+  // true on either engine, since only the chats still on the Retell agent depend on its credit.
+  const banner = /<div class="err">The AI assistant can’t answer the chats on the Retell agent: Retell credit ran out at 2026-10-03 12:30 Riyadh time\. Top up Retell and it resumes by itself; until then clients get the hand-over line\.<\/div>/;
   assert.match(html, banner);
+  assert.doesNotMatch(html, /Dana can’t answer|resumes by herself/, 'not the inbox list\'s named words');
   assert.ok(html.indexOf('Retell credit ran out') < html.indexOf('<h2>People</h2>'), 'at the top');
   assert.ok(html.indexOf('Retell credit ran out') < html.indexOf('class="ok"'), 'above the flash too');
   for (const fine of [null, undefined, 0, NaN, '1790', 'x']) {
@@ -140,4 +169,177 @@ test("the Team page names Bona's WhatsApp number as the sender, never \"your num
     assert.match(html, /<h2[^>]*>Sending from Bona&#39;s WhatsApp<\/h2>|<h2[^>]*>Sending from Bona's WhatsApp<\/h2>/);
     assert.match(html, /from Bona(&#39;|')s WhatsApp number/);
   }
+});
+
+/* ---------------- the go-live switches, the AI-service banner and the Ops panel (PLAN T04) ---------------- */
+
+const SWITCH_ROWS = [
+  // [key, heading, the button offered while off, the button offered while on]
+  ['own_inbox', 'Every chat on Bona’s number', 'Turn on for every chat', 'Turn off for new chats'],
+  ['owner_as_client', 'Test mode: your own chat as a client', 'Turn test mode on', 'Turn test mode off'],
+  ['calendar_booking', 'Viewing bookings', 'Turn bookings on', 'Turn bookings off'],
+  ['owner_notes', 'Notes to your WhatsApp', 'Turn notes on', 'Turn notes off'],
+  ['email_replies', 'Email replies', 'Turn email replies on', 'Turn email replies off'],
+  ['owner_mail_copy', 'Platform mail to your Gmail', 'Copy to my Gmail', 'Stop the Gmail copy'],
+  ['dana_brain', 'AI service for every WhatsApp chat', 'Move every chat to OpenAI', 'Back to the Retell agent'],
+];
+
+test('every go-live switch has its own button, off by default, offering the opposite value', () => {
+  const off = teamPage({ me: OWNER, users: [OWNER] });
+  assert.match(off, /<h2[^>]*>Go-live switches<\/h2>/);
+  // owner_notes and owner_mail_copy ship on, so "turning it on" alone would not cover them; and a
+  // switch changed early is stored, so it acts once the code for its part runs. A merge alone is not
+  // that: repo-sync pulls, and bona-api runs new code only from its next restart (Codex r2).
+  assert.ok(off.includes(esc('These belong to the move to full automation. Each one shows the setting saved for it, and does nothing until its part of the automation is running; one changed early starts acting by itself at that point. Leave each one as it ships until the go-live step that names it.')));
+  assert.doesNotMatch(off, /once its part is deployed|as soon as its part is merged/);
+  for (const [key, heading, offLabel, onLabel] of SWITCH_ROWS) {
+    assert.ok(off.includes(`>${heading}</h3>`), `${key} heading`);
+    assert.match(off, new RegExp(`name="${key}" value="1"`), `${key} offers on`);
+    assert.ok(off.includes(`>${offLabel}</button>`), `${key} label while off`);
+    assert.doesNotMatch(off, new RegExp(`name="${key}" value="0"`), `${key} never offers off while off`);
+  }
+  const allOn = Object.fromEntries(SWITCH_ROWS.map(([key]) => [key, true]));
+  const on = teamPage({ me: OWNER, users: [OWNER], switches: allOn });
+  for (const [key, , , onLabel] of SWITCH_ROWS) {
+    assert.match(on, new RegExp(`name="${key}" value="0"`), `${key} offers off`);
+    assert.ok(on.includes(`>${onLabel}</button>`), `${key} label while on`);
+    assert.doesNotMatch(on, new RegExp(`name="${key}" value="1"`), `${key} never offers on while on`);
+  }
+  // Fails closed like the setting itself: only a real `true` is on.
+  const fuzzy = teamPage({ me: OWNER, users: [OWNER], switches: Object.fromEntries(SWITCH_ROWS.map(([key]) => [key, 'yes'])) });
+  for (const [key] of SWITCH_ROWS) assert.match(fuzzy, new RegExp(`name="${key}" value="1"`), `${key}: only true is on`);
+});
+
+test('each go-live switch posts to the settings route, one switch per form, with the dashboard marker', () => {
+  const html = teamPage({ me: OWNER, users: [OWNER] });
+  for (const [key] of SWITCH_ROWS) {
+    const form = new RegExp(`<form method="post" action="/v1/admin/settings"[^>]*><input type="hidden" name="_dash" value="1"><input type="hidden" name="${key}" value="1"><button`);
+    assert.match(html, form, key);
+  }
+});
+
+test('the go-live switch copy says what each one does in either state, and names no client-facing assistant', () => {
+  const off = teamPage({ me: OWNER, users: [OWNER] });
+  const on = teamPage({ me: OWNER, users: [OWNER], switches: Object.fromEntries(SWITCH_ROWS.map(([key]) => [key, true])) });
+  for (const line of [
+    'When off, a chat joins the Bona inbox only as before: by its Ref code, an ad or a listing number, or by your Move or Add.',
+    'When off, your own chat with Bona’s number is never treated as a client’s.',
+    'When off, the AI assistant passes viewing requests to the team.',
+    'When off, those notes are dropped, not kept for later.',
+    'When off, clients’ email is sorted by its headers and listed for you; no AI reads it.',
+    'When off, platform mail stays in Bona’s mailbox only.',
+    'When off, only the chats the AI assistant fully serves use Bona’s AI service (OpenAI); every other chat still uses the Retell agent. Turn this on only once the privacy page names OpenAI.',
+  ]) assert.ok(off.includes(esc(line)), line);
+  for (const line of [
+    'When on, every one-to-one chat on Bona’s WhatsApp number joins the Bona inbox (the AI assistant answers it while it is on), except the team’s chats and the never list.',
+    'It works only while Bona’s own number is linked and checked.',
+    'stays on until you turn it off.',
+    'When on, the AI assistant can offer free times from Bona’s viewing calendar and book a viewing in the chats it fully serves, once Google Calendar is set up.',
+    'When on, notes about new enquiries, hand-overs and bookings, and the daily summary, reach your WhatsApp from Bona’s number while Sending is on.',
+    'but only once the sender address has been checked.',
+    'is copied to your Gmail.',
+    'When on, every WhatsApp chat the AI assistant answers uses Bona’s AI service (OpenAI).',
+    'do not turn this off to stop the assistant: use “Turn the AI assistant off” above.',
+  ]) assert.ok(on.includes(esc(line)), line);
+  for (const html of [on, off]) {
+    const section = html.slice(html.indexOf('Go-live switches'));
+    assert.doesNotMatch(section, /Dana|دانة/, 'no client-facing name');
+    assert.doesNotMatch(section, /\+?966\s?5\d|@gmail|@example/, 'no number, no address');
+  }
+});
+
+test('each go-live row says what is saved, and words its effect as a condition: no row claims an effect is live (Codex r2)', () => {
+  const off = teamPage({ me: OWNER, users: [OWNER] });
+  const on = teamPage({ me: OWNER, users: [OWNER], switches: Object.fromEntries(SWITCH_ROWS.map(([key]) => [key, true])) });
+  const rows = (html) => html.slice(html.indexOf('Go-live switches'), html.indexOf('<h2 style="margin-top:28px">Ops</h2>'))
+    .match(/<h3[^>]*>[^<]*<\/h3>\n<p class="sub">.*?<\/p>/g) ?? [];
+  for (const [html, saved, when] of [[off, 'Saved: off.', 'When off, '], [on, 'Saved: on.', 'When on, ']]) {
+    const found = rows(html);
+    assert.equal(found.length, SWITCH_ROWS.length, 'one paragraph per switch');
+    for (const row of found) {
+      assert.ok(row.includes(`<p class="sub"><b>${saved}</b> ${esc(when)}`), row);
+      assert.doesNotMatch(row, /<p class="sub">(?:On|Off)\. /, 'never a bare "On." or "Off." as if it were live');
+    }
+  }
+  // A mix reads per row: the two that ship on say so, the rest say off.
+  const shipped = teamPage({ me: OWNER, users: [OWNER], switches: { owner_notes: true, owner_mail_copy: true } });
+  const mixed = rows(shipped);
+  assert.deepEqual(mixed.map((r) => r.includes('<b>Saved: on.</b>')), SWITCH_ROWS.map(([key]) => key === 'owner_notes' || key === 'owner_mail_copy'));
+});
+
+test('the AI-service banner: "the AI service has not answered" with the time in Riyadh, above the Retell one; none while it is fine', () => {
+  const at = Date.UTC(2026, 9, 3, 9, 30);
+  const html = teamPage({ me: OWNER, users: [OWNER], brainOut: at, ok: 'setting' });
+  const banner = /<div class="err">The AI service has not answered since 2026-10-03 12:30 Riyadh time\. Until it is back, clients get a line saying the team will reply\.<\/div>/;
+  assert.match(html, banner);
+  assert.ok(html.indexOf('The AI service has not answered') < html.indexOf('<h2>People</h2>'), 'at the top');
+  assert.ok(html.indexOf('The AI service has not answered') < html.indexOf('class="ok"'), 'above the flash too');
+  assert.doesNotMatch(html, /Retell credit/, 'the Retell banner is its own: only while Retell is out');
+  assert.doesNotMatch(html.slice(0, html.indexOf('<h2>People</h2>')), /Dana/, 'nameless');
+  for (const fine of [null, undefined, 0, NaN, '1790', 'x']) {
+    assert.doesNotMatch(teamPage({ me: OWNER, users: [OWNER], brainOut: fine }), /AI service has not answered/, String(fine));
+  }
+  // Both out: both banners, the AI service first; the Retell one keeps today's Retell wording without the name
+  // (the website chat stays on Retell until T28).
+  const both = teamPage({ me: OWNER, users: [OWNER], brainOut: at, fundsOut: at });
+  assert.match(both, banner);
+  assert.match(both, /<div class="err">The AI assistant can’t answer the chats on the Retell agent: Retell credit ran out at 2026-10-03 12:30 Riyadh time\. Top up Retell and it resumes by itself; until then clients get the hand-over line\.<\/div>/);
+  assert.ok(both.indexOf('The AI service has not answered') < both.indexOf('Retell credit ran out'));
+});
+
+test('fundsBanner keeps its one-argument form for the inbox list: the Retell banner only, byte for byte', () => {
+  const at = Date.UTC(2026, 9, 3, 9, 30);
+  assert.equal(fundsBanner(at), '<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time. Top up Retell and she resumes by herself; until then clients get the hand-over line.</div>');
+  assert.equal(fundsBanner(null), '');
+  assert.equal(fundsBanner(null, { brainOut: at }), '<div class="err">The AI service has not answered since 2026-10-03 12:30 Riyadh time. Until it is back, clients get a line saying the team will reply.</div>');
+  assert.equal(fundsBanner(null, {}), '');
+  assert.equal(fundsBanner(at, { brainOut: at }), '<div class="err">The AI service has not answered since 2026-10-03 12:30 Riyadh time. Until it is back, clients get a line saying the team will reply.</div>' +
+    '<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time. Top up Retell and she resumes by herself; until then clients get the hand-over line.</div>', 'without `nameless`, today\'s words');
+  // The Team page's form: `nameless` swaps in the nameless Retell banner and changes nothing else.
+  assert.equal(fundsBanner(at, { nameless: true }), '<div class="err">The AI assistant can’t answer the chats on the Retell agent: Retell credit ran out at 2026-10-03 12:30 Riyadh time. Top up Retell and it resumes by itself; until then clients get the hand-over line.</div>');
+  assert.equal(fundsBanner(null, { nameless: true }), '');
+  assert.equal(fundsBanner(null, { brainOut: at, nameless: true }), fundsBanner(null, { brainOut: at }));
+});
+
+test('the Ops panel renders an injected ops() result: a placeholder while it is empty, escaped rows otherwise', () => {
+  const empty = teamPage({ me: OWNER, users: [OWNER] });
+  assert.match(empty, /<h2[^>]*>Ops<\/h2>/);
+  assert.match(empty, /No counts yet\./);
+  assert.match(teamPage({ me: OWNER, users: [OWNER], ops: {} }), /No counts yet\./);
+  for (const junk of [null, 'x', 42, ['a']]) assert.match(teamPage({ me: OWNER, users: [OWNER], ops: junk }), /No counts yet\./, String(junk));
+  const html = teamPage({ me: OWNER, users: [OWNER], ops: { answers_24h: 12, 'p90 <s>': '41 s', brain: { turns: 3 }, none: null } });
+  assert.doesNotMatch(html, /No counts yet/);
+  assert.match(html, /<td>answers_24h<\/td><td>12<\/td>/);
+  assert.match(html, /<td>p90 &lt;s&gt;<\/td><td>41 s<\/td>/);
+  assert.match(html, /<td>brain<\/td><td>\{&quot;turns&quot;:3\}<\/td>/);
+  assert.match(html, /<td>none<\/td><td>—<\/td>/);
+  assert.equal(opsPanel({}), opsPanel(undefined), 'the stub and nothing at all render the same');
+});
+
+test('an ops() value that cannot be shown is a dash, never a thrown page: a cycle, a BigInt, a function', () => {
+  const loop = { a: 1 };
+  loop.self = loop;
+  let html;
+  assert.doesNotThrow(() => { html = opsPanel({ loop, big: { n: 10n }, fn: () => 'secret source', plain: 3 }); });
+  assert.match(html, /<td>loop<\/td><td>—<\/td>/);
+  assert.match(html, /<td>big<\/td><td>—<\/td>/);
+  assert.match(html, /<td>fn<\/td><td>—<\/td>/);
+  assert.doesNotMatch(html, /secret source/, 'a function is never printed as its source');
+  assert.match(html, /<td>plain<\/td><td>3<\/td>/);
+  assert.doesNotThrow(() => teamPage({ me: OWNER, users: [OWNER], ops: { loop } }));
+});
+
+test('an ops() result that throws while it is read is still no thrown page: a getter is a dash, a proxy that cannot list its keys is the placeholder', () => {
+  let html;
+  const getter = { get count() { throw new Error('unavailable 966500000000'); }, plain: 3 };
+  assert.doesNotThrow(() => { html = opsPanel(getter); });
+  assert.match(html, /<td>count<\/td><td>—<\/td>/);
+  assert.match(html, /<td>plain<\/td><td>3<\/td>/);
+  assert.doesNotMatch(html, /unavailable|966500000000/);
+  const proxy = new Proxy({}, { ownKeys() { throw new Error('no keys'); } });
+  assert.doesNotThrow(() => { html = opsPanel(proxy); });
+  assert.match(html, /No counts yet\./);
+  assert.doesNotThrow(() => teamPage({ me: OWNER, users: [OWNER], ops: getter }));
+  // A nested value whose toJSON throws is a dash too.
+  assert.match(opsPanel({ odd: { toJSON() { throw new Error('no'); } } }), /<td>odd<\/td><td>—<\/td>/);
 });

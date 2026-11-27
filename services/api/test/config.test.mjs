@@ -85,3 +85,153 @@ test('the WhatsApp chat agent id comes from the env, else ids.json, and never fa
   assert.equal(redacted(cfg).waChatAgentId, 'agent_wa');
   assert.doesNotMatch(JSON.stringify(redacted(cfg)), /secret/);
 });
+
+/* ---------------- the automation knobs (PLAN T04, DESIGN §5.2; brain/DESIGN-brain.md §2) ---------------- */
+
+const cfgOf = (env) => loadConfig({ env, ids: {} });
+
+test('BONA_WA_LINKED_AT parses an ISO instant with an offset; anything else is null (the strictest warm-up tier)', () => {
+  assert.equal(cfgOf({ BONA_WA_LINKED_AT: '2026-11-26T05:25:00+03:00' }).waLinkedAt, Date.UTC(2026, 10, 26, 2, 25));
+  assert.equal(cfgOf({ BONA_WA_LINKED_AT: '2026-11-26T02:25:00Z' }).waLinkedAt, Date.UTC(2026, 10, 26, 2, 25));
+  assert.equal(cfgOf({ BONA_WA_LINKED_AT: '2026-11-26T05:25+03:00' }).waLinkedAt, Date.UTC(2026, 10, 26, 2, 25));
+  assert.equal(cfgOf({ BONA_WA_LINKED_AT: '2026-11-26T05:25:00.250-01:30' }).waLinkedAt, Date.UTC(2026, 10, 26, 6, 55, 0, 250));
+  assert.equal(cfgOf({ BONA_WA_LINKED_AT: ' 2026-11-26T05:25:00+03:00 ' }).waLinkedAt, Date.UTC(2026, 10, 26, 2, 25), 'surrounding blanks are trimmed');
+  assert.equal(cfgOf({}).waLinkedAt, null, 'unset');
+  for (const bad of [
+    '', 'yes', '1795659900000', '2026-11-26', '2026-11-26T05:25:00', // no offset: local time would be a guess
+    '2026-02-30T05:25:00+03:00', '2026-11-31T05:25:00+03:00', '2026-13-01T05:25:00+03:00', // no such day
+    '2026-11-26T24:00:00+03:00', '2026-11-26T05:60:00+03:00', '2026-11-26T05:25:60+03:00',
+    '2026-11-26T05:25:00+15:00', '2026-11-26T05:25:00+03:60', '2026-11-26 05:25:00+03:00', '2026-11-26T05:25:00+0300',
+  ]) {
+    assert.equal(cfgOf({ BONA_WA_LINKED_AT: bad }).waLinkedAt, null, JSON.stringify(bad));
+  }
+});
+
+test('BONA_DANA_TURNS_MONTH_ALERT defaults to 1500 and takes only a positive whole number', () => {
+  assert.equal(cfgOf({}).danaTurnsMonthAlert, 1500);
+  assert.equal(cfgOf({ BONA_DANA_TURNS_MONTH_ALERT: '2000' }).danaTurnsMonthAlert, 2000);
+  for (const bad of ['', 'lots', '0', '-5', '1.5', '1e3', '0x10', ' ']) {
+    assert.equal(cfgOf({ BONA_DANA_TURNS_MONTH_ALERT: bad }).danaTurnsMonthAlert, 1500, JSON.stringify(bad));
+  }
+});
+
+test('BONA_WA_PERSONAL_INSTANCES defaults to abdulaziz-personal, which stays in the list whatever the env names', () => {
+  assert.deepEqual(cfgOf({}).waPersonalInstances, ['abdulaziz-personal']);
+  assert.deepEqual(cfgOf({ BONA_WA_PERSONAL_INSTANCES: '' }).waPersonalInstances, ['abdulaziz-personal']);
+  assert.deepEqual(cfgOf({ BONA_WA_PERSONAL_INSTANCES: 'abdulaziz-personal' }).waPersonalInstances, ['abdulaziz-personal']);
+  assert.deepEqual(cfgOf({ BONA_WA_PERSONAL_INSTANCES: ' other-one , second_2 ' }).waPersonalInstances, ['abdulaziz-personal', 'other-one', 'second_2']);
+  assert.deepEqual(cfgOf({ BONA_WA_PERSONAL_INSTANCES: 'ok,bad name,also/bad,,' }).waPersonalInstances, ['abdulaziz-personal', 'ok'], 'a name that is not an instance name is dropped');
+});
+
+test('the calendar and Kuma keys come from the env only; redacted() says only whether they are set', () => {
+  const empty = cfgOf({});
+  assert.equal(empty.gcalSaFile, '');
+  assert.equal(empty.gcalCalendarId, '');
+  assert.deepEqual(empty.gcalExtraBusyIds, []);
+  assert.equal(empty.kumaWaLinkPush, '');
+  const env = {
+    BONA_GCAL_SA_FILE: ' /home/tester/.secrets/sa.json ',
+    BONA_GCAL_CALENDAR_ID: 'owner-calendar@example.com',
+    BONA_GCAL_EXTRA_BUSY_IDS: 'family@example.com, ,other@example.com',
+    BONA_KUMA_WA_LINK_PUSH: 'https://kuma.example.com/api/push/SECRETPUSH',
+  };
+  const cfg = cfgOf(env);
+  assert.equal(cfg.gcalSaFile, '/home/tester/.secrets/sa.json');
+  assert.equal(cfg.gcalCalendarId, 'owner-calendar@example.com');
+  assert.deepEqual(cfg.gcalExtraBusyIds, ['family@example.com', 'other@example.com']);
+  assert.equal(cfg.kumaWaLinkPush, 'https://kuma.example.com/api/push/SECRETPUSH');
+  const r = redacted(cfg);
+  assert.equal(r.hasGcalSaFile, true);
+  assert.equal(r.hasGcalCalendarId, true);
+  assert.equal(r.gcalExtraBusyCount, 2);
+  assert.equal(r.hasKumaWaLinkPush, true);
+  const printed = JSON.stringify(r);
+  for (const v of ['sa.json', 'owner-calendar', 'family@', 'other@', 'SECRETPUSH', 'kuma.example']) assert.doesNotMatch(printed, new RegExp(v), v);
+  const off = redacted(empty);
+  assert.equal(off.hasGcalSaFile, false);
+  assert.equal(off.hasGcalCalendarId, false);
+  assert.equal(off.gcalExtraBusyCount, 0);
+  assert.equal(off.hasKumaWaLinkPush, false);
+});
+
+test('the brain knobs default to gpt-5.6-sol / gpt-6.1-terra / gpt-6.1-terra / answer / 40 / 20 / 300', () => {
+  const cfg = cfgOf({});
+  assert.equal(cfg.brainModel, 'gpt-5.6-sol');
+  assert.equal(cfg.brainBackupModel, 'gpt-6.1-terra');
+  assert.equal(cfg.brainClassifyModel, 'gpt-6.1-terra');
+  assert.equal(cfg.brainBackupMode, 'answer');
+  assert.equal(cfg.brainMonthAlertUsd, 40);
+  assert.equal(cfg.brainDayStopUsd, 20);
+  assert.equal(cfg.brainMonthStopUsd, 300);
+});
+
+test('the brain knobs follow the env (bona-vps.env), so T26 can swap the models and T18.0 can set the $50 month stop', () => {
+  const cfg = cfgOf({
+    BONA_BRAIN_MODEL: 'gpt-6.1-terra', BONA_BRAIN_BACKUP_MODEL: 'gpt-5.6-sol', BONA_BRAIN_CLASSIFY_MODEL: 'gpt-5.6-sol',
+    BONA_BRAIN_BACKUP_MODE: 'handover', BONA_BRAIN_MONTH_ALERT_USD: '32.5', BONA_BRAIN_DAY_STOP_USD: '10', BONA_BRAIN_MONTH_STOP_USD: '50',
+  });
+  assert.equal(cfg.brainModel, 'gpt-6.1-terra');
+  assert.equal(cfg.brainBackupModel, 'gpt-5.6-sol');
+  assert.equal(cfg.brainClassifyModel, 'gpt-5.6-sol');
+  assert.equal(cfg.brainBackupMode, 'handover');
+  assert.equal(cfg.brainMonthAlertUsd, 32.5);
+  assert.equal(cfg.brainDayStopUsd, 10);
+  assert.equal(cfg.brainMonthStopUsd, 50);
+  assert.equal(cfgOf({ BONA_BRAIN_BACKUP_MODE: ' Answer ' }).brainBackupMode, 'answer', 'case and blanks do not matter');
+});
+
+test('a brain $ knob that is not a plain positive number falls back to its default', () => {
+  for (const bad of ['', ' ', 'twenty', '20usd', '$20', '-5', '0', '1e3', '0x10', 'NaN', 'Infinity', '20,5']) {
+    const cfg = cfgOf({ BONA_BRAIN_MONTH_ALERT_USD: bad, BONA_BRAIN_DAY_STOP_USD: bad, BONA_BRAIN_MONTH_STOP_USD: bad });
+    assert.equal(cfg.brainMonthAlertUsd, 40, `alert ${JSON.stringify(bad)}`);
+    assert.equal(cfg.brainDayStopUsd, 20, `day ${JSON.stringify(bad)}`);
+    assert.equal(cfg.brainMonthStopUsd, 300, `month ${JSON.stringify(bad)}`);
+  }
+});
+
+test('a brain model name that is not a plain model id falls back to its default; an unknown backup mode fails safe to handover', () => {
+  for (const bad of ['', ' ', 'gpt 5', 'gpt-5.6-sol;rm', '../x', 'x'.repeat(65)]) {
+    const cfg = cfgOf({ BONA_BRAIN_MODEL: bad, BONA_BRAIN_BACKUP_MODEL: bad, BONA_BRAIN_CLASSIFY_MODEL: bad });
+    assert.equal(cfg.brainModel, 'gpt-5.6-sol', JSON.stringify(bad));
+    assert.equal(cfg.brainBackupModel, 'gpt-6.1-terra', JSON.stringify(bad));
+    assert.equal(cfg.brainClassifyModel, 'gpt-6.1-terra', JSON.stringify(bad));
+  }
+  assert.equal(cfgOf({ BONA_BRAIN_BACKUP_MODE: '' }).brainBackupMode, 'answer', 'blank is unset: the default');
+  for (const bad of ['handvoer', 'yes', '1', 'answer please']) {
+    assert.equal(cfgOf({ BONA_BRAIN_BACKUP_MODE: bad }).brainBackupMode, 'handover', `${bad}: the backup never answers on a typo`);
+  }
+});
+
+test('no config key reads OPENAI_API_KEY, ANTHROPIC_API_KEY or BONA_OPENAI_API_KEY, and cfg.env does not carry them either', () => {
+  const env = {
+    OPENAI_API_KEY: 'sk-generic-openai-VALUE1',
+    ANTHROPIC_API_KEY: 'sk-ant-generic-VALUE2',
+    BONA_OPENAI_API_KEY: 'sk-bona-brain-VALUE3',
+    BONA_ANTHROPIC_API_KEY: 'sk-ant-bona-VALUE4',
+    OPENAI_ORG_ID: 'org-VALUE5',
+    EVOLUTION_API_URL: 'https://evo.example.com',
+  };
+  const cfg = cfgOf(env);
+  const all = JSON.stringify(cfg);
+  for (const v of ['VALUE1', 'VALUE2', 'VALUE3', 'VALUE4', 'VALUE5']) assert.doesNotMatch(all, new RegExp(v), v);
+  for (const k of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'BONA_OPENAI_API_KEY', 'BONA_ANTHROPIC_API_KEY', 'OPENAI_ORG_ID']) {
+    assert.equal(Object.hasOwn(cfg.env, k), false, `cfg.env.${k}`);
+  }
+  assert.equal(cfg.env.EVOLUTION_API_URL, 'https://evo.example.com', 'every other key still reaches the modules that read cfg.env');
+  assert.ok(Object.hasOwn(env, 'OPENAI_API_KEY'), 'the env object handed in is not mutated');
+  assert.doesNotMatch(JSON.stringify(redacted(cfg)), /VALUE\d/);
+});
+
+test('redacted() prints the brain knobs and the warm-up anchor, which are not secrets', () => {
+  const r = redacted(cfgOf({ BONA_WA_LINKED_AT: '2026-11-26T05:25:00+03:00' }));
+  assert.equal(r.brainModel, 'gpt-5.6-sol');
+  assert.equal(r.brainBackupModel, 'gpt-6.1-terra');
+  assert.equal(r.brainClassifyModel, 'gpt-6.1-terra');
+  assert.equal(r.brainBackupMode, 'answer');
+  assert.equal(r.brainMonthAlertUsd, 40);
+  assert.equal(r.brainDayStopUsd, 20);
+  assert.equal(r.brainMonthStopUsd, 300);
+  assert.equal(r.waLinkedAt, Date.UTC(2026, 10, 26, 2, 25));
+  assert.equal(r.danaTurnsMonthAlert, 1500);
+  assert.deepEqual(r.waPersonalInstances, ['abdulaziz-personal']);
+});
