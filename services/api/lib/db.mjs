@@ -19,6 +19,8 @@
  * are kept 5 years after a chat's last message (the retention purge in
  * lib/inbox/store.mjs); a login code's outbox row never carries its text. Since v5 it
  * holds push subscription endpoints (bearer URLs for a member's device; never logged).
+ * Since v8 it holds the owner-notes ledger (codes only, never a note's text) and the
+ * viewing bookings (a lead id, a listing, a time and the calendar event's id).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +28,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { randomId } from './store.mjs';
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export const STAGES = ['new', 'contacted', 'qualified', 'viewing', 'offer', 'negotiation', 'won', 'lost'];
 export const FANOUT_DESTS = ['meta', 'ga4', 'snap', 'tiktok'];
@@ -339,6 +341,71 @@ const MIGRATIONS = [
       CREATE INDEX lead_tasks_queue ON lead_tasks(status,due_ts,created);
     `,
   },
+  {
+    // The assistant for every client (the 2026-11-27 automation design, §11.1; it is kept
+    // outside this repo). Additive only: no table is
+    // rebuilt, so the wa_outbox CHECKs of v4 stay exactly as they are, and the v7 code still
+    // opens a v8 file (migrate() skips every step at or below user_version), so a code
+    // rollback still starts. Nothing reads or writes any of it until later releases.
+    // - `leads.inbox_via` is how a chat joined the inbox beyond today's proof rules:
+    //   'own_number' | 'owner_test', NULL = joined by proof (as today). Stamped at the join,
+    //   never rewritten. No CHECK: the vocabulary grows (email), and SQLite cannot change one.
+    // - `leads.dana_hold_until` (ms) and `dana_hold_reason` hold the assistant in one chat:
+    //   cap_chat | loop | send_failed | booking_unconfirmed | brain_out (code vocabulary, no
+    //   CHECK); a reason with no time holds until a person writes (or the dashboard button
+    //   lets it answer again). `dana_off` stays the
+    //   client's own stop only.
+    // - `wa_outbox.media_kind`: a brochure goes out as a document but keeps sender_kind 'dana',
+    //   so the caps, the ingest match and the poller's Dana check still count it (a new
+    //   sender kind would need the CHECK rebuilt). NULL = text.
+    // - `wa_outbox.guarded` is 1 only on the bubbles of a brain turn whose text passed the reply
+    //   guard; the guard allows an earlier amount back only from such rows. Every older row
+    //   (staff, codes, notes, Retell-era Dana sends) is 0.
+    // - `owner_notes` is the ledger of WhatsApp notes to the owner: a row first (queued, one
+    //   per dedupe_key, ever), the wa_outbox row (kind 'note', no lead, no text) only when it
+    //   is sent. `meta` is JSON of codes only; a note is rendered at send time and its text is
+    //   never stored. No foreign key: purging a lead deletes its rows.
+    // - `viewing_bookings` is one calendar event per row. No foreign key on purpose: a booking
+    //   outlives a lead purge so its event can still be cancelled. The two partial unique
+    //   indexes allow one `booked` row per start time and per lead; done, cancelled and
+    //   cancel-pending rows never block a new booking.
+    // The text keys are NOT NULL because a rowid table's TEXT PRIMARY KEY otherwise takes NULL
+    // (see v4), and client_told is 0 or 1 like every other flag here.
+    // Migrations here only ever add.
+    version: 8,
+    sql: `
+      ALTER TABLE leads ADD COLUMN inbox_via TEXT;
+      ALTER TABLE leads ADD COLUMN dana_hold_until INTEGER;
+      ALTER TABLE leads ADD COLUMN dana_hold_reason TEXT;
+      ALTER TABLE wa_outbox ADD COLUMN media_kind TEXT CHECK (media_kind IS NULL OR media_kind IN ('document'));
+      ALTER TABLE wa_outbox ADD COLUMN guarded INTEGER NOT NULL DEFAULT 0 CHECK (guarded IN (0,1));
+      CREATE TABLE IF NOT EXISTS owner_notes (
+        note_id TEXT NOT NULL PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('new_client','handover','booking','stopped','summary','command','alert','mail')),
+        lead_id TEXT,
+        dedupe_key TEXT NOT NULL UNIQUE,
+        due_ts INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('queued','sent','failed','uncertain','merged','dropped')),
+        send_id TEXT,
+        meta TEXT,
+        created INTEGER NOT NULL, updated INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS owner_notes_due ON owner_notes(status, due_ts);
+      CREATE TABLE IF NOT EXISTS viewing_bookings (
+        booking_id TEXT NOT NULL PRIMARY KEY,
+        lead_id TEXT NOT NULL,
+        task_id TEXT,
+        listing_id TEXT NOT NULL,
+        start_ts INTEGER NOT NULL, end_ts INTEGER NOT NULL,
+        event_id TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL CHECK (status IN ('booked','cancel_pending','cancelled','done')),
+        client_told INTEGER NOT NULL DEFAULT 0 CHECK (client_told IN (0,1)),
+        created INTEGER NOT NULL, updated INTEGER NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS viewing_bookings_slot ON viewing_bookings(start_ts) WHERE status = 'booked';
+      CREATE UNIQUE INDEX IF NOT EXISTS viewing_bookings_lead ON viewing_bookings(lead_id) WHERE status = 'booked';
+    `,
+  },
 ];
 
 /** Columns of each table, in order — the single source for the insert/update helpers. */
@@ -350,7 +417,8 @@ const COLUMNS = {
     'content', 'click_ids', 'ref', 'match_method', 'session_id', 'anon_id', 'listing_id', 'first_touch', 'last_touch', 'interest', 'budget',
     'timeline', 'district', 'language', 'notes', 'stage', 'stage_ts', 'value_sar', 'first_inbound_ts', 'first_reply_ts', 'legacy_id',
     'consent_ads', 'consent_analytics', 'inbox_state', 'inbox_since', 'handler_user_id', 'last_msg_ts', 'needs_human', 'history_from',
-    'chat_rev', 'dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts'],
+    'chat_rev', 'dana_off', 'dana_test', 'dana_chat_id', 'dana_chat_ts', 'dana_introduced', 'last_human_out_ts',
+    'inbox_via', 'dana_hold_until', 'dana_hold_reason'],
   touchpoints: ['id', 'lead_id', 'ts', 'channel', 'event_type', 'source', 'medium', 'campaign', 'campaign_id', 'listing_id', 'meta'],
 };
 

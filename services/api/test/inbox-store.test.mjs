@@ -371,6 +371,7 @@ test('insertOutbox writes a pending row once; a second insert of the same send_i
   assert.deepEqual(first.row, {
     send_id: 'SND-1', lead_id: 'L-1', jid: JID, text: 'on my way', user_id: 'USR-1', sender_kind: 'staff',
     status: 'pending', key_id: null, created: NOW, updated: NOW, error: null, covers_ts: null,
+    media_kind: null, guarded: 0, // v8 (db.mjs): a text send, never through the reply guard
   });
   tick(1000);
   const again = inbox.insertOutbox(out({ text: 'something else', user_id: 'USR-2' }));
