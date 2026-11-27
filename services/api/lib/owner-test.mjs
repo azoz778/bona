@@ -26,18 +26,22 @@
  * Such a record is CONSUMED (true: never stored, never wakes the assistant) in both switch
  * states, whether or not it is applied. It is applied only when, too:
  *   - its time is within 10 min of now (COMMAND_MAX_AGE_MS) and, for a switch, newer than that
- *     setting's `updated` stamp, so a replay after an outage never undoes a later change;
+ *     setting's `updated` stamp and than the newest command on it this process applied, so a
+ *     replay after an outage never undoes a later change;
  *   - its id is not in waSeen.
  * Applied: team.setSetting(key, value, { by: the owner's user_id }), the setting's `updated`
  * stamped with the command's own time (rec.ts, not the processing time, so two commands on one
  * switch read in one poll keep their order and the later one stands), and waSeenAdd, in one
- * transaction; an audit row (action 'setting', meta {value, via:'whatsapp'}), the lifecycle
- * below on a real change, and the reply as an owner note of kind `command` (notes.command,
- * deduplicated by the ledger as `cmd:<record id>`). `#dana status` replies with the switches and
- * an "AI: …" line from brain.health(); `#dana summary` asks the notes for a summary marked TEST
- * (no day marker), and replies only when none can go. In shared mode (the instance is not a
- * number of its own) `#dana test on|off` changes nothing, and the reply says the test switch
- * needs Bona's own number. `#dana live off` never touches dana_enabled: `#dana off` is the one
+ * transaction. A command for the value the switch already has writes only waSeen: its `updated`
+ * and updated_by stay, because owner_as_client's stamp is the moment the test went on (T06's
+ * history floor for the test chat), which a second `#dana test on` must not move. Either way:
+ * an audit row (action 'setting', meta {value, via:'whatsapp'}, as a repeat on the Team page
+ * gets one), the lifecycle below on a real change only, and the reply as an owner note of kind
+ * `command` (notes.command, deduplicated by the ledger as `cmd:<record id>`). `#dana status`
+ * replies with the switches and an "AI: …" line from brain.health(); `#dana summary` asks the
+ * notes for a summary marked TEST (no day marker), and replies only when none can go. In shared
+ * mode (the instance is not a number of its own) `#dana test on|off` changes nothing, and the
+ * reply says the test switch needs Bona's own number. `#dana live off` never touches dana_enabled: `#dana off` is the one
  * that stops the assistant (critic round 2 #10). An ignored command gets no reply.
  *
  * The lifecycle: `onSettingChanged(key, value)`. The Team page's saveSetting calls it once per
@@ -164,6 +168,12 @@ export function createOwnerTest({
   const auditLog = audit ?? (db ? createAudit(db, { now, log }) : null);
   let stampStmt = null;
   let stampSetStmt = null;
+  /**
+   * key → the time of the newest command applied to it in this process, a repeat that changed
+   * nothing included. A repeat leaves `updated` alone (see `command`), so this is what keeps a
+   * late-read older command from undoing it; the 10-min age limit covers what a restart forgets.
+   */
+  const newestCommand = new Map();
   /**
    * A setting's `updated` stamp (0 for a key never written): the Team page's write time, or the
    * time of the command that set it (`command` below). Throws when it cannot be read: the guard
@@ -432,7 +442,7 @@ export function createOwnerTest({
     }
     let stamp;
     try { stamp = settingStamp(c.key); } catch { return ignore('stamp_unknown'); }
-    if (!(rec.ts > stamp)) return ignore('older_than_setting');
+    if (!(rec.ts > Math.max(stamp, newestCommand.get(c.key) ?? 0))) return ignore('older_than_setting');
 
     const by = ownerUserId();
     let before = null;
@@ -440,17 +450,24 @@ export function createOwnerTest({
     try {
       db.transaction(() => {
         before = team.getSetting(c.key);
-        after = team.setSetting(c.key, c.value, { by });
-        // The switch carries the command's own time, not this tick's: a later command read in
-        // the same poll (records come oldest first) is newer than it, an older one is not.
-        stampSetStmt ??= db.db.prepare('UPDATE settings SET updated = ? WHERE key = ?');
-        stampSetStmt.run(rec.ts, String(c.key));
+        // Already so: nothing is written but waSeen. For owner_as_client the stamp is when the
+        // test went on, the test chat's history floor (T06), and a repeat must not move it.
+        if (before === c.value) {
+          after = before;
+        } else {
+          after = team.setSetting(c.key, c.value, { by });
+          // The switch carries the command's own time, not this tick's: a later command read in
+          // the same poll (records come oldest first) is newer than it, an older one is not.
+          stampSetStmt ??= db.db.prepare('UPDATE settings SET updated = ? WHERE key = ?');
+          stampSetStmt.run(rec.ts, String(c.key));
+        }
         db.waSeenAdd(rec.id, rec.ts);
       });
     } catch (err) {
       say({ level: 'error', evt: 'owner_test.command_failed', cmd: c.code, error: errCode(err) });
       return true;
     }
+    newestCommand.set(c.key, Math.max(newestCommand.get(c.key) ?? 0, rec.ts));
     try {
       auditLog?.record({ userId: by, action: 'setting', target: c.key, meta: { value: c.value, via: 'whatsapp' } });
     } catch { /* best effort, as every audit (lib/audit.mjs) */ }

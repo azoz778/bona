@@ -11,6 +11,7 @@ import { createInboxStore } from '../lib/inbox/store.mjs';
 import { createIngest, RESOLVE_WINDOW_MS, SEND_SKEW_MS } from '../lib/inbox/ingest.mjs';
 import { codeMessage } from '../lib/dashboard/auth.mjs';
 import { createBackfill } from '../lib/inbox/backfill.mjs';
+import { createSender } from '../lib/wa-send.mjs';
 
 const NOW = Date.UTC(2026, 8, 28, 12, 0, 0);
 const LEAD_ID = 'LEAD-20260928-0000aaaa';
@@ -910,11 +911,14 @@ test('the Greeting/Away detector: one untracked sent text in two chats within 24
   assertCleanT(h.logs);
   h.s.close();
 
-  // Not a greeting: a short reply, a tracked send, an old record (a join's history), two days apart.
+  // Not a greeting: a short reply in ONE chat (twice), photos with no caption in two chats, a tracked send,
+  // an old record (a join's history), two days apart.
   const n = testChat();
   n.s.insertLead({ ...LEAD, lead_id: T_THIRD, phone_e164: '966500000003', wa_jid: T_THIRD_JID, wa_lid: null });
-  n.ingest(n.lead(LEAD_ID), rec({ id: 'S-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: 'Ok, thanks', ts: NOW - 20_000 }));
-  n.ingest(n.lead(T_THIRD), rec({ id: 'S-2', fromMe: true, jid: T_THIRD_JID, jidAlt: null, text: 'Ok, thanks', ts: NOW - 10_000 }));
+  n.ingest(n.lead(LEAD_ID), rec({ id: 'S-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: 'Ok', ts: NOW - 20_000 }));
+  n.ingest(n.lead(LEAD_ID), rec({ id: 'S-2', fromMe: true, jid: PHONE_JID, jidAlt: null, text: 'Ok', ts: NOW - 15_000 }));
+  n.ingest(n.lead(LEAD_ID), rec({ id: 'P-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: '', media: '[image]', ts: NOW - 12_000 }));
+  n.ingest(n.lead(T_THIRD), rec({ id: 'P-2', fromMe: true, jid: T_THIRD_JID, jidAlt: null, text: '', media: '[image]', ts: NOW - 11_000 }));
   for (const [id, leadId, jid] of [['D-1', LEAD_ID, PHONE_JID], ['D-2', T_THIRD, T_THIRD_JID]]) {
     n.inbox.insertOutbox({ send_id: `SND-${id}`, lead_id: leadId, jid, text: GREETING, sender_kind: 'dana' });
     n.inbox.updateOutbox(`SND-${id}`, { status: 'accepted', key_id: id });
@@ -941,6 +945,38 @@ test("the Greeting/Away detector survives a restart: the stored copy counts, and
   h.ingest(h.lead(LEAD_ID), rec({ id: 'R-3', fromMe: true, jid: PHONE_JID, jidAlt: null, text: GREETING, ts: NOW - 20_000 }));
   assert.equal(h.alerts.length, 1);
   h.s.close();
+});
+
+test('the Greeting/Away detector has no shortest text: a short away message in English or Arabic, in two chats, raises the alert; in one chat it does not', () => {
+  for (const away of ['Back tomorrow', 'بعود بكرة']) {
+    // The test chat's dropped copy and a client's stored one.
+    const h = testChat();
+    h.ingest(h.lead(), toOwner({ id: 'A-1', text: away, ts: NOW - 60_000 }));
+    assert.deepEqual(h.alerts, [], away);
+    h.ingest(h.lead(LEAD_ID), rec({ id: 'A-2', fromMe: true, jid: PHONE_JID, jidAlt: null, text: away, ts: NOW - 30_000 }));
+    assert.deepEqual(h.alerts.map((a) => a.code), ['greeting_away'], away);
+    assert.equal(JSON.stringify([h.alerts, h.logs]).includes(away), false, 'neither the alert nor a log line carries the text');
+    h.s.close();
+
+    // Two clients' chats, across a restart: the stored copy of the first counts.
+    const r = testChat();
+    r.s.insertLead({ ...LEAD, lead_id: T_THIRD, phone_e164: '966500000003', wa_jid: T_THIRD_JID, wa_lid: null });
+    r.ingest(r.lead(LEAD_ID), rec({ id: 'A-3', fromMe: true, jid: PHONE_JID, jidAlt: null, text: away, ts: NOW - 3_600_000 }));
+    r.restart();
+    r.ingest(r.lead(T_THIRD), rec({ id: 'A-4', fromMe: true, jid: T_THIRD_JID, jidAlt: null, text: ` ${away} `, ts: NOW - 60_000 }));
+    assert.deepEqual(r.alerts.map((a) => a.code), ['greeting_away'], away);
+    r.s.close();
+
+    // One short reply in ONE chat, read again and sent again: one chat is no greeting.
+    const one = testChat();
+    one.ingest(one.lead(LEAD_ID), rec({ id: 'A-5', fromMe: true, jid: PHONE_JID, jidAlt: null, text: away, ts: NOW - 30_000 }));
+    one.ingest(one.lead(LEAD_ID), rec({ id: 'A-5', fromMe: true, jid: PHONE_JID, jidAlt: null, text: away, ts: NOW - 30_000 }));
+    one.ingest(one.lead(LEAD_ID), rec({ id: 'A-6', fromMe: true, jid: PHONE_JID, jidAlt: null, text: away, ts: NOW - 20_000 }));
+    one.restart();
+    one.ingest(one.lead(LEAD_ID), rec({ id: 'A-7', fromMe: true, jid: PHONE_JID, jidAlt: null, text: away, ts: NOW - 10_000 }));
+    assert.deepEqual(one.alerts, [], away);
+    one.s.close();
+  }
 });
 
 test('a human message clears a hold that waits for a person (and needs_human, as before); a timed hold stays until its end', () => {
@@ -1024,6 +1060,53 @@ test('a brochure the assistant sent comes back as a document: matched by its cap
   t.s.close();
 });
 
+test('a caption finds only a brochure row and a text only a text row: a Dana PDF never settles a staff send with the same words, nor a typed text the brochure', () => {
+  const CAPTION = 'Here is the brochure';
+  const doc = (over = {}) => rec({ id: 'DOC-1', fromMe: true, jid: LID, jidAlt: PHONE_JID, media: '[document: BONA-W003.pdf]', text: CAPTION, ts: NOW + 2000, ...over });
+  const typed = (over = {}) => rec({ id: 'TXT-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: CAPTION, ts: NOW + 2000, ...over });
+  const staffRow = (h) => h.inbox.insertOutbox({
+    send_id: 'SND-staff', lead_id: LEAD_ID, jid: PHONE_JID, text: CAPTION, user_id: h.staff.user_id, sender_kind: 'staff', status: 'uncertain',
+  });
+  const docRow = (h) => h.inbox.insertOutbox({
+    send_id: 'SND-doc', lead_id: LEAD_ID, jid: PHONE_JID, text: CAPTION, sender_kind: 'dana', status: 'uncertain', media_kind: 'document',
+  });
+  const status = (h) => [h.inbox.getOutbox('SND-staff')?.status ?? null, h.inbox.getOutbox('SND-doc')?.status ?? null];
+  /** Both rows unsure, the older one first: the text lookup returns the oldest match, so each order is its own case. */
+  const both = (first, second) => {
+    const h = testChat({ client: { needs_human: 1 } });
+    first(h);
+    h.at(NOW + 500);
+    second(h);
+    return h;
+  };
+  for (const [label, order] of [['the staff send older', [staffRow, docRow]], ['the brochure older', [docRow, staffRow]]]) {
+    // The brochure's own copy: Dana's, the staff send stays unsure, and nobody's human clock moves.
+    const a = both(...order);
+    assert.deepEqual(a.ingest(a.lead(LEAD_ID), doc()), { stored: true, inserted: true, senderKind: 'dana' }, label);
+    assert.deepEqual(status(a), ['uncertain', 'accepted'], label);
+    assert.equal(a.inbox.getOutbox('SND-doc').key_id, 'DOC-1', label);
+    assert.deepEqual([a.lead(LEAD_ID).last_human_out_ts, a.lead(LEAD_ID).needs_human, a.lead(LEAD_ID).handler_user_id], [null, 1, null], label);
+    a.s.close();
+    // The staff text's own copy: the staff member's, the brochure stays unsure.
+    const b = both(...order);
+    assert.equal(b.ingest(b.lead(LEAD_ID), typed()).senderKind, 'staff', label);
+    assert.deepEqual(status(b), ['accepted', 'uncertain'], label);
+    b.s.close();
+  }
+  // No brochure row: a document with an unsure staff text's words is not that text (the owner's phone, as any untracked send).
+  const c = testChat();
+  staffRow(c);
+  assert.equal(c.ingest(c.lead(LEAD_ID), doc()).senderKind, 'owner_number');
+  assert.deepEqual(status(c), ['uncertain', null]);
+  c.s.close();
+  // No staff row: a typed text with the brochure's caption is not the brochure.
+  const d = testChat();
+  docRow(d);
+  assert.equal(d.ingest(d.lead(LEAD_ID), typed()).senderKind, 'owner_number');
+  assert.deepEqual(status(d), [null, 'uncertain']);
+  d.s.close();
+});
+
 test('a `#dana` text is never a message, in any chat, either way it went, whichever read brings it (poller, join history, refresh)', async () => {
   const h = testChat();
   // With an invisible mark a phone keyboard slipped in, too: parseCommand takes those (owner-test.mjs), so ingest refuses them.
@@ -1092,4 +1175,115 @@ test("with the test switch off, the owner's test lead is the owner's number agai
   const h = testChat({ sw: fakeSwitch({ on: false }) });
   assert.deepEqual(h.ingest(h.lead(), rec({ id: 'X-1', jid: T_OWNER_JID, jidAlt: null })), { stored: false, reason: 'excluded' });
   h.s.close();
+});
+
+/* ---------- the acceptance order at its two callers (PLAN T07, "Added 27 Nov"; PR-B2 #94) ---------- */
+
+/** The real sender (lib/wa-send.mjs) over a test chat's store; Evolution is a fake on a test host. */
+const SEND_ENV = {
+  EVOLUTION_API_URL: 'http://evo.example.com', EVOLUTION_API_KEY: 'test-key', BONA_WA_INSTANCE: 'bona2',
+  BONA_OWNER_JID: T_OWNER_JID, BONA_WA_INSTANCE_JID: T_INSTANCE_JID,
+};
+
+/**
+ * Evolution answers 201 with `key` at `answerAt`; `during` runs while the call is out (the
+ * poller's tick reading WhatsApp's own copy before the HTTP answer is back).
+ */
+function senderFor(h, { key, answerAt, during = null }) {
+  h.team.setSetting('inbox_replies', '1');
+  const fetchImpl = async () => {
+    if (during) await during();
+    h.at(answerAt);
+    return { ok: true, status: 201, text: async () => JSON.stringify({ key: { id: key } }) };
+  };
+  return createSender({ env: SEND_ENV, team: h.team, inbox: h.inbox, db: h.s, fetchImpl, now: h.now, log: (o) => h.logs.push(o) });
+}
+
+test("the poller's match and wa-send's 2xx, in either order at the real callers: the first acceptance time stays, the copy is the row's own sender, and no owner's-number mute", async () => {
+  const WROTE = NOW;
+  const SEEN = NOW + 3_000;
+  const ANSWERED = NOW + 12_000;
+  const READ_AFTER = NOW + 20_000;
+  const SENDS = {
+    // Dana writes her row first (with the `covers_ts` it answers), then hands its id to the sender.
+    dana: {
+      leadId: LEAD_ID, key: 'WA-DANA-1', text: 'Hello from the assistant',
+      async send(h, sender) {
+        h.inbox.insertOutbox({ send_id: 'SND-dana-x', lead_id: LEAD_ID, jid: PHONE_JID, text: this.text, sender_kind: 'dana', covers_ts: NOW - 60_000 });
+        const out = await sender.sendTo({ jid: PHONE_JID, text: this.text, kind: 'dana', leadId: LEAD_ID, sendId: 'SND-dana-x' });
+        assert.equal(out.ok, true);
+        return 'SND-dana-x';
+      },
+      echo() { return rec({ id: this.key, fromMe: true, jid: LID, jidAlt: PHONE_JID, text: this.text, ts: NOW + 1_000 }); },
+    },
+    // A team member's reply from the inbox thread (`reply` writes the row, sends, and stores the message itself).
+    staff: {
+      leadId: LEAD_ID, key: 'WA-STAFF-1', text: 'From the dashboard',
+      async send(h, sender) {
+        const out = await sender.reply({ sendId: 'sid_staff_0123456789', leadId: LEAD_ID, userId: h.staff.user_id, text: this.text, seenRev: h.inbox.revision(LEAD_ID) });
+        assert.equal(out.ok, true, JSON.stringify(out));
+        return 'sid_staff_0123456789';
+      },
+      echo() { return rec({ id: this.key, fromMe: true, jid: LID, jidAlt: PHONE_JID, text: this.text, ts: NOW + 1_000 }); },
+    },
+    // A note to the owner: the sender writes its row (no lead, no text). Its copy sits in his test chat.
+    note: {
+      leadId: T_LEAD, key: 'WA-NOTE-1', text: '*Bona — note*\nA new enquiry',
+      async send(h, sender) {
+        const out = await sender.sendTo({ jid: T_OWNER_JID, text: this.text, kind: 'note' });
+        assert.equal(out.ok, true);
+        return out.sendId;
+      },
+      echo() { return toOwner({ id: this.key, text: this.text, ts: NOW + 1_000 }); },
+    },
+  };
+  const expectedKind = { dana: 'dana', staff: 'staff', note: null };
+
+  for (const [kind, s] of Object.entries(SENDS)) {
+    for (const order of ['poller first', '2xx first']) {
+      const label = `${kind}, ${order}`;
+      const h = testChat({ client: { needs_human: 1 } });
+      h.at(WROTE);
+      const results = [];
+      const sender = senderFor(h, {
+        key: s.key, answerAt: ANSWERED,
+        during: order === 'poller first' ? () => { h.at(SEEN); results.push(h.ingest(h.lead(s.leadId), s.echo())); } : null,
+      });
+      const sendId = await s.send(h, sender);
+      if (order === '2xx first') {
+        h.at(READ_AFTER);
+        results.push(h.ingest(h.lead(s.leadId), s.echo()));
+      }
+      // A thread refresh reads the copy once more, later still.
+      h.at(NOW + 60_000);
+      results.push(h.ingest(h.lead(s.leadId), s.echo()));
+
+      const row = h.inbox.getOutbox(sendId);
+      // A note's copy cannot be matched before its key is known (no text in its row): its first acceptance is the 2xx.
+      const firstAccept = order === 'poller first' && kind !== 'note' ? SEEN : ANSWERED;
+      assert.deepEqual([row.status, row.key_id, row.updated], ['accepted', s.key, firstAccept], label);
+      const kinds = h.inbox.messagesFor(s.leadId).map((m) => m.sender_kind);
+      if (expectedKind[kind]) {
+        assert.deepEqual(kinds, [expectedKind[kind]], label);
+        assert.equal(h.inbox.messageByKey(s.key)?.sender_kind, expectedKind[kind], label);
+      } else {
+        assert.deepEqual(kinds, [], `${label}: a note is never a bubble`);
+        assert.ok(results.every((r) => r.stored === false && ['note', 'test_chat_untracked'].includes(r.reason)), `${label}: ${JSON.stringify(results)}`);
+        assert.equal(results.at(-1).reason, 'note', label);
+      }
+      assert.equal(kinds.includes('owner_number'), false, `${label}: never the owner's number`);
+      const l = h.lead(s.leadId);
+      if (kind === 'staff') {
+        // A team member answering is a person answering, as designed: their handler, never the owner's phone.
+        assert.deepEqual([l.needs_human, l.handler_user_id], [0, h.staff.user_id], label);
+      } else {
+        // The assistant's own message and a note mute nothing: no human clock, the hand-over flag as it was.
+        assert.equal(l.last_human_out_ts, null, label);
+        assert.equal(h.lead(LEAD_ID).needs_human, 1, label);
+      }
+      assert.deepEqual(h.alerts, [], label);
+      assertCleanT(h.logs);
+      h.s.close();
+    }
+  }
 });

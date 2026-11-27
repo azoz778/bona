@@ -313,12 +313,18 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
    * identical text, created within `windowMs` of the record either way. Lead-level, not
    * jid-level, because the record may carry the chat's lid while the row carries its
    * phone jid (P2-17). Read-only: the caller decides to resolve it.
+   *
+   * A caption finds a brochure only and a text a text only (PLAN T07, PR-A2): `document: true`
+   * (the record is a document) looks at Dana rows with media_kind 'document', anything else at
+   * rows with no media_kind. Otherwise a Dana PDF whose caption is an unsure staff reply's words
+   * would settle that reply and be stored as a person's answer, and a typed text the brochure.
    */
-  function resolveUncertain({ leadId, text, ts, windowMs = 120_000 } = {}) {
+  function resolveUncertain({ leadId, text, ts, windowMs = 120_000, document = false } = {}) {
     if (!leadId || text === null || text === undefined || text === '' || !hasNumber(ts)) return null;
+    const kind = document ? "sender_kind = 'dana' AND media_kind = 'document'" : 'media_kind IS NULL';
     return plain(prep(`SELECT * FROM wa_outbox
                        WHERE lead_id = ? AND status IN ('uncertain','pending') AND key_id IS NULL
-                         AND text = ? AND ABS(created - ?) <= ?
+                         AND text = ? AND ABS(created - ?) <= ? AND ${kind}
                        ORDER BY created ASC, rowid ASC LIMIT 1`)
       .get(String(leadId), capText(text), toTs(ts), num(windowMs)));
   }

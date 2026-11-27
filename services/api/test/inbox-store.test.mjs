@@ -502,6 +502,30 @@ test('resolveUncertain matches within two minutes of the send either way, edges 
   s.close();
 });
 
+test('resolveUncertain keeps a caption to brochure rows and a text to text rows (document: true → a Dana row with media_kind document only)', () => {
+  const { s, inbox, at } = harness();
+  const text = 'Here is the brochure';
+  // The oldest of each kind first, so "the oldest wins" alone would pick the wrong one every time.
+  at(NOW - 2000);
+  inbox.insertOutbox(out({ send_id: 'SND-staff', text, status: 'uncertain' }));
+  at(NOW - 1000);
+  inbox.insertOutbox(out({ send_id: 'SND-dana-text', text, sender_kind: 'dana', user_id: null, status: 'uncertain' }));
+  at(NOW);
+  inbox.insertOutbox(out({ send_id: 'SND-doc', text, sender_kind: 'dana', user_id: null, status: 'uncertain', media_kind: 'document' }));
+  // A staff row can never carry a document (only Dana sends brochures), so a hand-made one is no match either.
+  inbox.insertOutbox(out({ send_id: 'SND-staff-doc', text, status: 'uncertain', media_kind: 'document' }));
+  const find = (o) => inbox.resolveUncertain({ leadId: 'L-1', text, ts: NOW + 5000, ...o })?.send_id ?? null;
+  assert.equal(find({ document: true }), 'SND-doc');
+  assert.equal(find({}), 'SND-staff', 'a text record: the oldest text row');
+  inbox.updateOutbox('SND-staff', { status: 'accepted', key_id: 'K-staff' });
+  inbox.updateOutbox('SND-dana-text', { status: 'accepted', key_id: 'K-dana' });
+  assert.equal(find({}), null, 'a text record never takes a brochure row');
+  assert.equal(find({ document: true }), 'SND-doc');
+  inbox.updateOutbox('SND-doc', { status: 'accepted', key_id: 'K-doc' });
+  assert.equal(find({ document: true }), null, "a document record never takes a text row, nor a staff row's document");
+  s.close();
+});
+
 test('openOutboxFor lists the staff and Dana sends of one chat that did not surely go: newest 20, oldest first', () => {
   const { s, inbox, tick } = harness();
   inbox.insertOutbox(out({ send_id: 'SND-p' }));

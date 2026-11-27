@@ -75,17 +75,22 @@
  *     `test_chat_untracked`: it is not his chat, and as `owner_number` it would mute the
  *     assistant for a day (critic C3). So a human on the Fold cannot be tested there; the
  *     dashboard's staff reply covers that test;
- *   - the Greeting/Away detector: one untracked sent text (GREETING_MIN_CHARS or more) seen in
- *     two or more chats within 24 h means WhatsApp Business's greeting or away message is on,
- *     which mutes the assistant: ONE `notes.alert('greeting_away')` a (Riyadh) day, raised after
- *     the record's transaction. A text is remembered as a hash only; the stored copies of other
+ *   - the Greeting/Away detector: one untracked sent text, of any length, seen in two or more
+ *     chats within 24 h means WhatsApp Business's greeting or away message is on, which mutes
+ *     the assistant: ONE `notes.alert('greeting_away')` a (Riyadh) day, raised after the
+ *     record's transaction. No shortest text: an away message can be two words ("Back
+ *     tomorrow"); the same short reply typed into two chats raises it too, at most once a day,
+ *     and the alert says the messages "look" on. A record with no text (a photo without a
+ *     caption) never counts. A text is remembered as a hash only; the stored copies of other
  *     chats count too, so a restart forgets nothing, and a day's alert already in the
  *     owner-notes ledger is not raised again;
  *   - a human message seen for the first time also ends a hold that waits for a person
  *     (`dana_hold_reason` with no `dana_hold_until`); a timed hold runs to its end;
  *   - a brochure the assistant sent (a Dana row with media_kind 'document') is found by its id,
- *     by its caption like any text, or, for a document record, by the fallback: the lead's oldest
- *     unresolved such row within two minutes (`via: 'document'`). It is Dana's, never the owner's.
+ *     by its caption (a document record's text, matched to such rows only, never to a staff or
+ *     text send with the same words, and a text record never to a brochure), or by the fallback:
+ *     the lead's oldest unresolved such row within two minutes (`via: 'document'`). It is Dana's,
+ *     never the owner's.
  *
  * Nothing here logs text, a phone number, a lid or a name — ids and field names only.
  */
@@ -109,9 +114,8 @@ export const SEND_SKEW_MS = 5_000;
 /** Distinct lead/reason pairs a refusal is logged for before the memory of them starts over. */
 const WARNED_MAX = 1000;
 
-/** The Greeting/Away detector (DESIGN §3.2): the window two chats' copies must fall in, and the shortest text it counts. */
+/** The Greeting/Away detector (DESIGN §3.2): the window two chats' copies must fall in. */
 export const GREETING_WINDOW_MS = 24 * 3_600_000;
-export const GREETING_MIN_CHARS = 20;
 /** Distinct texts it remembers (as hashes) before the oldest is forgotten. */
 const GREETING_MEMORY = 500;
 /** The alert is once a day by Riyadh's calendar (UTC+3, no daylight saving). */
@@ -216,14 +220,17 @@ export function createIngest({
    * own — and only for a send written no later than the record was stamped (SEND_SKEW_MS).
    * `resolveUncertain` returns the oldest match, so when that one is too new, all are. A
    * record with no time of its own is never matched by text: `ts` is then now(), and a send
-   * written in the last two minutes would match a record that could be days old. `byKey` is
-   * the row the caller already looked up by the record's id.
+   * written in the last two minutes would match a record that could be days old. A document's
+   * caption is matched to a Dana brochure row only, and any other record's text to a text row
+   * only (store.mjs `resolveUncertain`'s `document`): a PDF whose caption is an unsure staff
+   * reply's words is not that reply. `byKey` is the row the caller already looked up by the
+   * record's id.
    */
   function outboxRowFor(leadId, rec, body, ts, byKey) {
     if (byKey) return { row: byKey, via: 'key' };
     if (!Number.isFinite(rec.ts) || inbox.messageByKey(rec.id)) return null;
     if (body) {
-      const byText = inbox.resolveUncertain({ leadId, text: body, ts, windowMs: RESOLVE_WINDOW_MS });
+      const byText = inbox.resolveUncertain({ leadId, text: body, ts, windowMs: RESOLVE_WINDOW_MS, document: isDocument(rec) });
       if (byText && ts >= byText.created - SEND_SKEW_MS) return { row: byText, via: 'text' };
     }
     // A brochure whose caption did not come back as it went (or at all): the same rules, by its
@@ -251,7 +258,8 @@ export function createIngest({
   function noteUntracked(leadId, body, ts) {
     const text = typeof body === 'string' ? body.trim() : '';
     const t = now();
-    if (Array.from(text).length < GREETING_MIN_CHARS || !Number.isFinite(ts) || ts < t - GREETING_WINDOW_MS) return false;
+    // Any length counts (an away message can be "Back tomorrow"); only no text at all does not.
+    if (!text || !Number.isFinite(ts) || ts < t - GREETING_WINDOW_MS) return false;
     const key = createHash('sha256').update(text).digest('base64url');
     let chats = untracked.get(key);
     if (!chats) {

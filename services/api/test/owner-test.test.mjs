@@ -420,6 +420,45 @@ test('replay guard: two commands on one switch read in one poll (oldest first) b
   }
 });
 
+test('a command that changes nothing writes nothing: the switch keeps its updated stamp (the test floor) and updated_by, and the owner still gets his answer', () => {
+  const h = harness();
+  const base = { jid: OWNER_JID, jidAlt: null, fromMe: false };
+  // The test goes on at the command's own time: T06's join reads that stamp as the test chat's history floor.
+  assert.equal(h.send('#dana test on'), true);
+  const on = h.setting('owner_as_client');
+  assert.equal(on.value, '1');
+  // A minute later he sends it again (a poll ran late, or he was not sure it took): the floor must not move,
+  // or a test message he sent in between would read as older than the test.
+  h.tick(MIN);
+  assert.equal(h.send('#dana test on'), true);
+  assert.deepEqual(h.setting('owner_as_client'), on, 'a repeat never moves the floor while the switch stays on');
+  assert.equal(h.notes.commands.length, 2, 'the repeat is still answered');
+  assert.ok(h.notes.commands[1].text.startsWith(`${COMMAND_HEADER} ON`), h.notes.commands[1].text);
+  assert.equal(h.s.waSeenHas('CMD-2'), true, 'and consumed for good');
+  // Every switch the same, including one never written (its default) and one the Team page set.
+  h.team.setSetting('calendar_booking', '1', { by: h.owner.user_id });
+  for (const [text, key] of [['#dana booking on', 'calendar_booking'], ['#dana off', 'dana_enabled'], ['#dana live off', 'own_inbox']]) {
+    const before = h.setting(key);
+    h.tick(MIN);
+    assert.equal(h.send(text), true, text);
+    assert.deepEqual(h.setting(key), before, text);
+  }
+  // A command sent before the repeat but read after it (a record that came late) is older than the owner's
+  // last word on that switch, so it is still ignored, as it was when every repeat rewrote the stamp.
+  h.tick(MIN);
+  const repeatAt = h.now() - 1000;
+  assert.equal(h.ot.command({ ...base, id: 'REPEAT', ts: repeatAt, text: '#dana test on' }), true);
+  assert.equal(h.ot.command({ ...base, id: 'LATE-OFF', ts: repeatAt - 5000, text: '#dana test off' }), true);
+  assert.equal(h.team.getSetting('owner_as_client'), '1', 'an older command read after a repeat never undoes it');
+  assert.equal(h.notes.commands.at(-1).recId, 'REPEAT', 'the ignored one gets no answer');
+  // A real change still carries its own time.
+  h.tick(MIN);
+  assert.equal(h.send('#dana test off'), true);
+  assert.deepEqual([h.setting('owner_as_client').value, h.setting('owner_as_client').updated], ['0', h.now() - 2000]);
+  assertClean(h.logs);
+  h.s.close();
+});
+
 /* ---------------- 6. the effect ---------------- */
 
 test("the command's effect: setSetting by the owner's user_id, an audit row {via:'whatsapp'}, waSeen, and the reply as a command note", () => {
