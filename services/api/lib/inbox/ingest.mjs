@@ -66,8 +66,9 @@
  *     refused (`rule_off`) while `ownerTest.ownNumberOk()` is false (no switch handed in reads as
  *     false), so the poller and a thread refresh alike stop storing it the moment Bona's own
  *     number is not checked, or the personal-number rollback is in place (DESIGN §13.2);
- *   - an owner command (`#dana …`, owner-test.mjs DANA_COMMAND_RE) is never a message, in any
- *     chat, either way it went (`command`), whichever read brings it;
+ *   - an owner command (`#dana …`, owner-test.mjs isDanaCommandText: DANA_COMMAND_RE once the
+ *     invisible marks parseCommand drops are gone) is never a message, in any chat, either way
+ *     it went (`command`), whichever read brings it;
  *   - in the owner's test chat (`inbox_via` 'owner_test') a sent record is stored only when a
  *     staff or Dana outbox row is its send. Anything else (a note whose send went uncertain,
  *     call_alert.py's lines, a command's confirmation, anything typed on the Fold) is
@@ -90,7 +91,7 @@
  */
 import { createHash } from 'node:crypto';
 import { isCodeMessage } from '../dashboard/auth.mjs';
-import { DANA_COMMAND_RE } from '../owner-test.mjs';
+import { isDanaCommandText } from '../owner-test.mjs';
 import { normalisePhone } from '../phone.mjs';
 import { createTeam, isExcludedLead as sharedIsExcludedLead } from '../team.mjs';
 import { jidsOf } from '../wa-poller.mjs';
@@ -396,7 +397,7 @@ export function createIngest({
       // learned from. The row is reused below to find who sent an outbound record.
       if (byKey?.sender_kind === 'code') return { stored: false, reason: 'code' };
       // An owner command (`#dana …`) is never a message, whichever way it went (DESIGN §3.2).
-      if (typeof rec.text === 'string' && DANA_COMMAND_RE.test(rec.text)) return { stored: false, reason: 'command' };
+      if (isDanaCommandText(rec.text)) return { stored: false, reason: 'command' };
 
       const direction = rec.fromMe ? 'out' : 'in';
       const ts = Number.isFinite(rec.ts) ? rec.ts : now();

@@ -281,17 +281,25 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
    * `key_id`/`error` left out (undefined) are kept as they are; null clears them. A staff or
    * Dana row of a chat leaving `pending` moves that chat's revision on (`revision`), in the
    * same transaction.
+   *
+   * Marking a row `accepted` that already is keeps its `updated` (PLAN T07, PR-B2 #94): the
+   * poller's match of WhatsApp's copy (ingest.mjs) and the HTTP 2xx (wa-send.mjs) both accept a
+   * send, in either order, and the first acceptance is the answer time owner-notes reads. A key
+   * handed in is still written: a 2xx names its send exactly.
    */
   function updateOutbox(sendId, { status, key_id = undefined, error = undefined } = {}) {
     if (!OUTBOX_STATUSES.includes(status)) throw new RangeError(`unknown outbox status ${status}`);
-    const sets = ['status = ?', 'updated = ?'];
-    const vals = [status, now()];
-    if (key_id !== undefined) { sets.push('key_id = ?'); vals.push(str(key_id)); }
-    if (error !== undefined) { sets.push('error = ?'); vals.push(error === null ? null : String(error).slice(0, MAX_ERROR)); }
     const id = String(sendId ?? '');
-    vals.push(id);
+    const t = now();
     return transaction(() => {
       const before = prep('SELECT status, lead_id, sender_kind FROM wa_outbox WHERE send_id = ?').get(id);
+      if (!before) return false;
+      const sets = ['status = ?'];
+      const vals = [status];
+      if (!(before.status === 'accepted' && status === 'accepted')) { sets.push('updated = ?'); vals.push(t); }
+      if (key_id !== undefined) { sets.push('key_id = ?'); vals.push(str(key_id)); }
+      if (error !== undefined) { sets.push('error = ?'); vals.push(error === null ? null : String(error).slice(0, MAX_ERROR)); }
+      vals.push(id);
       const updated = prep(`UPDATE wa_outbox SET ${sets.join(', ')} WHERE send_id = ?`).run(...vals).changes === 1;
       if (updated && before.status === 'pending' && status !== 'pending' && before.lead_id !== null
           && (before.sender_kind === 'staff' || before.sender_kind === 'dana')) bump(before.lead_id);

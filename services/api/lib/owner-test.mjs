@@ -28,8 +28,10 @@
  *   - its time is within 10 min of now (COMMAND_MAX_AGE_MS) and, for a switch, newer than that
  *     setting's `updated` stamp, so a replay after an outage never undoes a later change;
  *   - its id is not in waSeen.
- * Applied: team.setSetting(key, value, { by: the owner's user_id }) and waSeenAdd in one
- * transaction, an audit row (action 'setting', meta {value, via:'whatsapp'}), the lifecycle
+ * Applied: team.setSetting(key, value, { by: the owner's user_id }), the setting's `updated`
+ * stamped with the command's own time (rec.ts, not the processing time, so two commands on one
+ * switch read in one poll keep their order and the later one stands), and waSeenAdd, in one
+ * transaction; an audit row (action 'setting', meta {value, via:'whatsapp'}), the lifecycle
  * below on a real change, and the reply as an owner note of kind `command` (notes.command,
  * deduplicated by the ledger as `cmd:<record id>`). `#dana status` replies with the switches and
  * an "AI: …" line from brain.health(); `#dana summary` asks the notes for a summary marked TEST
@@ -88,7 +90,16 @@ export const COMMANDS = Object.freeze({
 });
 
 /** Invisible marks a phone keyboard may slip in (bidi marks, the zero-width space, a BOM): never part of a command. */
-const INVISIBLE = /[​-‏⁦-⁩﻿]/g;
+const INVISIBLE = /[\u200B-\u200F\u2066-\u2069\uFEFF]/g;
+
+/**
+ * Ingest's refusal (DESIGN §3.2): a text that is a `#dana …` command once the same invisible
+ * marks parseCommand drops are gone, so every text parseCommand could take is refused there too,
+ * by any read path (the poller, the join history, a thread refresh).
+ */
+export function isDanaCommandText(text) {
+  return typeof text === 'string' && DANA_COMMAND_RE.test(text.replace(INVISIBLE, ''));
+}
 
 /**
  * The command a text is, or null: `#dana` and one of COMMANDS, in any case, with any run of
@@ -152,7 +163,12 @@ export function createOwnerTest({
   const say = (e) => { try { log(e); } catch { /* a logger that throws never breaks a command */ } };
   const auditLog = audit ?? (db ? createAudit(db, { now, log }) : null);
   let stampStmt = null;
-  /** A setting's `updated` stamp (0 for a key never written). Throws when it cannot be read: the guard then fails closed. */
+  let stampSetStmt = null;
+  /**
+   * A setting's `updated` stamp (0 for a key never written): the Team page's write time, or the
+   * time of the command that set it (`command` below). Throws when it cannot be read: the guard
+   * then fails closed.
+   */
   const settingStamp = (key) => {
     stampStmt ??= db.db.prepare('SELECT updated FROM settings WHERE key = ?');
     return Number(stampStmt.get(String(key))?.updated ?? 0) || 0;
@@ -425,6 +441,10 @@ export function createOwnerTest({
       db.transaction(() => {
         before = team.getSetting(c.key);
         after = team.setSetting(c.key, c.value, { by });
+        // The switch carries the command's own time, not this tick's: a later command read in
+        // the same poll (records come oldest first) is newer than it, an older one is not.
+        stampSetStmt ??= db.db.prepare('UPDATE settings SET updated = ? WHERE key = ?');
+        stampSetStmt.run(rec.ts, String(c.key));
         db.waSeenAdd(rec.id, rec.ts);
       });
     } catch (err) {

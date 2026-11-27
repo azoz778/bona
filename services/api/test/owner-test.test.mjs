@@ -11,7 +11,7 @@ import { createTeam, learnTeamLid } from '../lib/team.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
 import { waConfig } from '../lib/wa.mjs';
 import {
-  createOwnerTest, parseCommand, COMMANDS, COMMAND_MAX_AGE_MS, COMMAND_HEADER, DANA_COMMAND_RE,
+  createOwnerTest, parseCommand, COMMANDS, COMMAND_MAX_AGE_MS, COMMAND_HEADER, DANA_COMMAND_RE, isDanaCommandText,
 } from '../lib/owner-test.mjs';
 
 const NOW = Date.UTC(2026, 10, 27, 9, 0, 0);
@@ -212,12 +212,18 @@ test('parseCommand: the exact command texts, any case and any whitespace; anythi
   }
   assert.equal(parseCommand('#dana status').code, 'status');
   assert.equal(parseCommand('#Dana Summary').code, 'summary');
-  assert.equal(parseCommand('‏#dana off'), COMMANDS.off, 'an invisible mark the keyboard added');
+  assert.equal(parseCommand('\u200F#dana off'), COMMANDS.off, 'an invisible mark the keyboard added');
   for (const text of ['#dana', '#dana foo', '#danaoff', '#dana test', '#dana test on please', 'dana off', '# dana off', '#dana email verified', '', null, 42]) {
     assert.equal(parseCommand(text), null, String(text));
   }
   assert.equal(Object.keys(COMMANDS).length, 14);
   assert.ok(DANA_COMMAND_RE.test(' #DANA test on') && DANA_COMMAND_RE.test('#dana foo') && !DANA_COMMAND_RE.test('#danaX') && !DANA_COMMAND_RE.test('hi #dana'));
+  // ingest's refusal (isDanaCommandText) drops the same invisible marks parseCommand does, so every text it takes is refused there too.
+  for (const text of ['#dana off', ' #DANA test on', '#dana foo', '\u200F#dana status', '\u200E#dana off', '\u200B #dana off', '\u2067#dana live on\u2069', '#\u200Fdana off']) {
+    assert.equal(isDanaCommandText(text), true, JSON.stringify(text));
+  }
+  assert.equal(parseCommand('#\u200Fdana off'), COMMANDS.off, 'a mark inside the word is dropped by both');
+  for (const text of ['#danaX', 'hi #dana', '\u200Fhi #dana', '', null, 42, undefined]) assert.equal(isDanaCommandText(text), false, String(text));
 });
 
 test('every switch command sets its own setting, by the owner\'s phone or his lid, and only received ones from him count', () => {
@@ -382,6 +388,38 @@ test('replay guard: older than 10 min, older than the setting\'s updated stamp, 
   h.s.close();
 });
 
+test('replay guard: two commands on one switch read in one poll (oldest first) both apply, and the later one is what stays', () => {
+  const pairs = [
+    ['#dana live on', '#dana live off', 'own_inbox', '0'],
+    ['#dana on', '#dana off', 'dana_enabled', '0'],
+    ['#dana off', '#dana on', 'dana_enabled', '1'],
+    ['#dana test on', '#dana test off', 'owner_as_client', '0'],
+  ];
+  for (const [first, second, key, want] of pairs) {
+    const h = harness();
+    h.team.setSetting('dana_enabled', '1');
+    const t0 = h.now() + MIN;
+    const base = { jid: OWNER_JID, jidAlt: null, fromMe: false };
+    // Sent 4 s apart; the poller hands both over in one tick, 9 s after the first was sent.
+    h.at(t0 + 9000);
+    assert.equal(h.ot.command({ ...base, id: 'A', ts: t0, text: first }), true, first);
+    assert.equal(h.ot.command({ ...base, id: 'B', ts: t0 + 4000, text: second }), true, second);
+    assert.equal(h.team.getSetting(key), want, `${first} then ${second}: the owner's last word stands`);
+    assert.deepEqual(h.notes.commands.map((c) => c.recId), ['A', 'B'], 'both were applied and answered');
+    // The switch carries the time of the command that set it, so the first one replayed (a new id) is older.
+    assert.equal(h.setting(key).updated, t0 + 4000);
+    assert.equal(h.ot.command({ ...base, id: 'A-again', ts: t0 + 1000, text: first }), true);
+    assert.equal(h.team.getSetting(key), want, 'an older command read later never undoes it');
+    // A change on the Team page after both is still newer than either of them.
+    h.tick(1000);
+    h.team.setSetting(key, want === '1' ? '0' : '1', { by: h.owner.user_id });
+    assert.equal(h.ot.command({ ...base, id: 'C', ts: t0 + 8000, text: second }), true);
+    assert.notEqual(h.team.getSetting(key), want, 'the Team page change stands');
+    assertClean(h.logs);
+    h.s.close();
+  }
+});
+
 /* ---------------- 6. the effect ---------------- */
 
 test("the command's effect: setSetting by the owner's user_id, an audit row {via:'whatsapp'}, waSeen, and the reply as a command note", () => {
@@ -389,7 +427,7 @@ test("the command's effect: setSetting by the owner's user_id, an audit row {via
   assert.equal(h.send('#dana live on'), true);
   const row = h.setting('own_inbox');
   assert.deepEqual({ value: row.value, updated_by: row.updated_by }, { value: '1', updated_by: h.owner.user_id });
-  assert.equal(row.updated, h.now());
+  assert.equal(row.updated, h.now() - 2000, "the switch carries the command's own time (send() sends it 2 s before now)");
   assert.deepEqual(h.audits(), [{ user_id: h.owner.user_id, target: 'own_inbox', meta: { value: '1', via: 'whatsapp' } }]);
   assert.equal(h.s.waSeenHas('CMD-1'), true);
   assert.equal(h.notes.commands.length, 1);

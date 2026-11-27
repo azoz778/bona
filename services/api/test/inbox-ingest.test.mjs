@@ -457,6 +457,41 @@ for (const status of ['uncertain', 'pending']) {
   });
 }
 
+test('the poller\'s match and the HTTP 2xx both mark a send accepted; whichever comes second, the first acceptance time stays (PLAN T07, PR-B2 #94)', () => {
+  const SENT = NOW + 1_000;
+  // wa-send.mjs on a 2xx with a key: updateOutbox(accepted, the key), always written.
+  const httpOk = (h, key) => h.inbox.updateOutbox('SND-dana-2', { status: 'accepted', key_id: key });
+  const record = rec({ id: 'DANA-2', fromMe: true, jid: PHONE_JID, jidAlt: null, text: REPLY, ts: SENT });
+  const fresh = () => {
+    const h = harness();
+    h.at(SENT);
+    h.inbox.insertOutbox({ send_id: 'SND-dana-2', lead_id: LEAD_ID, jid: PHONE_JID, text: REPLY, sender_kind: 'dana' });
+    return h;
+  };
+
+  // The poller first: it matches WhatsApp's copy by its text while the call is still out; the 2xx comes back later.
+  const a = fresh();
+  a.at(SENT + 3_000);
+  assert.equal(a.ingest(a.lead(), record).senderKind, 'dana');
+  assert.deepEqual([a.inbox.getOutbox('SND-dana-2').status, a.inbox.getOutbox('SND-dana-2').updated], ['accepted', SENT + 3_000]);
+  a.at(SENT + 12_000);
+  httpOk(a, 'DANA-2');
+  assert.deepEqual([a.inbox.getOutbox('SND-dana-2').key_id, a.inbox.getOutbox('SND-dana-2').updated], ['DANA-2', SENT + 3_000], 'poller, then 2xx');
+  a.s.close();
+
+  // The 2xx first; the poller reads WhatsApp's copy on its next tick and finds the row by its key.
+  const b = fresh();
+  b.at(SENT + 3_000);
+  httpOk(b, 'DANA-2');
+  b.at(SENT + 12_000);
+  assert.equal(b.ingest(b.lead(), record).senderKind, 'dana');
+  // A thread refresh reads it again later still.
+  b.at(SENT + 60_000);
+  assert.equal(b.ingest(b.lead(), record).senderKind, 'dana');
+  assert.deepEqual([b.inbox.getOutbox('SND-dana-2').key_id, b.inbox.getOutbox('SND-dana-2').updated], ['DANA-2', SENT + 3_000], '2xx, then poller');
+  b.s.close();
+});
+
 test("two minutes and one millisecond, other words, or another chat: the owner's own number, and the row stays unsure", () => {
   const cases = [
     ['too late', { ts: NOW + RESOLVE_WINDOW_MS + 1, text: REPLY }, LEAD_ID],
@@ -991,7 +1026,9 @@ test('a brochure the assistant sent comes back as a document: matched by its cap
 
 test('a `#dana` text is never a message, in any chat, either way it went, whichever read brings it (poller, join history, refresh)', async () => {
   const h = testChat();
-  for (const [id, text] of [['C-1', '#dana test on'], ['C-2', '  #DANA off'], ['C-3', '#dana foo'], ['C-4', '#Dana\tstatus']]) {
+  // With an invisible mark a phone keyboard slipped in, too: parseCommand takes those (owner-test.mjs), so ingest refuses them.
+  for (const [id, text] of [['C-1', '#dana test on'], ['C-2', '  #DANA off'], ['C-3', '#dana foo'], ['C-4', '#Dana\tstatus'],
+    ['C-5', '\u200F#dana status'], ['C-6', '\u200E#dana off'], ['C-7', '\u200B #dana off'], ['C-8', '\u2067#dana live on\u2069'], ['C-9', '\uFEFF#dana on']]) {
     assert.deepEqual(h.ingest(h.lead(LEAD_ID), rec({ id, text })), { stored: false, reason: 'command' }, text);
     assert.deepEqual(h.ingest(h.lead(LEAD_ID), rec({ id: `${id}-out`, fromMe: true, jid: PHONE_JID, jidAlt: null, text })), { stored: false, reason: 'command' }, `${text} sent`);
     assert.deepEqual(h.ingest(h.lead(), rec({ id: `${id}-t`, jid: T_OWNER_JID, jidAlt: null, text })), { stored: false, reason: 'command' }, `${text} in the test chat`);

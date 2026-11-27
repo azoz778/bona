@@ -431,6 +431,37 @@ test('getOutbox, outboxByKey and updateOutbox: a key is recorded, an error is ca
   s.close();
 });
 
+test('a second "accepted" never moves the first acceptance time: updated stays, whichever of the two comes first (PLAN T07, PR-B2 #94)', () => {
+  const { s, inbox, tick } = harness();
+  chat(s, 'L-1');
+  inbox.insertOutbox(out({ send_id: 'SND-1', sender_kind: 'dana' }));
+  const rev = inbox.revision('L-1');
+  // The first acceptance (the poller's match of WhatsApp's copy, or the HTTP 2xx) is the answer time.
+  tick(3000);
+  assert.equal(inbox.updateOutbox('SND-1', { status: 'accepted', key_id: 'K-1' }), true);
+  assert.equal(inbox.revision('L-1'), rev + 1, 'leaving pending moves the chat on once');
+  // The other one comes back nine seconds later with the same key: nothing changes, and the row is there.
+  tick(9000);
+  assert.equal(inbox.updateOutbox('SND-1', { status: 'accepted', key_id: 'K-1' }), true);
+  const fields = (r) => ({ status: r.status, key_id: r.key_id, updated: r.updated, error: r.error });
+  assert.deepEqual(fields(inbox.getOutbox('SND-1')), { status: 'accepted', key_id: 'K-1', updated: NOW + 3000, error: null });
+  // A 2xx names its send exactly (wa-send.mjs), so its key is still recorded, but not as a new time.
+  tick(1000);
+  inbox.updateOutbox('SND-1', { status: 'accepted', key_id: 'K-exact' });
+  assert.deepEqual(fields(inbox.getOutbox('SND-1')), { status: 'accepted', key_id: 'K-exact', updated: NOW + 3000, error: null });
+  assert.equal(inbox.revision('L-1'), rev + 1, 'a send accepted again is no news');
+  // Any other move still stamps its own time: uncertain → accepted, accepted → failed.
+  inbox.insertOutbox(out({ send_id: 'SND-2' }));
+  inbox.updateOutbox('SND-2', { status: 'uncertain' });
+  tick(2000);
+  inbox.updateOutbox('SND-2', { status: 'accepted', key_id: 'K-2' });
+  assert.equal(inbox.getOutbox('SND-2').updated, NOW + 15_000);
+  tick(2000);
+  inbox.updateOutbox('SND-2', { status: 'failed' });
+  assert.equal(inbox.getOutbox('SND-2').updated, NOW + 17_000);
+  s.close();
+});
+
 test('resolveUncertain finds the oldest unresolved send of the same lead with the same text; accepted and keyed rows never match', () => {
   const { s, inbox, at } = harness();
   const text = 'see you at 5';
