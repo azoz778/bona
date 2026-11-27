@@ -1733,6 +1733,48 @@ test("clearHumanHold with the answer's time ends the hold only when the answer i
   s.close();
 });
 
+test("clearHumanHold bounds an accepted assistant send by when it was written: accepting it later (its copy read in a catch-up) moves no bound; an unsure or failed one still counts by when that happened (Claude T07 r6)", () => {
+  const { s, inbox, at } = harness();
+  const held = () => s.getLead('L-1').dana_hold_reason;
+  const hold = () => s.updateLead('L-1', { dana_hold_reason: 'send_failed', dana_hold_until: null });
+  chat(s, 'L-1');
+  // The assistant's send written at NOW - 60 s, unsure at NOW - 45 s; then the hold.
+  at(NOW - 60_000);
+  inbox.insertOutbox(out({ send_id: 'SND-u', sender_kind: 'dana', user_id: null }));
+  at(NOW - 45_000);
+  inbox.updateOutbox('SND-u', { status: 'uncertain', error: 'timeout' });
+  hold();
+  at(NOW);
+  // While it is unsure, an answer from before it went unsure leaves the hold.
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 50_000 }), false, 'unsure: before it went unsure');
+  assert.equal(held(), 'send_failed');
+  // A catch-up at NOW + 5 min reads its copy and accepts it: its `updated` is now the read time.
+  at(NOW + 300_000);
+  assert.equal(inbox.updateOutbox('SND-u', { status: 'accepted', key_id: 'WA-D-1' }), true);
+  assert.equal(inbox.getOutbox('SND-u').updated, NOW + 300_000);
+  // An answer from before the send was written, or of the same moment, still leaves the hold ...
+  for (const [label, ts] of [['before the send was written', NOW - 70_000], ['the same moment it was written', NOW - 60_000]]) {
+    assert.equal(inbox.clearHumanHold('L-1', { ts }), false, `accepted: ${label}`);
+    assert.equal(held(), 'send_failed', label);
+  }
+  // ... and one written after it ends it, though it is older than the read that accepted the send.
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW }), true, 'accepted: after the send, before the read');
+  assert.equal(held(), null);
+  // A later send that went unsure, or failed, after the answer keeps the hold by that time.
+  for (const [label, status] of [['unsure', 'uncertain'], ['failed', 'failed']]) {
+    hold();
+    at(NOW + 400_000);
+    inbox.insertOutbox(out({ send_id: `SND-${status}`, sender_kind: 'dana', user_id: null }));
+    at(NOW + 420_000);
+    inbox.updateOutbox(`SND-${status}`, { status, error: 'timeout' });
+    at(NOW + 500_000);
+    assert.equal(inbox.clearHumanHold('L-1', { ts: NOW + 410_000 }), false, `${label}: after it was written, before it went ${label}`);
+    assert.equal(held(), 'send_failed', label);
+    assert.equal(inbox.clearHumanHold('L-1', { ts: NOW + 430_000 }), true, `${label}: a newer answer ends it`);
+  }
+  s.close();
+});
+
 test('pruneCandidates({ phones: true }) also deletes every OPEN row with a number; dismissed and lid-only rows stay; without it, as before', () => {
   const { s, inbox, at } = harness();
   const withPhone = inbox.noteCandidate({ phone: '966500000001', jid: JID, ts: NOW - DAY, words: ['villa'], dir: 'in' });

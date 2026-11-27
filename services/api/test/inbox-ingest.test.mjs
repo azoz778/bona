@@ -1154,6 +1154,56 @@ test('a human reply found late ends an until-human hold although a newer client 
   }
 });
 
+test("a catch-up that accepts an unsure assistant send's copy first, then reads a newer human reply, ends the until-human hold; one from before that send was written leaves it (Claude T07 r6)", () => {
+  const MIN = 60_000;
+  const hold = (h) => [h.lead(LEAD_ID).dana_hold_reason, h.lead(LEAD_ID).dana_hold_until];
+  /**
+   * NOW is 10:00. The client wrote at 09:48; the assistant's answer failed at 09:50. Its next send,
+   * written at 10:00, went unsure at 10:00:15 (no 2xx), and the chat was held until a person writes.
+   */
+  const heldChat = () => {
+    const h = testChat({ client: { needs_human: 1 } });
+    h.at(NOW - 12 * MIN + 2000);
+    assert.equal(h.ingest(h.lead(LEAD_ID), rec({ id: 'C-1', ts: NOW - 12 * MIN })).senderKind, 'client');
+    h.at(NOW - 10 * MIN - 5000);
+    h.inbox.insertOutbox({ send_id: 'SND-f', lead_id: LEAD_ID, jid: PHONE_JID, text: 'From the assistant', sender_kind: 'dana' });
+    h.at(NOW - 10 * MIN);
+    h.inbox.updateOutbox('SND-f', { status: 'failed', error: 'evolution_500' });
+    h.at(NOW);
+    h.inbox.insertOutbox({ send_id: 'SND-u', lead_id: LEAD_ID, jid: PHONE_JID, text: 'From the assistant, again', sender_kind: 'dana' });
+    h.at(NOW + 15_000);
+    h.inbox.updateOutbox('SND-u', { status: 'uncertain', error: 'timeout' });
+    h.s.updateLead(LEAD_ID, { dana_hold_reason: 'send_failed', dana_hold_until: null });
+    return h;
+  };
+  /** WhatsApp's copy of the unsure send (10:00:01), matched by its words, and a reply typed on the Fold. */
+  const danaCopy = rec({ id: 'WA-DANA-U', fromMe: true, jid: LID, jidAlt: PHONE_JID, text: 'From the assistant, again', ts: NOW + 1000 });
+  const typed = (ts) => rec({ id: 'WA-PHONE-1', fromMe: true, jid: LID, jidAlt: PHONE_JID, text: TYPED, ts });
+  // One catch-up at 10:05, oldest first: the copy (which accepts the row, `updated` = 10:05), then the reply typed at 10:01.
+  for (const [label, order] of [['the copy first', ['copy', 'reply']], ['the reply first', ['reply', 'copy']]]) {
+    const h = heldChat();
+    h.at(NOW + 5 * MIN);
+    for (const step of order) {
+      if (step === 'copy') {
+        assert.deepEqual(h.ingest(h.lead(LEAD_ID), danaCopy), { stored: true, inserted: true, senderKind: 'dana' }, label);
+        assert.equal(h.inbox.getOutbox('SND-u').status, 'accepted', label);
+      } else {
+        assert.deepEqual(h.ingest(h.lead(LEAD_ID), typed(NOW + MIN)), { stored: true, inserted: true, senderKind: 'owner_number' }, label);
+      }
+    }
+    assert.deepEqual(hold(h), [null, null], `${label}: a reply written after the assistant's last send ends the hold, whenever that send was accepted`);
+    assertCleanT(h.logs);
+    h.s.close();
+  }
+  // The copy accepted first, then a reply typed at 09:59:58 — before that send was written — found in the same catch-up: the hold stays.
+  const old = heldChat();
+  old.at(NOW + 5 * MIN);
+  assert.equal(old.ingest(old.lead(LEAD_ID), danaCopy).senderKind, 'dana');
+  assert.equal(old.ingest(old.lead(LEAD_ID), typed(NOW - 2000)).senderKind, 'owner_number');
+  assert.deepEqual(hold(old), ['send_failed', null], 'a reply from before the send does not end the hold');
+  old.s.close();
+});
+
 test('a brochure the assistant sent comes back as a document: matched by its caption, else by the fallback (same lead, 2 min) → dana, never owner_number', () => {
   const doc = (over = {}) => rec({ id: 'DOC-1', fromMe: true, jid: LID, jidAlt: PHONE_JID, media: '[document: BONA-W003.pdf]', text: 'BONA-W003 brochure', ts: NOW + 1000, ...over });
   const docRow = (h, over = {}) => h.inbox.insertOutbox({

@@ -601,7 +601,11 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
    * it. The hold's own start is not stored (db v8 keeps its reason and its end only); what puts
    * a chat on such a hold is the assistant's own send in it (`send_failed` after a failed send,
    * `booking_unconfirmed` after a confirmation that did not go), so the answer must be newer than
-   * every assistant send of the chat, by its `created` and by its `updated`. Client messages
+   * every assistant send of the chat, by its `created`, and by its `updated` while it is not
+   * `accepted` (when it failed or went unsure). An accepted row's `updated` is when the send was
+   * accepted, which for an unsure one is when the poller read WhatsApp's copy (updateOutbox): a
+   * catch-up that reads that copy before a person's newer reply would otherwise keep the hold
+   * (Claude T07 r6). That send went, so it is bounded by when it was written. Client messages
    * never keep the hold, older or newer (DESIGN §6.3, "until a human writes"; Codex T07 r3): a
    * follow-up the poller stored before a refresh found the reply says nothing of when the reply
    * was written. A `loop` hold, set on the client's messages with no send of its own, is bounded
@@ -618,7 +622,8 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
     const at = toTs(ts);
     return prep(`UPDATE leads SET dana_hold_reason = NULL, dana_hold_until = NULL
                  WHERE lead_id = ? AND dana_hold_reason IS NOT NULL AND dana_hold_until IS NULL
-                   AND NOT EXISTS (SELECT 1 FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana' AND (created >= ? OR updated >= ?))`)
+                   AND NOT EXISTS (SELECT 1 FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana'
+                                     AND (created >= ? OR (status <> 'accepted' AND updated >= ?)))`)
       .run(id, id, at, at).changes === 1;
   }
 
