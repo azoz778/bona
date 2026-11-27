@@ -169,11 +169,36 @@ test('a unit reference passes only when a tool returned it in this turn (Arabic-
 });
 
 test('a property link passes only for a home a tool returned (this turn, or an earlier guarded reply)', () => {
-  assert.equal(checkReply(`Here it is: ${SITE}/properties/sea-view-villa/`, { toolResults: [villa] }).ok, true);
-  assert.equal(checkReply(`هنا: ${SITE}/ar/properties/sea-view-villa/`, { toolResults: [villa] }).ok, true);
-  assert.deepEqual(checkReply(`Here: ${SITE}/properties/other-villa/`, { toolResults: [villa] }).hits, [{ kind: 'link' }]);
-  assert.equal(checkReply(`Again: ${SITE}/properties/other-villa/`, { earlierReplies: [`${SITE}/properties/other-villa/`] }).ok, true);
-  assert.equal(checkReply(`Our site: ${SITE}/ and ${SITE}/ar/`, {}).ok, true, 'the site itself is not a home');
+  assert.equal(checkReply(`Here it is: ${SITE}/properties/sea-view-villa/`, { toolResults: [villa], siteUrl: SITE }).ok, true);
+  assert.equal(checkReply(`هنا: ${SITE}/ar/properties/sea-view-villa/`, { toolResults: [villa], siteUrl: SITE }).ok, true);
+  assert.deepEqual(checkReply(`Here: ${SITE}/properties/other-villa/`, { toolResults: [villa], siteUrl: SITE }).hits, [{ kind: 'link' }]);
+  assert.equal(checkReply(`Again: ${SITE}/properties/other-villa/`, { earlierReplies: [`${SITE}/properties/other-villa/`], siteUrl: SITE }).ok, true);
+  assert.equal(checkReply(`Our site: ${SITE}/ and ${SITE}/ar/`, { siteUrl: SITE }).ok, true, 'the site itself is not a home');
+});
+
+test("a home link passes only on Bona's own site (the same scheme, host and port as siteUrl): a returned path on any other host is a hit", () => {
+  const ctx = { toolResults: [villa], siteUrl: SITE };
+  assert.equal(checkReply('See https://BONA-Real-Estate.com/properties/sea-view-villa/.', ctx).ok, true, 'the host is case-free');
+  assert.equal(checkReply(`(${SITE}/ar/properties/sea-view-villa/)`, ctx).ok, true);
+  assert.equal(checkReply('https://bona-real-estate.com:443/properties/sea-view-villa/', ctx).ok, true, 'the default port is the same origin');
+  for (const url of [
+    'https://evil.example/properties/sea-view-villa/', // another host
+    'https://evil.example/ar/properties/sea-view-villa/',
+    'https://bona-real-estate.com.evil.example/properties/sea-view-villa/', // look-alike: the site as a subdomain of another
+    'https://bona-real-estate.co/properties/sea-view-villa/', // look-alike TLD
+    'https://bona-reaI-estate.com/properties/sea-view-villa/', // look-alike letter
+    'https://b\u043Ena-real-estate.com/properties/sea-view-villa/', // look-alike Cyrillic o (punycode host)
+    'http://bona-real-estate.com/properties/sea-view-villa/', // http, not https
+    'https://www.bona-real-estate.com/properties/sea-view-villa/', // a subdomain
+    'https://listings.bona-real-estate.com/properties/sea-view-villa/',
+    'https://bona-real-estate.com@evil.example/properties/sea-view-villa/', // the site as a user name
+    'https://bona-real-estate.com:8443/properties/sea-view-villa/', // another port
+    'https://evil.example/go?to=/properties/sea-view-villa/', // the path in a query
+  ]) assert.deepEqual(checkReply(`Here: ${url}`, ctx).hits, [{ kind: 'link' }], url);
+  assert.deepEqual(checkReply('Again: https://evil.example/properties/other-villa/', { earlierReplies: [`${SITE}/properties/other-villa/`], siteUrl: SITE }).hits,
+    [{ kind: 'link' }], 'an earlier reply allows the home, never another host');
+  assert.deepEqual(checkReply(`Here: ${SITE}/properties/sea-view-villa/`, { toolResults: [villa] }).hits, [{ kind: 'link' }], 'no siteUrl: no home link passes (fail closed)');
+  assert.deepEqual(checkReply(`Here: ${SITE}/properties/sea-view-villa/`, { toolResults: [villa], siteUrl: 'not a url' }).hits, [{ kind: 'link' }]);
 });
 
 test('hits carry only their kind, never the text or the amount; bad input is a clean pass', () => {

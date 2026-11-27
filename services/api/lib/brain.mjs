@@ -25,8 +25,9 @@
  *   earlierReplies: the texts of this lead's earlier replies the guard passed (wa_outbox dana rows with
  *              guarded=1; T12); their amounts are allowed again. Email and web hand in none.
  *
- * The loop (§3.4): rounds 1-3 `tool_choice:'auto'`, round 4 `'none'`; at most 6 tools (the rest
- * answer `tool_limit`; request_human is never refused by the cap: it only notes the hand-over);
+ * The loop (§3.4): rounds 1-3 `tool_choice:'auto'`, round 4 `'none'`; at most 6 tools, request_human
+ * included (the rest answer `tool_limit`; in a batch request_human runs first, so the cap never
+ * refuses it while a tool is left);
  * a tool not offered on the route answers `tool_not_offered` and never runs; a thrown or slow
  * tool (10 s) answers the WhatsApp `tool_failed` note; 15 s per model call, 40 s per turn. The
  * reply guard checks the final text; one repair call (the draft is dropped, the note follows the
@@ -35,8 +36,9 @@
  * at least 12 s remain and BONA_BRAIN_BACKUP_MODE is `answer`; a refusal is never retried
  * elsewhere. The caps are per turn (§2.4): the backup restart gets only what the main model left
  * of the 4 answer calls, the 1 repair call and the 6 tools, inside the same 40 s (tools only
- * read, so running them again is safe). A request that got no answer (an HTTP error, a network
- * error, a timeout) uses up no call; one with no answer call left starts no backup.
+ * read, so running them again is safe). Every request sent uses up a call, answered or not (an
+ * HTTP error, a network error, a timeout, a rate-limit retry); one never sent (a runaway stop, no
+ * time left) does not. A turn with no answer call left starts no backup and makes no retry.
  *
  * State (§4.1): quota/auth → `out` for 10 min (no call; the next turn after that tries; the free
  * GET /v1/models probe clears `auth` early), with the restart-safe `brain_out` marker and one
@@ -92,7 +94,7 @@ export const LIMITS = Object.freeze({
 const TOOL_FAILED = JSON.stringify({ error: 'tool_failed', note: 'say you cannot check that right now; a person can help' });
 const TOOL_NOT_OFFERED = JSON.stringify({ error: 'tool_not_offered' });
 const TOOL_LIMIT = JSON.stringify({ error: 'tool_limit', note: 'answer with what you already have' });
-/** The hand-over tool: it only notes the hand-over (tools.mjs), so the 6-tool cap never refuses it. */
+/** The hand-over tool (it only notes the hand-over, tools.mjs): it runs first in a batch, so the 6-tool cap never refuses it while a tool is left. */
 const HANDOVER_TOOL = 'request_human';
 const SOURCES = Object.freeze({ wa: 'bona-whatsapp', mail: 'bona-email', web: 'bona-web' });
 const TEAM_PREFIX = '[Bona team member] ';
@@ -342,12 +344,15 @@ export function createBrain(deps = {}) {
   /**
    * One paid request. A runaway stop is checked before it is sent and again after its response is
    * counted: a request that crosses a stop answers `budget` (its alert goes out now), so the turn
-   * stops at once and never sends the next round, the backup or the repair.
+   * stops at once and never sends the next round, the backup or the repair. With a `slot` ('answer'
+   * or 'repair') every request sent takes one from the turn's allowance (`ctx.allow[slot]`), whatever
+   * comes back; a rate-limit retry only when one is left.
    */
-  async function call(model, ctx, messages, toolChoice, acc, { retried = false, noRetry = false } = {}) {
+  async function call(model, ctx, messages, toolChoice, acc, { retried = false, noRetry = false, slot = null } = {}) {
     if (overBudget()) return fail('budget');
     const left = ctx.deadline - now();
     if (left <= 0) return fail('timeout');
+    if (slot) ctx.allow[slot] -= 1;
     const body = requestBody({ model, messages, tools: ctx.tools, toolChoice, cacheKey: ctx.cacheKey, safetyId: ctx.safetyId, responseFormat: ctx.responseFormat });
     const started = now();
     const controller = new AbortController();
@@ -386,9 +391,11 @@ export function createBrain(deps = {}) {
     if (!out.ok && out.code === 'rate') {
       noteRate(model);
       const wait = retryAfterMs(res?.headers);
-      if (!noRetry && !retried && wait !== null && wait <= limits.rateRetryMaxMs && ctx.deadline - now() > wait) {
+      if (!noRetry && !retried && wait !== null && wait <= limits.rateRetryMaxMs && ctx.deadline - now() > wait && (!slot || ctx.allow[slot] > 0)) {
         await sleep(wait);
-        return call(model, ctx, messages, toolChoice, acc, { retried: true });
+        // The retry is a request of its own: as the last answer call of the turn, the model must answer.
+        const again = slot === 'answer' && ctx.allow.answer === 1 ? 'none' : toolChoice;
+        return call(model, ctx, messages, again, acc, { retried: true, slot });
       }
     }
     return out;
@@ -425,32 +432,33 @@ export function createBrain(deps = {}) {
     }
   }
   /**
-   * Answers every tool call of one response, taking each tool from the turn's allowance (`ctx.allow.tools`,
-   * shared with the backup restart). request_human is never refused by the cap and takes nothing from it.
+   * Answers every tool call of one response, in the order asked, taking each tool from the turn's allowance
+   * (`ctx.allow.tools`, shared with the backup restart). request_human counts too, but it takes its tool
+   * first, so the hand-over is never refused while a tool is left (a batch of 6 searches and a hand-over
+   * runs the hand-over and 5 searches).
    */
   async function runTools(calls, ctx) {
-    const jobs = calls.map((c) => {
+    const order = [...calls.keys()].sort((a, b) => Number(calls[b].name === HANDOVER_TOOL) - Number(calls[a].name === HANDOVER_TOOL));
+    const jobs = new Array(calls.length);
+    for (const k of order) {
+      const c = calls[k];
       if (!ctx.offered.has(c.name)) {
         say({ evt: 'brain.bad_tool', name: TOOL_NAME_RE.test(c.name) ? c.name : 'unknown' });
-        return { id: c.id, name: c.name, args: {}, result: TOOL_NOT_OFFERED, ok: false, ran: false };
+        jobs[k] = { id: c.id, name: c.name, args: {}, result: TOOL_NOT_OFFERED, ok: false, ran: false };
+        continue;
       }
       const args = cleanArgs(c.name, c.args);
-      if (c.name !== HANDOVER_TOOL) {
-        if (ctx.allow.tools <= 0) return { id: c.id, name: c.name, args, result: TOOL_LIMIT, ok: false, ran: false };
-        ctx.allow.tools -= 1;
+      if (ctx.allow.tools <= 0) {
+        jobs[k] = { id: c.id, name: c.name, args, result: TOOL_LIMIT, ok: false, ran: false };
+        continue;
       }
-      return runOne(c.name, args, ctx).then((r) => ({ id: c.id, name: c.name, args, result: r.result, ok: r.ok, ran: true }));
-    });
+      ctx.allow.tools -= 1;
+      jobs[k] = runOne(c.name, args, ctx).then((r) => ({ id: c.id, name: c.name, args, result: r.result, ok: r.ok, ran: true }));
+    }
     return Promise.all(jobs);
   }
 
   /* ---------------- one attempt on one model ---------------- */
-  /**
-   * A request the provider answered (`ok`, or `bad_response`: a 200 we cannot use, another 4xx) uses up a call;
-   * one that got no answer (rate, down, timeout, quota, auth, budget, or never sent) does not.
-   */
-  const answered = (res) => res.ok || res.code === 'bad_response';
-
   /**
    * The repair request (§5.4): the same messages, then the note right after the last user or tool
    * message. With tool rounds that is the last tool message; without, it is the client turn, so the
@@ -470,20 +478,20 @@ export function createBrain(deps = {}) {
     const results = [];
     let rounds = 0;
     const passes = (text) => {
-      const v = guard.checkReply(text, { toolResults: results, earlierReplies: ctx.earlier });
+      const v = guard.checkReply(text, { toolResults: results, earlierReplies: ctx.earlier, siteUrl: cfg.siteUrl });
       for (const h of v.hits) say({ evt: 'brain.guard', leadId: ctx.logLead, kind: h.kind });
       return v.ok;
     };
     while (allow.answer > 0) {
       // The last answer call of the turn (round 4), or no tool left: the model must answer.
       const choice = allow.answer === 1 || allow.tools <= 0 ? 'none' : 'auto';
-      const res = await call(model, ctx, messages, choice, acc);
-      if (answered(res)) allow.answer -= 1;
+      const res = await call(model, ctx, messages, choice, acc, { slot: 'answer' });
       rounds += 1;
       if (!res.ok) return res;
       if (res.refusal) return fail('refusal');
       if (res.toolCalls.length) {
-        if (choice === 'none') return fail('bad_response');
+        // Tools on the last answer call (round 4, or a retry that became it) leave nothing to answer with.
+        if (choice === 'none' || allow.answer <= 0) return fail('bad_response');
         messages.push(assistantMessage(res));
         for (const d of await runTools(res.toolCalls, ctx)) {
           messages.push({ role: 'tool', tool_call_id: d.id, content: d.result });
@@ -496,8 +504,7 @@ export function createBrain(deps = {}) {
       if (passes(res.text)) return { ok: true, model, rounds, text: res.text, calls: reported, repaired: false };
       // One repair call a turn: the draft is dropped (never sent, never stored, never sent back).
       if (allow.repair <= 0) return fail('guard');
-      const fix = await call(model, ctx, repairMessages(messages), 'none', acc);
-      if (answered(fix)) allow.repair -= 1;
+      const fix = await call(model, ctx, repairMessages(messages), 'none', acc, { slot: 'repair' });
       if (!fix.ok) return fix;
       if (fix.refusal) return fail('refusal');
       if (fix.toolCalls.length || !fix.text || !passes(fix.text)) return fail('guard');

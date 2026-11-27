@@ -114,3 +114,85 @@ test('names stay (booking needs them); anything that is not a string is the empt
   assert.equal(minimise('I am Sara Example from Jeddah'), 'I am Sara Example from Jeddah');
   for (const v of [null, undefined, 42, {}, []]) assert.equal(minimise(v), '');
 });
+
+
+/* Codex r2 P0: a separator or a digit form the masks did not know split one number into short groups. */
+const DASHES = ['\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015', '\u2212', '\uFE58', '\uFE63', '\uFF0D', '\u00AD'];
+const SPACES = ['\u00A0', '\u202F', '\u2002', '\u2007', '\u2009', '\u205F', '\u3000', '\u1680'];
+const INVISIBLE = ['\u200B', '\u200C', '\u200D', '\u2060', '\uFEFF', '\u200E', '\u200F', '\u061C'];
+const hex = (s) => [...s].map((c) => `U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join(' ');
+
+test('every Unicode dash, hyphen or minus between digit groups joins them: a phone, an IBAN and an ID are masked', () => {
+  for (const d of DASHES) {
+    assert.equal(minimise(`call 050${d}000${d}0000 please`), 'call [phone] please', hex(d));
+    assert.equal(minimise(`call 050 ${d} 000 0000`), 'call [phone]', `spaced ${hex(d)}`);
+    assert.equal(minimise(`+966${d}50${d}000${d}0000`), '[phone]', hex(d));
+    assert.equal(minimise(`IBAN SA12${d}3456${d}7890${d}1234${d}5678${d}9012 thanks`), 'IBAN [iban] thanks', hex(d));
+    assert.equal(minimise(`هويتي 1000${d}000${d}001`), 'هويتي [id-number]', hex(d));
+  }
+});
+
+test('every Unicode space separator between digit groups joins them: a phone, an IBAN and an ID are masked', () => {
+  for (const sp of SPACES) {
+    assert.equal(minimise(`call 050${sp}000${sp}0000 please`), 'call [phone] please', hex(sp));
+    assert.equal(minimise(`+966${sp}50${sp}000${sp}0000`), '[phone]', hex(sp));
+    assert.equal(minimise(`IBAN SA12${sp}3456${sp}7890${sp}1234${sp}5678${sp}9012 thanks`), 'IBAN [iban] thanks', hex(sp));
+    assert.equal(minimise(`iqama 2${sp}000${sp}000${sp}001`), 'iqama [id-number]', hex(sp));
+  }
+});
+
+test('zero-width and direction marks inside or around a number never split it: a phone, an IBAN, an ID and an email are masked', () => {
+  for (const z of INVISIBLE) {
+    assert.equal(minimise(`call 0500${z}000000 please`), 'call [phone] please', `inside ${hex(z)}`);
+    assert.equal(minimise(`call 050${z} ${z}000${z}-${z}0000 please`), 'call [phone] please', `padding a gap ${hex(z)}`);
+    assert.equal(minimise(`IBAN SA12${z}3456${z} ${z}7890 1234 5678 9012 thanks`), 'IBAN [iban] thanks', hex(z));
+    assert.equal(minimise(`iqama 1000${z}000${z}001`), 'iqama [id-number]', hex(z));
+    assert.equal(minimise(`mail na${z}me@example.com`), 'mail [email]', hex(z));
+  }
+  // Marks that wrap a number stay as written around the mask.
+  assert.equal(minimise('\u202A+966 50 000 0000\u202C'), '\u202A[phone]\u202C');
+  assert.equal(minimise('\u2066050 000 0000\u2069'), '\u2066[phone]\u2069');
+});
+
+test('every decimal digit form (Arabic-Indic, Persian, fullwidth, Devanagari, mathematical) becomes ASCII, so the masks see the number', () => {
+  const ar = (s) => s.replace(/\d/g, (d) => String.fromCodePoint(0x0660 + Number(d)));
+  const fa = (s) => s.replace(/\d/g, (d) => String.fromCodePoint(0x06F0 + Number(d)));
+  const fw = (s) => s.replace(/\d/g, (d) => String.fromCodePoint(0xFF10 + Number(d)));
+  const dev = (s) => s.replace(/\d/g, (d) => String.fromCodePoint(0x0966 + Number(d)));
+  const math = (s) => s.replace(/\d/g, (d) => String.fromCodePoint(0x1D7CE + Number(d)));
+  for (const [input, want] of [
+    [ar('050\u2011000\u20110000'), '[phone]'],
+    [fa('050 000 0000'), '[phone]'],
+    [fw('050\uFF0D000\uFF0D0000'), '[phone]'],
+    [dev('0500000000'), '[phone]'],
+    [math('050 000 0000'), '[phone]'],
+    [`\uFF0B${fw('966 50 000 0000')}`, '[phone]'],
+    [`\uFF08${fw('050')}\uFF09 ${fw('000 0000')}`, '[phone]'],
+    [`SA${ar('12\u20113456\u20117890\u20111234\u20115678\u20119012')}`, '[iban]'],
+    [`id ${fa('1000000001')}`, 'id [id-number]'],
+    [`card ${fw('1111 2222 3333 4444')}`, 'card [account-number]'],
+  ]) assert.equal(minimise(input), want, hex(input));
+  assert.equal(minimise(`unit ${fw('7')}, ${math('3')} rooms, ${dev('12')} m`), 'unit 7, 3 rooms, 12 m', 'a short number is only made ASCII');
+});
+
+test('text that is not a number stays exactly as written, whatever its dashes and spaces (only digits become ASCII)', () => {
+  for (const s of ['10:00\u201319:00', 'BONA\u2011W012', 'from 29\u201311\u20132026 to 3\u201312\u20132026', '29\u201311\u20132026 10:30', 'SAR\u00A02,950,000',
+    'B08\u201119', '3\u00A0\u2013\u00A04 bedrooms', 'Sun\u202F29\u202FNov\u202F2026', 'السعر\u200F 2,950,000 ريال']) {
+    assert.equal(minimise(s), s, hex(s));
+  }
+});
+
+test('a budget range of two thousand-grouped amounts on a dash or a slash stays as written; a 12+ digit run never passes as one', () => {
+  for (const s of ['2.950.000 - 3.100.000', 'budget 2950000 / 3100000', '2 950 000 - 3 100 000', '2.950.000/3.100.000', 'SAR 2.950.000 \u2013 3.100.000',
+    '2950000 - 3.100.000', 'budget 950.000 - 1.200.000 riyals', 'budget 2950000-3100000']) {
+    assert.equal(minimise(s), s, s);
+  }
+  for (const [input, want] of [
+    ['123456789012 - 1000', '[account-number]'],
+    ['123.456.789.012 - 3.100.000', '[account-number]'],
+    ['1111 2222 3333 - 4444', '[account-number]'],
+    ['account 1234567890123 / 5000', 'account [account-number]'],
+    ['2.950.000 - 3.100.000 - 4.000.000', '[account-number]'],
+    ['2950 / 500000000', '2950 / [phone]'],
+  ]) assert.equal(minimise(input), want, input);
+});

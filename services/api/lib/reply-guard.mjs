@@ -10,7 +10,8 @@
  * therefore never allowed back ("within your budget" instead).
  *
  * Also refused: a unit reference (`B08-19`) no tool returned in this turn, and a link to a home
- * no tool returned (this turn, or an earlier guarded reply). Each hit says only its kind; the
+ * no tool returned (this turn, or an earlier guarded reply) or on any site but Bona's (`siteUrl`:
+ * the same scheme, host and port; no site URL, no home link). Each hit says only its kind; the
  * text and the amount are never repeated, so a hit can be logged.
  *
  * `claimsBooking` is the booking-claim check of DESIGN §4.3's safety net, for the commit step.
@@ -236,8 +237,26 @@ export function unitRefs(text) {
   return [...new Set([...toAsciiDigits(String(text ?? '')).matchAll(UNIT_RE)].map((m) => m[0].toUpperCase()))];
 }
 
-const propertySlugs = (text) => [...String(text ?? '').matchAll(URL_RE)]
-  .flatMap((u) => [...u[0].matchAll(PROPERTY_PATH_RE)].map((m) => m[1].toLowerCase()));
+const slugsIn = (url) => [...url.matchAll(PROPERTY_PATH_RE)].map((m) => m[1].toLowerCase());
+const propertySlugs = (text) => [...String(text ?? '').matchAll(URL_RE)].flatMap((u) => slugsIn(u[0]));
+/** "https://bona-real-estate.com" for any URL on it (host case and the default port do not matter), else null. */
+const originOf = (url) => {
+  try { return new URL(String(url)).origin; } catch { return null; }
+};
+
+/**
+ * A home link the reply may not carry: a home no tool returned, or a home's path on a host that is not
+ * exactly Bona's site ("https://evil.example/properties/<a returned slug>/", a look-alike, http, a subdomain).
+ */
+function badHomeLink(text, slugs, siteOrigin) {
+  for (const u of String(text).matchAll(URL_RE)) {
+    const found = slugsIn(u[0]);
+    if (!found.length) continue;
+    if (found.some((slug) => !slugs.has(slug))) return true;
+    if (!siteOrigin || originOf(u[0]) !== siteOrigin) return true;
+  }
+  return false;
+}
 
 /** The words of a JSON key: "cashFrom" → cash, from; "price_two_year" → price, two, year. */
 const keyWords = (k) => String(k).replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
@@ -312,7 +331,7 @@ export function allowedFrom({ toolResults = [], earlierReplies = [] } = {}) {
 
 /**
  * @param {unknown} text  the reply the model wrote
- * @param {{ toolResults?: string[], earlierReplies?: string[] }} [ctx]
+ * @param {{ toolResults?: string[], earlierReplies?: string[], siteUrl?: string }} [ctx]  siteUrl: Bona's site (cfg.siteUrl)
  * @returns {{ ok: boolean, hits: { kind: 'amount'|'unit'|'link' }[] }}  at most one hit per kind.
  *   An amount written with a currency passes on the same SAR value or the same figure in that currency
  *   ("$750,000" is a hit when the tool said SAR 750,000); a bare figure passes on the same figure.
@@ -325,7 +344,7 @@ export function checkReply(text, ctx = {}) {
     && (allowed.amounts.has(`sar:${a.sar}`) || allowed.amounts.has(a.currency ? `${a.currency}:${a.raw}` : `raw:${a.raw}`));
   if (!findAmounts(text).every(allowedAmount)) hits.push({ kind: 'amount' });
   if (unitRefs(text).some((u) => !allowed.units.has(u))) hits.push({ kind: 'unit' });
-  if (propertySlugs(text).some((slug) => !allowed.slugs.has(slug))) hits.push({ kind: 'link' });
+  if (badHomeLink(text, allowed.slugs, originOf(ctx?.siteUrl))) hits.push({ kind: 'link' });
   return { ok: hits.length === 0, hits };
 }
 
