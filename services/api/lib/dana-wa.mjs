@@ -171,6 +171,8 @@ const MAPS_RE = /^https:\/\/maps\.google\.com\/\?q=-?\d{1,3}(?:\.\d+)?,-?\d{1,3}
 const ACK_WORDS = new Set(['ok', 'okay', 'okey', 'k', 'thanks', 'thank', 'you', 'thx', 'ty', 'تمام', 'اوك', 'اوكي', 'شكرا', 'طيب', 'تم', '👍']);
 /** Holds for a sender refusal back off (brain chats): 60 s, then twice as long each time, at most 30 min. */
 const RATE_HOLD_MAX_MS = 30 * 60_000;
+/** An owed line's retries while the link has not held back off the same way, at most 10 min (bounded by its 2-h mark). */
+const OWED_BACKOFF_MAX_MS = 10 * 60_000;
 const STOP_KINDS = new Set(['stop', 'privacy', 'deletion']);
 /** The raw lead fields the brain's client record reads (lib/brain/prompt.mjs clientTurn masks each before its clip). */
 const FACT_FIELDS = ['name', 'interest', 'budget', 'district', 'listing_id', 'stage', 'timeline'];
@@ -393,6 +395,7 @@ export function createDana({
   const backlogReserved = new Set(); // leadIds whose backlog first bubble is on its way (the 10-an-hour race)
   const latencies = [];           // the newest LATENCY_RING answers' latencies (ms)
   const rateStreak = new Map();  // leadId → the sender refusals in a row (the rate hold's back-off)
+  const owedStreak = new Map();  // leadId → an owed line's backlog deferrals in a row (its back-off)
   let identityAlertAt = -Infinity;
   let stopped = false;            // stop() is final: no wake arms a run after it
   const stmts = {};
@@ -427,6 +430,13 @@ export function createDana({
 
   const setHold = (leadId, reason, until) => db.updateLead(leadId, { dana_hold_reason: reason, dana_hold_until: until });
   const clearHold = (leadId) => db.updateLead(leadId, { dana_hold_reason: null, dana_hold_until: null });
+  /**
+   * THE one way a step ends a hold it set itself (r7): only while the chat still holds THAT reason, so a person-wait
+   * hold (send_failed after a counted failure, loop, booking_unconfirmed) that replaced it meanwhile always stays.
+   */
+  function endOwnHold(leadId, reason) {
+    if (db.getLead(leadId)?.dana_hold_reason === reason) clearHold(leadId);
+  }
   /** A timed hold never replaces one that waits for a person (send_failed, loop, booking_unconfirmed; r3). */
   function setTimedHold(leadId, reason, until) {
     const l = db.getLead(leadId);
@@ -898,12 +908,13 @@ export function createDana({
     }
     const auto = autoOf(fresh);
     const already = Number(fresh.needs_human) === 1;
+    let taskId = null; // the hand-off task actually used (a reused open one keeps its id, r7)
     db.transaction(() => {
       if (!already) inbox.setNeedsHuman(leadId, 1);
-      ensureHandoff(db, { leadId, source: 'dana', reason: why, details, now: now() });
+      taskId = ensureHandoff(db, { leadId, source: 'dana', reason: why, details, now: now() })?.task_id ?? null;
       if (stop) db.updateLead(leadId, { dana_off: 1 });
       // A run that ends in a hand-over ends an outage hold: no re-run of a paid turn every minute (r5 N5).
-      if (fresh.dana_hold_reason === 'brain_out') clearHold(leadId);
+      endOwnHold(leadId, 'brain_out');
     });
     if (alerts) safely(() => alerts.notify(leadId, { reason: 'needs_human' }));
     if (auto && note?.stopped) safely(() => notes?.stopped?.(fresh, note.stopped));
@@ -920,7 +931,7 @@ export function createDana({
     if (r.stopped === 'missed') {
       // The line reached the queue past the 2-h mark: recorded as missed (the task too, r6), no line (r5).
       outcome = 'missed';
-      taskMissed(leadId, why);
+      taskMissed(taskId);
       if (auto) noteHandover(fresh, { kind: 'missed', coversTs });
     } else {
       // Deferred by the backlog gate or a cap: the line is OWED (r6), like an outage line; the sweep sends it itself.
@@ -931,15 +942,34 @@ export function createDana({
     return { handover: outcome, sent };
   }
 
-  /** The open hand-off task of this chat, written for `why`, becomes `missed` (the queue crossed 2 h; r6). */
-  function taskMissed(leadId, why = null) {
-    prep(why ? 'taskMissedWhy' : 'taskMissedAny', `UPDATE lead_tasks SET reason = 'missed', updated = ? WHERE lead_id = ? AND kind = 'handoff'
-        AND status = 'open' AND source = 'dana'${why ? ' AND reason = ?' : ''}`).run(now(), String(leadId), ...(why ? [String(why)] : []));
+  /** The hand-off task actually used becomes `missed` (the queue crossed 2 h; by its id, whatever its reason: r6, r7). */
+  function taskMissed(taskId) {
+    if (taskId) prep('taskMissed', "UPDATE lead_tasks SET reason = 'missed', updated = ? WHERE task_id = ?").run(now(), String(taskId));
   }
-  /** A fixed line the backlog gate or a cap deferred: owed, on a timed hold the sweep turns into the line itself (r6). */
+  const openTaskId = (leadId) => prep('openTask', "SELECT task_id FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff' AND status = 'open'")
+    .get(String(leadId))?.task_id ?? null;
+  /** Does this refusal defer the line (it stays owed) rather than end it? The backlog gate, a cap, the sender's rate limit. */
+  const defers = (r) => r?.stopped === 'backlog' || Boolean(r?.cap && r.cap.reason !== 'cap_chat_day') || r?.error === 'rate_limited';
+  /**
+   * A fixed line deferred (`defers`): owed, on a timed hold the sweep turns into the line itself (r6). Its retry time
+   * backs off: the backlog gate 60 s doubling to 10 min (r7), the sender's rate limit the rate hold's back-off, a cap
+   * until it frees. The hold's 2-h mark bounds all of it (holdDeadline). True when it is owed.
+   */
   function oweLine(leadId, reason, r) {
-    if (r?.stopped === 'backlog') setTimedHold(leadId, reason, now() + RATE_HOLD_MS);
-    else if (r?.cap && r.cap.reason !== 'cap_chat_day') setTimedHold(leadId, reason, Number.isFinite(r.cap.until) ? r.cap.until : now() + MINUTE_MS);
+    if (!defers(r)) return false;
+    let until;
+    if (r.stopped === 'backlog') {
+      const n = (owedStreak.get(leadId) ?? 0) + 1;
+      owedStreak.set(leadId, n);
+      until = now() + Math.min(OWED_BACKOFF_MAX_MS, RATE_HOLD_MS * 2 ** (n - 1));
+    } else if (r.error === 'rate_limited') {
+      const n = (rateStreak.get(leadId) ?? 0) + 1;
+      rateStreak.set(leadId, n);
+      until = now() + Math.min(RATE_HOLD_MAX_MS, RATE_HOLD_MS * 2 ** (n - 1));
+    } else {
+      until = Number.isFinite(r.cap.until) ? r.cap.until : now() + MINUTE_MS;
+    }
+    return setTimedHold(leadId, reason, until);
   }
   /**
    * The sweep's send of an owed hand-over or closing line (r6): the line itself, through the same gate, never a new
@@ -949,28 +979,30 @@ export function createDana({
     const lead = db.getLead(leadId);
     if (!lead || lead.inbox_state !== 'in') return skip(leadId, 'not_in_inbox');
     const waiting = pendingFor(leadId, lead);
-    if (!waiting.length) { clearHold(leadId); return skip(leadId, 'nothing'); }
+    if (!waiting.length) { endOwnHold(leadId, reason); return skip(leadId, 'nothing'); }
     const coversTs = waiting[waiting.length - 1].ts;
     const language = languageOf({ lead, texts: waiting.map((m) => m.text) });
     const auto = autoOf(lead);
     const closing = reason === 'owed_closing';
     const text = closing ? (auto ? CLOSING[language] : HANDOVER[language]) : (auto ? autoHandoverLine(language, now()) : HANDOVER[language]);
+    const taskId = openTaskId(leadId);
     const r = await sendFixed(lead, text, language, coversTs, true, { closing });
     if (r.sent) {
-      clearHold(leadId);
+      // Only its own owed hold ends: a send_failed hold afterFailure just set (an unsure send) stays (r7).
+      endOwnHold(leadId, reason);
+      owedStreak.delete(leadId);
+      rateStreak.delete(leadId);
       say({ evt: 'dana.owed_line', leadId, sent: true });
       return { handover: 'owed', sent: true };
     }
-    if (r.stopped === 'backlog' || r.cap) {
-      oweLine(leadId, reason, r);
-      return skip(leadId, r.stopped);
-    }
-    clearHold(leadId);
+    // Deferred again (the backlog gate, a cap, the sender's rate limit): still owed, the hold kept (r7).
+    if (oweLine(leadId, reason, r)) return skip(leadId, r.stopped ?? r.error);
+    endOwnHold(leadId, reason);
     if (r.stopped === 'missed') {
-      taskMissed(leadId);
+      taskMissed(taskId);
       if (auto) noteHandover(lead, { kind: 'missed', coversTs });
     }
-    return skip(leadId, r.stopped ?? 'nothing');
+    return skip(leadId, r.stopped ?? r.error ?? 'nothing');
   }
 
   /** A stop, privacy or deletion request (DESIGN §4.1): no more answers in this chat. */

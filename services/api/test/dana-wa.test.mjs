@@ -2585,3 +2585,74 @@ test('T12 r6 6: a restart during the outage line\'s own send keeps its mark; the
   assert.equal(r.brain.calls.length, 1, 'the brain was retried: the line answered nothing');
   assert.equal(h.sent().at(-1), 'Yes, it is free.');
 });
+
+/* ======================================================================================
+ * PR-B3 r7 (Codex P1s in the owed-line code): a retry ends only its own hold; a sender rate limit owes the
+ * line; the cutoff updates the task actually used; owed retries back off while the link is unstable.
+ * ====================================================================================== */
+
+/** A hand-over line deferred as backlog (the link not held): owed_handover, as in r6 4. */
+async function owedHandover(h) {
+  h.client('a person please', { ts: T_IN - 30 * 60_000 + 1000 });
+  await h.dana.answer(LEAD, { ts: T_IN - 30 * 60_000 + 1000 });
+  assert.equal(h.lead().dana_hold_reason, 'owed_handover');
+}
+
+test('T12 r7 1: an owed retry that times out as the second counted failure keeps the send_failed hold', async () => {
+  let stable = false;
+  const h = bh({ link: { identityOk: () => true, linkStable: () => stable }, evo: () => ({ throws: timeoutErr() }),
+    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }] });
+  h.client('earlier', { ts: T_IN - 3 * HOUR });
+  h.danaRow({ covers: T_IN - 3 * HOUR, created: T_IN - 3 * HOUR + 1000, status: 'failed', error: 'http_400' });
+  await owedHandover(h);
+  stable = true;
+  await sweepFor(h, h.now() + 60_000, h.now() + 3 * 60_000);
+  assert.deepEqual([h.lead().dana_hold_reason, h.lead().dana_hold_until], ['send_failed', null]);
+});
+
+test('T12 r7 2: a closing line refused by a full sender minute is owed and goes once capacity frees (and a hand-over line too)', async () => {
+  for (const kind of ['privacy', 'person']) {
+    const h = bh({ turns: [brainReply('', { tools: [{ name: 'request_human', args: { kind } }] })] });
+    for (let i = 0; i < 8; i += 1) assert.equal((await h.sender.sendTo({ jid: `9665000012${String(i).padStart(2, '0')}@s.whatsapp.net`, text: 'staff', kind: 'staff' })).ok, true);
+    h.client('hmm');
+    await h.dana.answer(LEAD, { ts: h.now() });
+    assert.equal(h.sent().filter((t) => t === 'staff').length, 8);
+    assert.equal(h.sent().length, 8, `${kind}: the line was refused this minute`);
+    assert.equal(h.lead().dana_hold_reason, kind === 'privacy' ? 'owed_closing' : 'owed_handover');
+    await sweepFor(h, h.now() + 61_000, h.now() + 3 * 60_000);
+    const last = h.sent().at(-1);
+    assert.ok(last.endsWith(kind === 'privacy' ? CLOSING.en : HANDOVER.en), `${kind}: ${last}`);
+    assert.equal(h.lead().dana_hold_reason, null);
+  }
+});
+
+test('T12 r7 3: the cutoff sets `missed` on the task actually used, an open request_human task included', async () => {
+  // The privacy closing line crosses 2 h inside the queue.
+  const late = bh({ at: T_IN - 2 * HOUR - 60_000, link: { identityOk: () => true, linkStable: () => true },
+    turns: [brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }), brainReply('', { tools: [{ name: 'request_human', args: { kind: 'privacy' } }] })],
+    pacing: { ...immediate, fifo: async (fn) => { if (late.now() >= T_IN) late.tick(10_000); return fn(); } } });
+  await ask(late, 'a person please');
+  assert.equal(late.s.db.prepare("SELECT reason FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff' AND status = 'open'").get(LEAD).reason, 'request_human');
+  late.client('what do you keep about me?', { ts: T_IN - 2 * HOUR + 5000 });
+  late.set(T_IN);
+  await late.dana.answer(LEAD, { ts: T_IN - 2 * HOUR + 5000 });
+  assert.equal(late.s.db.prepare("SELECT reason FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff' AND status = 'open'").get(LEAD).reason, 'missed');
+  assert.equal(late.lead().dana_off, 1, 'the stop still stops the chat');
+});
+
+test('T12 r7: owed retries back off while the link is unstable (60 s doubling, at most 10 min)', async () => {
+  const h = bh({ link: { identityOk: () => true, linkStable: () => false },
+    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }] });
+  await owedHandover(h);
+  const gaps = [];
+  let prev = h.now();
+  for (let i = 0; i < 5; i += 1) {
+    const until = h.lead().dana_hold_until;
+    gaps.push(until - prev);
+    h.set(until);
+    prev = until;
+    h.dana.sweep();
+    await h.dana.flush();
+  }
+  assert.deepEqual(gaps, [60_000, 120_000, 240_000, 480_000, 600_000]);
+});
