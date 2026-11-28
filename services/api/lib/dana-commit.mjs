@@ -90,13 +90,31 @@ const TODAY_RE = /(?<![\p{L}])(?:today|tonight)(?![\p{L}])|(?<![\p{L}])اليو�
  *                       ث-ب-ت  ثبتت/ثبتنا لك, تم (ال)تثبيت, مثبت(ة)
  *                       س-ج-ل  سجلت/سجلنا لك موعد, تم تسجيل الموعد, الموعد مسجل
  *                       ر-ت-ب  رتبت/رتبنا لك موعد, تم ترتيب الموعد, الموعد مرتب
+ *                       ع-م-د  اعتمدت/اعتمدنا لك الموعد, تم اعتماد الموعد
+ *   "booking someone in" (Codex r10, the last lexicon pass): got / put / pencilled / slotted / added / signed / lined /
+ *                       fitted / squeezed + you | it | the viewing + down | in | up | on; "you're down|in|on|good for";
+ *                       "you've got the slot"; "it's yours"; "the slot is yours"; "that's you sorted"; "all done for";
+ *                       «سجلتك / حطيتك / ضفتك / دخلتك» + a booking noun, a day or a time; «الموعد صار لك»;
+ *                       «خلاص موعدك»; «الموعد لك» (never «الموعد لك تختاره»)
+ * Every form goes through the same denial, future and stock handling. A new single phrase goes to the T26 eval, not here:
+ * the regex is the safety net; the prompt and the code-only commit are the control.
  */
 const EN_DONE = String.raw`booked|confirmed|reserved|scheduled|arranged|sorted|fixed|set|locked\s+in`;
 const EN_BASE = String.raw`book|confirm|reserve|schedule|arrange|sort|fix|set|lock\s+in|put\s+you\s+down`;
+/**
+ * "Booking someone in" (Codex r10; the last lexicon pass, later single phrases go to the T26 eval): got / put / pencil(l)ed /
+ * slotted / added / signed / lined / fitted / squeezed + you | it | the viewing + down | in | up | on, at the end of the
+ * clause or before for / on / at / a day / a time ("I've put it in the brochure" is none).
+ */
+const EN_PHRASAL_DONE = String.raw`(?:got|put|pencil(?:l)?ed|slotted|added|signed|lined|fitted|squeezed)\s+(?:you|it|the\s+viewing)\s+(?:down|in|up|on)`;
+const EN_PHRASAL_BASE = String.raw`(?:get|put|pencil|slot|add|sign|line|fit|squeeze)\s+(?:you|it|the\s+viewing)\s+(?:down|in|up|on)`;
+const EN_PHRASAL_END = String.raw`(?=\s*(?:$|[.!?,;:—–)]|for(?![\p{L}])|on(?![\p{L}])|at(?![\p{L}])|(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|\d))`;
 /** The done-verbs said to the client («… لك»). */
-const AR_VERB = String.raw`حجزت|حجزنا|أكدت|أكدنا|اكدت|اكدنا|ثبتت|ثبتنا|ثبت|رتبت|رتبنا|سجلت|سجّلت|سجلنا|سجّلنا`;
+const AR_VERB = String.raw`حجزت|حجزنا|أكدت|أكدنا|اكدت|اكدنا|ثبتت|ثبتنا|ثبت|رتبت|رتبنا|سجلت|سجّلت|سجلنا|سجّلنا|اعتمدت|اعتمدنا`;
+/** "I entered you" forms («سجلتك», «حطيتك», «ضفتك», «دخلتك»): a claim only with a booking noun, a day or a time after them. */
+const AR_ENTERED_YOU = String.raw`سجلتك|سجّلتك|سجلتكم|حطيتك|حطيتكم|ضفتك|ضفتكم|دخلتك|دخلتكم`;
 /** The nouns after «تم» / «يتم». */
-const AR_NOUN = String.raw`حجز|تأكيد|تثبيت|تسجيل|ترتيب`;
+const AR_NOUN = String.raw`حجز|تأكيد|تثبيت|تسجيل|ترتيب|اعتماد`;
 /** The adjectives («موعدك مؤكد»). */
 const AR_ADJ = String.raw`محجوز|مؤكد|مثبت|مسجل|مرتب|متأكد`;
 /** What a booking is in Arabic: the viewing, the appointment, the booking, the visit, a tour. */
@@ -109,6 +127,7 @@ const AR_THING = String.raw`(?:ال)?(?:موعد|معاين|حجز|زيار|جو
 const OBJECT_RE = new RegExp([
   String.raw`(?<![\p{L}])(?:booked|confirmed|reserved|scheduled)\s+(?:you(?:r)?|(?:it|this|that|one)\s+for\s+you|for\s+you)(?![\p{L}])`,
   String.raw`(?<![\p{L}])put\s+you\s+down(?![\p{L}])`,
+  String.raw`(?<![\p{L}])(?:got|put|pencil(?:l)?ed|slotted|fitted|squeezed|added)\s+you\s+(?:down|in)(?![\p{L}])`,
   String.raw`(?:${AR_VERB})\s*(?:لك|لكم|عليك)`,
   String.raw`(?:${AR_ADJ})(?:ة|ه)?\s*(?:لك|لكم)`,
 ].join('|'), 'iu');
@@ -145,6 +164,8 @@ const FUTURE_RE = new RegExp([
   String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي)(?:تأكد|تثبت|تسجل|ترتب|نحجز|تحجز)\s+${AR_THING}\S*`,
   String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي|حي|سي)كون\s+(?:\S+\s+){0,2}?(?:${AR_ADJ})\S*`,
   String.raw`(?<![\p{L}])(?:once|when|after|as\s+soon\s+as|until|if)\s+(?:it['’]s|it\s+is|it\s+has\s+been|(?:a|the|your)\s+(?:\w+\s+)?(?:is|has\s+been))\s+(?:${EN_DONE})(?![\p{L}])`,
+  // a modal offer with the phrasal class ("I can fit you in on Sunday — shall I?", "I'll get you down once …")
+  String.raw`(?:(?<![\p{L}])(?:will|would|can|could|may|might|should|must|shall)|['’]ll)\s+(?:${EN_PHRASAL_BASE})(?![\p{L}])`,
   // "'ll" after any word ("You'll", "it’ll", "we'll": Codex r9)
   String.raw`(?:(?<![\p{L}])(?:will|would|can|could|may|might|should|must)|['’]ll)\s+be\s+(?:${EN_DONE})(?![\p{L}])`,
   // "sorted / arranged (it|them|the …) (for you) by|according to|in order|as a" is how a list is laid out, no booking (Claude r9 P3-1)
@@ -175,6 +196,13 @@ const EXTRA_CLAIM_RE = new RegExp([
   String.raw`(?<![\p{L}])[وف]?(?:محجوز|مثبت)(?:ة|ه)?(?![\p{L}])|(?<![\p{L}])[وف]?انحجز(?:ت)?(?![\p{L}])`,
   String.raw`(?:الموعد|موعدك|المعاينة|معاينتك|الزيارة|زيارتك|الحجز|حجزك)\s+(?:\S+\s+)?(?:مؤكد|مسجل|مرتب|متأكد)(?:ة|ه)?(?![\p{L}])`,
   String.raw`(?<![\p{L}])(?:مؤكد|مسجل|مرتب|متأكد)(?:ة|ه)?\s+${AR_THING}`,
+  // the phrasal class (Codex r10): "I've got you down for …", "you're down|in|on|good for …", "it's yours" (not "… to keep"),
+  // "all done for …", «الموعد لك» (not «الموعد لك تختاره»)
+  String.raw`(?<![\p{L}])${EN_PHRASAL_DONE}${EN_PHRASAL_END}`,
+  String.raw`(?<![\p{L}])you(?:['’]re|\s+are)\s+(?:down|in|on|good)\s+for(?![\p{L}])`,
+  String.raw`(?<![\p{L}])it['’]s\s+yours(?![\p{L}])(?!\s+to(?![\p{L}]))`,
+  String.raw`(?<![\p{L}])all\s+done\s+for(?![\p{L}])`,
+  String.raw`(?:الموعد|المعاينة|موعدك)\s+(?:لك|لكم)(?![\p{L}])(?!\s+(?:ت|ي)?(?:ختار|حدد|قرر))`,
   // a first-person past verb with a booking noun as its object, «لك» or not («حجزنا موعدك», «أكدنا المعاينة»: Codex r9)
   String.raw`(?<![\p{L}])[وف]?(?:${AR_VERB})\s+(?:لك(?:م)?\s+)?(?:ال)?(?:موعد|معاين|حجز|زيار)`,
   String.raw`(?<![\p{L}])[وف]?تأكد\s+${AR_THING}`,
@@ -192,6 +220,16 @@ const PERSONAL_CLAIM_RE = new RegExp([
   String.raw`(?<![\p{L}])see(?:ing)?\s+you\s+(?:then|on|at|there|tomorrow|(?:sun|mon|tues|wednes|thurs|fri|satur)day)(?![\p{L}])`,
   String.raw`(?<![\p{L}])[وف]?(?:تم\s+الحجز|تم\s+التأكيد|تم\s+التثبيت|تم\s+تأكيد\s+الحجز|تأكد\s+(?:ال)?حجز|تم\s+(?:ال)?(?:تثبيت|تسجيل|ترتيب)\s+${AR_THING}|(?:حجزت|حجزنا)\s*لك|(?:أكدت|أكدنا|اكدت|اكدنا|ثبتت|ثبتنا|ثبت|رتبت|رتبنا|سجلت|سجّلت|سجلنا|سجّلنا)\s*لك\s+${AR_THING}|انحجز\s*لك)`,
   String.raw`(?<![\p{L}])ب?نشوفك(?:م)?(?:\s+\S+){0,3}?\s+(?:يوم\s+)?(?:${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة|هناك|في\s+(?:المعاينة|الموعد))`,
+  // the phrasal class (Codex r10): "you've got the slot", "the slot is yours", "that's you sorted", «سجلتك / حطيتك / ضفتك /
+  // دخلتك» + up to three words + a booking noun, a day or a time (never «ضفتك على قائمة التحديثات»), «اعتمدت لك الموعد»,
+  // «تم اعتماد الموعد», «الموعد صار لك», «خلاص موعدك»
+  String.raw`(?<![\p{L}])you(?:['’]ve|\s+have)\s+got\s+(?:the|your)\s+(?:slot|viewing|appointment|spot)(?![\p{L}])`,
+  String.raw`(?<![\p{L}])the\s+(?:slot|time|spot|appointment)\s+is\s+yours(?![\p{L}])`,
+  String.raw`(?<![\p{L}])that['’]s\s+you\s+sorted(?![\p{L}])`,
+  String.raw`(?<![\p{L}])[وف]?(?:${AR_ENTERED_YOU})(?:\s+\S+){0,3}?\s+(?:يوم\s+)?(?:${AR_THING}|${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة)`,
+  String.raw`(?<![\p{L}])[وف]?(?:(?:اعتمدت|اعتمدنا)\s*(?:لك\s+)?${AR_THING}|تم\s+(?:ال)?اعتماد\s+${AR_THING})`,
+  String.raw`(?:الموعد|المعاينة|موعدك)\s+(?:صار|صارت)\s+(?:لك|لكم)|(?:صار|صارت)\s+(?:الموعد|المعاينة)\s+(?:لك|لكم)`,
+  String.raw`(?<![\p{L}])خلاص\s*[،,]?\s*(?:موعدك|معاينتك|حجزك)`,
 ].join('|'), 'iu');
 /** "You're all set": a claim, but it needs a booking sign ("You're all set: I've sent you the brochure" is no booking). */
 const ALL_SET_RE = /(?<![\p{L}])you(?:'re|’re|\s+are)\s+all\s+set(?![\p{L}])/iu;
@@ -204,9 +242,10 @@ const ALL_SET_RE = /(?<![\p{L}])you(?:'re|’re|\s+are)\s+all\s+set(?![\p{L}])/i
  * and «ما تم الاتفاق عليه» ("what was agreed") is none either.
  */
 const GOVERNED_DENIAL_RE = new RegExp([
-  String.raw`(?<![\p{L}])(?:isn['’]t|aren['’]t|wasn['’]t|(?:hasn['’]t|haven['’]t|has\s+not|have\s+not)(?:\s+been)?|didn['’]t|did\s+not|(?:is|are|was)\s+not|not)\s+(?:yet\s+|been\s+|fully\s+|actually\s+)?(?:${EN_DONE}|${EN_BASE})(?![\p{L}])(?:\s+(?:it|this|that|the\s+\S+|your\s+\S+))?(?:\s+yet)?`,
+  String.raw`(?<![\p{L}])(?:isn['’]t|aren['’]t|wasn['’]t|(?:hasn['’]t|haven['’]t|has\s+not|have\s+not)(?:\s+been)?|didn['’]t|did\s+not|(?:is|are|was)\s+not|not)\s+(?:yet\s+|been\s+|fully\s+|actually\s+)?(?:${EN_PHRASAL_DONE}|${EN_PHRASAL_BASE}|${EN_DONE}|${EN_BASE})(?![\p{L}])(?:\s+(?:it|this|that|the\s+\S+|your\s+\S+))?(?:\s+yet)?`,
+  String.raw`(?<![\p{L}])you(?:['’]re|\s+are)\s+not\s+(?:yet\s+)?(?:down|in|on|good)\s+for(?![\p{L}])`,
   String.raw`(?:لم\s+يتم|(?<!بعد\s+)(?<![\p{L}])ما\s+تم|(?:لسه|لسا|للحين)\s+ما(?:\s+تم)?)\s+(?:ال)?(?:${AR_NOUN}|تأكد|انحجز)\S*`,
-  String.raw`(?<!بعد\s+)(?<![\p{L}])ما\s+(?:${AR_VERB}|انحجز|تأكد)\S*`,
+  String.raw`(?<!بعد\s+)(?<![\p{L}])ما\s+(?:${AR_VERB}|${AR_ENTERED_YOU}|انحجز|تأكد)\S*`,
   String.raw`(?:الحجز|موعدك|الموعد|المعاينة)\s+(?:(?:لسه|لسا|للحين)\s+ما\s+(?:تأكد|تم|تثبت|ترتب|تسجل))`,
   String.raw`(?<![\p{L}])(?:(?:لسه|لسا|للحين)\s+)?(?:مو|مب|مش|غير|ليس|ليست|مهو|ماهو|مهي|ماهي)\s+(?:${AR_ADJ})\S*`,
 ].join('|'), 'giu');
