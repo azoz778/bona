@@ -786,6 +786,22 @@ test("Codex r11: a turn whose request went out before the breaker opened never c
   assert.equal((await h.brain.turn(turnArgs())).ok, true, 'the half-open trial closes it');
 });
 
+test("Codex r12: while the breaker is open, a turn whose first request went out before it opened sends no further request (its tool round ends on the outage path)", async () => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const h = harness({ backupMode: 'handover', script: [http(500, {}), http(500, {}), async () => { await held; return toolCalls(['search_properties', { query: 'villa' }]); }, http(500, {}), reply('never sent')] });
+  for (let i = 0; i < 2; i += 1) { assert.equal((await h.brain.turn(turnArgs())).code, 'down'); h.advance(MIN); }
+  const slow = h.brain.turn(turnArgs());
+  for (let i = 0; i < 200 && h.calls.length < 3; i += 1) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await h.brain.turn(turnArgs())).code, 'down', 'the breaker opens');
+  const n = h.calls.length;
+  release();
+  const r = await slow;
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'down', 'gated on the open breaker');
+  assert.equal(h.calls.length, n, 'no paid request while open');
+});
+
 test('a turn that throws during the half-open trial frees the trial: the next turn is the trial again, never a stuck breaker', async () => {
   let throwing = false;
   const h = harness({ backupMode: 'handover', script: [http(500, {}), http(500, {}), http(500, {}), reply('Draft.'), reply('Fine now.')] });
@@ -1179,6 +1195,28 @@ test("Codex r9: a number the client split across two messages never reaches the 
   const j = harness({ script: [reply('Hello.')] });
   await j.brain.turn(turnArgs({ history: [{ role: 'assistant', content: 'from SAR 2 950 000' }, { role: 'user', content: '500 000 is my budget' }] }));
   assert.equal(j.calls[0].body.messages.some((x) => x.content.includes('2 950 000')), true);
+});
+
+test("Codex r12: two budget messages in one batch reach the model as written (inboxTurn's batchParts keep the message boundaries through every masking pass); a CRM field is masked before it is clipped", async () => {
+  const rows = [
+    { key_id: 'b1', direction: 'in', text: 'ميزانيتي 500.000' },
+    { key_id: 'b2', direction: 'in', text: '600.000' },
+  ];
+  const t = inboxTurn(rows, { exclude: new Set(['b1', 'b2']) });
+  assert.deepEqual(t.batchParts, ['ميزانيتي 500.000', '600.000']);
+  assert.equal(t.batchText, 'ميزانيتي 500.000\n600.000');
+  const h = harness({ script: [reply('Noted.')] });
+  await h.brain.turn(turnArgs({ language: 'ar', history: t.history, batchText: t.batchText, batchParts: t.batchParts }));
+  const user = h.calls[0].body.messages.find((x) => x.role === 'user').content;
+  assert.equal(user.includes('500.000') && user.includes('600.000'), true, user);
+  // A CRM field longer than its 120-character clip: masked first, so a phone the clip cuts leaves no digit run.
+  const k = harness({ script: [reply('Hello.')] });
+  await k.brain.turn(turnArgs({ leadFacts: { interest: `${'x'.repeat(100)} callback +44 7700 900123 please` } }));
+  const sent = k.calls[0].body.messages.find((x) => x.role === 'user').content;
+  assert.equal(/\d{3}/.test(sent.replace(/[^\d]/g, '')), false, sent.slice(-60));
+  const j = harness({ script: [reply('Hello.')] });
+  await j.brain.turn(turnArgs({ leadFacts: 'Interest: call 0500000000\nBudget: 3 million' }));
+  assert.equal(j.calls[0].body.messages.find((x) => x.role === 'user').content.includes('0500000000'), false, 'a string record is masked too');
 });
 
 test("Claude r15 F2: two budget answers on either side of our question both reach the model as written", async () => {

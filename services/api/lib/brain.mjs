@@ -147,7 +147,8 @@ export function historyFromInbox(rows, { exclude = new Set() } = {}) {
 
 /**
  * What a turn gets from the inbox rows, as dana-wa hands them to turn() (PLAN T12): `history` (historyFromInbox's
- * turns: the rows not in `exclude`) and `batchText` (the client's rows in `exclude`, this batch, one per line). The
+ * turns: the rows not in `exclude`), `batchText` (the client's rows in `exclude`, this batch, one per line) and
+ * `batchParts` (those rows, one each: hand them to turn() so their boundaries hold through its masking). The
  * client's rows, the batch's included, are masked as ONE series (minimiseParts) before any is clipped, so a number
  * split across two of them, or cut by the 300-character clip, never leaves a piece in clear (Codex r10, r11); ours
  * are masked on their own.
@@ -158,12 +159,13 @@ export function inboxTurn(rows, { exclude = new Set() } = {}) {
   const ins = all.flatMap((m, i) => (m.direction === 'in' ? [i] : []));
   const masked = texts.map((t) => defaultMinimise(t));
   minimiseParts(ins.map((i) => texts[i])).forEach((t, k) => { masked[ins[k]] = t; });
-  const batchText = all.flatMap((m, i) => (exclude.has(m.key_id) && m.direction === 'in' ? [masked[i]] : [])).join('\n');
+  const batchParts = all.flatMap((m, i) => (exclude.has(m.key_id) && m.direction === 'in' ? [masked[i]] : []));
+  const batchText = batchParts.join('\n');
   const list = all.map((m, i) => ({ m, text: masked[i] })).filter(({ m }) => !exclude.has(m.key_id)).slice(-CONTEXT_ROWS);
   const turns = list.map(({ m, text }) => ({ role: m.direction === 'in' ? 'user' : m.sender_kind === 'dana' ? 'assistant' : 'team', content: oneLine(text, ROW_CHARS) }));
   const size = () => turns.reduce((n, t) => n + t.content.length, 0);
   while (turns.length > 1 && size() > LIMITS.historyChars) turns.shift();
-  return { history: turns, batchText };
+  return { history: turns, batchText, batchParts };
 }
 
 /** Retell-shaped messages: each tool call's invocation and result, then the answer. */
@@ -416,6 +418,9 @@ export function createBrain(deps = {}) {
     if (overBudget()) return fail('budget');
     const held = outGate(ctx);
     if (held) return { ...fail(held), gated: true };
+    // While the breaker is open only the half-open trial's own requests go out: a turn whose first request was sent
+    // before it opened sends no further round (Codex r12), gated (nothing sent, nothing learnt).
+    if (state.breaker.open && (ctx.trial ?? null) !== state.breaker.trial) return { ...fail('down'), gated: true };
     const left = ctx.deadline - now();
     if (left <= 0) return fail('timeout');
     if (slot) ctx.allow[slot] -= 1;
@@ -657,13 +662,14 @@ export function createBrain(deps = {}) {
    * number split across two of the client's messages, a reply of ours between them or not, is masked in both
    * pieces (Codex r9). Only the client's rows: an amount in our reply never joins a client's number.
    */
-  function clientRows(history, batchText) {
+  function clientRows(history, batchParts) {
     const rows = Array.isArray(history) ? history : [];
+    const parts = batchParts.map((p) => (typeof p === 'string' ? p : ''));
     const at = rows.flatMap((h, i) => (h?.role === 'user' && typeof h.content === 'string' ? [i] : []));
-    const masked = minimiseParts([...at.map((i) => rows[i].content), String(batchText ?? '')]);
+    const masked = minimiseParts([...at.map((i) => rows[i].content), ...parts]);
     const out = rows.slice();
     at.forEach((i, k) => { out[i] = { ...rows[i], content: masked[k] }; });
-    return { history: out, batch: masked.at(-1) };
+    return { history: out, batch: masked.slice(at.length).join('\n') };
   }
 
   /* ---------------- turn ---------------- */
@@ -695,7 +701,7 @@ export function createBrain(deps = {}) {
     }
     const outTrial = takeOutTrial();
     try {
-      return await modelTurn(input, { route, language, system, leadId, logLead, started, end, wasTrial: trial !== null, outTrial });
+      return await modelTurn(input, { route, language, system, leadId, logLead, started, end, wasTrial: trial !== null, trial, outTrial });
     } finally {
       // A throw before settle() (a bug of ours, never the provider) frees the trial, so the next
       // turn is the trial again instead of `down` with no call until a restart.
@@ -706,16 +712,16 @@ export function createBrain(deps = {}) {
   }
 
   /** The part of a turn that may call a model, once runTurn's gates passed. */
-  async function modelTurn(input, { route, language, system, leadId, logLead, started, end, wasTrial, outTrial }) {
+  async function modelTurn(input, { route, language, system, leadId, logLead, started, end, wasTrial, trial = null, outTrial }) {
     const answerBackup = backupMode === 'answer' && Boolean(models.backup) && models.backup !== models.main;
     const startOnBackup = inCooldown(started);
     if (startOnBackup && !answerBackup) return end(fail('rate'));
 
     const turnMs = Number.isFinite(input.deadlineMs) && input.deadlineMs > 0 ? Math.min(input.deadlineMs, limits.turnMs) : limits.turnMs;
     const offeredTools = toolsFor(route, Array.isArray(input.toolNames) ? input.toolNames : undefined);
-    const client = clientRows(input.history, input.batchText);
+    const client = clientRows(input.history, Array.isArray(input.batchParts) ? input.batchParts : [String(input.batchText ?? '')]);
     const ctx = {
-      route, language, leadId, logLead, outTrial,
+      route, language, leadId, logLead, outTrial, trial,
       deadline: started + turnMs,
       // The per-turn caps (§2.4), shared by the main attempt and the backup restart.
       allow: { answer: limits.answerCalls, repair: limits.repairCalls, tools: limits.tools },
@@ -727,8 +733,10 @@ export function createBrain(deps = {}) {
       base: [
         { role: 'system', content: system },
         ...historyMessages(client.history),
-        // Masked before the clip, so a phone across the 4,000-character cut leaves no digit.
-        { role: 'user', content: minimise(clientTurn({ batchText: clipChars(minimise(client.batch), limits.batchChars), leadFacts: input.leadFacts })) },
+        // The batch is masked (clientRows, its messages as parts) before the 4,000-character clip, and never masked
+        // again as one joined text, so two of its messages keep their boundary (Codex r12); clientTurn masks the CRM
+        // facts before it clips them.
+        { role: 'user', content: clientTurn({ batchText: clipChars(client.batch, limits.batchChars), leadFacts: input.leadFacts }) },
         { role: 'system', content: contextNote({ now: started, route, firstReply: Boolean(input.turnContext?.firstReply), autoMode: Boolean(input.autoMode) }) },
       ],
     };
@@ -792,7 +800,7 @@ export function createBrain(deps = {}) {
       const masked = (v) => minimise(String(v ?? ''));
       const user = minimise(`From: ${oneLine(masked(input.fromName), 80)} (${oneLine(masked(input.fromDomain), 120)})\nSubject: ${oneLine(masked(input.subject), 200)}\n\n${clipChars(masked(input.text ?? input.text600), 600)}`);
       const ctx = {
-        route: 'classify', tools: [], cacheKey: 'bona-classify-v1', responseFormat: CLASSIFY_FORMAT, deadline: t + limits.callMs, outTrial,
+        route: 'classify', tools: [], cacheKey: 'bona-classify-v1', responseFormat: CLASSIFY_FORMAT, deadline: t + limits.callMs, outTrial, trial,
         safetyId: typeof input.senderKey === 'string' && input.senderKey ? safetyIdentifier(`mail:${input.senderKey.toLowerCase()}`) : undefined,
       };
       const res = await call(models.classify, ctx, [{ role: 'system', content: prompts.classify.trim() }, { role: 'user', content: user }], undefined, null, { noRetry: true });
