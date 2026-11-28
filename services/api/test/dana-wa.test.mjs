@@ -2673,7 +2673,7 @@ test('LEGACY GUARD (r8 N7): a legacy hand-over line refused rate_limited sets no
   assert.equal(h.calls.length, before, 'nothing is sent later');
 });
 
-test('T12 r8 2 (r9): an inbound wake never ends an owed closing line; it sends it first', async () => {
+test('T12 r8 2 (r9, r10): an inbound wake never ends an owed closing line; the sweep sends it', async () => {
   let stable = false;
   const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
     turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'privacy' } }] }); }] });
@@ -2681,15 +2681,15 @@ test('T12 r8 2 (r9): an inbound wake never ends an owed closing line; it sends i
   await h.dana.answer(LEAD, { ts: T_IN - 30 * 60_000 + 1000 });
   assert.equal(h.lead().dana_hold_reason, 'owed_closing');
   h.set(h.lead().dana_hold_until + 1000);
-  // The batch fires before the sweep: since r9 the due owed line goes first (never discarded at chat_off).
-  assert.deepEqual(await ask(h, 'hello?'), { handover: 'owed', sent: true });
-  assert.equal(h.sent().length, 1);
+  // The batch fires before the sweep (r9: the owed line is tried first). It covers its own message (r10), which is
+  // backlog with the link not held: it stays owed, never discarded at chat_off.
+  assert.deepEqual(await ask(h, 'hello?'), { skipped: 'backlog' });
+  assert.equal(h.lead().dana_hold_reason, 'owed_closing', 'the owed hold survives the wake');
+  stable = true;
+  await sweepFor(h, h.now() + 60_000, h.now() + 5 * 60_000);
+  assert.equal(h.sent().length, 1, 'once');
   assert.ok(h.sent()[0].endsWith(CLOSING.en));
   assert.equal(h.lead().dana_hold_reason, null);
-  stable = true;
-  h.dana.sweep();
-  await h.dana.flush();
-  assert.equal(h.sent().length, 1, 'once');
 });
 
 test('T12 r8 3: a stale queued owed retry re-reads its hold: after the first gets the second counted failure, the second does not send', async () => {
@@ -2763,15 +2763,76 @@ test('T12 r9 1: a backlog deferral at 1h59m30s whose back-off is due at 2h00m30s
 test('T12 r9 2: a due owed hand-over line goes before any model turn when the client\'s follow-up wakes the chat first', async () => {
   let stable = false;
   const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
-    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }, brainReply('never')] });
+    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }, brainReply('Someone will call you shortly.')] });
   h.client('a person please', { ts: T_IN - 30 * 60_000 + 1000 });
   await h.dana.answer(LEAD, { ts: T_IN - 30 * 60_000 + 1000 });
   assert.equal(h.lead().dana_hold_reason, 'owed_handover');
   stable = true;
   h.set(h.lead().dana_hold_until + 1000);
   await ask(h, 'hello? anyone?');
-  assert.equal(h.sent().length, 1);
-  assert.ok(h.sent()[0].endsWith(HANDOVER.en), 'the owed line went');
-  assert.equal(h.brain.calls.length, 1, 'no new model turn');
+  await h.dana.flush();
+  assert.ok(h.sent()[0].endsWith(HANDOVER.en), 'the owed line went first');
+  assert.equal(h.brain.calls[0].batchParts.includes('hello? anyone?'), false, 'no model turn in the run that sent it');
+  assert.equal(h.lead().dana_hold_reason, null);
+  // r10 (b): the owed line covered only the message it was owed for; the follow-up is answered in the next run.
+  assert.equal(h.brain.calls.length, 2);
+  assert.deepEqual(h.brain.calls[1].batchParts, ['hello? anyone?']);
+  assert.equal(h.sent().length, 2);
+});
+
+/* ======================================================================================
+ * PR-B3 r10 (Codex P1, Claude P3): the stop check runs before any owed dispatch; an owed line covers only the
+ * message it was owed for; an owed line of a chat that left the brain path ends unsent.
+ * ====================================================================================== */
+
+/** A hand-over line owed for 'a person please' (deferred as backlog), now due with the link held. */
+async function dueOwedHandover(h, setStable) {
+  const ts = h.client('a person please', { ts: T_IN - 30 * 60_000 + 1000 });
+  await h.dana.answer(LEAD, { ts });
+  assert.equal(h.lead().dana_hold_reason, 'owed_handover');
+  setStable(true);
+  h.set(h.lead().dana_hold_until + 1000);
+  return ts;
+}
+
+test('T12 r10 1a: a deletion request beats a due owed hand-over: the stop flow wins and the owed line is never sent', async () => {
+  let stable = false;
+  const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
+    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }, brainReply('never')] });
+  await dueOwedHandover(h, (v) => { stable = v; });
+  h.client('delete my data');
+  await ask(h, 'احذف بياناتي');
+  assert.equal(h.lead().dana_off, 1);
+  assert.equal(h.sent().length, 1, 'one line: the closing line');
+  assert.ok([CLOSING.en, CLOSING.ar].some((l) => h.sent()[0].endsWith(l)), h.sent()[0]);
+  assert.equal(h.sent().some((t) => t.endsWith(HANDOVER.en) || t.endsWith(HANDOVER.ar)), false, 'no hand-over line');
+  assert.deepEqual(h.notes.of('stopped').map((c) => c[2]), ['deletion']);
+  assert.equal(h.brain.calls.length, 1, 'no model turn');
+  assert.equal(h.lead().dana_hold_reason, null);
+});
+
+test('T12 r10 1b: an owed line covers only the message it was owed for; a fresh follow-up stays waiting and is answered as usual', async () => {
+  let stable = false;
+  const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
+    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }, brainReply('Yes, two covered spaces.')] });
+  const owedFor = await dueOwedHandover(h, (v) => { stable = v; });
+  await ask(h, 'and is there parking?');
+  await h.dana.flush();
+  const line = h.s.db.prepare("SELECT covers_ts FROM wa_outbox WHERE sender_kind = 'dana' AND status = 'accepted' ORDER BY created, rowid LIMIT 1").get();
+  assert.equal(line.covers_ts, owedFor, 'the owed line covers its own message only');
+  assert.ok(h.sent()[0].endsWith(HANDOVER.en));
+  assert.equal(h.sent()[1], 'Yes, two covered spaces.', 'the follow-up answered as usual');
+  assert.deepEqual(h.brain.calls[1].batchParts, ['and is there parking?']);
+});
+
+test('T12 r10 2: an owed line of a chat that left the brain path (auto off, dana_brain 0) ends unsent', async () => {
+  let stable = false;
+  const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
+    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }] });
+  await dueOwedHandover(h, (v) => { stable = v; });
+  h.ownerTest.setAuto(LEAD, false);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.equal(h.sent().length, 0, 'never sent through the brain path');
   assert.equal(h.lead().dana_hold_reason, null);
 });

@@ -396,6 +396,9 @@ export function createDana({
   const latencies = [];           // the newest LATENCY_RING answers' latencies (ms)
   const rateStreak = new Map();  // leadId → the sender refusals in a row (the rate hold's back-off)
   const owedStreak = new Map();  // leadId → an owed line's backlog deferrals in a row (its back-off)
+  // leadId → the message an owed line was owed for (r10): it covers that one only, never a newer message. After a
+  // restart the oldest waiting message stands in (it can only leave a newer one waiting, never swallow it).
+  const owedFor = new Map();
   let identityAlertAt = -Infinity;
   let stopped = false;            // stop() is final: no wake arms a run after it
   const stmts = {};
@@ -951,7 +954,7 @@ export function createDana({
     } else if (viaBrain) {
       // Deferred by the backlog gate, a cap or the sender's rate limit: the line is OWED (r6), like an outage line; the
       // sweep sends it itself. A brain chat's only (r8 N7): a legacy line goes at once or not at all, as on main.
-      oweLine(leadId, line === 'closing' ? 'owed_closing' : 'owed_handover', r);
+      oweLine(leadId, line === 'closing' ? 'owed_closing' : 'owed_handover', r, coversTs);
     }
     await notifyHandoff(leadId);
     say({ evt: 'dana.handover', leadId, why: outcome, sent });
@@ -971,8 +974,9 @@ export function createDana({
    * backs off: the backlog gate 60 s doubling to 10 min (r7), the sender's rate limit the rate hold's back-off, a cap
    * until it frees. The hold's 2-h mark bounds all of it (holdDeadline). True when it is owed.
    */
-  function oweLine(leadId, reason, r) {
+  function oweLine(leadId, reason, r, coversTs = null) {
     if (!defers(r)) return false;
+    if (coversTs !== null && coversTs !== undefined && !owedFor.has(leadId)) owedFor.set(leadId, Number(coversTs));
     let until;
     if (r.stopped === 'backlog') {
       const n = (owedStreak.get(leadId) ?? 0) + 1;
@@ -994,19 +998,33 @@ export function createDana({
   async function sendOwed(leadId, reason) {
     const lead = db.getLead(leadId);
     if (!lead || lead.inbox_state !== 'in') return skip(leadId, 'not_in_inbox');
-    // A stale retry (its hold replaced meanwhile) does nothing; one not due yet waits. Due is the hold's deadline,
-    // the clock the sweep wakes on (r9: never the raw time, or the 2-h mark would be missed for hours).
+    // A stale retry (its hold replaced meanwhile) does nothing.
     if (lead.dana_hold_reason !== reason) return skip(leadId, 'hold');
+    const forget = () => { endOwnHold(leadId, reason); owedFor.delete(leadId); };
+    // The chat left the brain path meanwhile (dana_brain off, out of auto mode): the owed line ends unsent (r10).
+    if (!useBrain(lead)) { forget(); return skip(leadId, 'not_brain'); }
+    const waiting = pendingFor(leadId, lead);
+    if (!waiting.length) { forget(); return skip(leadId, 'nothing'); }
+    // A stop, privacy or deletion request among the waiting messages wins over an owed hand-over, before it is due or
+    // after (r10): the stop flow (closing line, dana_off, the stopped note) replaces it; it is never sent first.
+    const stopHit = reason === 'owed_handover' ? waiting.map((m) => (typeof m.text === 'string' ? matchStopWords(m.text) : null)).find(Boolean) : null;
+    if (stopHit) {
+      forget();
+      return stopChat(lead, languageOf({ lead, texts: waiting.map((m) => m.text) }), stopHit.kind, waiting[waiting.length - 1].ts, { viaBrain: true });
+    }
+    // One not due yet waits. Due is the hold's deadline, the clock the sweep wakes on (r9: never the raw time).
     const t = now();
     if (holdDeadline(lead, t) > t) return skip(leadId, 'hold');
-    const waiting = pendingFor(leadId, lead);
-    if (!waiting.length) { endOwnHold(leadId, reason); return skip(leadId, 'nothing'); }
-    const coversTs = waiting[waiting.length - 1].ts;
-    const language = languageOf({ lead, texts: waiting.map((m) => m.text) });
+    // It covers the message it was owed for, never a newer one (r10).
+    const owedTs = owedFor.get(leadId);
+    const target = waiting.find((m) => Number(m.ts) === owedTs) ?? waiting[0];
+    const coversTs = target.ts;
+    const newer = waiting.filter((m) => Number(m.ts) > Number(coversTs));
+    const language = languageOf({ lead, texts: waiting.filter((m) => Number(m.ts) <= Number(coversTs)).map((m) => m.text) });
     const auto = autoOf(lead);
     // Past the 2-h mark: straight to `missed` (the hold ends, the task used reads missed, the note), no line (r9).
     if (t - Number(coversTs) > FRESH_MS) {
-      endOwnHold(leadId, reason);
+      forget();
       taskMissed(openTaskId(leadId));
       if (auto) noteHandover(lead, { kind: 'missed', coversTs });
       say({ evt: 'dana.owed_line', leadId, sent: false, missed: true });
@@ -1018,15 +1036,17 @@ export function createDana({
     const r = await sendFixed(lead, text, language, coversTs, true, { closing, owed: reason });
     if (r.sent) {
       // Only its own owed hold ends: a send_failed hold afterFailure just set (an unsure send) stays (r7).
-      endOwnHold(leadId, reason);
+      forget();
       owedStreak.delete(leadId);
       rateStreak.delete(leadId);
+      // What came after the owed message still waits: answered as usual, by the next run (r10).
+      if (newer.length) pendingAgain.set(leadId, Math.max(pendingAgain.get(leadId) ?? 0, Number(newer[newer.length - 1].ts)));
       say({ evt: 'dana.owed_line', leadId, sent: true });
       return { handover: 'owed', sent: true };
     }
     // Deferred again (the backlog gate, a cap, the sender's rate limit): still owed, the hold kept (r7).
     if (oweLine(leadId, reason, r)) return skip(leadId, r.stopped ?? r.error);
-    endOwnHold(leadId, reason);
+    forget();
     if (r.stopped === 'missed') {
       taskMissed(taskId);
       if (auto) noteHandover(lead, { kind: 'missed', coversTs });
