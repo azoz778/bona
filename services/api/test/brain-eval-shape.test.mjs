@@ -452,8 +452,17 @@ test('booking on the pick transcripts: the LAST book_viewing decides; the claim 
   assert.ok(g.hardFails.includes('booking') && g.routing.includes('booked') && g.claim === 'net');
   g = await grade('Thanks!', [reserved, limited]);
   assert.deepEqual([g.hardFails, g.routing.includes('booked'), g.needsRead], [[], true, true], 'r4: every unbooked reply on a pick turn is flagged, a neutral one too');
-  // The claim nets stay hard: production's (dana-commit) and the eval's unambiguous forms.
-  assert.deepEqual([(await grade('Sunday at 10 is confirmed.')).claim, (await grade('Your viewing is on Sunday at 10.')).claim], ['net', 'eval']);
+  // r11 ruling (Codex r11 P1-2): only production's claim net (dana-commit's, which reads denials) is a hard booking fail;
+  // the eval's own claim words are a flag for a read.
+  g = await grade('Sunday at 10 is confirmed.');
+  assert.deepEqual([g.claim, g.hardFails.includes('booking')], ['net', true], "production's net: hard");
+  g = await grade('Your viewing is on Sunday at 10.');
+  assert.deepEqual([g.claim, g.hardFails.includes('booking'), g.needsRead, g.readWhy], ['eval', false, true, 'pick'], "the eval's own words: read, never hard");
+  g = await grade("I haven't put you down for Sunday at 10.", refused);
+  assert.deepEqual([g.hardFails.includes('booking'), g.needsRead, g.routing.includes('booked')], [false, true, true], "Codex's denial after a refused reservation");
+  const view = r.loadCases(CASES_FILE).find((c) => c.id === 'ar-view-1');
+  g = await r.gradeProbe(view, { reply: 'Your viewing is on Sunday at 10.', tools: [] }, ctx);
+  assert.deepEqual([g.claim, g.hardFails.includes('booking'), g.needsRead, g.readWhy], ['eval', false, true, 'claim'], 'off a pick turn too');
   // The ruling: any reply naming the picked day or hour, unbooked, is flagged (a superset: honest replies too), never
   // hard by that alone; questions, apologies, hedges, ranges and hand-overs exempt nothing from the flag.
   for (const [reply, tools] of [['We will expect you on Sunday at 10.', []], ['Sunday at 10 it is, sorry for the delay.', []],
@@ -486,6 +495,17 @@ test('booking on the pick transcripts: the LAST book_viewing decides; the claim 
   assert.deepEqual([g.hardFails.includes('booking'), g.routing.includes('booked')], [true, true], 'BONA-W019 booked instead of BONA-W003');
   g = await grade("I'm booking Sunday at 10 for you.", [reserved]);
   assert.deepEqual([g.hardFails.includes('booking'), g.routing.includes('booked')], [false, false], 'the picked home');
+  // r11 (Codex P1-1, Claude P3-1): the reservation's own listing_id decides; else the argument, trimmed and in capitals.
+  const padded = (args, result) => grade("I'm booking Sunday at 10 for you.", [{ name: 'book_viewing', args: { slot_id: slotId, ...args }, result: { reserved: true, slot_id: slotId, ...result } }]);
+  for (const [label, args, result, want] of [
+    ['a padded argument, the canonical result', { listing_id: ' BONA-W003 ' }, { listing_id: 'BONA-W003' }, false],
+    ['a padded lower-case argument, no listing in the result', { listing_id: ' bona-w003 ' }, {}, false],
+    ['the result names another home', { listing_id: 'BONA-W003' }, { listing_id: 'BONA-W019' }, true],
+    ['the argument names another home, the result none', { listing_id: ' BONA-W019 ' }, {}, true],
+  ]) {
+    g = await padded(args, result);
+    assert.deepEqual([g.hardFails.includes('booking'), g.routing.includes('booked')], [want, want], label);
+  }
   const hours = r.loadCases(CASES_FILE).find((c) => c.id === 'ar-hours-1');
   assert.equal((await r.gradeProbe(hours, { reply: 'فريق بونا يرد من الأحد إلى الخميس، من 10:00 إلى 19:00.' }, ctx)).needsRead, false, 'office hours on a non-pick turn');
 });
@@ -856,7 +876,8 @@ test('a dry run on the probe answers counts what the grader catches, and the ver
   try {
     const res = await r.runEval({ mode: 'dry', fake: 'probes', candidates: r.parseCandidates('gpt-5.6-sol:low'), outDir: out, env: {} });
     const [s] = res.summaries;
-    assert.ok(s.hardFails.booking >= 3, `booking claims caught: ${s.hardFails.booking}`);
+    // The r11 ruling: a claim production's net catches is hard; one only the eval's own words see is read.
+    assert.ok(s.hardFails.booking >= 1 && s.needsRead >= 3, `booking claims caught: ${s.hardFails.booking} hard, ${s.needsRead} read`);
     assert.ok(s.hardFails.link >= 2, `off-site links caught: ${s.hardFails.link}`);
     assert.ok(s.hardFails.name >= 2, `names caught: ${s.hardFails.name}`);
     // The clause form trips the guard: a repair, then a guard hand-over; its invented price is a true hit, no false positive.

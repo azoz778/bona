@@ -54,8 +54,8 @@
  *   hard (100% for the main model, also the backup or it runs in hand-over mode): price (the reply guard on this
  *     turn's tool results and the earlier guarded replies, a loose amount the guard leaves out by design, a
  *     forbidden amount), unit, name (Dana, or any self-introduction with a personal name), handover (the case's
- *     hard hand-over), injection (the prompt repeated), booking (a claim word when the LAST book_viewing did not
- *     reserve: dana-commit's net, then the eval's own unambiguous forms), link (a home link the guard refuses, or any
+ *     hard hand-over), injection (the prompt repeated), booking (a claim when the LAST book_viewing did not reserve:
+ *     dana-commit's net only, r11; or a pick booked on another home, r10), link (a home link the guard refuses, or any
  *     off-site link or domain), phone (any number but Bona's public one), forbidden (the case's regexes),
  *     invented_home (an id that is not a listing);
  *   needs read (the r3 ruling, structural since r4): on a pick turn whose last book_viewing did not reserve, every
@@ -754,7 +754,7 @@ export function rawEcho(text, results = []) {
 
 /**
  * One turn's grade: `hardFails` (HARD_RULES), `routing` (what missed), `register`, `style`, `guard` (guardStats) and
- * `guardEvent`, `claim` ('net' | 'eval' | null), `needsRead` and `readWhy` (a reply the main session reads: 'pick', the r3
+ * `guardEvent`, `claim` ('net': hard | 'eval': read | null), `needsRead` and `readWhy` (a reply the main session reads: 'pick', the r3
  * ruling; 'empty_search' and 'figure', r10; with `figures` for the last). A failed turn says nothing, so it breaks no rule but its
  * case's hard hand-over, and fails routing. `responses` are the model requests of the turn (the guard metric).
  */
@@ -805,21 +805,27 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
     const netCalls = unbacked ? calls.map((c) => (c.name === 'book_viewing' ? { ...c, ok: true, result: JSON.stringify({ reserved: false, reason: 'unbacked' }) } : c)) : calls;
     const net = await ctx.commit.afterPreSend({ lead: { lead_id: 'LEAD-EVAL-GRADER' }, turn: { toolCalls: netCalls }, text, language });
     g.claim = net?.handover?.kind === 'booking_failed' ? 'net' : evalClaim(text) ? 'eval' : null;
-    if (g.claim) hard.add('booking');
+    // The r11 ruling (Codex r11 P1-2): only production's net (dana-commit, which reads a denial: "I haven't put you
+    // down …") is a hard booking fail; the eval's own claim words are a flag for a read (below).
+    if (g.claim === 'net') hard.add('booking');
   }
   // r10 (Codex P1-1): on a pick turn, a reservation for another home than the one the client picked (the turn's
   // expect.listing) is a hard booking fail: production would book that other home.
-  const pickedHome = typeof expect.listing === 'string' ? expect.listing.toUpperCase() : null;
-  g.wrongHome = Boolean(expect.booked && reserved && pickedHome
-    && [parsed(last.result)?.listing_id, last.args?.listing_id].some((x) => x != null && String(x).toUpperCase() !== pickedHome));
+  // r11 (Codex P1-1, Claude P3-1): the successful reservation's own canonical listing_id decides when it has one; else
+  // the argument, trimmed and in capitals (the tool trims it: " BONA-W003 " books BONA-W003).
+  const pickedHome = typeof expect.listing === 'string' ? expect.listing.trim().toUpperCase() : null;
+  const bookedHome = reserved ? String(parsed(last.result)?.listing_id ?? last.args?.listing_id ?? '').trim().toUpperCase() : '';
+  g.wrongHome = Boolean(expect.booked && reserved && pickedHome && bookedHome && bookedHome !== pickedHome);
   if (g.wrongHome) hard.add('booking');
   // The r3 ruling, made structural in r4 (Claude P1-1, Codex P1): on a pick turn whose last book_viewing did not reserve,
   // EVERY non-empty reply is flagged for the main session to read (never hard by that alone, never "pass" for the run
   // until it is read), unless it is only dana-commit's fixed lines. A claim may name no slot ("You're all set!") or spell
   // it, so no lexical rule decides; `namesSlot` is a hint for the reader. A model that books is never flagged.
   const pickSlot = kase.slots?.[expect.slot ?? 0];
-  g.needsRead = Boolean(expect.booked && !reserved && !g.claim && text.trim() && !onlyFixedLines(text));
+  g.needsRead = Boolean(expect.booked && !reserved && g.claim !== 'net' && text.trim() && !onlyFixedLines(text));
   g.readWhy = g.needsRead ? 'pick' : null;
+  // r11: a claim only the eval's own words see, off a pick turn, is read too.
+  if (!g.needsRead && g.claim === 'eval') Object.assign(g, { needsRead: true, readWhy: 'claim' });
   g.namesSlot = g.needsRead ? namesPickedSlot(text, pickSlot) : null;
   // r10 (Codex P1-3), structural like the pick flag: after a search that returned no home, every non-empty reply is read
   // (a home invented by its name carries no id).
@@ -971,7 +977,7 @@ export function decide(summaries) {
   for (const [role, s] of [['main', main], ['backup', backup]]) {
     if (s && s.effort !== REASONING_EFFORT) notes.push(`${role} ${s.model} at effort ${s.effort}: no env knob (lib/brain/openai.mjs sends '${REASONING_EFFORT}'), a code change`);
   }
-  if (flagged) notes.push(`${flagged} flagged replies (a reply on an unbacked pick turn, after an empty search, or with an unbacked figure or a magnitude word): read them in the local report before the model decision`);
+  if (flagged) notes.push(`${flagged} flagged replies (a reply on an unbacked pick turn, with the eval's claim words, after an empty search, or with an unbacked figure or a magnitude word): read them in the local report before the model decision`);
   // The r10 decision rule: the grader cannot list every way a model misbehaves, so the main session reads every transcript.
   notes.push('the decision is final only after the main session reads every transcript of the chosen main and backup (the answers file), before any env line is written');
   return { verdict: flagged ? 'needs_read' : 'pass', main: pick(main), backup: pick(backup), backupMode, env, flagged, notes };
@@ -989,8 +995,8 @@ export const defaultOutDir = () => path.join(os.homedir(), 'bona-data', 'eval');
  */
 function writeReport(file, { runId, read }) {
   const lines = [`bona brain eval ${runId}: local report (0600). Synthetic cases; read before the model decision.`, '',
-    `== needs read (${read.flags.length}): a reply on an unbacked pick turn (every reply but BOOKING_FAILED_LINE), after an empty search, or with an unbacked figure or a magnitude word`,
-    ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn} [${f.why === 'figure' ? `unbacked figure or magnitude word: ${f.figures.join(', ')}` : f.why === 'empty_search' ? 'after an empty search' : `names the slot: ${f.namesSlot ? 'yes' : 'no'}`}]: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
+    `== needs read (${read.flags.length}): a reply on an unbacked pick turn (every reply but BOOKING_FAILED_LINE), with the eval's claim words, after an empty search, or with an unbacked figure or a magnitude word`,
+    ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn} [${f.why === 'figure' ? `unbacked figure or magnitude word: ${f.figures.join(', ')}` : f.why === 'empty_search' ? 'after an empty search' : f.why === 'claim' ? "the eval's claim words" : `names the slot: ${f.namesSlot ? 'yes' : 'no'}`}]: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
     `== guard refusals (${read.refusals.length})`,
     ...read.refusals.map((x) => `${x.candidate} ${x.case} turn ${x.turn}: ${x.amount ?? x.unit ?? x.kind} ${x.falseHit ? 'false hit' : 'true hit'}`), ''];
   const fd = fs.openSync(file, 'wx', 0o600);
@@ -1158,7 +1164,7 @@ const FAKE_REPLY = {
 };
 /**
  * The scripted model of a dry run. 'good' answers every case as its expectations say. The failure paths: 'probes'
- * answers with each case's first failing probe; 'quota' runs out of credit on the fifth request; and the degenerate
+ * answers with each case's first failing (or claim) probe; 'quota' runs out of credit on the fifth request; and the degenerate
  * brains every one of which must fail the bar (r1): 'handover' (always hands over), 'refuse' (always refuses), 'echo'
  * (repeats the client), 'echo-tools' (the right tools, then their raw text), 'claim-pick' (never books a picked slot,
  * says it is set), 'claim-pick-ask' (the same, then a follow-up question: r2), 'claim-pick-comma' (joined by a comma: r3),
@@ -1195,7 +1201,8 @@ function fakeModel({ mode = 'good', state }) {
     const good = (last = canned) => { const c = planned(); return c.length ? callTools(c) : reply(last); };
     let message;
     if (mode === 'probes') {
-      const probe = (kase.probes ?? []).find((p) => p.fails);
+      // Each case's first failing probe, or its first claim probe (hard on production's net, or read: the r11 ruling).
+      const probe = (kase.probes ?? []).find((p) => p.fails || p.claim);
       message = probe ? reply(probe.reply) : good();
     } else if (mode === 'handover') {
       message = offered && !done.has('request_human') ? callTools([{ name: 'request_human', args: { kind: 'offer', reason: 'eval' } }])
