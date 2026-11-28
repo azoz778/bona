@@ -587,6 +587,51 @@ test("Codex r14: a reconcile's older read never undoes a newer one: the owner re
   } finally { h.db.close(); }
 });
 
+test("Codex r15: the other order: reconcile's older read answers while the lookup's newer read is on its way; the older one is not applied and the newer one is, so the rescheduled viewing stays the lead's one booking", async () => {
+  const clock = { t: NOW };
+  const h = setup({ clock });
+  try {
+    const rowOf = (id) => h.rows().find((r) => r.booking_id === id);
+    const x = h.lead('LEAD-20261201-0000aaaa');
+    const y = h.lead('LEAD-20261201-0000bbbb');
+    const gx = await h.viewing.commitBooking({ lead: x, listingId: 'BONA-W901', slotId: '2026-12-06T10:00+03:00' });
+    const gy = await h.viewing.commitBooking({ lead: y, listingId: 'BONA-W902', slotId: '2026-12-07T12:00+03:00' });
+    assert.equal(gx.ok && gy.ok, true, JSON.stringify([gx, gy]));
+    clock.t = R(2026, 12, 6, 11, 30);
+    const realGet = h.gcal.get;
+    const held = new Map();
+    const reads = new Map();
+    h.gcal.get = async (id) => {
+      const n = (reads.get(id) ?? 0) + 1;
+      reads.set(id, n);
+      const answer = await realGet(id);
+      // Reconcile's read of Y, and the lookup's (second) read of X, wait until the test releases them.
+      if ((id === gy.eventId && n === 1) || (id === gx.eventId && n === 2)) await new Promise((resolve) => { held.set(`${id}:${n}`, resolve); });
+      return answer;
+    };
+    const reached = async (k) => {
+      for (let i = 0; i < 200 && !held.has(k); i += 1) await new Promise((resolve) => setImmediate(resolve));
+      assert.ok(held.has(k), `${k} reached`);
+    };
+    const rec = h.viewing.reconcile();
+    await reached(`${gy.eventId}:1`);
+    moveEvent(h, gx.eventId, '2026-12-07T10:00:00+03:00', '2026-12-07T11:00:00+03:00');
+    const look = h.viewing.slots({ lead: x, listingId: 'BONA-W903' });
+    await reached(`${gx.eventId}:2`);
+    held.get(`${gy.eventId}:1`)();
+    await rec;
+    assert.equal(rowOf(gx.bookingId).status, 'booked', "reconcile's older read is not applied while a newer one is on its way");
+    held.get(`${gx.eventId}:2`)();
+    const got = await look;
+    assert.equal(got.reason, 'active_booking', JSON.stringify(got));
+    const row = rowOf(gx.bookingId);
+    assert.deepEqual([row.status, row.start_ts], ['booked', R(2026, 12, 7, 10)], "the newer read is applied: Monday's time");
+    assert.equal(tasksForLead(h.db, x.lead_id).find((t) => t.kind === 'viewing').due_ts, R(2026, 12, 7, 10));
+    const again = await h.viewing.commitBooking({ lead: x, listingId: 'BONA-W903', slotId: '2026-12-08T10:00+03:00' });
+    assert.equal(again.ok, false, 'one booking per lead: no second viewing');
+  } finally { h.db.close(); }
+});
+
 test('a booking the owner moved in Google never blocks its first start: the same lead books that start again, under a new event id', async () => {
   const TUE = '2026-12-08T10:00+03:00';
   const clock = { t: NOW };

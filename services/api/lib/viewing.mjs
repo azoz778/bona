@@ -232,6 +232,16 @@ export function createViewing(deps = {}) {
    * restart the first read finds them again.
    */
   const missing = new Set();
+  /**
+   * The newest calendar read sent for each booking (readEvents()): a number per read, in the order the reads went
+   * out. A read's result (a plan, a 404) applies only while no newer read of that booking has been sent since, in
+   * either order of their answers: an older read never undoes a newer one (Codex r14, r15). In memory: a restart
+   * starts no read before its first.
+   */
+  const readSeq = new Map();
+  let readN = 0;
+  /** True when `r` (a row a read was for) carries the newest read of its booking, or came from no read. */
+  const newestRead = (r) => r.readSeq === undefined || readSeq.get(r.booking_id) === r.readSeq;
   /** Not a row a restart left untold (no task, older than STRANDED_MS, held by no commit here): sweepStranded() takes those. */
   const live = (r, t) => r.task_id !== null || inFlight.has(r.booking_id) || r.created >= t - STRANDED_MS;
   /**
@@ -708,18 +718,18 @@ export function createViewing(deps = {}) {
     const out = { moved: 0, done: 0, cancelled: 0 };
     const stuck = new Set();
     const t = now();
-    for (const p of plans) if (p.cancel) out.cancelled += cancelRow(p.r);
-    for (const r of judgedGone) out.cancelled += cancelRow(r);
+    for (const p of plans) if (p.cancel && newestRead(p.r)) out.cancelled += cancelRow(p.r);
+    for (const r of judgedGone) if (newestRead(r)) out.cancelled += cancelRow(r);
     const booked = new Map(prep("SELECT booking_id, task_id, start_ts, end_ts FROM viewing_bookings WHERE status = 'booked'").all()
       .map((x) => [x.booking_id, x]));
     // What changes, from the rows as they are now (a purge may have taken one while Google answered). A plan
-    // applies only to the row its read was for, unchanged: a row whose times changed since (a newer read, a
-    // lookup's settle(), followed the owner's move meanwhile) is left as it is, and the next read decides. An
-    // older read never undoes a newer one (Codex r14).
+    // applies only when its read is the newest sent for that booking (newestRead()) and to the row its read was
+    // for, unchanged: a row whose times changed since (another path followed the owner's move) is left as it is,
+    // and the next read decides. An older read never undoes a newer one (Codex r14, r15).
     const changes = [];
     for (const p of plans) {
       const cur = p.cancel ? null : booked.get(p.r.booking_id);
-      if (!cur) continue;
+      if (!cur || !newestRead(p.r)) continue;
       if (cur.start_ts !== p.r.start_ts || cur.end_ts !== p.r.end_ts) continue;
       const moved = p.start !== cur.start_ts || p.end !== cur.end_ts;
       if (moved || p.status === 'done') changes.push({ ...p, cur, moved });
@@ -781,6 +791,8 @@ export function createViewing(deps = {}) {
     }
     for (const r of todo) {
       res.checked += 1;
+      r.readSeq = ++readN;
+      readSeq.set(r.booking_id, r.readSeq);
       const got = await gcal.get(r.event_id);
       if (!got.ok && got.gone === true) { res.gone.push(r); continue; }
       if (!got.ok) {
