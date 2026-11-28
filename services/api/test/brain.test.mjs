@@ -1008,6 +1008,31 @@ test("Codex r16: a charge metered while the marker cannot be read is added to th
   assert.equal(k.calls.length, 0);
 });
 
+test("Codex r17: a save the store committed but could not read back is no unsaved charge (never counted twice); the month alert is checked when a pending charge is saved later", async () => {
+  const env = { BONA_BRAIN_MONTH_STOP_USD: '50' };
+  // The upsert commits, then its read-back throws: the charge is saved once, not again on the next save.
+  const h = harness({ env, script: [reply('One.'), reply('Two.')] });
+  const start = 50_000_000 - Math.round(2.5 * MICRO);
+  h.team.setSetting('brain_usd_month', `2026-11:${start}`);
+  const realSet = h.team.setSetting.bind(h.team);
+  h.team.setSetting = (k, v, o) => { const out = realSet(k, v, o); if (String(k).startsWith('brain_usd_')) throw new Error('read-back failed'); return out; };
+  assert.equal((await h.brain.turn(turnArgs())).ok, true);
+  assert.equal(h.team.getSetting('brain_usd_month'), `2026-11:${start + MICRO}`, 'saved once');
+  assert.equal((await h.brain.turn(turnArgs())).ok, true, 'the next turn is not stopped by a charge counted twice');
+  assert.equal(h.team.getSetting('brain_usd_month'), `2026-11:${start + 2 * MICRO}`, 'each charge once');
+  // Reads fail while the response that crosses the month alert is metered: the alert goes once it is reconciled.
+  let failRead = false;
+  const a = harness({ script: [async () => { failRead = true; return reply('Hello.'); }, reply('Later.')] });
+  a.team.setSetting('brain_usd_month', `2026-11:${40_000_000 - Math.round(MICRO / 2)}`);
+  const aGet = a.team.getSetting.bind(a.team);
+  a.team.getSetting = (k) => { if (failRead && String(k).startsWith('brain_usd_')) throw new Error('disk I/O error'); return aGet(k); };
+  assert.equal((await a.brain.turn(turnArgs())).ok, true);
+  assert.deepEqual(a.alerts.filter((x) => x.code === 'brain_spend'), [], 'not yet: the total could not be read');
+  failRead = false;
+  await a.brain.turn(turnArgs());
+  assert.deepEqual(a.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level), [{ code: 'brain_spend', meta: { level: 100 } }], 'the $40 check-in goes once the charge is saved');
+});
+
 test('the runaway stops are checked before every paid request and after every response: crossing one mid-turn stops the turn at once, with the stop alert in that turn', async () => {
   const stopAlerts = (h) => h.alerts.filter((a) => a.code === 'brain_spend' && a.meta.stop);
   // A tool round takes the day from $19.99 past $20: no second round.

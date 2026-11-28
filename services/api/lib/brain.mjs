@@ -410,9 +410,15 @@ export function createBrain(deps = {}) {
     if (!team) return { ...cur, saved: true };
     const u = unsavedFor(cur);
     if (!cur.readable) return { ...cur, saved: false };
+    // A write the store refused may still have committed (its read-back threw): the marker read back decides, so a
+    // committed charge is never left unsaved and counted twice (Codex r17).
+    const save = (k, v) => store(k, v) || readMarker(k) === v;
     let ok = true;
-    if (u.day) { if (store('brain_usd_day', `${cur.day}:${cur.dayMicro}`)) state.unsaved.dayMicro = 0; else ok = false; }
-    if (u.month) { if (store('brain_usd_month', `${cur.month}:${cur.monthMicro}`)) state.unsaved.monthMicro = 0; else ok = false; }
+    if (u.day) { if (save('brain_usd_day', `${cur.day}:${cur.dayMicro}`)) state.unsaved.dayMicro = 0; else ok = false; }
+    if (u.month) {
+      // The month alert is checked as the charge is saved, also when it was metered while the total could not be read (Codex r17).
+      if (save('brain_usd_month', `${cur.month}:${cur.monthMicro}`)) { state.unsaved.monthMicro = 0; monthAlert(cur); } else ok = false;
+    }
     if (!ok && !state.meterBroken) say({ level: 'error', evt: 'brain.meter_failed', kind: 'write' });
     state.meterBroken = !ok;
     return { ...cur, saved: ok };
@@ -431,8 +437,13 @@ export function createBrain(deps = {}) {
       if (state.unsaved.month !== p.month) state.unsaved = { ...state.unsaved, month: p.month, monthMicro: 0 };
       state.unsaved.dayMicro += micro;
       state.unsaved.monthMicro += micro;
-      cur = flushSpend(t);
+      flushSpend(t); // checks the month alert as it saves the charge
+      return;
     }
+    monthAlert(cur);
+  }
+  /** The 80% and 100% month alerts (BONA_BRAIN_MONTH_ALERT_USD), once each a month, from the totals `cur`. */
+  function monthAlert(cur) {
     const level = cur.monthMicro >= usd.alert * 1e6 ? 100 : cur.monthMicro >= usd.alert * 0.8 * 1e6 ? 80 : 0;
     if (!level) return;
     const marked = /^(\d{4}-\d{2}):(80|100)$/.exec(team ? setting('brain_month_alerted') : state.spend.alerted);
