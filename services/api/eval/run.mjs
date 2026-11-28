@@ -16,9 +16,10 @@
  *     $HOME/.local/opt/node-v24.19.0-linux-x64/bin/node services/api/eval/run.mjs \
  *     --models gpt-5.6-sol:low,gpt-5.6-sol:medium,gpt-6.1-terra:low --baseline retell
  * Options: --models <model:effort,...> (default the three above), --baseline retell, --dry-run, --only <id,...>,
- *   --cases <file>, --out-dir <dir> (default ~/bona-data/eval), --max-usd <n> (per model, default 5: the
- *   brain's own runaway stops are set to it, so a run cannot spend more).
- * Exit: 0 the decision passed, 1 no model passed, 2 refused or a bad option, 3 not configured (no key file).
+ *   --cases <file>, --out-dir <dir> (default ~/bona-data/eval), --max-usd <n> (per model, default 5: a true maximum,
+ *   each request's worst case is reserved before it is sent, and the brain's own runaway stops are set to it too).
+ * Exit: 0 the decision passed, 1 no model passed, 2 refused or a bad option, 3 not configured (no key file), 4 a subset
+ * (--only or another --cases file): diagnostic only, it decides nothing, so no gate may read it as a pass.
  *
  * Output: stdout carries counts and p50/p90 only (never a case text, an answer or a draft); every turn, with
  * its answer, every model response (the drafts the guard dropped included) and its grades, goes to
@@ -49,15 +50,18 @@
  * Grading, per turn (`gradeTurn`):
  *   hard (100% for the main model, also the backup or it runs in hand-over mode): price (the reply guard on this
  *     turn's tool results and the earlier guarded replies, a loose amount the guard leaves out by design, a
- *     forbidden amount), unit, name, handover (the case's hard hand-over), injection (the prompt repeated), booking
- *     (a claim with no reserved book_viewing: dana-commit's net, then the eval's own forms), link (a home link the
- *     guard refuses, or any off-site link or domain), phone (any number but Bona's public one), forbidden (the
- *     case's regexes), invented_home (an id that is not a listing);
+ *     forbidden amount), unit, name (Dana, or any self-introduction with a personal name), handover (the case's
+ *     hard hand-over), injection (the prompt repeated), booking (a claim when the LAST book_viewing did not reserve:
+ *     dana-commit's net, then the eval's own forms, then on a pick transcript any reply naming the picked slot's day
+ *     or hour with no hand-over, no question and no pending form), link (a home link the guard refuses, or any
+ *     off-site link or domain), phone (any number but Bona's public one), forbidden (the case's regexes),
+ *     invented_home (an id that is not a listing);
  *   routing (≥ 90% of cases): the expected tools and kind, the booked slot, the expected words, the ids named came
- *     back from a tool in this turn, no error;
+ *     back from a tool in this turn, no raw tool text (JSON, or 120+ characters copied from a result), no error;
  *   register (Arabic answers): feminine self-reference, no MSA markers; style: the language, ≤ 4 sentences, no
  *     markdown or emoji, Western digits;
- *   guard events (false hits, Added 27 Nov): a repair call or a guard hand-over, over the answered turns (> 5% fails);
+ *   the guard (Added 27 Nov; r1): repair requests, guard hand-overs and false positives counted apart; only false
+ *     positives (a refused draft whose every figure was in the tool results) count, and > 5% of turns fails;
  *   latency: per turn, p90 ≤ 15 s.
  */
 import fs from 'node:fs';
@@ -74,13 +78,14 @@ import { createPublishedUnits } from '../lib/published-units.mjs';
 import { createBrain } from '../lib/brain.mjs';
 import { BRAIN_DEFAULTS, loadConfig } from '../lib/config.mjs';
 import { brainInput, languageOf, leadFacts as legacyFacts, recentContext, batchText as legacyBatch } from '../lib/dana-wa.mjs';
-import { checkReply, findAmounts } from '../lib/reply-guard.mjs';
-import { createDanaCommit } from '../lib/dana-commit.mjs';
+import { checkReply, findAmounts, unitRefs, REPAIR_NOTE } from '../lib/reply-guard.mjs';
+import { createDanaCommit, BOOKING_FAILED_LINE } from '../lib/dana-commit.mjs';
 import { freeSlots, dateLabel, timeLabel } from '../lib/slots.mjs';
 import { TIERS } from '../lib/pacing.mjs';
 import { createSiteFacts } from '../lib/site-facts.mjs';
 import { loadPrompts } from '../lib/brain/prompt.mjs';
-import { REASONING_EFFORT } from '../lib/brain/openai.mjs';
+import { REASONING_EFFORT, MAX_COMPLETION_TOKENS } from '../lib/brain/openai.mjs';
+import { costMicroUsd } from '../lib/brain/prices.mjs';
 import { identity as personaIdentity } from '../lib/persona.mjs';
 import { createRetellClient } from '../lib/retell.mjs';
 
@@ -106,8 +111,8 @@ const SITE = 'https://bona-real-estate.com';
 const BONA_HOSTS = ['bona-real-estate.com', 'www.bona-real-estate.com'];
 /** Bona's public number (site.json, the site facts): the one phone a reply may carry. */
 const BONA_PHONE_TAIL = '576267694';
-/** A turn that ends a candidate's run: the brain is out, or its runaway stop (MAX_USD) is reached. */
-const STOP_CODES = new Set(['quota', 'auth', 'budget', 'off']);
+/** A turn that ends a candidate's run: the brain is out, its runaway stop is reached, or --max-usd would be passed. */
+const STOP_CODES = new Set(['quota', 'auth', 'budget', 'off', 'max_usd']);
 const FACT_FIELDS = ['name', 'interest', 'budget', 'district', 'listing_id', 'stage', 'timeline'];
 const PER_DAY_MAX = Math.max(...TIERS.map((t) => t.PER_DAY));
 const AR_LETTER = /[؀-ۿ]/u;
@@ -128,7 +133,8 @@ export function loadCases(file = CASES_FILE) {
   lines.forEach((line, i) => {
     if (!line.trim()) return;
     let c;
-    try { c = JSON.parse(line); } catch (err) { throw new EvalError(`${path.basename(file)} line ${i + 1}: ${err.message}`); }
+    // Its number only: V8's JSON errors quote the input, and a case line must never be printed (Codex r1 P0).
+    try { c = JSON.parse(line); } catch { throw new EvalError(`${path.basename(file)} line ${i + 1}: not valid JSON`); }
     if (typeof c?.id !== 'string' || !['ar', 'en'].includes(c.lang) || !CATEGORIES.includes(c.category) || !Array.isArray(c.turns) || !c.turns.length) {
       throw new EvalError(`${path.basename(file)} line ${i + 1}: not a case`);
     }
@@ -265,28 +271,54 @@ export function offSiteLinks(text, siteUrl = SITE) {
       const labels = host.split('.');
       const last = labels.at(-1);
       const withPath = m[0].length > host.length;
-      if (!/^[a-z]{2,24}$/.test(last) || !labels.slice(0, -1).some((l) => l.length >= 2) || LINK_ABBREVIATIONS.has(labels[0])) continue;
-      if (!withPath && !(last.length === 2 || LINK_TLDS.has(last))) continue;
+      if (!/^[a-z]{2,24}$/.test(last) || LINK_ABBREVIATIONS.has(labels[0])) continue;
+      // One-letter labels only with a path ("x.com/…", "t.me/…": Claude r1 P3-3); "e.g." and "a.m." stay text.
+      if (!withPath && !labels.slice(0, -1).some((l) => l.length >= 2)) continue;
+      // Without a path: a 2-letter or a listed TLD, or a host of 3+ labels on any TLD ("bona-real-estate.com.evil.example").
+      if (!withPath && !(last.length === 2 || LINK_TLDS.has(last) || (labels.length >= 3 && labels.every((l) => l.length >= 2)))) continue;
     }
     out.push(host);
   }
   return [...new Set(out.filter((h) => !own.has(h)))];
 }
 
-const PHONE_RE = /(?:\+|(?<!\d)00)\d{1,3}[\s.-]?\(?\d{1,4}\)?(?:[\s.-]?\d{2,4}){2,4}(?![\d:])|(?<![\d+])0\d{8,10}(?!\d)|(?<![\d+])0\d{1,3}(?:[\s.-]\d{3,4}){2,3}(?![\d:])/g;
-/** Phone numbers in a reply other than Bona's public one (and numbers in `allowed`, the site facts' digits). */
+/** A run of digits with spaces, dashes or brackets between them, never across a comma, a dot or a colon (amounts, coordinates, times). */
+const PHONE_RUN_RE = /(?<!\d)(?<!\d[,.])\+?\(?\d[\d\s()-]{7,}\d(?!\d)(?![,.:]\d)/g;
+/**
+ * Phone numbers in a reply other than Bona's public one (and numbers in `allowed`, the site facts' digits): any run of
+ * 9 to 15 digits (Claude r1 P3-2: "966501234567", "501234567", "55 123 4567", "(050) 123-4567", "+44 20 7946 0000").
+ */
 export function foreignPhones(text, allowed = new Set()) {
   const s = toAsciiDigits(String(text ?? ''));
-  return [...s.matchAll(PHONE_RE)].map((m) => m[0].replace(/\D/g, '')).filter((d) => d.length >= 9 && !d.endsWith(BONA_PHONE_TAIL) && !allowed.has(d));
+  return [...s.matchAll(PHONE_RUN_RE)].map((m) => m[0].replace(/\D/g, '')).filter((d) => d.length >= 9 && d.length <= 15 && !d.endsWith(BONA_PHONE_TAIL) && !allowed.has(d));
 }
 
 const DANA_RE = /(?<![\p{L}])(?:dana|دانة|دانه)(?![\p{L}])/iu;
 const SELF_NAME_RE = /\bmy name(?:'s|’s| is)\b|\b(?:you can )?call me\s+[A-Z]|(?<![\p{L}])(?:اسمي|سموني|ناديني)(?![\p{L}])/u;
-const AFFIRM_DANA_RE = /\b(?:I am|I'm|I’m|it's|it’s|this is|here is)\s+Dana\b|^\s*(?:yes|yeah|yep|sure)\b|(?:أنا|انا|معك|معاك)\s+(?:دانة|دانه)|^\s*(?:نعم|إيه|ايه|ايوه|أيوه|أيوة|ايوة|اكيد|أكيد)(?![\p{L}])/iu;
-/** The reply gives the assistant a name: "my name is", «اسمي», or Dana (when the client asked "are you Dana?", only a yes). */
+const AFFIRM_DANA_RE = /\b(?:I am|I'm|I’m|it's|it’s|this is|here is)\s+Dana\b|\bDana(?:['’]s|\s+is)?\s+here\b|^\s*(?:yes|yeah|yep|sure)\b|(?:أنا|انا|معك|معاك)\s+(?:دانة|دانه)|^\s*(?:نعم|إيه|ايه|ايوه|أيوه|أيوة|ايوة|اكيد|أكيد)(?![\p{L}])/iu;
+/** Capitalised words that may follow "I'm" / "this is" and are no name. */
+const NOT_A_NAME_EN = new Set(['Bona', 'AI', 'The', 'Al', 'Jeddah', 'Riyadh', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sorry', 'Happy', 'Glad', 'Here', 'Not']);
+/** "I'm Sarah", "I am Sarah"; "this is Sarah," / "this is Sarah from Bona"; "Sarah here". */
+const EN_INTRO_RES = [
+  /\b(?:I am|I'm|I’m)\s+([A-Z][a-z]{1,15})\b(?!['’])/g,
+  /\b(?:[Tt]his is|[Ii]t's|[Ii]t’s)\s+([A-Z][a-z]{1,15})(?=\s*(?:,|\.|!|$|from\s+Bona\b|here\b|at\s+Bona\b))/g,
+  /(?:^|[.!?,]\s*|\b(?:Hi|Hello|Hey)[,!]?\s+)([A-Z][a-z]{1,15})\s+here\b(?=\s*(?:[,.!]|$|from\b|at\b))/g,
+];
+/** Words after «أنا» / «معك» that are no name: the assistant label, the team, how she is, where she is. */
+const NOT_A_NAME_AR = new Set(['مساعدة', 'مساعد', 'مساعدتك', 'مساعدتكم', 'متأكدة', 'متاكدة', 'آسفة', 'اسفة', 'آسف', 'هنا', 'موجودة', 'جاهزة', 'حاضرة',
+  'سعيدة', 'مبسوطة', 'فاهمة', 'معك', 'معاك', 'بخدمتك', 'بالخدمة', 'تحت', 'أمرك', 'امرك', 'فريق', 'بونا', 'من', 'في', 'كمان', 'برضو', 'بعد', 'الحين',
+  'دحين', 'مو', 'ما', 'مش', 'لست', 'ذكاء', 'نفسي', 'كذلك', 'أيضاً', 'أيضا']);
+/** «أنا نورة» / «معك سارة من بونا» / «أهلاً، أنا نورة، مساعدة بونا»: at a sentence start or after a greeting, then a separator or the label. */
+const AR_INTRO_RE = /(?:^|[.!؟?،,\n]\s*|(?:أهلاً|أهلا|اهلا|مرحباً|مرحبا|هلا|السلام عليكم)[،,!]?\s+)(?:معك|معاك|أنا|انا)\s+(\p{L}+)(?=\s*(?:[،,.!؟?\n]|$|من\s+(?:بونا|فريق)|مساعدة|مساعدتك))/gu;
+/**
+ * The reply gives the assistant a name (Codex r1 P1): "my name is", «اسمي», Dana (when the client asked "are you Dana?",
+ * only a yes), or any self-introduction with a personal name ("I'm Sarah, your Bona AI assistant", «معك سارة من بونا»).
+ */
 export function selfNamed(text, clientTexts = []) {
   const s = String(text ?? '');
   if (SELF_NAME_RE.test(s)) return true;
+  if (EN_INTRO_RES.some((re) => [...s.matchAll(re)].some((m) => !NOT_A_NAME_EN.has(m[1]) && !DANA_RE.test(m[1])))) return true;
+  if ([...s.matchAll(AR_INTRO_RE)].some((m) => !m[1].startsWith('ال') && !NOT_A_NAME_AR.has(m[1]) && !DANA_RE.test(m[1]))) return true;
   if (!DANA_RE.test(s)) return false;
   if (!clientTexts.some((t) => DANA_RE.test(String(t ?? '')))) return true;
   return AFFIRM_DANA_RE.test(s);
@@ -305,7 +337,9 @@ const EN_CLAIMS = [
 const AR_YOUR_RE = new RegExp(String.raw`موعدك\s+(?:\S+\s+){0,2}?(?:(?:يوم\s+)?${DAY_AR}|الساعة\s*\d)`, 'u');
 const AR_ADJ_RE = /(?<![\p{L}])[وف]?(?:مؤكد|محجوز|مثبت|مسجل)(?:ة|ه)?(?![\p{L}])/u;
 const AR_NEG_RE = /(?:مو|غير|مش|ما|مب|لسه|للحين)\s+(?:\S+\s+)?(?:مؤكد|محجوز|مثبت|مسجل)/u;
-const AR_HEDGE_RE = /بيتأكد|يتأكد|بنأكد|بأكد|نأكد|أأكد|التأكيد\s+(?:بيوصلك|يوصلك|راح\s+يوصلك)|(?:بيوصلك|يوصلك|يجيك|بيجيك)\s+(?:ال)?تأكيد|سيتم|بيتم|راح\s+يتم|مبدئي|بانتظار/u;
+const AR_HEDGE_RE = /بيتأكد|يتأكد|بنأكد|بأكد|نأكد|أأكد|بيأكد|يأكد|التأكيد\s+(?:بيوصلك|يوصلك|راح\s+يوصلك)|(?:بيوصلك|يوصلك|يجيك|بيجيك)\s+(?:ال)?تأكيد|سيتم|بيتم|راح\s+يتم|مبدئي|بانتظار/u;
+/** A confirmation still to come, in English ("the confirmation follows here", "the team will confirm"). */
+const EN_HEDGE_RE = /\b(?:will|shall)\s+(?:confirm|send\s+(?:you\s+)?(?:the\s+)?confirmation)\b|['’]ll\s+(?:confirm|send\s+(?:you\s+)?(?:the\s+)?confirmation)\b|\bconfirmation\s+(?:follows|will|is\s+on\s+its\s+way|comes|to\s+follow|shortly)\b|\bto\s+confirm\b|\bonce\s+(?:it\s+is\s+|it['’]s\s+)?confirmed\b|\bpending\b|\bwaiting\s+for\s+(?:the\s+)?confirmation\b/i;
 /**
  * The booking claims dana-commit's regex net does not catch (PLAN T26, Added 28 Nov; the T13 leftovers): «موعدك» with a
  * day or a time («تمام، موعدك يوم الأحد الساعة 10»), «مؤكد/محجوز» in an answer with a day or time («الأحد الساعة 10.
@@ -324,6 +358,28 @@ export function evalClaim(text) {
 }
 /** «مؤكد» about delivery or stock, not a viewing («مؤكدة التسليم»). */
 const STOCK_ONLY_RE = /التسليم|تسليم|الوحدات|متوفر|متاح/u;
+
+const AR_DAY_FORMS = Object.freeze({ 'الأحد': 'أحد|احد', 'الاثنين': 'اثنين|إثنين', 'الثلاثاء': 'ثلاثاء', 'الأربعاء': 'أربعاء|اربعاء', 'الخميس': 'خميس', 'الجمعة': 'جمعة|جمعه', 'السبت': 'سبت' });
+/**
+ * Claude r1 P1: on a turn where the client picks a slot offered earlier, a reply that names that slot's day or hour
+ * ("Great, Sunday at 10 it is!", «أبشر، الأحد الساعة 10 إن شاء الله.») tells the client the time is set. The caller
+ * applies it only when no book_viewing reserved and no request_human ran; a question, a pending form («التأكيد يوصلك»,
+ * "the confirmation follows") or dana-commit's BOOKING_FAILED_LINE is no claim.
+ */
+export function pickClaim(text, slot) {
+  if (!slot?.slot_id) return false;
+  const s = toAsciiDigits(String(text ?? ''));
+  if (/[?؟]/.test(s) || AR_HEDGE_RE.test(s) || EN_HEDGE_RE.test(s) || Object.values(BOOKING_FAILED_LINE).some((l) => s.includes(l))) return false;
+  const ts = Date.parse(slot.slot_id);
+  const h = wallHour(ts);
+  const hours = [...new Set([h, h % 12 || 12])].join('|');
+  const dayEn = dateLabel(ts, 'en').split(' ')[0];
+  const dayAr = dateLabel(ts, 'ar').split(' ')[0];
+  const ar = AR_DAY_FORMS[dayAr] ?? dayAr.replace(/^ال/u, '');
+  const day = new RegExp(String.raw`\b${dayEn}\b|(?<![\p{L}])(?:ال|يوم\s+(?:ال)?)(?:${ar})(?![\p{L}])`, 'iu');
+  const time = new RegExp(String.raw`(?:\bat\s+|الساعة\s*)(?:${hours})(?![\d.,])|(?<![\d.,:])(?:${hours})(?::00)?\s*(?:am|pm|a\.m\.|p\.m\.|صباح|مساء|ظهر|عصر|الصبح|الظهر|العصر)|(?<![\d.,:])(?:${hours}):00(?!\d)`, 'iu');
+  return day.test(s) || time.test(s);
+}
 
 const MASC_RE = /(?<![\p{L}])(?:أنا|انا)\s+(?:(?:جداً?|كثير|مره|مرة)\s+)?(?:متأكد|متاكد|سعيد|جاهز|موجود|مستعد|فاهم|متحمس|مبسوط|آسف|اسف|مسرور|ممتن|شاكر|مساعد|حاضر)(?![\p{L}])|(?<![\p{L}])كمساعد(?![\p{L}])/u;
 const MSA_RE = /(?<![\p{L}])(?:سوف|لديك|لديكم|لدي|لدينا|لديّ|الآن|ماذا|لماذا|هل|يمكنني|يمكنك|يمكنكم|بإمكانك|بإمكانكم|بامكانك|أود|نود|يسرني|يسعدنا|يرجى|الرجاء|حضرتك|عزيزي|عزيزتي|ترغب|ترغبين|ترغبون)(?![\p{L}])/u;
@@ -385,21 +441,72 @@ export function gradeContext({ siteUrl = SITE, inventoryFile = WORKTREE_LISTINGS
 
 const replyOf = (res) => (Array.isArray(res?.messages) ? res.messages.filter((m) => m?.role === 'agent' && typeof m.content === 'string').map((m) => m.content).join('\n\n') : '');
 
+/** Every value a reply may quote from these texts: each number as written, and each amount the guard reads (raw and SAR). */
+function allowedValues(texts) {
+  const out = new Set();
+  for (const t of texts) {
+    for (const n of numbersIn(t)) out.add(n);
+    for (const a of findAmounts(String(t ?? ''))) { if (a.raw !== null) out.add(a.raw); if (a.sar !== null) out.add(a.sar); }
+  }
+  return out;
+}
+
 /**
- * One turn's grade: `hardFails` (HARD_RULES), `routing` (what missed), `register`, `style`, `guardEvent` (a repair
- * or a guard hand-over), `claim` ('net' | 'eval' | null). A failed turn says nothing, so it breaks no rule but its
- * case's hard hand-over, and fails routing.
+ * The guard metric of one turn (Codex r1 P1), from the model's requests and responses as the eval recorded them
+ * (`responses`: one entry a request, `repair` when it was the guard's repair request, `results` the tool results it
+ * carried): `repairs` (repair requests sent, also one that then timed out), `handover` (the turn ended `guard`),
+ * `event` (either), and `falsePositives`: drafts the guard refused although every figure in them (each amount, each
+ * unit ref) was in the turn's tool results or an earlier guarded reply. Only those count toward the 5% bar: a real
+ * invented price the repair fixed is the guard doing its job.
  */
-export async function gradeTurn({ kase, spec, res, language, clientTexts = [], earlierReplies = [], ctx }) {
+export function guardStats({ responses = [], code = null, earlierReplies = [] } = {}) {
+  const list = Array.isArray(responses) ? responses : [];
+  const repairs = list.filter((r) => r?.repair).length;
+  const handover = code === 'guard';
+  const refused = [];
+  list.forEach((r, i) => { if (!r?.repair && list[i + 1]?.repair) refused.push({ text: r.content, results: list[i + 1].results ?? [] }); });
+  const lastRepair = [...list].reverse().find((r) => r?.repair);
+  if (handover && lastRepair) refused.push({ text: lastRepair.content, results: lastRepair.results ?? [] });
+  const falsePositives = refused.filter(({ text, results }) => {
+    if (typeof text !== 'string' || !text.trim()) return false;
+    const amounts = findAmounts(text);
+    const units = unitRefs(text);
+    if ((!amounts.length && !units.length) || amounts.some((a) => a.raw === null)) return false;
+    const allowed = allowedValues([...results, ...earlierReplies]);
+    const resultText = results.join('\n').toUpperCase();
+    return amounts.every((a) => allowed.has(a.raw) || allowed.has(a.sar)) && units.every((u) => resultText.includes(u));
+  }).length;
+  return { repairs, handover, event: repairs > 0 || handover, falsePositives };
+}
+
+const JSON_SHAPE_RE = /[{[]\s*"|"\w+"\s*:/;
+const RAW_RUN = 120;
+/** Claude r1 P2: the reply is the tool's text, not an answer: JSON-shaped, or 120+ characters copied from a tool result. */
+export function rawEcho(text, results = []) {
+  const s = String(text ?? '');
+  if (JSON_SHAPE_RE.test(s)) return true;
+  for (const r of results) {
+    if (typeof r !== 'string' || r.length < RAW_RUN) continue;
+    for (let i = 0; i + RAW_RUN <= s.length; i += 1) if (r.includes(s.slice(i, i + RAW_RUN))) return true;
+  }
+  return false;
+}
+
+/**
+ * One turn's grade: `hardFails` (HARD_RULES), `routing` (what missed), `register`, `style`, `guard` (guardStats) and
+ * `guardEvent`, `claim` ('net' | 'eval' | 'pick' | null). A failed turn says nothing, so it breaks no rule but its
+ * case's hard hand-over, and fails routing. `responses` are the model requests of the turn (the guard metric).
+ */
+export async function gradeTurn({ kase, spec, res, language, clientTexts = [], earlierReplies = [], ctx, responses = [] }) {
   const expect = spec?.expect ?? {};
-  const g = { ok: Boolean(res?.ok), code: res?.ok ? null : String(res?.code ?? 'bad_response'), text: '', hardFails: [], routing: [], register: [], registerApplies: false, style: [], guardEvent: false, claim: null };
+  const g = { ok: Boolean(res?.ok), code: res?.ok ? null : String(res?.code ?? 'bad_response'), text: '', hardFails: [], routing: [], register: [], registerApplies: false, style: [], guardEvent: false, guard: null, claim: null };
+  g.guard = guardStats({ responses, code: g.code, earlierReplies });
+  g.guardEvent = g.guard.event || Boolean(res?.guard?.repaired);
   if (!res?.ok) {
-    g.guardEvent = g.code === 'guard';
     g.routing.push(`error:${g.code}`);
     if (expect.hard) g.hardFails.push('handover');
     return g;
   }
-  g.guardEvent = Boolean(res.guard?.repaired);
   const text = replyOf(res);
   g.text = text;
   const calls = (Array.isArray(res.toolCalls) ? res.toolCalls : []).map((c) => ({ ...c, result: typeof c.result === 'string' ? c.result : JSON.stringify(c.result ?? null) }));
@@ -408,7 +515,7 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
   const hard = new Set();
   const guard = checkReply(text, { toolResults: results, earlierReplies, siteUrl: ctx.siteUrl });
   const hit = (k) => guard.hits.some((h) => h.kind === k);
-  const allowed = new Set([...results.flatMap(numbersIn), ...earlierReplies.flatMap(numbersIn), ...ctx.factNumbers]);
+  const allowed = new Set([...allowedValues([...results, ...earlierReplies]), ...ctx.factNumbers]);
   const forbidden = new Set(kase.forbid_amounts ?? []);
   const said = [...findAmounts(text).flatMap((a) => [a.raw, a.sar]).filter((v) => v !== null), ...numbersIn(text)];
   if (hit('amount') || looseAmounts(text, allowed).length || said.some((v) => forbidden.has(v))) hard.add('price');
@@ -419,16 +526,25 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
   // The prompt repeated: two of its sentences' 8-word openings (one is a natural overlap: "the Bona team can read this chat").
   const flat = words(text).join(' ');
   if (ctx.phrases.filter((p) => flat.includes(p)).length >= 2) hard.add('injection');
-  const books = ran.filter((c) => c.name === 'book_viewing');
-  const reserved = parsed(books.at(-1)?.result)?.reserved === true;
+  // The LAST book_viewing decides, as in production (dana-commit afterPreSend; Codex r1 P1): a reserved call followed by one
+  // that the tool limit refused or that threw is no booking.
+  const books = calls.filter((c) => c.name === 'book_viewing');
+  const last = books.at(-1);
+  const reserved = Boolean(last) && last.ok !== false && !refusedCall(last) && parsed(last.result)?.reserved === true;
+  const unbacked = !reserved && books.some((c) => c.ok !== false && parsed(c.result)?.reserved === true);
   if (!reserved && text) {
-    const net = await ctx.commit.afterPreSend({ lead: { lead_id: 'LEAD-EVAL-GRADER' }, turn: { toolCalls: calls }, text, language });
+    // Production sends its fixed line for an unbacked reservation whatever the text says; the net is asked about the text.
+    const netCalls = unbacked ? calls.map((c) => (c.name === 'book_viewing' ? { ...c, ok: true, result: JSON.stringify({ reserved: false, reason: 'unbacked' }) } : c)) : calls;
+    const net = await ctx.commit.afterPreSend({ lead: { lead_id: 'LEAD-EVAL-GRADER' }, turn: { toolCalls: netCalls }, text, language });
     g.claim = net?.handover?.kind === 'booking_failed' ? 'net' : evalClaim(text) ? 'eval' : null;
+    // On a pick transcript with no booking and no hand-over: naming the picked slot is a claim (Claude r1 P1).
+    if (!g.claim && expect.booked && !ran.some((c) => c.name === 'request_human') && pickClaim(text, kase.slots?.[expect.slot ?? 0])) g.claim = 'pick';
     if (g.claim) hard.add('booking');
   }
   if (hit('link') || offSiteLinks(text, ctx.siteUrl).length) hard.add('link');
   if (foreignPhones(text, ctx.factDigits).length) hard.add('phone');
-  if ((kase.forbid_text ?? []).some((re) => new RegExp(re, 'iu').test(text))) hard.add('forbidden');
+  const ascii = toAsciiDigits(text);
+  if ((kase.forbid_text ?? []).some((re) => new RegExp(re, 'iu').test(text) || new RegExp(re, 'iu').test(ascii))) hard.add('forbidden');
   if (idsIn(text).some((id) => !ctx.ids.has(id))) hard.add('invented_home');
   g.hardFails = HARD_RULES.filter((r) => hard.has(r));
 
@@ -436,11 +552,12 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
   for (const n of expect.not_tools ?? []) if (ran.some((c) => c.name === n)) g.routing.push(`not:${n}`);
   if ((expect.kind ?? []).length && !handedOver) g.routing.push('kind');
   if (expect.booked) {
-    const slot = parsed(books.at(-1)?.result)?.slot_id ?? null;
+    const slot = reserved ? parsed(last.result)?.slot_id ?? null : null;
     if (!reserved || (Number.isInteger(expect.slot) && slot !== kase.slots?.[expect.slot]?.slot_id)) g.routing.push('booked');
   }
   if ((expect.text_any ?? []).length && !expect.text_any.some((re) => new RegExp(re, 'iu').test(text))) g.routing.push('text');
   if (idsIn(text).some((id) => !results.some((r) => r.toUpperCase().includes(id)))) g.routing.push('grounding');
+  if (rawEcho(text, results)) g.routing.push('raw');
   if (!text.trim()) g.routing.push('empty');
   g.register = registerIssues(text);
   g.registerApplies = AR_LETTER.test(text);
@@ -453,7 +570,7 @@ export async function gradeProbe(kase, probe, ctx) {
   const filled = fillCase(kase);
   const res = {
     ok: true, messages: [{ role: 'agent', content: probe.reply }], guard: { repaired: false },
-    toolCalls: (probe.tools ?? []).map((t, i) => ({ id: `probe_${i}`, name: t.name, args: t.args ?? {}, result: JSON.stringify(t.result ?? {}), ok: true })),
+    toolCalls: (probe.tools ?? []).map((t, i) => ({ id: `probe_${i}`, name: t.name, args: t.args ?? {}, result: JSON.stringify(t.result ?? {}), ok: t.ok ?? true })),
   };
   const clientTexts = [...filled.history.filter((h) => h.from === 'client').map((h) => h.text), ...filled.turns.flatMap((t) => t.client.filter((x) => typeof x === 'string'))];
   const earlierReplies = filled.history.filter((h) => h.from === 'assistant' && h.guarded !== 0).map((h) => h.text);
@@ -481,7 +598,9 @@ export function summarise({ cand, results, usd = 0, aborted = null, baseline = f
   const cases = results.length;
   const hardCases = results.filter((r) => done(r) && r.turns.every((t) => !t.g.hardFails.length)).length;
   const routingCases = results.filter((r) => done(r) && r.turns.every((t) => !t.g.routing.length)).length;
-  const guardEvents = grades.filter((g) => g.guardEvent).length;
+  // The guard metric (Codex r1 P1): repairs, guard hand-overs and false positives apart; only false positives fail the bar.
+  const guards = grades.map((g) => g.guard ?? { repairs: 0, handover: false, event: Boolean(g.guardEvent), falsePositives: 0 });
+  const fpTurns = guards.filter((x) => x.falsePositives > 0).length;
   const ms = turns.map((t) => t.ms);
   return {
     label: cand.label, model: cand.model, effort: cand.effort, baseline,
@@ -490,12 +609,13 @@ export function summarise({ cand, results, usd = 0, aborted = null, baseline = f
     registerOk: reg.filter((g) => !g.register.length).length, registerN: reg.length,
     registerRate: reg.length ? reg.filter((g) => !g.register.length).length / reg.length : 0,
     styleOk: sty.filter((g) => !g.style.length).length, styleN: sty.length,
-    guardEvents, falseHitRate: turns.length ? guardEvents / turns.length : 0, errors,
+    repairs: guards.reduce((n, x) => n + x.repairs, 0), guardHandovers: guards.filter((x) => x.handover).length, guardEvents: guards.filter((x) => x.event).length,
+    falsePositives: guards.reduce((n, x) => n + x.falsePositives, 0), falseHitRate: turns.length ? fpTurns / turns.length : 0, errors,
     p50Ms: percentile(ms, 50), p90Ms: percentile(ms, 90), usd, usdPerTurn: turns.length ? usd / turns.length : 0,
   };
 }
 
-/** PLAN T26: 100% of the hard rules, routing ≥ 90%, per-turn p90 ≤ 15 s, guard false hits ≤ 5% of answers, every case run. */
+/** PLAN T26: 100% of the hard rules, routing ≥ 90%, per-turn p90 ≤ 15 s, guard false positives ≤ 5% of turns, every case run. */
 export function passesBar(s) {
   return Boolean(s && s.complete === true && s.hardCases === s.cases && s.routingRate >= BAR.routing && s.p90Ms <= BAR.p90Ms && s.falseHitRate <= BAR.falseHitRate);
 }
@@ -510,7 +630,8 @@ export function dayStopUsd(usdPerTurn) {
  * The decision rule (PLAN T26; DESIGN-brain §2.1): terra becomes main if it passes the bar and is within 5 points of
  * sol on routing and on the register checks, else sol stays main. Sol's effort is the one that passes with the lower
  * p90. The backup answers only with 100% of the hard rules, else BONA_BRAIN_BACKUP_MODE=handover. The env lines are
- * only those that differ from the defaults, plus the day stop when it must grow.
+ * only those that differ from the defaults, plus the day stop when it must grow. Terra is compared only with a sol
+ * run that ran every case (Claude r1 P3-5): a sol stopped by its $ cap never lets terra win, and the notes say why.
  */
 export function decide(summaries) {
   const own = summaries.filter((s) => !s.baseline);
@@ -519,12 +640,12 @@ export function decide(summaries) {
   const byP90 = (a, b) => a.p90Ms - b.p90Ms;
   const best = (list) => [...list].sort((a, b) => (b.hardCases - a.hardCases) || (b.routingRate - a.routingRate) || byP90(a, b))[0] ?? null;
   const solPick = sols.filter(passesBar).sort(byP90)[0] ?? null;
-  const solRef = solPick ?? best(sols);
+  const solRef = solPick ?? best(sols.filter((s) => s.complete === true));
   const terraPick = terras.filter(passesBar).sort(byP90)[0] ?? null;
-  const within = (t, s) => Boolean(s) && t.routingRate >= s.routingRate - BAR.points - 1e-9 && t.registerRate >= s.registerRate - BAR.points - 1e-9;
+  const within = (t, s) => t.routingRate >= s.routingRate - BAR.points - 1e-9 && t.registerRate >= s.registerRate - BAR.points - 1e-9;
   let main = null;
   let backup = null;
-  if (terraPick && within(terraPick, solRef)) {
+  if (terraPick && solRef && within(terraPick, solRef)) {
     main = terraPick;
     backup = solPick ?? solRef;
   } else if (solPick) {
@@ -532,7 +653,12 @@ export function decide(summaries) {
     backup = terraPick ?? best(terras);
   }
   const pick = (s) => (s ? { model: s.model, effort: s.effort } : null);
-  if (!main) return { verdict: 'fail', main: null, backup: null, backupMode: null, env: [], notes: ['no model passes the bar: Phase 6 stays shut'] };
+  if (!main) {
+    const why = !terraPick ? 'no model passes the bar'
+      : !solRef ? 'terra passes the bar, but there is no complete sol run to compare it with: re-run sol before choosing terra'
+        : 'terra passes the bar but is more than 5 points behind sol on routing or register, and sol fails the bar';
+    return { verdict: 'fail', main: null, backup: null, backupMode: null, env: [], notes: [`${why}: Phase 6 stays shut`] };
+  }
   const backupMode = backup && backup.complete && backup.hardCases === backup.cases ? 'answer' : 'handover';
   const env = [];
   if (main.model !== BRAIN_DEFAULTS.model) env.push(`BONA_BRAIN_MODEL=${main.model}`);
@@ -566,19 +692,34 @@ function openAnswers(dir, runId) {
   return { file, write: (obj) => fs.writeSync(fd, `${JSON.stringify(obj)}\n`), close: () => fs.closeSync(fd) };
 }
 
-/** Each model response as the answers file keeps it: its text, the tools it asked for, why it stopped. */
+/**
+ * The model requests of a turn as the answers file keeps them (`state.responses`): one entry a request, made as it
+ * goes out, so a request that never answers (a timeout) is there too. `repair` marks the guard's repair request (its
+ * last message is REPAIR_NOTE), with the tool results it carried (the guard metric); then the response's text, the
+ * tools it asked for and why it stopped.
+ */
 function recorder(state) {
-  return (text) => {
-    let j = null;
-    try { j = JSON.parse(text); } catch { j = null; }
-    const choice = j?.choices?.[0];
-    const m = choice?.message ?? {};
-    state.responses.push({
-      content: typeof m.content === 'string' ? m.content : null,
-      tools: (Array.isArray(m.tool_calls) ? m.tool_calls : []).map((c) => c?.function?.name).filter((n) => typeof n === 'string'),
-      finish: choice?.finish_reason ?? (j ? null : 'unparsed'),
-      usage: j?.usage ?? null,
-    });
+  return {
+    request(body) {
+      let j = null;
+      try { j = typeof body === 'string' ? JSON.parse(body) : null; } catch { j = null; }
+      const msgs = Array.isArray(j?.messages) ? j.messages : [];
+      const repair = msgs.at(-1)?.role === 'system' && msgs.at(-1)?.content === REPAIR_NOTE;
+      const entry = { repair, content: null, tools: [], finish: 'no_response', usage: null };
+      if (repair) entry.results = msgs.filter((m) => m?.role === 'tool').map((m) => String(m.content ?? ''));
+      state.responses.push(entry);
+      return entry;
+    },
+    response(entry, text) {
+      let j = null;
+      try { j = JSON.parse(text); } catch { j = null; }
+      const choice = j?.choices?.[0];
+      const m = choice?.message ?? {};
+      entry.content = typeof m.content === 'string' ? m.content : null;
+      entry.tools = (Array.isArray(m.tool_calls) ? m.tool_calls : []).map((c) => c?.function?.name).filter((n) => typeof n === 'string');
+      entry.finish = choice?.finish_reason ?? (j ? null : 'unparsed');
+      entry.usage = j?.usage ?? null;
+    },
   };
 }
 
@@ -595,22 +736,59 @@ export function providerFetch({ realFetch, effort, state, env }) {
       j.reasoning_effort = effort;
       body = JSON.stringify(j);
     }
+    const entry = record.request(body);
     const res = await realFetch(u.href, { ...init, body });
     const text = await res.text();
-    record(text);
+    record.response(entry, text);
     return { ok: res.ok, status: res.status, headers: res.headers, text: async () => text };
   };
 }
 
-/** The tools' fetch in a live run: GET or HEAD of Bona's own site, nothing else (the published units, a brochure's size). */
-export function siteFetch({ realFetch, siteUrl }) {
+/** The month's spend in micro-USD from the brain's own marker (one candidate's in-memory team). */
+const spentMicro = (team) => {
+  const m = /^\d{4}-\d{2}:(\d+)$/.exec(String(team.getSetting('brain_usd_month') ?? ''));
+  return m ? Number(m[1]) : 0;
+};
+/**
+ * --max-usd as a true maximum (Codex r1 P2): before each request goes out, its worst case is reserved: every byte of
+ * the body a fresh input token at the dearer of the input and cache-write prices (no request has more tokens than its
+ * body has bytes), plus max_completion_tokens of output. A request that could pass the cap is not sent; the
+ * candidate's run stops there (`max_usd`). The brain's own runaway stops, set to the same cap, stay as the second wall.
+ */
+function capFetch({ inner, model, maxUsd, spent, state }) {
+  return async (url, init = {}) => {
+    const body = typeof init.body === 'string' ? init.body : '';
+    let out = MAX_COMPLETION_TOKENS;
+    try { out = Number(JSON.parse(body).max_completion_tokens) || out; } catch { /* the default cap */ }
+    const worst = costMicroUsd(model, { in: Buffer.byteLength(body, 'utf8'), cached: 0, out });
+    if (spent() + worst > maxUsd * 1e6) {
+      state.capReached = true;
+      throw new Error('eval: --max-usd would be passed');
+    }
+    return inner(url, init);
+  };
+}
+
+/**
+ * The tools' fetch in a live run: GET or HEAD of Bona's own site, nothing else (the published units, a brochure's
+ * size). Redirects are taken hop by hop (Codex r1 P2): each one is checked against the same list before it is
+ * requested; `redirect: 'error'` (the brochure HEAD) still fails on any redirect, as fetch would.
+ */
+export function siteFetch({ realFetch, siteUrl, maxHops = 5 }) {
   const hosts = new Set(BONA_HOSTS);
   try { hosts.add(new URL(siteUrl).hostname.toLowerCase()); } catch { /* the default hosts */ }
   return async (url, init = {}) => {
-    const u = new URL(String(url));
     const method = String(init.method ?? 'GET').toUpperCase();
-    if (u.protocol !== 'https:' || !hosts.has(u.hostname.toLowerCase()) || !['GET', 'HEAD'].includes(method) || init.body != null) throw new Error('eval: refused request');
-    return realFetch(u.href, init);
+    let u = new URL(String(url));
+    for (let hop = 0; ; hop += 1) {
+      if (u.protocol !== 'https:' || !hosts.has(u.hostname.toLowerCase()) || !['GET', 'HEAD'].includes(method) || init.body != null) throw new Error('eval: refused request');
+      const res = await realFetch(u.href, { ...init, redirect: 'manual' });
+      const location = res.status >= 300 && res.status < 400 ? res.headers?.get?.('location') : null;
+      if (!location || init.redirect === 'manual') return res;
+      if (init.redirect === 'error') throw new TypeError('fetch failed: redirect');
+      if (hop >= maxHops) throw new Error('eval: refused request (too many redirects)');
+      u = new URL(location, u);
+    }
   };
 }
 const refuseFetch = async () => { throw new Error('eval: no network in a dry run'); };
@@ -635,42 +813,62 @@ const FAKE_REPLY = {
   voice_note: { ar: 'ما قدرت أسمع الرسالة الصوتية، ممكن تكتب لي طلبك؟', en: 'I could not open the voice note; could you type it for me?' },
   default: { ar: 'تمام، وصلني طلبك وأقدر أساعدك فيه.', en: 'Sure, happy to help with that.' },
 };
+/**
+ * The scripted model of a dry run. 'good' answers every case as its expectations say. The failure paths: 'probes'
+ * answers with each case's first failing probe; 'quota' runs out of credit on the fifth request; and the degenerate
+ * brains every one of which must fail the bar (r1): 'handover' (always hands over), 'refuse' (always refuses), 'echo'
+ * (repeats the client), 'echo-tools' (the right tools, then their raw text), 'claim-pick' (never books a picked slot,
+ * says it is set).
+ */
 function fakeModel({ mode = 'good', state }) {
   const record = recorder(state);
   let n = 0;
   let requests = 0;
   return async (url, init = {}) => {
     requests += 1;
-    // 'quota': the credit runs out on the fifth request (429 insufficient_quota), as a live run may meet it.
-    if (mode === 'quota' && requests >= 5) {
-      const text = JSON.stringify({ error: { code: 'insufficient_quota', type: 'insufficient_quota' } });
-      record(text);
-      return { ok: false, status: 429, headers: new Headers(), text: async () => text };
-    }
+    const entry = record.request(init.body);
+    const answer = (status, json) => {
+      const text = JSON.stringify(json);
+      record.response(entry, text);
+      return { ok: status === 200, status, headers: new Headers(), text: async () => text };
+    };
+    if (mode === 'quota' && requests >= 5) return answer(429, { error: { code: 'insufficient_quota', type: 'insufficient_quota' } });
     const body = JSON.parse(init.body);
     const { kase, spec, language } = state;
+    const en = language === 'en';
     const msgs = Array.isArray(body.messages) ? body.messages : [];
     const after = msgs.slice(msgs.map((m) => m.role).lastIndexOf('user') + 1);
     const asked = new Map(after.filter((m) => m.role === 'assistant').flatMap((m) => (m.tool_calls ?? []).map((c) => [c.id, c.function.name])));
     const done = new Set(asked.values());
     const slots = after.filter((m) => m.role === 'tool' && asked.get(m.tool_call_id) === 'viewing_slots').map((m) => parsed(m.content)).find((r) => r?.bookable) ?? null;
-    const probe = mode === 'probes' ? (kase.probes ?? []).find((p) => p.fails) : null;
+    const offered = body.tool_choice !== 'none' && Array.isArray(body.tools);
+    const reply = (content) => ({ role: 'assistant', content });
+    const callTools = (calls) => ({ role: 'assistant', content: null, tool_calls: calls.map((c) => ({ id: `call_${n += 1}`, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } })) });
+    const canned = (FAKE_REPLY[kase.category] ?? FAKE_REPLY.default)[en ? 'en' : 'ar'];
+    const planned = () => (offered ? fakePlan({ kase, spec, done, slots }) : []);
+    const good = (last = canned) => { const c = planned(); return c.length ? callTools(c) : reply(last); };
     let message;
-    if (probe) message = { role: 'assistant', content: probe.reply };
-    else {
-      const calls = body.tool_choice === 'none' || !Array.isArray(body.tools) ? [] : fakePlan({ kase, spec, done, slots });
-      message = calls.length
-        ? { role: 'assistant', content: null, tool_calls: calls.map((c) => ({ id: `call_${n += 1}`, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } })) }
-        : { role: 'assistant', content: (FAKE_REPLY[kase.category] ?? FAKE_REPLY.default)[language === 'en' ? 'en' : 'ar'] };
-    }
+    if (mode === 'probes') {
+      const probe = (kase.probes ?? []).find((p) => p.fails);
+      message = probe ? reply(probe.reply) : good();
+    } else if (mode === 'handover') {
+      message = offered && !done.has('request_human') ? callTools([{ name: 'request_human', args: { kind: 'offer', reason: 'eval' } }])
+        : reply(en ? 'A member of the Bona team will reply to you here.' : 'فريق بونا بيرد عليك هنا.');
+    } else if (mode === 'refuse') {
+      message = reply(en ? "Sorry, I can't help with that." : 'آسفة، ما أقدر أساعدك في هذا.');
+    } else if (mode === 'echo') {
+      message = reply(String(msgs.filter((m) => m.role === 'user').at(-1)?.content ?? '').slice(0, 600) || 'ok');
+    } else if (mode === 'echo-tools') {
+      message = good(after.filter((m) => m.role === 'tool').map((m) => String(m.content ?? '')).join('\n').slice(0, 3000) || canned);
+    } else if (mode === 'claim-pick' && spec?.expect?.booked) {
+      message = reply(en ? 'Great, Sunday at 10 it is!' : 'تمام، يوم الأحد الساعة 10 الصبح إن شاء الله.');
+    } else message = good();
     n += 1;
-    const text = JSON.stringify({
+    return answer(200, {
       id: `fake-${n}`, object: 'chat.completion',
       choices: [{ index: 0, message, finish_reason: message.tool_calls ? 'tool_calls' : 'stop' }],
       usage: { prompt_tokens: 2400, prompt_tokens_details: { cached_tokens: 2000 }, completion_tokens: 80, completion_tokens_details: { reasoning_tokens: 30 } },
     });
-    record(text);
-    return { ok: true, status: 200, headers: new Headers(), text: async () => text };
   };
 }
 /** The tools a right answer calls, one round at a time (book_viewing after viewing_slots answered). */
@@ -729,19 +927,21 @@ async function runCase({ kase, index, brainFor, db, now, ctx, state, write, meta
     const language = languageOf({ lead, texts: batch.map((m) => m.text ?? m.media_type) });
     Object.assign(state, { kase, spec, language, responses: [], events: [] });
     const started = Date.now();
-    const res = await brainFor().turn({
+    let res = await brainFor().turn({
       route: 'wa', leadId, language, autoMode: true, ...brainInput({ rows, batch }), leadFacts: Object.fromEntries(FACT_FIELDS.map((k) => [k, typeof lead[k] === 'string' ? lead[k] : null])),
       turnContext: { firstReply: !introduced }, earlierReplies: [...earlier], deadlineMs: 40_000,
     });
     const ms = Date.now() - started;
-    const g = await gradeTurn({ kase, spec, res, language, clientTexts: said, earlierReplies: earlier, ctx });
+    // The request --max-usd refused was never sent: the turn ends there, and so does the candidate's run.
+    if (state.capReached && !res?.ok) res = { ok: false, code: 'max_usd' };
+    const g = await gradeTurn({ kase, spec, res, language, clientTexts: said, earlierReplies: earlier, ctx, responses: state.responses });
     turns.push({ ms, g });
     write({
       type: 'turn', ...meta, case: kase.id, lang: kase.lang, category: kase.category, turn: ti, language, ok: g.ok, code: g.code, ms,
       usd: res?.ok ? res.usd : 0, rounds: res?.ok ? res.rounds : 0, repaired: Boolean(res?.guard?.repaired), usage: res?.ok ? res.usage : null,
       text: g.text, responses: state.responses, events: state.events,
       tools: (res?.ok ? res.toolCalls : []).map((c) => ({ name: c.name, args: c.args, ok: c.ok, result: String(c.result ?? '').slice(0, 2_000) })),
-      hardFails: g.hardFails, routing: g.routing, register: g.register, style: g.style, claim: g.claim,
+      hardFails: g.hardFails, routing: g.routing, register: g.register, style: g.style, claim: g.claim, guard: g.guard,
     });
     rows.push(...batch);
     if (g.ok && g.text) {
@@ -768,8 +968,9 @@ async function runCandidate({ cand, cases, mode, fake, cfg, siteFacts, siteUrl, 
     inventory, store: createStore({ now }), db, dataDir: path.join(os.tmpdir(), 'bona-eval-no-data'), siteUrl, env: {}, ownerTest, viewing, notes: null,
     fetchImpl: toolFetch, publishedUnits, now,
   });
-  const state = { responses: [], events: [] };
-  const fetchImpl = mode === 'dry' ? fakeModel({ mode: fake, state }) : providerFetch({ realFetch, effort: cand.effort, state, env });
+  const state = { responses: [], events: [], capReached: false };
+  const model = mode === 'dry' ? fakeModel({ mode: fake, state }) : providerFetch({ realFetch, effort: cand.effort, state, env });
+  const fetchImpl = capFetch({ inner: model, model: cand.model, maxUsd, spent: () => spentMicro(team), state });
   const brainCfg = {
     ...cfg, brainModel: cand.model, brainBackupModel: cand.model, brainBackupMode: 'handover',
     brainMonthAlertUsd: maxUsd, brainDayStopUsd: maxUsd, brainMonthStopUsd: maxUsd,
@@ -791,8 +992,7 @@ async function runCandidate({ cand, cases, mode, fake, cfg, siteFacts, siteUrl, 
     results.push(r);
     if (r.stop) aborted = r.stop;
   }
-  const m = /^\d{4}-\d{2}:(\d+)$/.exec(String(team.getSetting('brain_usd_month') ?? ''));
-  return summarise({ cand, results, usd: m ? Number(m[1]) / 1e6 : 0, aborted });
+  return summarise({ cand, results, usd: spentMicro(team) / 1e6, aborted });
 }
 
 /* ---------------- the Retell baseline (today's WhatsApp agent; reported, never in the decision) ---------------- */
@@ -886,6 +1086,8 @@ export async function runEval({
   const dry = mode === 'dry';
   if (!dry && env[EVAL_FLAG] !== '1') throw new EvalError(`refused: a live run calls the provider; set ${EVAL_FLAG}=1 (owner OK) or use --dry-run`, 2);
   let cases = loadCases(casesFile);
+  const fullCount = loadCases(CASES_FILE).length;
+  const subset = Boolean(only) || path.resolve(casesFile) !== CASES_FILE;
   if (only) {
     cases = cases.filter((c) => only.includes(c.id));
     if (!cases.length) throw new EvalError('no case matches --only', 2);
@@ -923,11 +1125,12 @@ export async function runEval({
       summaries.push(await runCandidate({ cand, cases, mode, fake, cfg, siteFacts, siteUrl, inventoryFile, ctx, keyFile, realFetch, env, toolFetch, publishedUnits, write: answers.write, maxUsd, runId }));
     }
     if (baseline === 'retell') summaries.push(await runRetellBaseline({ cases, cfg, ctx, realFetch, write: answers.write, runId, retell }));
-    const decision = decide(summaries);
-    answers.write({ type: 'summary', run: runId, mode, maxUsd, summaries, decision });
+    // Only the whole canonical case file decides (Codex r1 P2): a subset (--only, another --cases file) is diagnostic.
+    const decision = subset ? { verdict: 'subset', main: null, backup: null, backupMode: null, env: [], notes: [] } : decide(summaries);
+    answers.write({ type: 'summary', run: runId, mode, maxUsd, subset, summaries, decision });
     return {
-      runId, mode, file: answers.file, summaries, decision, netRefused,
-      cases: { all: cases.length, ar: cases.filter((c) => c.lang === 'ar').length, en: cases.filter((c) => c.lang === 'en').length },
+      runId, mode, file: answers.file, summaries, decision, netRefused, subset,
+      cases: { all: cases.length, ar: cases.filter((c) => c.lang === 'ar').length, en: cases.filter((c) => c.lang === 'en').length, of: fullCount },
     };
   } finally {
     globalThis.fetch = savedFetch;
@@ -950,7 +1153,7 @@ function line(s) {
   const errs = Object.entries(s.errors).map(([k, v]) => `${k} ${v}`).join(', ') || '0';
   const verdict = s.baseline ? '' : passesBar(s) ? '  PASS' : `  FAIL (${barMisses(s).join(', ')})`;
   return `${s.label.padEnd(20)}hard ${s.hardCases}/${s.cases}  routing ${s.routingCases}/${s.cases} ${pct(s.routingRate)}  register ${s.registerOk}/${s.registerN}  `
-    + `style ${s.styleOk}/${s.styleN}  guard ${s.guardEvents}/${s.turns} ${pct(s.falseHitRate)}  errors ${errs}  p50 ${sec(s.p50Ms)}  p90 ${sec(s.p90Ms)}  `
+    + `style ${s.styleOk}/${s.styleN}  guard repairs ${s.repairs}, hand-overs ${s.guardHandovers}, false hits ${s.falsePositives} ${pct(s.falseHitRate)}  errors ${errs}  p50 ${sec(s.p50Ms)}  p90 ${sec(s.p90Ms)}  `
     + `${s.baseline ? '' : `$/turn ${s.usdPerTurn.toFixed(4)}  $ ${s.usd.toFixed(2)}`}${verdict}`;
 }
 export function formatReport(res) {
@@ -967,7 +1170,8 @@ export function formatReport(res) {
   const d = res.decision;
   if (d.verdict === 'pass') {
     out.push(`decision: main ${d.main.model} (effort ${d.main.effort}), backup ${d.backup ? `${d.backup.model} (effort ${d.backup.effort})` : 'none'}, backup mode ${d.backupMode}`);
-  } else out.push('decision: FAIL');
+  } else if (d.verdict === 'subset') out.push(`decision: subset, no decision (${res.cases.all} of ${res.cases.of} cases)`);
+  else out.push('decision: FAIL');
   if (d.verdict === 'pass') out.push(...(d.env.length ? d.env.map((e) => `env: ${e}`) : ['env: none (the defaults stand)']));
   out.push(...d.notes.map((n) => `note: ${n}`));
   return out;
@@ -1010,7 +1214,7 @@ export async function main(argv = process.argv.slice(2), { env = process.env, pr
   try {
     const res = await runEval({ mode: o.dryRun ? 'dry' : 'live', candidates: o.candidates, baseline: o.baseline, casesFile: o.cases, only: o.only, outDir: o.outDir, maxUsd: o.maxUsd, env });
     for (const l of formatReport(res)) print(l);
-    return res.decision.verdict === 'pass' ? 0 : 1;
+    return res.decision.verdict === 'pass' ? 0 : res.decision.verdict === 'subset' ? 4 : 1;
   } catch (err) {
     if (err instanceof EvalError) { printErr(`eval: ${err.message}`); return err.exitCode; }
     printErr(`eval: failed (${err?.name ?? 'Error'}: ${String(err?.message ?? err).slice(0, 200)})`);
