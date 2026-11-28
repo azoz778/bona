@@ -50,6 +50,7 @@ function rig({ client = CLIENT, inboxVia = null, turns = [], commit = null, paci
   const ownerTest = { autoMode: (l) => l?.lead_id === LEAD, active: () => true, ownNumberOk: () => true };
   const dana = createDana({
     db: s, inbox, team, sender, retell: null, inventory, siteUrl: SITE, agentId: null, brain, ownerTest, notes, pacing, sleep,
+    later: () => {}, // the read receipt and "composing" are dana-wa.test.mjs's (these tests count messages)
     ...(commit ? { commit } : {}), ...(batchMs === null ? {} : { batchMs }),
     alerts: { notify: async () => ({}), notifyOwners: async () => ({}) },
     // The owner's test chat is his own number: the real owner test (PR-A2) lifts the team exclusion for it.

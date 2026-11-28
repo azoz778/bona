@@ -969,12 +969,14 @@ function bh({
     match_method: 'ref', stage: 'new', stage_ts: at - DAY, inbox_state: 'in', inbox_since: at - DAY, interest: 'villa in Al Khalidiyah', ...lead,
   });
   const slept = [];
+  const laters = []; // side effects she schedules (the read receipt, "composing"): run by a test that wants them
   const build = (b = brain, n = notes) => createDana({
     db: s, inbox, team, sender, retell, inventory, siteUrl: SITE, agentId, brain: b, ownerTest, notes: n, pacing, link, wa,
     ...(commit ? { commit } : {}),
     alerts: { notify: (id, o) => { pushed.push([id, o]); return Promise.resolve({}); }, notifyOwners: (o) => { owners.push(o); return Promise.resolve({}); } },
     isExcludedLead: (l) => isExcludedLead(team, s, l), now: () => clock, log: (o) => logs.push(o), batchMs: 0,
     sleep: async (ms) => { slept.push(ms); clock += ms; },
+    later: (ms, fn) => { laters.push({ ms, fn }); },
   });
   const dana = build();
   /** A restart: a new createDana on the same database, with a brain and notes of its own. */
@@ -995,9 +997,9 @@ function bh({
     s.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts, guarded)
                   VALUES (?,?,?,?,NULL,'dana',?,NULL,?,?,?,?,?)`).run(`SND-R-${String(k).padStart(8, '0')}`, id, CLIENT_JID, text, status, created, created, error, covers, guarded);
   };
-  const sent = () => calls.map((c) => c.body.text ?? c.body.caption);
+  const sent = () => calls.filter((c) => /\/message\//.test(c.url)).map((c) => c.body.text ?? c.body.caption);
   return {
-    s, team, inbox, sender, retell, brain, notes, dana, calls, pushed, owners, logs, ownerTest, client, staff, danaRow, sent, slept, restart,
+    s, team, inbox, sender, retell, brain, notes, dana, calls, pushed, owners, logs, ownerTest, client, staff, danaRow, sent, slept, restart, laters,
     lead: () => s.getLead(LEAD), tick: (ms) => { clock += ms; }, now: () => clock, set: (t) => { clock = t; },
   };
 }
@@ -2076,4 +2078,152 @@ test('T12 r2: cap_day frees one turn → one waiting chat is woken (the oldest),
   assert.equal(h.calls[0].body.number, '966500000700', 'the oldest waiting chat first');
   assert.ok(h.s.getLead('LEAD-P1').dana_hold_until > h.now(), 'the others wait for the next free turn');
   assert.equal(h.notes.of('handover').length, 3, 'no repeat hand-over');
+});
+
+/* ======================================================================================
+ * PR-B3 r3 (Claude N4, Codex P1/P2): every timed hold ends; the breaker binds test chats; a send_failed
+ * hold is never replaced; ages re-checked at send time; read receipts and "composing"; documents per day.
+ * ====================================================================================== */
+
+const fillDay = (h, n, at, prefix = 'LEAD-R') => {
+  for (let i = 0; i < n; i += 1) {
+    const id = `${prefix}${String(i).padStart(3, '0')}`;
+    h.s.insertLead({ lead_id: id, created: at - DAY, updated: at - DAY, phone_e164: `96650008${String(i).padStart(4, '0')}`, wa_jid: `96650008${String(i).padStart(4, '0')}@s.whatsapp.net`, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+    h.danaRow({ covers: at + i, created: at + i, id });
+  }
+};
+const strictTier = () => ({ ...immediate, tier: createPacing({ cfg: { waLinkedAt: null }, now: () => T_IN }).tier });
+const sweepFor = async (h, fromMs, toMs) => {
+  let wakes = 0;
+  for (let t = fromMs; t <= toMs; t += 60_000) {
+    h.set(t);
+    wakes += h.dana.sweep().woken;
+    await h.dana.flush();
+  }
+  return wakes;
+};
+
+test('T12 r3 N4: a cap_day chat whose message passes 2 h is handed over `missed` exactly once', async () => {
+  const h = bh({ pacing: strictTier(), turns: [], link: { identityOk: () => true, linkStable: () => true } });
+  fillDay(h, 60, T_IN - DAY + 2 * HOUR + 5 * 60_000); // the day frees its first turn 2 h 05 min from now
+  h.client('hello');
+  assert.equal((await h.dana.answer(LEAD, { ts: h.now() })).handover, 'cap_day');
+  await sweepFor(h, T_IN + 60_000, T_IN + 2 * HOUR + 30 * 60_000);
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['cap_day', 'missed'], 'one missed, never one a minute');
+  assert.ok(h.pushed.length <= 2, `${h.pushed.length} pushes`);
+  assert.equal(h.lead().dana_hold_reason, null);
+});
+
+test('T12 r3 N4: an ended cap_day hold stops waking with Dana off, and past 24 h', async () => {
+  const off = bh({ pacing: strictTier(), lead: { dana_hold_reason: 'cap_day', dana_hold_until: T_IN - 60_000 } });
+  off.client('hello', { ts: T_IN - 5 * 60_000 });
+  off.team.setSetting('dana_enabled', '0');
+  assert.ok(await sweepFor(off, T_IN, T_IN + 30 * 60_000) <= 1);
+  assert.equal(off.lead().dana_hold_reason, null);
+  const old = bh({ pacing: strictTier(), lead: { dana_hold_reason: 'cap_day', dana_hold_until: T_IN - 60_000 } });
+  old.client('hello', { ts: T_IN - DAY - HOUR });
+  assert.ok(await sweepFor(old, T_IN, T_IN + 30 * 60_000) <= 1);
+  assert.equal(old.lead().dana_hold_reason, null);
+});
+
+test('T12 r3: the breaker (dana_enabled 0 by system) binds a per-chat test too; the owner\'s own switch-off does not', async () => {
+  const h = bh({ lead: { dana_test: 1 } });
+  h.team.setSetting('dana_enabled', '0', { by: 'system' });
+  assert.deepEqual(h.dana.eligible(LEAD), { ok: false, reason: 'off' });
+  h.team.setSetting('dana_enabled', '0', { by: 'USR-owner' });
+  assert.equal(h.dana.eligible(LEAD).ok, true, "the owner's test flag on this chat, as on main");
+  // A fixed line queued when the breaker trips does not go, test chat or not.
+  const q = bh({ lead: { dana_test: 1 }, turns: [brainError('quota')], pacing: { ...immediate, fifo: async (fn) => { q.team.setSetting('dana_enabled', '0', { by: 'system' }); return fn(); } } });
+  await ask(q, 'hello');
+  assert.equal(q.sent().length, 0);
+});
+
+test('T12 r3: a send_failed hold (until a person) is never replaced by an outage\'s timed hold', async () => {
+  const h = bh({ turns: [brainError('quota')], evo: () => ({ status: 400 }) });
+  h.client('hi', { ts: T_IN - HOUR });
+  h.danaRow({ covers: T_IN - HOUR, created: T_IN - HOUR + 1000, status: 'failed', error: 'http_400' });
+  await ask(h, 'is it free?');
+  assert.deepEqual([h.lead().dana_hold_reason, h.lead().dana_hold_until], ['send_failed', null]);
+});
+
+test('T12 r3: the message\'s age is checked again at send time — 29m59s becomes backlog, 1h59m becomes missed', async () => {
+  const b = bh({ turns: [async () => { b.tick(2000); return brainReply('Sorry for the wait.'); }], link: { identityOk: () => true, linkStable: () => false } });
+  b.client('hello', { ts: T_IN - 30 * 60_000 + 1000 });
+  assert.deepEqual(await b.dana.answer(LEAD, { ts: T_IN - 30 * 60_000 + 1000 }), { skipped: 'backlog' });
+  assert.equal(b.sent().length, 0, 'over 30 min by send time: the backlog rule, and the link has not held');
+  const m = bh({ turns: [async () => { m.tick(2 * 60_000); return brainReply('Sorry for the wait.'); }], link: { identityOk: () => true, linkStable: () => true } });
+  m.client('hello', { ts: T_IN - 2 * HOUR + 60_000 });
+  const r = await m.dana.answer(LEAD, { ts: T_IN - 2 * HOUR + 60_000 });
+  assert.equal(r.handover, 'missed');
+  assert.equal(m.sent().length, 0, 'over 2 h by send time: never answered');
+});
+
+test('T12 r3: an outage recovery under a full day cap is handed over and held, not woken every minute', async () => {
+  const h = bh({ pacing: strictTier(), turns: [brainError('quota')] });
+  await ask(h, 'is it free?');
+  assert.equal(h.sent().length, 1);
+  fillDay(h, 60, T_IN - DAY + 3 * HOUR);
+  const wakes = await sweepFor(h, T_IN + 10 * 60_000, T_IN + 40 * 60_000);
+  assert.equal(wakes, 1, 'woken once: the cap_day hand-over holds it until the day frees a turn');
+  assert.equal(h.lead().dana_hold_reason, 'cap_day');
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['brain', 'cap_day']);
+});
+
+test('T12 r3: a brain turn marks the batch read and shows "composing" (T00 shapes); a failure there blocks nothing and counts for nothing; legacy has neither', async () => {
+  const h = bh({ turns: [brainReply('Of course.')], pacing: { ...immediate, typingFloorMs: () => 9000 },
+    evo: (n, body) => (body.readMessages || body.presence ? { status: 500 } : { status: 201, body: { key: { id: `K${n}` } } }) });
+  const ts = h.client('hello');
+  await h.dana.answer(LEAD, { ts });
+  assert.equal(h.sent().length, 1, 'the answer went');
+  for (const l of h.laters) await l.fn();
+  const read = h.calls.find((c) => c.url.includes('/chat/markMessageAsRead/'));
+  const typing = h.calls.find((c) => c.url.includes('/chat/sendPresence/'));
+  assert.deepEqual(read.body, { readMessages: [{ id: 'C1', fromMe: false, remoteJid: CLIENT_JID }] });
+  assert.deepEqual(typing.body, { number: CLIENT, presence: 'composing', delay: 9000 });
+  assert.ok(h.laters.find((l) => l.ms >= 1000 && l.ms <= 3000), 'the read receipt 1-3 s after the batch fired');
+  assert.equal(h.s.db.prepare("SELECT COUNT(*) n FROM wa_outbox WHERE status <> 'accepted'").get().n, 0, 'no outbox row for either');
+  assert.deepEqual([h.lead().dana_hold_reason, h.team.getSetting('dana_enabled')], [null, '1']);
+  // An @lid chat: the receipt names the phone jid (T00 finding 4: Evolution drops @lid keys).
+  const lid = bh({ turns: [brainReply('Of course.')], lead: { wa_jid: '123456789012345@lid', wa_lid: '123456789012345@lid' } });
+  await ask(lid, 'hello');
+  for (const l of lid.laters) await l.fn();
+  assert.equal(lid.calls.find((c) => c.url.includes('/chat/markMessageAsRead/')).body.readMessages[0].remoteJid, CLIENT_JID);
+  assert.equal(lid.calls.some((c) => c.url.includes('/chat/sendPresence/')), false, 'no floor left: no "composing"');
+  const legacy = bh({ auto: false, pacing: { ...immediate, typingFloorMs: () => 9000 } });
+  await ask(legacy, 'hello');
+  assert.deepEqual(legacy.laters, []);
+  assert.equal(legacy.calls.some((c) => c.url.includes('/chat/')), false);
+});
+
+test('T12 r3: a queued fixed line re-checks the own-number rule and the instance identity', async () => {
+  const own = bh({ lead: { inbox_via: 'own_number' }, turns: [brainError('quota')], pacing: { ...immediate, fifo: async (fn) => { own.ownerTest.ownNumberOk = () => false; return fn(); } } });
+  await ask(own, 'hello');
+  assert.equal(own.sent().length, 0, 'the rule went off in the queue');
+  let ok = true;
+  const id = bh({ turns: [brainError('quota')], wa: { ownNumberFrom: 'instance' }, link: { identityOk: () => ok, linkStable: () => true },
+    pacing: { ...immediate, fifo: async (fn) => { ok = false; return fn(); } } });
+  await ask(id, 'hello');
+  assert.equal(id.sent().length, 0, 'the identity failed in the queue');
+});
+
+test('T12 r3: one brochure document per chat per day (the tier); a second becomes its link', async () => {
+  const doc = { kind: 'document', url: 'https://bona.azoz.uk/b/w012.pdf', fileName: 'BONA-W012.pdf', caption: 'BONA-W012 brochure' };
+  const commit = fakeCommit((o) => ({ bubbles: [{ kind: 'text', text: o.text }, doc] }));
+  const h = bh({ commit, turns: [brainReply('Here it is.'), brainReply('And again.')] });
+  await ask(h, 'brochure please');
+  h.tick(60_000);
+  await ask(h, 'send it again please');
+  const media = h.calls.filter((c) => c.url.includes('/sendMedia/'));
+  assert.equal(media.length, 1, 'one document a day');
+  assert.ok(h.sent().some((t) => t.includes('BONA-W012 brochure') && t.includes(doc.url)), 'the second as its link');
+});
+
+test('T12 r3: during an outage the batch reaches back no further than 24 h', async () => {
+  const h = bh({ turns: [brainError('quota'), brainReply('Yes.')] });
+  h.client('a day ago', { ts: T_IN - DAY - 60_000 });
+  await ask(h, 'is it free?');
+  h.set(T_IN + 10 * 60_000);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.deepEqual(h.brain.calls[1].batchParts, ['is it free?']);
 });

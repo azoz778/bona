@@ -101,6 +101,8 @@ export const SEND_PER_DAY_TIERS = Object.freeze(TIERS.map((t) => t.SEND_PER_DAY)
 export const SEND_PER_DAY = SEND_PER_DAY_TIERS[0];
 /** A document send's deadline (DESIGN §6.3; Evolution downloads the PDF before it answers). */
 export const MEDIA_TIMEOUT_MS = 45_000;
+/** "composing" blocks Evolution for its `delay` (T00 finding 5): never longer than this. */
+export const PRESENCE_MAX_MS = 15_000;
 export const PER_RECIPIENT_PER_MIN = 6;
 export const PER_USER_PER_MIN = 30;
 export const MAX_TEXT_LEN = 4096;
@@ -510,5 +512,43 @@ export function createSender({
    */
   const recoverInterrupted = () => inbox.markStalePending(Number.MAX_SAFE_INTEGER);
 
-  return { sendTo, reply, recoverInterrupted, dayFull };
+  /**
+   * A read receipt and "composing" for Dana's brain turns (DESIGN §6.2; T00 verified the Evolution 2.3.7 shapes,
+   * verify/T00.md). Neither is a message: no outbox row, no limiter, nothing against any budget, and never a
+   * send failure for lib/dana-wa.mjs. A phone jid only: markMessageAsRead silently drops @lid keys (T00 finding 4),
+   * so the caller names the phone jid; sendPresence blocks for `delay` ms (finding 5), so it is capped at 15 s and
+   * the caller never awaits it inside a send. Both obey the Sending switch and BONA_WA_NOTIFY, and never throw.
+   */
+  async function chatCall(route, jid, body, ms) {
+    const m = PHONE_JID_RE.exec(String(jid ?? ''));
+    if (!m || m[1].startsWith('0')) return { ok: false, error: 'bad_recipient' };
+    if (!team.sendingEnabled()) return { ok: false, error: 'sending_disabled' };
+    if (!cfg.enabled) return { ok: false, error: 'disabled' };
+    if (!cfg.baseUrl || !cfg.apiKey) return { ok: false, error: 'evolution-not-configured' };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+      const res = await fetchImpl(`${cfg.baseUrl}/chat/${route}/${encodeURIComponent(cfg.instance)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', apikey: cfg.apiKey }, body: JSON.stringify(body(m[1])), signal: controller.signal,
+      });
+      await res.text?.().catch(() => '');
+      log({ evt: `wa.${route === 'sendPresence' ? 'presence' : 'read'}`, ok: res.ok, status: res.status });
+      return res.ok ? { ok: true } : { ok: false, error: `http_${res.status}` };
+    } catch (err) {
+      return { ok: false, error: err?.name === 'AbortError' ? 'timeout' : 'network' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const markRead = ({ jid, keyIds = [] } = {}) => {
+    const ids = (Array.isArray(keyIds) ? keyIds : []).filter((k) => typeof k === 'string' && k);
+    if (!ids.length) return Promise.resolve({ ok: false, error: 'nothing' });
+    return chatCall('markMessageAsRead', jid, () => ({ readMessages: ids.map((id) => ({ id, fromMe: false, remoteJid: jid })) }), 5_000);
+  };
+  const presence = ({ jid, delayMs = 0 } = {}) => {
+    const delay = Math.max(0, Math.min(PRESENCE_MAX_MS, Math.floor(Number(delayMs) || 0)));
+    return chatCall('sendPresence', jid, (digits) => ({ number: digits, presence: 'composing', delay }), delay + 5_000);
+  };
+
+  return { sendTo, reply, recoverInterrupted, dayFull, markRead, presence };
 }

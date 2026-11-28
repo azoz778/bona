@@ -1602,3 +1602,24 @@ test('T12 r2: team login codes are outside the shared minute and day budget (sti
   assert.equal((await r.sender.sendTo({ jid: '966500000077@s.whatsapp.net', text: 'again', kind: 'code' })).error, 'rate_limited', 'still capped per recipient');
   for (const x of [h, m, r]) x.s.close();
 });
+
+test('T12 r3: markRead and presence use T00\'s Evolution 2.3.7 shapes, write no outbox row, never throw, and obey the switches', async () => {
+  const h = harness({ env: T12_ENV, reply: () => ({ status: 201, body: {} }) });
+  assert.deepEqual(await h.sender.markRead({ jid: CLIENT_JID, keyIds: ['K1', 'K2'] }), { ok: true });
+  assert.equal(h.calls[0].url, 'http://evo.test/chat/markMessageAsRead/bona-test');
+  assert.deepEqual(h.calls[0].body, { readMessages: [{ id: 'K1', fromMe: false, remoteJid: CLIENT_JID }, { id: 'K2', fromMe: false, remoteJid: CLIENT_JID }] });
+  assert.deepEqual(await h.sender.presence({ jid: CLIENT_JID, delayMs: 9000 }), { ok: true });
+  assert.equal(h.calls[1].url, 'http://evo.test/chat/sendPresence/bona-test');
+  assert.deepEqual(h.calls[1].body, { number: CLIENT, presence: 'composing', delay: 9000 });
+  assert.equal(outboxRows(h).length, 0, 'neither is a message: no outbox row, nothing against any budget');
+  assert.deepEqual(await h.sender.presence({ jid: CLIENT_JID, delayMs: 60_000 }), { ok: true });
+  assert.equal(h.calls[2].body.delay, 15_000, 'the delay is capped (T00 finding 5: it blocks for `delay`)');
+  assert.deepEqual(await h.sender.markRead({ jid: '123456789012345@lid', keyIds: ['K1'] }), { ok: false, error: 'bad_recipient' }, 'a phone jid only (T00 finding 4)');
+  h.team.setSetting('sending_enabled', '0');
+  assert.deepEqual(await h.sender.markRead({ jid: CLIENT_JID, keyIds: ['K1'] }), { ok: false, error: 'sending_disabled' });
+  assert.equal(h.calls.length, 3);
+  const bad = harness({ env: T12_ENV, reply: () => ({ throws: netError('ECONNRESET') }) });
+  assert.deepEqual(await bad.sender.presence({ jid: CLIENT_JID, delayMs: 3000 }), { ok: false, error: 'network' });
+  h.s.close();
+  bad.s.close();
+});

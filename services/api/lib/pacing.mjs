@@ -65,6 +65,8 @@ export function createPacing({ cfg = {}, now = () => Date.now(), random = Math.r
   const between = (lo, hi) => Math.floor(lo + rand() * (hi - lo));
 
   const tier = (ts = now()) => ({ ...TIERS[tierIndex(Number(ts), linkedAt)] });
+  /** When the read receipt goes after the batch fires: 1-3 s (DESIGN §6.2). */
+  const readDelayMs = () => between(1000, 3000);
   const batchMs = () => between(BATCH_MIN_MS, BATCH_MAX_MS);
   function batchDelay({ firstAt, at = now() } = {}) {
     const wait = batchMs();
@@ -109,5 +111,5 @@ export function createPacing({ cfg = {}, now = () => Date.now(), random = Math.r
     return run;
   }
 
-  return { batchMs, batchDelay, typingFloorMs, fifo, tier };
+  return { batchMs, batchDelay, typingFloorMs, fifo, tier, readDelayMs };
 }
