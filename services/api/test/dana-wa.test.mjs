@@ -2991,3 +2991,57 @@ test('LEGACY GUARD (r13): the legacy stop scan is the legacy batch (the newest t
   assert.equal(h.lead().dana_off, 0);
   assert.equal(h.retell.completions.length, 1, 'answered as on main');
 });
+
+/* ======================================================================================
+ * PR-B3 r14, two invariants. I1 stop first: on the brain path the stop scan of every waiting message runs before
+ * freshness, missed, backlog, caps, holds and owed checks. I2 one batch builder: pending is in rowid order, the batch
+ * is its prefix (presented in ts order), aged by its newest ts and covered by its highest rowid.
+ * ====================================================================================== */
+
+test('T12 r14 I1: a deletion request hours older than the question (backfilled behind it) gives the closing line, dana_off and the stopped note, never missed', async () => {
+  let q;
+  let done = false;
+  const backfill = { refresh: async () => { if (!done && q) { done = true; h.client('delete my data', { ts: q - 2 * HOUR - 60_000 }); } } };
+  const h = bh({ backfill, turns: [brainReply('Sure, here are the details.'), brainReply('never')] });
+  q = h.client('what villas do you have?');
+  await h.dana.answer(LEAD, { ts: q });
+  await h.dana.flush();
+  assert.equal(h.sent().some((t) => t.includes('Sure, here are the details.')), false);
+  assert.ok(h.sent().at(-1).endsWith(CLOSING.en), 'the closing line');
+  assert.equal(h.lead().dana_off, 1);
+  assert.deepEqual(h.notes.of('stopped').map((c) => c[2]), ['deletion']);
+  assert.equal(h.notes.of('handover').some((c) => c[2].kind === 'missed'), false, 'never missed');
+});
+
+test('T12 r14 I1: a stop request is honoured over an active hold and an old batch', async () => {
+  const h = bh({ lead: { dana_hold_reason: 'cap_chat', dana_hold_until: T_IN + 30 * 60_000 }, turns: [brainReply('never')] });
+  h.client('is the villa free?', { ts: T_IN - 3 * HOUR });
+  await ask(h, 'stop');
+  assert.equal(h.lead().dana_off, 1);
+  assert.deepEqual(h.notes.of('stopped').map((c) => c[2]), ['stop']);
+  assert.ok(h.sent().at(-1).endsWith(CLOSING.en));
+  assert.equal(h.brain.calls.length, 0);
+});
+
+test('T12 r14 I2: two backfilled messages, one older than the history window, both reach the brain; none is marked covered unseen', async () => {
+  const h = bh({ turns: [brainReply('Of course.')] });
+  for (let i = 0; i < 25; i += 1) h.client(`earlier ${i}`, { ts: T_IN - 4 * HOUR + i * 5 * 60_000 });
+  const maxRid = h.s.db.prepare("SELECT MAX(rowid) AS r FROM wa_messages WHERE lead_id = ?").get(LEAD).r;
+  h.danaRow({ covers: T_IN - 4 * HOUR + 24 * 5 * 60_000, created: T_IN - 2 * HOUR });
+  h.s.db.prepare("UPDATE wa_outbox SET error = ? WHERE sender_kind = 'dana'").run(`cov:${maxRid}`);
+  h.client('recent question', { ts: T_IN - 60_000 });
+  h.client('an old one the backfill found', { ts: T_IN - 5 * HOUR });
+  await h.dana.answer(LEAD, { ts: T_IN - 60_000 });
+  const parts = h.brain.calls[0].batchParts;
+  assert.equal(parts.length, 2, JSON.stringify(parts));
+  assert.deepEqual(parts, ['an old one the backfill found', 'recent question'], 'both, presented in ts order');
+});
+
+test('T12 r14 I2: a batch over the cap takes the first ten by rowid; the rest stays pending and is answered next', async () => {
+  const h = bh({ turns: [brainReply('First ten.'), brainReply('The last two.')] });
+  for (let i = 1; i <= 12; i += 1) h.client(`q${i}`, { ts: T_IN - 12_000 + i * 1000 });
+  await h.dana.answer(LEAD, { ts: T_IN });
+  await h.dana.flush();
+  assert.deepEqual(h.brain.calls[0].batchParts, Array.from({ length: 10 }, (_, i) => `q${i + 1}`));
+  assert.deepEqual(h.brain.calls[1].batchParts, ['q11', 'q12'], 'the rest stayed pending and got its own turn');
+});

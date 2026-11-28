@@ -253,11 +253,13 @@ export function batchText(messages) {
  * out when there is no batch row at all: turn() takes an array over batchText even when it is empty.
  */
 export function brainInput({ rows = [], batch = [] } = {}) {
+  // History and batch from one list (r14 I2): the history rows the caller read (pending ones are never history), then
+  // EVERY batch message, so batchParts is always the whole batch, never a partial read. Masked as one series.
   const exclude = new Set(batch.map((m) => m?.key_id));
-  const t = inboxTurn(rows, { exclude });
-  const own = t.batchParts.length ? t : inboxTurn(batch, { exclude });
-  const out = { history: t.history, batchText: own.batchText };
-  if (own.batchParts.length) out.batchParts = own.batchParts;
+  const history = (Array.isArray(rows) ? rows : []).filter((m) => m && !exclude.has(m.key_id));
+  const t = inboxTurn([...history, ...batch], { exclude });
+  const out = { history: t.history, batchText: t.batchText };
+  if (t.batchParts.length) out.batchParts = t.batchParts;
   return out;
 }
 
@@ -571,7 +573,29 @@ export function createDana({
     }
     const rows = prep('pendRows', `SELECT rowid AS rid, * FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND rowid > ? AND ts > ?
         ORDER BY rowid`).all(id, ridBound, tsBound);
-    return all ? rows : rows.slice(-CONTEXT_MESSAGES);
+    // Coverage is a prefix (r14 I2): the batch is the FIRST messages in rowid order; the rest waits for the next turn.
+    return all ? rows : rows.slice(0, CONTEXT_MESSAGES);
+  }
+
+  /**
+   * THE batch builder of a brain chat (r14 I2): the pending list in rowid order; the batch is its prefix of at most
+   * CONTEXT_MESSAGES (every pending message with a lower rowid than the last one taken is in it), presented in ts
+   * order; it is aged by the NEWEST ts it holds and covered by its HIGHEST rowid, so the mark covers exactly that
+   * prefix and anything past the cap stays pending. A legacy chat: the store's batch, as on main.
+   */
+  function batchOf(leadId, lead = db.getLead(leadId)) {
+    if (!useBrain(lead)) {
+      const batch = inbox.unansweredClientMessages(leadId, { limit: CONTEXT_MESSAGES });
+      return { all: batch, batch, coversTs: batch.length ? batch[batch.length - 1].ts : null, rid: null };
+    }
+    const all = pendingFor(leadId, lead, { all: true });
+    const taken = all.slice(0, CONTEXT_MESSAGES);
+    const batch = [...taken].sort((a, b) => Number(a.ts) - Number(b.ts) || Number(a.rid) - Number(b.rid));
+    return {
+      all, batch,
+      coversTs: taken.length ? Math.max(...taken.map((m) => Number(m.ts))) : null,
+      rid: taken.length ? Math.max(...taken.map((m) => Number(m.rid))) : null,
+    };
   }
 
   /**
@@ -585,8 +609,8 @@ export function createDana({
     if (until === null || until === undefined) return Infinity;
     let d = Number(until);
     if (useBrain(lead) && d > t) {
-      const w = pendingFor(lead.lead_id, lead);
-      if (w.length) d = Math.min(d, Number(w[w.length - 1].ts) + FRESH_MS);
+      const { coversTs } = batchOf(lead.lead_id, lead);
+      if (coversTs !== null) d = Math.min(d, Number(coversTs) + FRESH_MS);
     }
     return d;
   }
@@ -737,8 +761,10 @@ export function createDana({
       AND guarded = 1 AND text IS NOT NULL ORDER BY created DESC LIMIT 50`).all(String(leadId)).map((r) => r.text);
   const rawFacts = (lead) => Object.fromEntries(FACT_FIELDS.map((k) => [k, typeof lead[k] === 'string' ? lead[k] : null]));
 
-  async function think(lead, batch, language, auto) {
-    const rows = inbox.messagesFor(lead.lead_id, { limit: CONTEXT_MESSAGES + batch.length });
+  async function think(lead, batch, language, auto, pendingAll = batch) {
+    // History never holds a pending message (one past the cap included); the batch is passed whole (r14 I2).
+    const pendingKeys = new Set(pendingAll.map((m) => m.key_id));
+    const rows = inbox.messagesFor(lead.lead_id, { limit: CONTEXT_MESSAGES + pendingAll.length }).filter((m) => !pendingKeys.has(m.key_id));
     const input = brainInput({ rows, batch });
     try {
       const turn = await brain.turn({
@@ -1330,6 +1356,29 @@ export function createDana({
     setTimedHold(leadId, 'cap_chat', now() + Math.min(RATE_HOLD_MAX_MS, RATE_HOLD_MS * 2 ** (n - 1)));
   }
 
+  /** What only delays an answer: a stop request overrides it (r14 I1). Not a person's activity, a switch or a rule. */
+  const STOP_OVERRIDES = new Set(['hold', 'cap_chat', 'cap_day', 'cap_chat_day', 'old', 'needs_human', 'no_open_chat', 'backlog']);
+  /**
+   * STOP FIRST (r14 I1): on the brain path, before freshness, missed, backlog, caps, holds and owed lines, the stop /
+   * privacy / deletion scan of EVERY waiting message. A match is always honoured, however old the rest of the batch:
+   * the closing line (covering everything waiting), dana_off and the stopped note; an owed line is replaced. It yields
+   * only to what a stop cannot override: not configured, identity, out of the inbox, a rule off, Dana or Sending off,
+   * the chat already off, a person active in the chat, no phone jid. Null when there is no stop request.
+   */
+  async function stopFirst(leadId) {
+    const lead = db.getLead(leadId);
+    if (!lead || !useBrain(lead) || autoState(lead) === null || Number(lead.dana_off) === 1) return null;
+    const all = pendingFor(leadId, lead, { all: true });
+    const hit = all.map((m) => (typeof m.text === 'string' ? matchStopWords(m.text) : null)).find(Boolean);
+    if (!hit) return null;
+    const e = eligible(leadId);
+    if (!e.ok && !STOP_OVERRIDES.has(e.reason)) return skip(leadId, e.reason);
+    if (isOwed(lead.dana_hold_reason)) endHold(leadId, { own: lead.dana_hold_reason });
+    const coversTs = Math.max(...all.map((m) => Number(m.ts)));
+    turnCover.set(String(leadId), { ts: coversTs, rid: Math.max(...all.map((m) => Number(m.rid))) });
+    return stopChat(lead, languageOf({ lead, texts: all.map((m) => m.text) }), hit.kind, coversTs, { checked: true, viaBrain: true });
+  }
+
   /* ---------------- one run ---------------- */
   async function refusedRun(leadId, e) {
     if (e.reason === 'identity') {
@@ -1343,8 +1392,9 @@ export function createDana({
     if (e.reason === 'cap_chat' || CAP_HANDOVERS.has(e.reason)) {
       const lead = db.getLead(leadId);
       const viaBrain = useBrain(lead);
-      // A brain chat's waiting messages include those an outage line covered (r3), like the run's batch.
-      const waiting = pendingFor(leadId, lead);
+      // A brain chat's waiting messages include those an outage line covered (r3), from the one builder (r14).
+      const built = batchOf(leadId, lead);
+      const waiting = built.batch;
       // A cap acts only for a client who is waiting: with nothing unanswered (a wake for a
       // batch another run answered) there is nobody to hand over — no flag, alert or line.
       if (!waiting.length) {
@@ -1352,7 +1402,7 @@ export function createDana({
         return skip(leadId, 'nothing');
       }
       const language = languageOf({ lead, texts: waiting.map((m) => m.text) });
-      const coversTs = waiting[waiting.length - 1].ts;
+      const coversTs = built.coversTs;
       // Past 2 h a brain chat's message is a person's, capped or not: `missed` once, and its hold ends (r3 N4).
       if (viaBrain && now() - coversTs > FRESH_MS) {
         clearEnded(leadId, now(), { owed: true });
@@ -1365,6 +1415,9 @@ export function createDana({
   }
 
   async function run(leadId, ts, { wokeAt = null, owed = null } = {}) {
+    // Stop first (r14 I1), before an owed line and before every other check.
+    const stopped = await stopFirst(leadId);
+    if (stopped) return stopped;
     if (owed) return sendOwed(leadId, owed);
     // A chat that owes a line sends it (when due) before anything else, and starts no model turn in this run (r9): an
     // inbound wake never answers over, or covers up, the owed hand-over or closing line. Not due yet: it waits.
@@ -1384,19 +1437,21 @@ export function createDana({
       return refusedRun(leadId, e);
     }
     const viaBrain = e.brain;
-    const batch = pendingFor(leadId, e.lead);
+    const built = batchOf(leadId, e.lead);
+    const batch = built.batch;
     if (!batch.length) {
       backlog.delete(leadId);
       if (viaBrain && e.lead.dana_hold_reason) clearHold(leadId);
       return skip(leadId, 'nothing');
     }
     const lead = e.lead;
-    // The covered message by insertion order, for every boundary this run reads (r12).
-    turnCover.set(String(leadId), { ts: Number(batch[batch.length - 1].ts), rid: Number(batch[batch.length - 1].rid ?? coverRid(leadId, batch[batch.length - 1].ts)) });
+    // The covered prefix by insertion order, for every boundary this run reads (r12, r14).
+    if (viaBrain) turnCover.set(String(leadId), { ts: Number(built.coversTs), rid: Number(built.rid) });
     // A recovery run: an outage of this chat is open, read from its marked line, whatever hold it has now (r6).
     const recovering = viaBrain && openOutage(leadId, started);
     const language = languageOf({ lead, texts: batch.map((m) => m.text) });
-    const coversTs = batch[batch.length - 1].ts;
+    // The batch's age is its NEWEST ts (r14 I2), its coverage its highest rowid (a brain chat).
+    const coversTs = viaBrain ? built.coversTs : batch[batch.length - 1].ts;
     if (!openChat(leadId, coversTs, started)) {
       if (viaBrain) clearEnded(leadId, started, { owed: true });
       return skip(leadId, 'no_open_chat');
@@ -1421,10 +1476,9 @@ export function createDana({
       }
       backlog.delete(leadId);
     }
-    // The code stop-word check, before any model call (DESIGN §4.1; both paths), on EVERY waiting message, not only
-    // the batch's newest ten (r12).
-    // A legacy chat scans its batch (the store's newest ten), as before r12 (r13): an old false positive can't stop it.
-    const stopHit = (viaBrain ? pendingFor(leadId, lead, { all: true }) : batch).map((m) => (typeof m.text === 'string' ? matchStopWords(m.text) : null)).find(Boolean);
+    // The code stop-word check of a legacy chat, on its batch (the store's newest ten), before the model call (DESIGN
+    // §4.1). A brain chat's ran first (stopFirst, r14 I1).
+    const stopHit = viaBrain ? null : batch.map((m) => (typeof m.text === 'string' ? matchStopWords(m.text) : null)).find(Boolean);
     if (stopHit) return stopChat(lead, language, stopHit.kind, coversTs, { viaBrain });
     // The loop guard of a brain chat (sticky): held until a person writes; the owner hears "looks automated".
     if (viaBrain && looping(leadId, started)) {
@@ -1453,7 +1507,7 @@ export function createDana({
         const keyIds = batch.map((m) => m.key_id).filter((k) => typeof k === 'string' && k);
         safely(() => later(safely(() => pace.readDelayMs?.()) ?? 1500, () => sender.markRead({ jid: readJid, keyIds }).catch(() => {})));
       }
-      turn = await think(lead, batch, language, e.auto);
+      turn = await think(lead, batch, language, e.auto, built.all);
       if (!turn.ok) {
         if (turn.code === 'refusal') return handover(leadId, language, 'brain_refusal', coversTs, { note: { kind: 'other', reason: 'brain_refusal' }, viaBrain });
         if (turn.code === 'guard') return handover(leadId, language, 'price_guard', coversTs, { note: { kind: 'price_guard' }, viaBrain });
@@ -1513,19 +1567,19 @@ export function createDana({
       if (wait > 0) await sleep(wait);
     }
     const pre = await preSend(leadId, coversTs);
-    if (!pre.ok) {
-      // A cap reached meanwhile: the client is waiting (P4-6).
-      if (pre.reason === 'cap_chat' || CAP_HANDOVERS.has(pre.reason)) return capped(leadId, language, pre, coversTs, viaBrain, { checked: true });
-      return skip(leadId, pre.reason);
-    }
-    // A stop, privacy or deletion request stored while she worked (preSend's refresh included) wins before the commit
-    // hook runs (r13): no booking, no bubble; the chat is woken so the stop flow runs.
+    // A stop, privacy or deletion request stored while she worked (preSend's refresh included) wins before anything
+    // else this step would decide (r13, r14 I1): no booking, no bubble; the chat is woken so the stop flow runs.
     if (viaBrain) {
       const late = messagesAfter(leadId, coversTs);
       if (late.some((m) => typeof m.text === 'string' && matchStopWords(m.text))) {
         pendingAgain.set(String(leadId), Math.max(pendingAgain.get(String(leadId)) ?? 0, Number(late[late.length - 1].ts)));
         return skip(leadId, 'stop_request');
       }
+    }
+    if (!pre.ok) {
+      // A cap reached meanwhile: the client is waiting (P4-6).
+      if (pre.reason === 'cap_chat' || CAP_HANDOVERS.has(pre.reason)) return capped(leadId, language, pre, coversTs, viaBrain, { checked: true });
+      return skip(leadId, pre.reason);
     }
     // The commit hook (DESIGN §8.3; lib/dana-commit.mjs): only after preSend passed. It answers the bubbles
     // in the order they go (text, brochure, confirmation), maybe the booking it made, maybe a hand-over.
@@ -1681,6 +1735,8 @@ export function createDana({
     for (const kind of followUps) await commitHandover(leadId, language, kind, coversTs, viaBrain);
     if (outcome) return outcome;
     if (!sentAny) return skip(leadId, 'nothing');
+    // Messages past the batch cap (or stored after it) still waiting get their own turn (r14 I2).
+    if (viaBrain) rewakeNewer(leadId, coversTs);
     // An ended timed hold is over once she answered: no stale reason stays on the row (r2).
     const after = db.getLead(leadId);
     // (A hold with no time waits for a person: never cleared here. Number(null) is 0, so null is ruled out first.)
@@ -1784,11 +1840,12 @@ export function createDana({
       const capDay = [];
       for (const r of held) {
         const lead = db.getLead(r.lead_id);
-        const waiting = pendingFor(r.lead_id, lead);
+        const built = batchOf(r.lead_id, lead);
+        const waiting = built.batch;
         // Nothing waits, or what waits is past 24 h (never answered: never first): the hold ends, no wake (r3 N4).
-        if (!waiting.length || Number(waiting[waiting.length - 1].ts) < t - DAY_MS) { clearHold(r.lead_id); continue; }
+        if (!waiting.length || Number(built.coversTs) < t - DAY_MS) { clearHold(r.lead_id); continue; }
         if (t < holdDeadline(lead, t)) continue;
-        const newest = waiting[waiting.length - 1];
+        const newest = { ts: built.coversTs };
         const pastMark = t - Number(newest.ts) > FRESH_MS;
         // The day cap: each freed turn wakes one waiting chat, the oldest first (below); its reason stays so a
         // chat still capped only waits again, with no repeat hand-over (r2). Past the 2-h mark it goes now (missed).
