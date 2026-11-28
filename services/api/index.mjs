@@ -27,6 +27,7 @@
 import { createTelegramHandoffs } from './lib/telegram-handoff.mjs';
 import { ensureHandoff, taskCounts } from './lib/lead-tasks.mjs';
 import { previousEnquiry, saveEnquiryReceipt, recoverPendingNotifications } from './lib/enquiry-receipt.mjs';
+import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { loadConfig, redacted } from './lib/config.mjs';
@@ -50,7 +51,7 @@ import { appendJsonl, createOrMergeLead } from './lib/leads.mjs';
 import { sendText, waConfig } from './lib/wa.mjs';
 import { createTeam, TeamError, isExcludedLead } from './lib/team.mjs';
 import { createAudit } from './lib/audit.mjs';
-import { createSender, INTERRUPTED_MS as INTERRUPTED_SEND_MS } from './lib/wa-send.mjs';
+import { createSender, splitMark, INTERRUPTED_MS as INTERRUPTED_SEND_MS } from './lib/wa-send.mjs';
 import { createInboxStore, RETENTION_MS, CANDIDATE_KEEP_MS, DISMISSED_KEEP_MS } from './lib/inbox/store.mjs';
 import { createIngest } from './lib/inbox/ingest.mjs';
 import { createBackfill, JOIN_HISTORY_MS } from './lib/inbox/backfill.mjs';
@@ -72,21 +73,91 @@ import { createPushPolicy } from './lib/push-policy.mjs';
 import { createDanaCommit } from './lib/dana-commit.mjs';
 import { createMail } from './lib/mail/index.mjs';
 import { createBrain } from './lib/brain.mjs';
+import { createDailySummary, summaryOn, SUMMARY_HOUR, CATCH_UP_BEFORE_HOUR } from './lib/daily-summary.mjs';
+import { dayKey, TZ_OFFSET_MS } from './lib/dashboard/stats.mjs';
 
+/** The website chat's greeting when Retell sends none: nameless (brain migration, 27 Nov; PLAN T14). */
 const GREETING = {
-  en: "Hello, I'm Dana from Bona. How can I help you today?",
-  ar: 'مرحباً، أنا دانة من بونا. كيف أقدر أساعدك؟',
+  en: "Hello, I'm Bona's AI assistant. How can I help you today?",
+  ar: 'أهلاً، أنا مساعدة بونا الذكية. كيف أقدر أساعدك؟',
 };
 
 /** Login-code outbox rows and purged chats' send stubs exist only to count the day's sends; two days covers any rolling 24 h. */
 const CODE_ROW_TTL_MS = 2 * 86_400_000;
-/** How often the real server runs `app.inboxMaintenance()`. */
+/** How often the real server runs `app.inboxMaintenance()` (TIMERS 'upkeep'). */
 const INBOX_UPKEEP_EVERY_MS = 24 * 3_600_000;
 /**
  * The only error codes /health may name (DESIGN §5.4): a fixed enum, never upstream text, which
  * can carry a calendar id or an address. Anything else a module reports reads as null.
  */
 const HEALTH_ERROR_CODES = new Set(['auth', 'forbidden', 'not_found', 'timeout', 'quota', 'network', 'bad_response']);
+/**
+ * The workers PR-INT puts on a clock (PLAN T14): the owner notes' pass, the daily summary's minute (with
+ * the calendar's 05:00 reconcile), the hold and backlog sweep, the viewing worker, the brain's free
+ * GET /v1/models probe, and the daily upkeep. The link probe keeps its own 10-minute loop (lib/wa-link.mjs).
+ */
+export const TIMERS = Object.freeze([
+  ['notes', 5_000], ['summary', 60_000], ['sweep', 60_000], ['viewing', 5 * 60_000], ['brainProbe', 15 * 60_000], ['upkeep', INBOX_UPKEEP_EVERY_MS],
+  // The identity watch (PR-INT r1): a link probe every 30 s until the instance is proven once (then the probe's own
+  // 10-minute loop), and a wake for the chats Dana refused as `identity` meanwhile.
+  ['identity', 30_000],
+]);
+/** The calendar's daily reconcile hour, Riyadh time (DESIGN §8.4); it also runs before the summary builds. */
+const RECONCILE_HOUR = 5;
+/** DESIGN §5.4: latencyOk = p90 ≤ 60 s over the answers' ring, once it holds 5 answers. */
+const LATENCY_OK_MS = 60_000;
+const LATENCY_MIN_ANSWERS = 5;
+/**
+ * The pre-update database copies (services/deploy/vps/db-snapshot.mjs) go after 29 days by their own UTC stamp, so a
+ * once-a-day run never lets one pass the 30 days the privacy text promises (PLAN T14, "Added 27 Nov").
+ */
+const BACKUP_MAX_AGE_DAYS = 29;
+const DAY_MS = 86_400_000;
+/** A snapshot of any label (db-snapshot.mjs ANY_NAME_RE; group 1 its UTC stamp) and a killed run's temp copy (its PARTIAL_RE). */
+const SNAPSHOT_NAME_RE = /^bona-[a-z0-9][a-z0-9-]{0,39}-(\d{8}T\d{6}Z)\.db$/;
+const SNAPSHOT_PARTIAL_RE = /^\.bona-[a-z0-9][a-z0-9-]{0,39}-\d{8}T\d{6}Z\.db\.[1-9]\d{0,9}\.[0-9a-f]{12}\.partial$/;
+
+/** The time (ms) a snapshot stamp (20261127T111500Z) stands for, or NaN when it is no real UTC time. */
+function snapshotTime(stamp) {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(stamp);
+  if (!m) return NaN;
+  const t = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]));
+  return Number.isFinite(t) && new Date(t).toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '') === stamp ? t : NaN;
+}
+
+/**
+ * The daily backup prune of one release-backups folder (PLAN T14, "Added 27 Nov"): every snapshot whose stamp is
+ * more than BACKUP_MAX_AGE_DAYS before `now`, and every temp copy whose file time is more than a day before it
+ * (a younger one may be a run still writing it). Plain files only: a sub-folder or a link is never touched, nor
+ * any other name. The rules of services/deploy/vps/db-snapshot.mjs `--max-age-days`, by name and age.
+ * @returns {{ expired: number, abandoned: number }}
+ */
+export function pruneReleaseBackups(outDir, now) {
+  const cutoff = now - BACKUP_MAX_AGE_DAYS * DAY_MS;
+  const partialCutoff = now - DAY_MS;
+  let expired = 0;
+  let abandoned = 0;
+  for (const name of fs.readdirSync(outDir).sort()) {
+    const snap = SNAPSHOT_NAME_RE.exec(name);
+    if (!snap && !SNAPSHOT_PARTIAL_RE.test(name)) continue;
+    const file = path.join(outDir, name);
+    let st;
+    try { st = fs.lstatSync(file); } catch { continue; }
+    if (!st.isFile()) continue;
+    if (snap ? !(snapshotTime(snap[1]) < cutoff) : !(st.mtimeMs < partialCutoff)) continue;
+    try {
+      fs.unlinkSync(file);
+    } catch (err) {
+      if (err?.code === 'ENOENT') continue;
+      throw err;
+    }
+    if (snap) expired += 1; else abandoned += 1;
+  }
+  return { expired, abandoned };
+}
+/** The tool_failed note on WhatsApp and email (critic round 2 #17a): no number, a person can help. */
+const TOOL_FAILED_NOTE_CLIENT = 'Tell the client you cannot check that right now; a person can help.';
+const TOOL_FAILED_NOTE_VISITOR = 'Tell the visitor you cannot check that right now and offer WhatsApp +966 57 626 7694.';
 
 const jsonLog = (level, obj) => {
   const line = JSON.stringify({ ts: new Date().toISOString(), level, ...obj });
@@ -225,7 +296,10 @@ export function createApp(options = {}) {
   // Team accounts (2026-09-27 design §3). The owner is (re)seeded on every start from
   // BONA_OWNER_JID — which also hands him every session that predates accounts, so his
   // live login survives the deploy; everyone else is added on the Team page.
-  const team = options.team ?? createTeam(db, { log });
+  // The owner test (lib/owner-test.mjs) is built below, from the team; the team reads it back through this
+  // reference on every call, so the owner's own number is a client's chat while his test is on (DESIGN §3.2).
+  let ownerTest = null;
+  const team = options.team ?? createTeam(db, { log, ownerTest: () => ownerTest });
   // The owner (BONA_OWNER_JID) and the instance's own number (BONA_WA_INSTANCE_JID) are two
   // numbers since 2026-11-19 (design 2026-11-16 §11); unset, the second is the first.
   const wa = waConfig(cfg.env ?? {});
@@ -299,29 +373,117 @@ export function createApp(options = {}) {
     pusher: pushKeys && pushSubject ? createPusher({ keys: pushKeys, subject: pushSubject, fetchImpl, now: clock }) : null,
     isExcludedLead: excludedLead, now: clock, log,
   });
-  // The instance identity guard and the link probe (DESIGN §5.3, PR-L). Stub: identity fails
-  // closed, the link reads as up, and nothing is started.
+  // The instance identity guard and the link probe (DESIGN §5.3, PR-L): identity fails closed until
+  // the first probe; `startTimers` (the real server) starts its 10-minute loop.
   const waLink = options.waLink ?? createWaLink({ env: cfg.env ?? {}, alerts, fetchImpl, now: clock, log });
-  // The owner's test switch and the per-lead auto mode (DESIGN §2, §3.2, PR-A2). Stub: no test,
-  // no own-number rule, no auto mode — today's behaviour wherever it is read.
-  const ownerTest = options.ownerTest ?? createOwnerTest({ cfg, team, wa, link: waLink, log, now: clock });
-  // The owner's notes (DESIGN §7, PR-B2). Stub: today's new-enquiry note, sent at once, through
-  // today's transport, `sendWhatsApp` (the one handed to createApp, else lib/wa.mjs to the
-  // owner's chat), exactly as the form path sent it at 13e4954: PR-F2b is inert for that note.
-  // For T11: moving it onto the one sender's kind 'note' (lib/wa-send.mjs; the owner's jid only,
-  // its own `note:to:` limit, an outbox row without text) is PR-B2's change, together with the
-  // ledger that holds a note the Sending switch or the note's minute refuses for now. Until then
-  // no production caller sends kind 'note'.
-  const notes = options.notes ?? createOwnerNotes({
-    db, siteUrl: cfg.siteUrl, sendNote: sendWhatsApp, team, inbox: inboxStore, ownerTest, log, now: clock,
+  // Built lazily below and read through these references, so each module can hold the others it needs.
+  let notes = null;
+  let viewing = null;
+  let brain = null;
+  let tools = null;
+  let mail = null;
+  // The owner's test switch, the per-lead auto mode and his `#dana …` commands (DESIGN §2, §3.2, PR-A2), with the
+  // store, the inbox (the switch's lifecycle), the notes (his replies), the viewing module and the brain's health.
+  ownerTest = options.ownerTest ?? createOwnerTest({
+    cfg, team, wa, link: waLink, db, inbox: inboxStore, audit, notes: () => notes, viewing: () => viewing, brain: () => brain, log, now: clock,
   });
-  // Viewing bookings (DESIGN §8, PR-B1). Stub: nothing bookable, every hook a no-op.
-  const viewing = options.viewing ?? createViewing({ db, cfg, team, ownerTest, notes, log, now: clock });
+  // Viewing bookings (DESIGN §8, PR-B1) on the shared inventory; nothing is bookable until calendar_booking and a calendar.
+  viewing = options.viewing ?? createViewing({ db, cfg, team, ownerTest, inventory, fetchImpl, log, now: clock });
+  // Bona's AI assistant on the OpenAI API (DESIGN-brain §3, PR-BR): its tools run in-process (`runInProcess`, the five
+  // WhatsApp tools answer nothing else), and its own alerts go to the owner notes unchanged; an outage for credit or
+  // the key also pushes the owners' phones (reason `brain`). Without ~/.secrets/bona-brain.env it is not configured.
+  // Only while the brain is in use (PR-INT r1, Codex P0-1): dana_brain '1', own_inbox '1', the owner's test, or an
+  // own-number chat on a proven instance (auto mode, DESIGN §2). A key staged before any of them (a revoked one that
+  // answers the models probe 401, say) is a journal line, never an owner note or a push.
+  const brainInUse = () => {
+    try {
+      if (team.danaBrainEnabled?.() === true || team.ownInboxEnabled?.() === true || ownerTest.active?.() === true) return true;
+      return ownerTest.ownNumberOk?.() === true
+        && Boolean(db.db.prepare("SELECT 1 FROM leads WHERE inbox_state = 'in' AND inbox_via = 'own_number' LIMIT 1").get());
+    } catch { return false; }
+  };
+  // The one outage alert (brain_out for quota or auth) the quiet sink held back (PR-INT r2): delivered, note and
+  // push, once the brain enters use (a switch or the owner test on, seen on the notes tick or a setting change) while
+  // the brain is still not answering; dropped once it answers again.
+  let deferredBrainOut = null;
+  const brainAlert = (code, meta) => {
+    if (!brainInUse()) {
+      log({ level: 'warn', evt: 'brain.alert_quiet', code: String(code).slice(0, 40), why: typeof meta?.code === 'string' ? meta.code.slice(0, 40) : null });
+      if (code === 'brain_out' && (meta?.code === 'quota' || meta?.code === 'auth')) deferredBrainOut = { code, meta: { code: meta.code }, push: true };
+      return;
+    }
+    deliverBrainAlert(code, meta);
+  };
+  // This process's first models probe has answered (r5): until then a RESTORED hold waits (a 200 drops it).
+  let probeAnswered = false;
+  const flushDeferredBrainAlert = () => {
+    if (!deferredBrainOut) return;
+    if (deferredBrainOut.restored && !probeAnswered && brain?.configured === true) return;
+    let out = false;
+    try { out = brain?.health?.()?.ok !== true; } catch { out = false; }
+    if (!out) { deferredBrainOut = null; return; }
+    if (!brainInUse()) return;
+    const { code, meta, push } = deferredBrainOut;
+    deferredBrainOut = null;
+    deliverBrainAlert(code, meta, { push });
+  };
+  function deliverBrainAlert(code, meta, { push = false } = {}) {
+    try { notes?.alert?.(code, meta); } catch (err) { log({ level: 'error', evt: 'brain.alert_failed', code: String(code), name: loggableName(err) }); }
+    if (code === 'brain_out' && (push || meta?.code === 'quota' || meta?.code === 'auth')) alerts.notifyOwners?.({ reason: 'brain' });
+  }
+  brain = options.brain ?? createBrain({
+    cfg, runTool: (name, envelope) => tools.runInProcess(name, envelope), team, fetchImpl, now: clock, log, alert: brainAlert,
+  });
+  // An outage the brain restored from its marker (PR-INT r3): the marker is set only by quota or auth, and its alert
+  // went before the restart, or was held then; held again while the brain is not in use, so its first use delivers it.
+  try {
+    // The owner's test switch is read as saved (r4): at start the instance is not proven yet, so active() is false, and a
+    // test already on before the restart had its alert then.
+    if (brain.configured === true && team.brainOutSince?.() != null && !brainInUse() && team.ownerAsClientEnabled?.() !== true) {
+      deferredBrainOut = { code: 'brain_out', meta: { code: 'down' }, push: true, restored: true };
+    }
+  } catch { /* nothing to hold */ }
+  // The owner's notes (DESIGN §7, PR-B2): the ledger, paced and merged, sent through the one sender as kind 'note' (the
+  // owner's jid only, its own `note:to:` limit, an outbox row without text or lead), held while Sending is off. A test
+  // that hands createApp its own `sendWhatsApp` gets that as the transport instead (http.test.mjs's seam).
+  // On Bona's own number (BONA_WA_INSTANCE_JID set) a note goes only through an instance proven to be Bona's
+  // (PR-INT r3, DESIGN §5.3): while it is not (unproven or mismatched), the ledger holds it, queued, and the next
+  // pass after the proof sends it; answered like the Sending switch's refusal, so it is never failed or dropped.
+  const sendNote = options.sendWhatsApp ?? ((text) => {
+    if (wa.ownNumberFrom === 'instance' && waLink.identityOk?.() !== true) {
+      log({ level: 'warn', evt: 'notes.held_identity' });
+      return { ok: false, error: 'sending_disabled', failure: 'local' };
+    }
+    return sender.sendTo({ jid: wa.ownerJid, text, kind: 'note' });
+  });
+  notes = options.notes ?? createOwnerNotes({
+    ledger: true, db, siteUrl: cfg.siteUrl, publicApi: cfg.publicApi, sendNote, team, ownerTest, inventory, brain, viewing, waLink,
+    mail: { get configured() { return mail?.health?.()?.configured === true; }, health: () => mail?.health?.() ?? { configured: false } },
+    log, now: clock,
+  });
   // Each subscribes by its `onPurge(leadId)` (PR-B1: the lead's booked rows to cancel_pending;
   // PR-B2: the lead's owner_notes rows). A module without one has nothing to forget.
   purgeSubscribers.push((leadId) => viewing.onPurge?.(leadId), (leadId) => notes.onPurge?.(leadId));
+  // The Greeting/Away alert (ingest's detector) reaches the owner only while the new automation is on (PR-INT r4,
+  // strict inert): own_inbox '1', the owner's test, or dana_brain '1'. Otherwise two staff replies alike are a
+  // journal line, never a new WhatsApp note.
+  const automationOn = () => {
+    try { return team.ownInboxEnabled?.() === true || ownerTest.active?.() === true || team.danaBrainEnabled?.() === true; } catch { return false; }
+  };
+  let greetingQuietDay = null;
+  const ingestNotes = {
+    alert: (code, meta) => {
+      if (code === 'greeting_away' && !automationOn()) {
+        // `quiet`: nothing taken, so ingest keeps its day latch unset (r5); this line once a Riyadh day.
+        const day = dayKey(clock(), TZ_OFFSET_MS);
+        if (greetingQuietDay !== day) { greetingQuietDay = day; log({ level: 'warn', evt: 'inbox.greeting_away_quiet' }); }
+        return { queued: false, reason: 'automation_off', quiet: true };
+      }
+      return notes.alert(code, meta);
+    },
+  };
   const given = options.ingest ?? createIngest({
-    db, inbox: inboxStore, ownerUserId, ownerPhone: selfDigits || null, isExcludedLead: excludedLead, ownerTest, log, now: clock,
+    db, inbox: inboxStore, ownerUserId, ownerPhone: selfDigits || null, isExcludedLead: excludedLead, ownerTest, notes: ingestNotes, log, now: clock,
   });
   // The backfill and the poller take the one-record function. A test may hand in either
   // shape, as createPoller allows; any other fails here, not on every record the poller reads.
@@ -352,29 +514,53 @@ export function createApp(options = {}) {
   const funds = options.funds ?? createFundsWatch({ team, alerts, now: clock, log });
   // The concierge's tool handlers, built before Dana (PR-F2b) so the brain can run them
   // in-process through `runTool` (DESIGN-brain §3.4). Constructing them contacts nothing.
-  const tools = createToolHandlers({
-    inventory, units, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, notifyHandoff, ownerTest, log,
+  tools = createToolHandlers({
+    inventory, units, store, db, dataDir: cfg.dataDir, siteUrl: cfg.siteUrl, env: cfg.env, sendWhatsApp, notifyHandoff, ownerTest,
+    viewing, notes, fetchImpl, log,
   });
-  // Bona's AI assistant on the OpenAI API (DESIGN-brain §3, PR-BR). Stub: not configured, every
-  // turn `off`; it reads no key file and calls nothing.
-  const brain = options.brain ?? createBrain({ cfg, runTool: (name, envelope) => tools.run(name, envelope), team, fetchImpl, now: clock, log });
   // Dana's human timing and caps (DESIGN §6.2-6.3, PR-B3). Stub: today's numbers.
   const pacing = options.pacing ?? createPacing({ cfg, now: clock });
   // What an answer becomes after preSend (DESIGN §8.3, PR-B4). Stub: one text bubble.
   const danaCommit = options.danaCommit ?? createDanaCommit({ viewing, notes, inventory, sender, log });
-  // `brain`, `ownerTest`, `pacing`, `commit` and `notes` are the seams PR-B3 (lib/dana-wa.mjs)
-  // reads; today's Dana ignores them, so she answers exactly as before.
+  // The Ops panel's 24-hour counts of what Dana did (DESIGN §5.4): answers, hand-overs and skips by
+  // reason, read off her own journal lines (ids and codes only) as they pass, in memory, so a restart
+  // starts them again. Her lines still go to the journal unchanged.
+  const opsEvents = [];
+  const OPS_EVENTS_MAX = 20_000;
+  // The chats Dana refused as `identity` (the instance not proven yet): woken once it is (the `identity` tick).
+  const identitySkipped = new Set();
+  const danaLog = (e) => {
+    try {
+      if (e?.evt === 'dana.skipped' && e.reason === 'identity' && typeof e.leadId === 'string') identitySkipped.add(e.leadId);
+      const kind = e?.evt === 'dana.answered' ? 'answered' : e?.evt === 'dana.skipped' ? 'skipped' : e?.evt === 'dana.handover' ? 'handover' : null;
+      if (kind) {
+        const why = kind === 'skipped' ? e.reason : kind === 'handover' ? e.why : null;
+        opsEvents.push({ at: clock(), kind, why: typeof why === 'string' && /^[a-z_]{1,40}$/.test(why) ? why : 'other' });
+        if (opsEvents.length > OPS_EVENTS_MAX) opsEvents.splice(0, opsEvents.length - OPS_EVENTS_MAX);
+      }
+    } catch { /* a count is never worth an answer */ }
+    log(e);
+  };
+  // Dana on WhatsApp with every seam PR-B3 (lib/dana-wa.mjs) reads: the brain, the owner test, the
+  // pacing, the commit, the notes, and the identity guard (`link` and `wa`, DESIGN §5.3).
   const dana = options.dana ?? createDana({
     db, inbox: inboxStore, team, sender, notifyHandoff, retell: cfg.retellMock && !danaOnMock ? null : retell, alerts, inventory, funds,
-    siteUrl: cfg.siteUrl, agentId: cfg.waChatAgentId ?? null, isExcludedLead: excludedLead, backfill, budget, now: clock, log,
-    brain, ownerTest, pacing, commit: danaCommit, notes,
+    siteUrl: cfg.siteUrl, agentId: cfg.waChatAgentId ?? null, isExcludedLead: excludedLead, backfill, budget, now: clock,
+    brain, ownerTest, pacing, commit: danaCommit, notes, link: waLink, wa, log: danaLog,
     ...(Number.isFinite(options.danaBatchMs) ? { batchMs: options.danaBatchMs } : {}),
   });
   // What a stored client message sets off (PR-B2). Stub: today's hook — the phone alert, then
   // Dana's wake — moved out of the poller's wiring below unchanged.
-  const pushPolicy = options.pushPolicy ?? createPushPolicy({ alerts, dana });
+  const pushPolicy = options.pushPolicy ?? createPushPolicy({ alerts, dana, ownerTest, log });
   // Bona's mailbox (DESIGN §9, PR-C2). Stub: not configured, nothing started.
-  const mail = options.mail ?? createMail({ cfg, db, brain, notes, log, now: clock });
+  mail = options.mail ?? createMail({ cfg, db, brain, notes, log, now: clock });
+  // The daily summary's minute step (DESIGN §7.3), queued through the notes; null when the notes cannot hold one.
+  let dailySummary = null;
+  try {
+    dailySummary = createDailySummary({ db, team, notes, now: clock, log });
+  } catch (err) {
+    log({ level: 'warn', evt: 'notes.summary_unwired', name: loggableName(err) });
+  }
   // The WhatsApp Ref-code poller. Read-only, and only when `BONA_WA_POLL` says so —
   // constructing it contacts nothing; the real server (below) is what puts it on a timer.
   // Handed the inbox, so every live client message of an `in` chat is stored as it is
@@ -483,6 +669,8 @@ export function createApp(options = {}) {
       // The owner's list of real-estate chats to check (D17): an open one 30 days after its
       // last property message, a dismissed one a year after he dismissed it.
       const candidates = step('candidates', () => inboxStore.pruneCandidates({ openBefore: t - CANDIDATE_KEEP_MS, dismissedBefore: t - DISMISSED_KEEP_MS }));
+      // The pre-update database copies past 29 days (PLAN T14, "Added 27 Nov"); its own line, counts only.
+      step('backups', () => pruneBackups(t));
       const counts = {
         excludedOut,
         purgedChats: retention?.leads ?? null,
@@ -543,6 +731,25 @@ export function createApp(options = {}) {
     }
   };
 
+  /**
+   * The daily backup prune (PLAN T14, "Added 27 Nov"; the D1 retention text promises 30 days): in
+   * release-backups/ beside the database, every `bona-<label>-<UTC stamp>.db` whose stamp is more than 29 days
+   * before the clock, and every `.bona-*.partial` a killed snapshot run left whose file time is over a day old.
+   * Never anything else (another name, a sub-folder), and nothing at all without the folder (pruneReleaseBackups).
+   * Logged as counts only.
+   */
+  function pruneBackups(t) {
+    const dbFile = cfg.dbFile ?? (cfg.dataDir ? path.join(cfg.dataDir, 'bona.db') : null);
+    if (!dbFile || dbFile === ':memory:') return null;
+    const outDir = path.join(path.dirname(dbFile), 'release-backups');
+    let isDir = false;
+    try { isDir = fs.lstatSync(outDir).isDirectory(); } catch { isDir = false; }
+    if (!isDir) return null;
+    const r = pruneReleaseBackups(outDir, t);
+    upkeepLog({ evt: 'backups.pruned', ...r });
+    return r;
+  }
+
   /** The upkeep's logger: one that throws costs no step, and never turns a finished run into a failed one. */
   function upkeepLog(entry) {
     try { log(entry); } catch { /* the upkeep goes on */ }
@@ -574,12 +781,211 @@ export function createApp(options = {}) {
   const dashboard = options.dashboard ?? createDashboardRoutes({
     db, cfg, inventory, fanout, app, log, sendWhatsApp, probeRetell, team, audit, sendCode,
     inbox: inboxStore, sender, backfill, alerts, ownerTest,
-    onSettingChanged: (key, value) => ownerTest.onSettingChanged?.(key, value),
+    onSettingChanged: (key, value) => { ownerTest.onSettingChanged?.(key, value); flushDeferredBrainAlert(); },
     hooks: {
       onTaskChange: (task, patch) => viewing.onTaskChange?.(task, patch),
       onLeadLeaving: (leadId) => viewing.onLeadLeaving?.(leadId),
     },
+    ops: () => opsCounts(),
   });
+
+  /**
+   * The Team page's Ops panel (DESIGN §5.4), owner only (routes.mjs draws it on the Team page): counts and
+   * codes, never a name, a number or a word of a message. Dana's answers, hand-overs and skips by reason over
+   * 24 h (her journal, `danaLog`), her latency ring, the sends that failed or went unsure (a non-null `error` on
+   * any other row is lib/dana-wa.mjs's mark, `outage_line`, `cov:<rowid>` or `<mark>|<reason>`, read with
+   * wa-send's splitMark: never a failure), the notes, the bookings, the month's turns, the chats an AI outage
+   * holds, and the brain's own rows (brain.ops()). A part that cannot be read is left out.
+   */
+  function opsCounts() {
+    const t = clock();
+    const since = t - DAY_MS;
+    while (opsEvents.length && opsEvents[0].at < since) opsEvents.shift();
+    // Through a Map: a reason is data, never a key that could reach Object.prototype.
+    const tally = (list) => Object.fromEntries(list.reduce((m, x) => m.set(x, (m.get(x) ?? 0) + 1), new Map()));
+    const out = {};
+    const part = (fn) => { try { fn(); } catch { /* left out */ } };
+    const seconds = (ms) => (typeof ms === 'number' && Number.isFinite(ms) ? `${Math.round(ms / 1000)} s` : '—');
+    part(() => {
+      const l = dana.latency?.() ?? {};
+      out['Latency p50 / p90 (24 h)'] = Number(l.n) > 0 ? `${seconds(l.p50)} / ${seconds(l.p90)}` : 'no answers yet';
+    });
+    const events = opsEvents.filter((e) => e.at >= since);
+    out['Answers (24 h)'] = events.filter((e) => e.kind === 'answered').length;
+    out['Hand-overs (24 h)'] = tally(events.filter((e) => e.kind === 'handover').map((e) => e.why));
+    out['Skips (24 h)'] = tally(events.filter((e) => e.kind === 'skipped').map((e) => e.why));
+    part(() => {
+      const rows = db.db.prepare("SELECT status, error FROM wa_outbox WHERE created >= ? AND status IN ('failed', 'uncertain')").all(since);
+      const reason = (r) => {
+        const why = r.status === 'failed' ? r.error : splitMark(r.error).reason;
+        return typeof why === 'string' && /^[\w.-]{1,40}$/.test(why) ? why : 'unknown';
+      };
+      out['Send failures (24 h)'] = tally(rows.filter((r) => r.status === 'failed').map(reason));
+      out['Sends unsure (24 h)'] = tally(rows.filter((r) => r.status === 'uncertain').map(reason));
+    });
+    part(() => {
+      out['Owner notes (24 h)'] = Object.fromEntries(db.db.prepare('SELECT status, COUNT(*) AS n FROM owner_notes WHERE created >= ? GROUP BY status ORDER BY status').all(since).map((r) => [r.status, r.n]));
+    });
+    part(() => {
+      out['Viewings booked (upcoming)'] = db.db.prepare("SELECT COUNT(*) AS n FROM viewing_bookings WHERE status = 'booked' AND start_ts >= ?").get(t).n;
+    });
+    part(() => {
+      const d = new Date(t + TZ_OFFSET_MS);
+      const monthStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) - TZ_OFFSET_MS;
+      out['Assistant turns this month'] = inboxStore.countDanaTurns({ sinceTs: monthStart });
+    });
+    part(() => {
+      out['Lid-only chats to check'] = db.db.prepare("SELECT COUNT(*) AS n FROM inbox_candidates WHERE state = 'open' AND phone_e164 IS NULL AND lid IS NOT NULL").get().n;
+    });
+    part(() => {
+      out['Chats held by an AI outage'] = db.db.prepare("SELECT COUNT(*) AS n FROM leads WHERE inbox_state = 'in' AND dana_hold_reason = 'brain_out'").get().n;
+    });
+    part(() => {
+      const o = brain.ops?.() ?? {};
+      if (!o || typeof o !== 'object' || !Object.keys(o).length) return;
+      const money = (v) => (typeof v === 'number' && Number.isFinite(v) ? `$${v.toFixed(2)}` : '—');
+      out['AI turns by model (24 h)'] = o.turnsByModel ?? {};
+      out['AI backup turns (24 h)'] = o.backupTurns ?? 0;
+      out['AI errors by code (24 h)'] = o.errors ?? {};
+      out['AI guard repairs / hand-overs (24 h)'] = `${o.guardRepairs ?? 0} / ${o.guardHandovers ?? 0}`;
+      out['AI cached-token ratio'] = typeof o.cachedRatio === 'number' && Number.isFinite(o.cachedRatio) ? `${Math.round(o.cachedRatio * 100)}%` : '—';
+      out['AI $ today / month'] = `${money(o.usdToday)} / ${money(o.usdMonth)}`;
+      out['AI state'] = o.out ? 'out (not answering)' : o.breaker ? 'breaker open' : o.cooldown ? 'main model cooling down' : 'ok';
+    });
+    return out;
+  }
+  app.ops = opsCounts;
+
+  /*
+   * The timers (PLAN T14). Each tick is its own: one at a time, it never rejects, and one that throws is a
+   * `timer.failed` line naming the timer and the kind of failure, never its message. INERT with the switches
+   * off: the notes have nothing queued, the summary is off, the sweep finds no hold, the viewing worker and the
+   * reconcile have no calendar (or nothing booked), the probe is $0 and only with a key, the link probe only reads.
+   */
+  let reconciled = { day: null, summary: null };
+  async function summaryMinute() {
+    const t = clock();
+    const today = dayKey(t, TZ_OFFSET_MS);
+    const hour = new Date(t + TZ_OFFSET_MS).getUTCHours();
+    // The calendar's daily reconcile (DESIGN §8.4): from 05:00, and again before the summary builds.
+    let summaryDue = false;
+    try {
+      summaryDue = Boolean(dailySummary) && hour >= SUMMARY_HOUR && hour < CATCH_UP_BEFORE_HOUR
+        && String(team.getSetting('owner_summary_day') ?? '') !== today && summaryOn(team);
+    } catch { summaryDue = false; }
+    const at05 = hour >= RECONCILE_HOUR && reconciled.day !== today;
+    const beforeSummary = summaryDue && reconciled.summary !== today;
+    if (viewing.configured === true && (at05 || beforeSummary)) {
+      reconciled = { day: today, summary: beforeSummary ? today : reconciled.summary };
+      await viewing.reconcile?.();
+    }
+    return dailySummary?.minute();
+  }
+  const ticking = new Set();
+  const tick = (name, fn) => async () => {
+    if (ticking.has(name)) return undefined;
+    ticking.add(name);
+    try {
+      return await fn();
+    } catch (err) {
+      try { log({ level: 'error', evt: 'timer.failed', timer: name, name: loggableName(err), code: loggableCode(err) }); } catch { /* the timer goes on */ }
+      return undefined;
+    } finally {
+      ticking.delete(name);
+    }
+  };
+  /**
+   * The identity watch (PR-INT r1; DESIGN §5.3 stays: no send before the instance is proven). Until it has been
+   * proven once, one link probe a tick (30 s), not the probe's 10 minutes. Whenever it is proven, each chat Dana
+   * refused as `identity` meanwhile is woken for its newest client message; Dana's own rules (freshness included)
+   * decide from there, as on main. Nothing at all on a shared number, which the guard never reads.
+   */
+  let identityProven = false;
+  async function identityWatch() {
+    if (wa.ownNumberFrom !== 'instance') return { woken: 0 };
+    // The identity half alone (wa-link probeIdentity): no link probe, no Kuma beat, no failure count from this tick.
+    if (!identityProven) await (waLink.probeIdentity ? waLink.probeIdentity() : waLink.probe?.());
+    if (waLink.identityOk?.() !== true) return { woken: 0 };
+    identityProven = true;
+    let woken = 0;
+    for (const leadId of [...identitySkipped]) {
+      identitySkipped.delete(leadId);
+      const ts = db.db.prepare("SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ? AND direction = 'in'").get(leadId)?.ts;
+      if (Number.isFinite(ts)) { dana.wake(leadId, ts); woken += 1; }
+    }
+    return { woken };
+  }
+  app.ticks = {
+    identity: tick('identity', identityWatch),
+    notes: tick('notes', () => {
+      flushDeferredBrainAlert();
+      // Nothing can go on Bona's own number before its instance is proven (sendNote holds it): no pass, no journal noise.
+      if (wa.ownNumberFrom === 'instance' && waLink.identityOk?.() !== true) return undefined;
+      return notes.tick?.();
+    }),
+    summary: tick('summary', summaryMinute),
+    sweep: tick('sweep', () => dana.sweep?.()),
+    viewing: tick('viewing', () => viewing.tick?.()),
+    brainProbe: tick('brainProbe', async () => {
+      const out = brain.configured === true ? await brain.probe?.() : undefined;
+      if (out && typeof out === 'object') probeAnswered = true;
+      // This process's models probe answered (r4): the key works, so a held alert (one restored from the marker included)
+      // is stale; a real quota outage gets dana-wa's own brain_out at the first failed turn.
+      if (out?.ok === true) deferredBrainOut = null;
+      flushDeferredBrainAlert();
+      return out;
+    }),
+    upkeep: () => app.inboxMaintenance(),
+  };
+  let running = null;
+  /**
+   * Put every worker on its clock (TIMERS) and start the link probe. The real server calls it once; a second call
+   * starts nothing. `every(ms, fn)` / `clear(handle)` default to unref'd intervals (a test passes its own).
+   * @returns {{ name: string, ms: number }[]}
+   */
+  app.startTimers = function startTimers({ every = null, clear = null } = {}) {
+    if (running) return [];
+    const on = every ?? ((ms, fn) => { const h = setInterval(() => { fn(); }, ms); h.unref?.(); return h; });
+    running = { clear: clear ?? ((h) => clearInterval(h)), handles: TIMERS.map(([name, ms]) => on(ms, app.ticks[name])) };
+    try { waLink.start?.(); } catch (err) { log({ level: 'error', evt: 'timer.failed', timer: 'link', name: loggableName(err) }); }
+    return TIMERS.map(([name, ms]) => ({ name, ms }));
+  };
+  /**
+   * The real server's start (isMain): the timers and the link probe, whose first round starts at once; the poller only
+   * once that first round has answered (bounded by `firstProbeMs`), so no client message is read while the identity
+   * guard is still pending. DESIGN §5.3 / T09-T12's rule stands as it is: identityOk is false until a round proves the
+   * instance, so a first round that errors, or no Evolution to ask, leaves Dana's own-number chats unanswered until a
+   * later round proves it (every 10 min). A shared-number setup (no BONA_WA_INSTANCE_JID) never reads the guard.
+   * @returns {Promise<{ timers: { name: string, ms: number }[], pollStarted: boolean|null }>}
+   */
+  app.start = async function start({ every = null, clear = null, firstProbeMs = 15_000 } = {}) {
+    const timers = app.startTimers({ every, clear });
+    let timer = null;
+    try {
+      await Promise.race([
+        Promise.resolve().then(() => waLink.probe?.()).catch(() => {}),
+        new Promise((resolve) => { timer = setTimeout(resolve, firstProbeMs); timer.unref?.(); }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (waLink.identityOk?.() === true) identityProven = true;
+    // A shutdown meanwhile (SIGTERM inside the first ≤ 15 s) stopped the timers: the poller is not started after it.
+    if (!running) return { timers, pollStarted: null };
+    // The brain's $0 models probe, after the identity round (PR-INT r2): its alert sink then reads the instance as proven.
+    app.ticks.brainProbe();
+    const pollStarted = poller ? poller.start({ intervalMs: cfg.waPollMs }) : null;
+    return { timers, pollStarted };
+  };
+
+  /** Every timer off, the link probe stopped, and the notes' own wake-up timer too (shutdown, tests). */
+  app.stopTimers = function stopTimers() {
+    if (running) {
+      for (const h of running.handles) { try { running.clear(h); } catch { /* gone anyway */ } }
+      running = null;
+    }
+    try { waLink.stop?.(); } catch { /* stopping */ }
+  };
 
   function dynamicVariables({ locale, page, sessionId }) {
     return {
@@ -658,6 +1064,9 @@ export function createApp(options = {}) {
     const yes = (v) => v === true;
     const code = (v) => (HEALTH_ERROR_CODES.has(v) ? v : null);
     const owner = read(() => ownerTest.health());
+    const danaHealth = read(() => dana.health?.());
+    const latency = read(() => dana.latency?.());
+    const answers = Number.isInteger(latency.n) ? latency.n : 0;
     const link = read(() => waLink.health());
     const brainHealth = read(() => brain.health());
     const booking = read(() => viewing.health());
@@ -689,10 +1098,12 @@ export function createApp(options = {}) {
       // chat, a count of answers, or anything she said.
       // `fundsOut`: Retell is refusing her for lack of credit (R2) — a yes or no, never when.
       // `brainOk` / `brainBackup` (DESIGN-brain §10) are NOT part of `ok`: an AI outage never
-      // marks bona-api down. `breaker` and `latencyOk` are filled by PR-B3 / PR-INT.
+      // marks bona-api down, and neither does the breaker or a slow p90. `latencyOk` = p90 ≤ 60 s
+      // over her answers' ring once it holds 5, else null (not known).
       dana: {
-        configured: dana.configured, enabled: team.danaEnabled(), brainOk: yes(brainHealth.ok), brainBackup: yes(brainHealth.backup),
-        fundsOut: fundsOutSince(team) !== null, breaker: false, latencyOk: null,
+        configured: dana.configured === true, enabled: team.danaEnabled(), brainOk: yes(brainHealth.ok), brainBackup: yes(brainHealth.backup),
+        fundsOut: fundsOutSince(team) !== null, breaker: yes(danaHealth.breaker),
+        latencyOk: answers >= LATENCY_MIN_ANSWERS && typeof latency.p90 === 'number' && Number.isFinite(latency.p90) ? latency.p90 <= LATENCY_OK_MS : null,
       },
       booking: {
         enabled: yes(booking.enabled),
@@ -1006,7 +1417,11 @@ export function createApp(options = {}) {
       return sendRaw(res, 200, JSON.stringify(await tools.run(toolName, body)));
     } catch (err) {
       log({ level: 'error', evt: 'tool.failed', tool: toolName, error: String(err?.message ?? err) });
-      return sendRaw(res, 200, JSON.stringify(JSON.stringify({ error: 'tool_failed', note: 'Tell the visitor you cannot check that right now and offer WhatsApp +966 57 626 7694.' })));
+      // On WhatsApp or email the client is already talking to Bona's number or mailbox: no number to
+      // offer, a person can help (critic round 2 #17a). The website concierge keeps today's note.
+      const source = (body.call?.metadata ?? body.chat?.metadata ?? {})?.source;
+      const note = source === 'bona-whatsapp' || source === 'bona-email' ? TOOL_FAILED_NOTE_CLIENT : TOOL_FAILED_NOTE_VISITOR;
+      return sendRaw(res, 200, JSON.stringify(JSON.stringify({ error: 'tool_failed', note })));
     }
   }
 
@@ -1178,7 +1593,7 @@ export function createApp(options = {}) {
   server.requestTimeout = 60_000;
   // The store is owned by the app when the app opened it; a caller who injected one
   // (tests, tools) closes it themselves.
-  if (ownsDb) server.on('close', () => { fanout.stop(); poller?.stop(); app.dana.stop().catch(() => {}); db.close(); });
+  if (ownsDb) server.on('close', () => { app.stopTimers(); notes.stop?.(); fanout.stop(); poller?.stop(); app.dana.stop().catch(() => {}); db.close(); });
 
   app.server = server;
   app.handle = handle;
@@ -1205,17 +1620,19 @@ if (isMain) {
   // destinations up the moment ~/.secrets/bona-marketing.env has them.
   const fanoutStarted = app.fanout.start();
   jsonLog('info', { evt: 'fanout.init', started: fanoutStarted, dests: app.fanout.dests(), everyMs: app.cfg.fanoutMs });
-  // The WhatsApp poller. `BONA_WA_POLL=0` turns it off; without Evolution credentials it
-  // starts and skips every tick rather than guessing a URL. It never sets a webhook.
-  if (app.poller) {
-    const pollStarted = app.poller.start({ intervalMs: app.cfg.waPollMs });
-    jsonLog('info', { evt: 'wa.poll.init', started: pollStarted, everyMs: app.cfg.waPollMs, ...app.poller.status() });
-  }
   // Inbox upkeep (P2-18): once now, then daily. It logs its own counts and never rejects
   // (the `.catch` only keeps a future slip from crashing the process); like the poller, it
   // is never the reason the process stays alive.
   app.inboxMaintenance().catch(() => {});
-  setInterval(() => { app.inboxMaintenance().catch(() => {}); }, INBOX_UPKEEP_EVERY_MS).unref();
+  // PR-INT's timers (TIMERS): the notes, the summary minute, the sweep, the viewing worker, the brain's
+  // models probe and the daily upkeep, plus the link probe, whose first round runs now. The WhatsApp
+  // poller starts once that round has answered (`app.start`): `BONA_WA_POLL=0` turns it off; without
+  // Evolution credentials it starts and skips every tick rather than guessing a URL. It never sets a
+  // webhook. The brain's probe runs once right after that round ($0, only with a key).
+  app.start().then(({ timers, pollStarted }) => {
+    jsonLog('info', { evt: 'timers.init', timers: timers.map((x) => x.name) });
+    if (app.poller) jsonLog('info', { evt: 'wa.poll.init', started: pollStarted, everyMs: app.cfg.waPollMs, ...app.poller.status() });
+  }).catch((err) => jsonLog('error', { evt: 'start.failed', name: loggableName(err) }));
   app.server.listen(app.cfg.port, app.cfg.host, () => {
     jsonLog('info', { evt: 'listening', ...redacted(app.cfg) });
   });
@@ -1229,6 +1646,8 @@ if (isMain) {
     // `last_ok`, a gone device), given up to 4 s together: a Retell call can take 30 s. A run
     // cut before its send leaves no row — the next client message wakes her; one cut mid-send
     // is `uncertain` at start-up. Then the server, whose close stops the fan-out and the store.
+    app.stopTimers();
+    app.notes.stop?.();
     await app.poller?.stop();
     await Promise.race([
       Promise.resolve().then(() => app.dana.stop()).then(() => app.alerts.flush()),

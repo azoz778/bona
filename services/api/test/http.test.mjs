@@ -11,6 +11,7 @@ import { createApp } from '../index.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { DEFAULT_ORIGINS } from '../lib/cors.mjs';
 import { RetellError } from '../lib/retell.mjs';
+import { createFakeBrain } from '../lib/brain/fake.mjs';
 
 const TOKEN = 'a'.repeat(32);
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
@@ -81,6 +82,7 @@ async function withServer(overrides, fn) {
     sendWhatsApp: overrides.sendWhatsApp ?? (async (text) => { sent.push(text); return { ok: true }; }),
     log: overrides.log ?? (() => {}),
     fetchImpl: overrides.fetchImpl,
+    ...(overrides.app ?? {}),
   });
   await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
   const { port } = app.server.address();
@@ -177,6 +179,78 @@ test('/health carries the DESIGN §5.4 module keys (stub values): booleans and f
   });
 });
 
+/** A Dana double for the /health mapping (lib/dana-wa.mjs health() and latency()). */
+const healthDana = ({ breaker = false, latency = { n: 0, p50: null, p90: null } } = {}) => ({
+  configured: true, wake() {}, eligible: () => ({ ok: false, reason: 'off' }), answer: async () => ({}), flush: async () => {}, stop: async () => {},
+  status: () => ({ configured: true, enabled: false, pending: 0, inflight: 0 }), sweep: () => ({ woken: 0 }),
+  health: () => ({ breaker }), latency: () => latency,
+});
+
+test('T14-1 /health: the exact DESIGN §5.4 shape, booleans and enums only, no digits or counts under dana, inbox or notes; brainOk false never makes ok false', async () => {
+  const SECTIONS = {
+    inbox: ['identityOk', 'ownerAsClient', 'rule'], wa: ['linkOk'],
+    dana: ['brainBackup', 'brainOk', 'breaker', 'configured', 'enabled', 'fundsOut', 'latencyOk'],
+    booking: ['enabled', 'gcal'], notes: ['enabled', 'ok'], mail: ['configured', 'lastErrorCode', 'ok', 'replies'],
+  };
+  const cases = [
+    [{ health: { configured: true, ok: false, backup: true } }, { breaker: true, latency: { n: 5, p50: 9_000, p90: 61_000 } },
+      { brainOk: false, brainBackup: true, breaker: true, latencyOk: false }],
+    [{ health: { configured: true, ok: true, backup: false } }, { latency: { n: 5, p50: 9_000, p90: 60_000 } },
+      { brainOk: true, brainBackup: false, breaker: false, latencyOk: true }],
+    [{ health: { configured: true, ok: true, backup: false } }, { latency: { n: 4, p50: 9_000, p90: 99_000 } },
+      { brainOk: true, brainBackup: false, breaker: false, latencyOk: null }],
+    [{ health: { configured: true, ok: 'yes', backup: 1 } }, { breaker: 'open', latency: { n: '9', p90: '1' } },
+      { brainOk: false, brainBackup: false, breaker: false, latencyOk: null }],
+  ];
+  for (const [b, d, want] of cases) {
+    await withServer({ app: { brain: createFakeBrain(b), dana: healthDana(d) } }, async ({ call }) => {
+      const res = await call('/health');
+      assert.equal(res.status, 200, 'an AI outage or a breaker never marks bona-api down');
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      for (const [key, keys] of Object.entries(SECTIONS)) assert.deepEqual(Object.keys(body[key]).sort(), keys, `${key}: exactly the §5.4 keys`);
+      assert.deepEqual(Object.keys(body.booking.gcal).sort(), ['configured', 'lastErrorCode', 'ok']);
+      assert.deepEqual({ brainOk: body.dana.brainOk, brainBackup: body.dana.brainBackup, breaker: body.dana.breaker, latencyOk: body.dana.latencyOk }, want, JSON.stringify(d));
+      for (const key of ['dana', 'inbox', 'notes', 'wa']) {
+        assert.doesNotMatch(JSON.stringify(body[key]), /\d/, `${key}: no digits, no counts`);
+        for (const v of Object.values(body[key])) assert.ok(typeof v === 'boolean' || v === null || ['own', 'shared'].includes(v), `${key}: ${JSON.stringify(v)}`);
+      }
+    });
+  }
+});
+
+test('T14-1b a tool that throws: a WhatsApp or email conversation gets a note without the number; the website concierge keeps today\'s note with it', async () => {
+  const broken = { ...inventory, search() { throw new Error('index broken'); } };
+  await withServer({ inventory: broken }, async ({ tool }) => {
+    const note = async (meta) => {
+      const res = await tool('/v1/tools/search_properties', { name: 'search_properties', args: { district: 'Al Khalidiyah' }, ...meta });
+      assert.equal(res.status, 200);
+      const out = JSON.parse(await res.json());
+      assert.equal(out.error, 'tool_failed');
+      return out.note;
+    };
+    for (const meta of [{ chat: { chat_id: 'c1', metadata: { source: 'bona-whatsapp' } } }, { call: { call_id: 'k1', metadata: { source: 'bona-email' } } }]) {
+      const n = await note(meta);
+      assert.doesNotMatch(n, /\+?966|\d{3}/, `no number for ${meta.chat?.metadata.source ?? meta.call.metadata.source}`);
+      assert.match(n, /cannot check that right now/);
+      assert.match(n, /a person can help/i);
+    }
+    for (const meta of [{ chat: { chat_id: 'c2', metadata: { source: 'bona-web' } } }, {}]) {
+      assert.equal(await note(meta), 'Tell the visitor you cannot check that right now and offer WhatsApp +966 57 626 7694.', 'the concierge: today\'s note, byte for byte');
+    }
+  });
+});
+
+test('T14 the website greeting is nameless in both languages', async () => {
+  await withServer({}, async ({ call }) => {
+    for (const [locale, want] of [['en', /^Hello, I'm Bona's AI assistant\./], ['ar', /^أهلاً، أنا مساعدة بونا الذكية\./]]) {
+      const body = await (await call('/v1/chat/session', { method: 'POST', body: JSON.stringify({ locale }) })).json();
+      assert.match(body.greeting, want, locale);
+      assert.doesNotMatch(body.greeting, /Dana|دانة/);
+    }
+  });
+});
+
 /* ---------------- chat ---------------- */
 
 test('POST /v1/chat/session opens a Retell chat and returns a greeting', async () => {
@@ -185,7 +259,8 @@ test('POST /v1/chat/session opens a Retell chat and returns a greeting', async (
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.match(body.sessionId, /^[0-9a-f]{32}$/);
-    assert.match(body.greeting, /دانة/);
+    assert.match(body.greeting, /^أهلاً، أنا مساعدة بونا الذكية\./, 'nameless (PLAN T14): no begin_message from Retell, so our own greeting');
+    assert.doesNotMatch(body.greeting, /دانة|Dana/);
     const [, sent] = retell.calls.find(([name]) => name === 'createChat');
     assert.equal(sent.agent_id, 'agent_chat');
     assert.equal(sent.retell_llm_dynamic_variables.locale, 'ar');
@@ -430,10 +505,12 @@ test('an unknown tool name is 404 even with a good token', async () => {
 });
 
 test('create_lead through HTTP writes the lead and messages the owner', async () => {
-  await withServer({}, async ({ tool, sent, dataDir }) => {
+  await withServer({}, async ({ tool, sent, dataDir, app }) => {
     const res = await tool('/v1/tools/create_lead', { chat: { chat_id: 'chat_1' }, name: 'create_lead', args: { phone: '+966500000000', name: 'Sara' } });
     assert.equal(JSON.parse(await res.json()).saved, true);
     assert.match(fs.readFileSync(path.join(dataDir, 'leads.jsonl'), 'utf8'), /Sara/);
+    // PR-INT: the concierge's note is the notes ledger's (due at once, sent by its own pass, not inside the tool call).
+    await app.notes.tick();
     assert.equal(sent.length, 1);
   });
 });
@@ -949,6 +1026,7 @@ test('a lead Dana saves during an attributed call carries the campaign that brou
     assert.equal(lead.campaign, 'villas_sep');
     assert.equal(lead.session_id, 'mf3k2a-7b1c');
     assert.equal(lead.listing_id, 'BONA-W003');
+    await app.notes.tick(); // the ledger's pass (PR-INT): the concierge's note is due at once
     assert.match(sent[0], /Source: meta \/ paid · villas_sep/);
     assert.equal(app.db.getSession('mf3k2a-7b1c').ref, 'K7Q2XR');
   });
@@ -1007,11 +1085,13 @@ test('POST /v1/enquiry lands a form lead with the visitor\'s source, queues the 
     assert.match(sent[0], /Source: meta \/ paid · villas_sep · Ref K7Q2XR · BONA-W003/);
     assert.match(fs.readFileSync(path.join(dataDir, 'leads.jsonl'), 'utf8'), /Sara Ahmed/);
 
-    // The same person submitting again is one lead, told about twice.
+    // The same person submitting again is one lead. With the notes ledger (PR-INT; DESIGN §7.2, PLAN T11 test 13)
+    // a merge sends no note of its own: its receipt says `skipped` ("an existing contact"), its hand-off task stays.
     const again = await (await call('/v1/enquiry', { method: 'POST', body: JSON.stringify(enquiryBody({ event_id: 'mf3k2a1b-form0002', message: 'Still keen' })) })).json();
     assert.equal(again.lead_id, body.lead_id);
     assert.deepEqual(app.db.touchpointsForLead(body.lead_id).map((t) => t.event_type), ['lead_created', 'form_submit']);
-    assert.equal(sent.length, 2);
+    assert.equal(sent.length, 1, 'no second note for a merge');
+    assert.equal(app.db.db.prepare('SELECT notify_status FROM enquiry_receipts WHERE event_id = ?').get('mf3k2a1b-form0002').notify_status, 'skipped');
     const spent = (await (await call('/health')).json()).budget;
     assert.equal(spent.chats + spent.calls, 0, 'enquiries are not billable');
   });
@@ -1196,11 +1276,13 @@ test('ref-only enquiry carries its denied consent on fallback lead_created event
   const event=app.db.recentEvents({name:'lead_created'})[0];assert.equal(event.props._consent_analytics,false);assert.equal(event.props._consent_ads,false);
  });
 });
-test('owner notification quotes corrected buyer needs, not stale merged lead fields',async()=>{
- await withServer({},async({call,sent})=>{
+test('owner notification: one note per new lead, quoting what that enquiry said; a merge with corrected needs sends none (PR-INT ledger) but its lead keeps the correction',async()=>{
+ await withServer({},async({call,sent,app})=>{
   const one={...enquiryBody(),budget:'4 million'};const two={...one,event_id:'updated-budget-0001',budget:'6 million'};
-  await call('/v1/enquiry',{method:'POST',body:JSON.stringify(one)});await call('/v1/enquiry',{method:'POST',body:JSON.stringify(two)});
-  assert.match(sent.at(-1),/6 million/);assert.doesNotMatch(sent.at(-1),/4 million/);
+  const a=await(await call('/v1/enquiry',{method:'POST',body:JSON.stringify(one)})).json();await call('/v1/enquiry',{method:'POST',body:JSON.stringify(two)});
+  assert.equal(sent.length,1);assert.match(sent[0],/4 million/);
+  assert.equal(app.db.db.prepare('SELECT notify_status FROM enquiry_receipts WHERE event_id=?').get('updated-budget-0001').notify_status,'skipped');
+  assert.match(JSON.stringify(app.db.getLead(a.lead_id)),/6 million/,'the merge still corrects the lead');
  });
 });
 

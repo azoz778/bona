@@ -129,6 +129,9 @@ const codeOf = (err) => (PROBE_CODES.has(err?.code) ? err.code : 'bad_response')
 /**
  * @typedef {object} WaLink
  * @property {() => boolean} identityOk  the instance is Bona's own, checked number (false until a probe has answered)
+ * @property {() => boolean} identityMismatch  the newest probe answer named another number (an established mismatch)
+ * @property {() => boolean} identityMismatchAlerted  the owners were already pushed about the current mismatch
+ * @property {() => Promise<boolean>} probeIdentity  the identity half alone: no link probe, no Kuma beat, no failure count
  * @property {() => boolean} linkOk      WhatsApp answers through the instance (true until two probes in a row fail)
  * @property {() => boolean} linkStable  the link has answered for 10 min (DESIGN §6.4; false until two good probes of this run span it)
  * @property {() => void} start          forget the last run, probe now, then every 10 min (a second call does nothing)
@@ -169,6 +172,12 @@ export function createWaLink({
   let goodSince = null;
   let lastGood = null;
   let loggedIdentity = null;
+  // PR-INT r3: every identity check takes a number when it starts; an answer is recorded only when its check started
+  // after the last recorded one, so a slow early answer never overwrites a newer one (a confirmed mismatch, say).
+  let probeSeq = 0;
+  let recordedSeq = 0;
+  const takeSeq = () => { probeSeq += 1; return probeSeq; };
+  const newest = (seq) => { if (seq <= recordedSeq) return false; recordedSeq = seq; return true; };
   let started = false;
   let timer = null;
   let gen = 0;
@@ -238,10 +247,13 @@ export function createWaLink({
     const ac = new AbortController();
     controller = ac;
     const fresh = () => g === gen;
+    const seq = takeSeq();
     const id = await askIdentity(ac.signal);
     if (!fresh()) return;
 
-    if (id.error) {
+    if (!id.error && !newest(seq)) {
+      // A newer check answered first: this round records nothing, and asks the link on what that one recorded.
+    } else if (id.error) {
       idFails += 1;
       say({ level: 'warn', evt: 'wa.link.probe_failed', probe: 'identity', code: id.error });
     } else {
@@ -297,6 +309,30 @@ export function createWaLink({
     else if (identityOk()) await beat('up', 'ok');
     else if (identity !== null || idFails >= IDENTITY_DOWN_AFTER) await beat('down', 'identity_unknown');
     else await beat('up', 'identity_pending');
+  }
+
+  /**
+   * The identity half alone (PR-INT r2): fetchInstances, the same answer rules as a round (the answer recorded, a
+   * mismatch alerted once per incident), but no link probe, no Kuma beat and no failure counted. index.mjs's 30-s
+   * identity watch runs it until the instance is proven once, so a 503 blip there never adds to the link's count.
+   * A full round in flight answers it instead. Resolves to identityOk() after it.
+   */
+  async function probeIdentity() {
+    if (!canProbe || !started) return identityOk();
+    if (inflight) { await inflight; return identityOk(); }
+    const g = gen;
+    const seq = takeSeq();
+    const id = await askIdentity(AbortSignal.timeout(timeoutMs));
+    if (g !== gen || id.error || !newest(seq)) return identityOk();
+    identity = { match: id.match, at: now() };
+    if (id.match) mismatchAlerted = false;
+    const idNow = identityOk();
+    if (idNow !== loggedIdentity) {
+      say({ level: idNow ? 'info' : 'error', evt: 'wa.identity', ok: idNow, why: idNow ? 'match' : 'mismatch' });
+      loggedIdentity = idNow;
+    }
+    if (identity.match === false && !mismatchAlerted) { mismatchAlerted = true; await push('identity_mismatch'); }
+    return identityOk();
   }
 
   function probe() {
@@ -358,6 +394,11 @@ export function createWaLink({
     stop,
     probe,
     flush,
+    // A probe's answer named another number (PR-INT r1): a mismatch established, not merely an identity unproven.
+    identityMismatch: () => setup.ok && identity?.match === false,
+    // This run has already pushed the owners about the current mismatch (once per incident): a caller adds none.
+    identityMismatchAlerted: () => mismatchAlerted,
+    probeIdentity,
     health: () => ({ linkOk: linkUp === true, identityOk: identityOk() === true }),
   };
 }

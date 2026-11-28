@@ -58,9 +58,11 @@ export function fundsBanner(fundsOut, { brainOut = null, nameless = false } = {}
 }
 
 /**
- * The Ops panel (DESIGN §5.4): counts for the owner only, from an injected `ops()`. Until
- * T14 wires the real one it is a stub that returns `{}`, and the panel says so. Every key
- * and value is escaped; a nested value is shown as its JSON. A value that cannot be shown (a
+ * The Ops panel (DESIGN §5.4): counts for the owner only, from the injected `ops()` (index.mjs
+ * `opsCounts`, PR-INT): latency, answers, hand-overs and skips, failed and unsure sends, notes,
+ * bookings and the AI rows. With nothing to count the panel says so. Every key and value is
+ * escaped; a flat object of counts reads as `key n · key n` (`none` when empty), anything deeper
+ * as its JSON. A value that cannot be shown (a
  * cycle, a BigInt inside an object, a function, a getter that throws) is a dash, and a result
  * whose keys cannot even be listed is the placeholder, so the counts never break the page.
  */
@@ -71,9 +73,20 @@ const json = (v) => {
     return '—';
   }
 };
+/** A flat object of counts or codes (`{ human_recent: 2, hold: 1 }`) reads as words; anything deeper as its JSON. */
+const words = (v) => {
+  try {
+    if (Array.isArray(v) || Object.getPrototypeOf(v) !== Object.prototype) return null;
+    const keys = Object.keys(v);
+    if (!keys.every((k) => ['number', 'string', 'boolean'].includes(typeof v[k]))) return null;
+    return keys.length ? keys.map((k) => `${k} ${v[k]}`).join(' · ') : 'none';
+  } catch {
+    return null;
+  }
+};
 const shown = (v) => {
   if (v === null || v === undefined || typeof v === 'function' || typeof v === 'symbol') return '—';
-  return typeof v === 'object' ? json(v) : String(v);
+  return typeof v === 'object' ? (words(v) ?? json(v)) : String(v);
 };
 /** Each key is read on its own: `Object.entries` would run every getter at once, outside any guard. */
 const keysOf = (ops) => {
