@@ -28,7 +28,8 @@
  *     slots and every commit for the lead); a 404 or a failed read never makes it done;
  *   - a booking whose event is in Google (it has a task) adds no busy time of its own: freeBusy
  *     shows it where it is now. Only a hold (a commit between its reserve and its task) is local
- *     busy time, and one booking per lead goes by the row's status, not by its stored times;
+ *     busy time, and, for one slots() lookup, a booking whose task landed while its freeBusy was on its way
+ *     (that answer may predate the event); one booking per lead goes by the row's status, not by its stored times;
  *   - the reads of a run are applied in one transaction (apply()), so swaps resolve. A commit reads the
  *     lead's bookings over by their stored times and the chain of bookings from its start, then applies
  *     those reads, checks again and reserves in ONE transaction (commit()).
@@ -251,6 +252,18 @@ export function createViewing(deps = {}) {
    */
   const holds = (t) => prep("SELECT booking_id, task_id, start_ts, end_ts, created FROM viewing_bookings WHERE status = 'booked' AND task_id IS NULL").all()
     .filter((r) => live(r, t));
+  /** The `booked` rows whose event is in Google now: place() sets a row's task only once its insert answered. */
+  const withEvent = () => new Set(prep("SELECT booking_id FROM viewing_bookings WHERE status = 'booked' AND task_id IS NOT NULL").all()
+    .map((r) => r.booking_id));
+  /**
+   * The local busy time of one freeBusy answer (slots()): every live `booked` row not in `before`, the withEvent()
+   * read right before that request went out. That is the holds now, and a row that was a hold then or was reserved
+   * since whose task landed while Google answered (another lead's commit): its event may be missing from that
+   * answer, so it counts by its stored times, task or not, for that answer only. A booking Google had before the
+   * request goes by Google, as everywhere else: an owner move frees its first start.
+   */
+  const unseen = (before, t) => prep("SELECT booking_id, task_id, start_ts, end_ts, created FROM viewing_bookings WHERE status = 'booked'").all()
+    .filter((r) => !before.has(r.booking_id) && live(r, t));
   const bookedToday = (t) => prep('SELECT COUNT(*) n FROM viewing_bookings WHERE created >= ?').get(dayStart(riyadhDay(t))).n;
 
   /** What slots() checks before it asks Google (and again, `settled`, once the lead's rows were read). */
@@ -316,14 +329,17 @@ export function createViewing(deps = {}) {
     const days = bookableDays(now(), { holidays: hol.dates });
     const window = searchWindow(days);
     if (!window) return { bookable: false, reason: 'none_free', timezone: TIMEZONE, slots: [] };
+    // The bookings Google has as this request goes out (withEvent()): its answer shows them where they are now.
+    const inGoogle = withEvent();
     const fb = await gcal.freeBusy(window);
     if ((stop = gated())) return stop;
     if (!fb.ok) return { bookable: false, reason: 'calendar', code: fb.code };
     // The clock again once freeBusy answered: a day that turned today meanwhile is not offered (a commit would
     // answer too_soon). Only the days just queried are: a later day's busy time was never read.
     const tn = now();
-    // Google's busy time, plus the holds of commits whose event Google may not show yet.
-    const own = holds(tn).map((r) => ({ start: r.start_ts, end: r.end_ts }));
+    // Google's busy time, plus every booking its answer may not show (unseen()): the holds now, and another lead's
+    // booking reserved, or still a hold, when the request went out, whose task landed while Google answered.
+    const own = unseen(inGoogle, tn).map((r) => ({ start: r.start_ts, end: r.end_ts }));
     const list = freeSlots({ now: tn, busy: [...fb.busy, ...own], holidays: hol.dates, days });
     if (!list.length) return { bookable: false, reason: 'none_free', timezone: TIMEZONE, slots: [] };
     // The last check, nothing awaited since: no slot leaves here unless the gate passes now.

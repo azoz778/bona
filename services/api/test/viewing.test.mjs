@@ -2115,6 +2115,124 @@ test('slots runs the whole gate again after every Google answer and right before
   }
 });
 
+test("a start another lead books while this lookup's freeBusy is on its way is never offered: a booked row with no task when freeBusy was asked (reserved meanwhile, or a hold then) is local busy time for that lookup, task or not; a booking Google had before the ask goes by Google, so an owner move still frees its first start", async () => {
+  const THU = { start: R(2026, 12, 3, 0), end: R(2026, 12, 4, 0) }; // Thursday is full, so the offer starts on Sunday
+  const SUN16 = '2026-12-06T16:00+03:00';
+  const MON = '2026-12-07T10:00+03:00';
+  /**
+   * A fake calendar whose freeBusy answers with the calendar as it was when the request arrived (a snapshot), and
+   * whose next call of a held op waits, after Google computed its answer, until the test releases it.
+   */
+  const harness = () => {
+    const gcal = fakeGcal({ busy: () => [THU, ...calendarBusy(gcal)] });
+    const pending = [];
+    for (const op of ['holidays', 'freeBusy']) {
+      const real = gcal[op];
+      gcal[op] = async (...args) => {
+        const answer = await real(...args);
+        const i = pending.findIndex((g) => g.op === op);
+        if (i >= 0) {
+          const [g] = pending.splice(i, 1);
+          await new Promise((resolve) => { g.release = resolve; });
+        }
+        return answer;
+      };
+    }
+    const h = setup({ gcal });
+    const hold = (op) => {
+      const g = { op, release: null };
+      pending.push(g);
+      return {
+        reached: async () => {
+          for (let i = 0; i < 200 && !g.release; i += 1) await new Promise((resolve) => setImmediate(resolve));
+          assert.ok(g.release, `the held ${op} was reached`);
+        },
+        answer: () => g.release(),
+      };
+    };
+    const offered = async (lead) => {
+      const got = await h.viewing.slots({ lead, listingId: 'BONA-W902' });
+      assert.equal(got.bookable, true, JSON.stringify(got));
+      return got.slots.map((s) => s.slot_id);
+    };
+    return { ...h, hold, offered };
+  };
+  const rowOf = (h, id) => h.rows().find((r) => r.booking_id === id);
+
+  // B reserves AND finishes (its task attached) while A's freeBusy answer, taken before B's insert, is on its way.
+  {
+    const h = harness();
+    try {
+      const a = h.lead('LEAD-20261201-0000aaaa');
+      const b = h.lead('LEAD-20261201-0000bbbb');
+      assert.equal((await h.offered(a)).includes(SLOT), true, 'free at first');
+      const fb = h.hold('freeBusy');
+      const p = h.offered(a);
+      await fb.reached();
+      const got = await h.viewing.commitBooking({ lead: b, listingId: 'BONA-W901', slotId: SLOT });
+      assert.equal(got.ok, true, JSON.stringify(got));
+      assert.ok(rowOf(h, got.bookingId).task_id, "B's task is attached before A's answer is read");
+      fb.answer();
+      const list = await p;
+      assert.equal(list.includes(SLOT), false, "B's new booking is busy for A's lookup, though A's snapshot predates it");
+      assert.equal(list.includes(SUN16), true, 'the rest of the day is still offered');
+      // The next lookup goes by Google, which shows B's event; once the owner moves it, its first start is free again.
+      assert.equal((await h.offered(a)).includes(SLOT), false);
+      moveEvent(h, got.eventId, '2026-12-06T16:00:00+03:00', '2026-12-06T17:00:00+03:00');
+      const after = await h.offered(a);
+      assert.equal(after.includes(SLOT), true, 'an owner move frees the first start');
+      assert.equal(after.includes(SUN16), false, 'the new one is busy');
+    } finally { h.db.close(); }
+  }
+
+  // B reserved BEFORE A asked (a hold then, its insert not sent yet) and got its task while A's answer was on its way.
+  {
+    const h = harness();
+    try {
+      const a = h.lead('LEAD-20261201-0000aaaa');
+      const b = h.lead('LEAD-20261201-0000bbbb');
+      const bHol = h.hold('holidays');
+      const pb = h.viewing.commitBooking({ lead: b, listingId: 'BONA-W901', slotId: SLOT });
+      await bHol.reached();
+      assert.equal(h.rows().length, 1, "B's row is reserved");
+      assert.equal(h.rows()[0].task_id, null, 'a hold: no task yet');
+      const aFb = h.hold('freeBusy');
+      const pa = h.offered(a);
+      await aFb.reached();
+      bHol.answer();
+      const got = await pb;
+      assert.equal(got.ok, true, JSON.stringify(got));
+      assert.ok(rowOf(h, got.bookingId).task_id);
+      aFb.answer();
+      assert.equal((await pa).includes(SLOT), false, 'a hold when A asked stays busy for that lookup once its task is attached');
+    } finally { h.db.close(); }
+  }
+
+  // A booking Google already had when A asked, which the owner moved: its first start is offered during the held
+  // lookup, while a start C books meanwhile is not.
+  {
+    const h = harness();
+    try {
+      const a = h.lead('LEAD-20261201-0000aaaa');
+      const b = h.lead('LEAD-20261201-0000bbbb');
+      const c = h.lead('LEAD-20261201-0000cccc');
+      const first = await h.viewing.commitBooking({ lead: b, listingId: 'BONA-W901', slotId: SLOT });
+      assert.equal(first.ok, true, JSON.stringify(first));
+      moveEvent(h, first.eventId, '2026-12-06T16:00:00+03:00', '2026-12-06T17:00:00+03:00');
+      const fb = h.hold('freeBusy');
+      const p = h.offered(a);
+      await fb.reached();
+      const other = await h.viewing.commitBooking({ lead: c, listingId: 'BONA-W901', slotId: MON });
+      assert.equal(other.ok, true, JSON.stringify(other));
+      fb.answer();
+      const list = await p;
+      assert.equal(list.includes(SLOT), true, "the moved booking's first start is free: Google decides, not its stored times");
+      assert.equal(list.includes(SUN16), false, 'where Google shows it now is busy');
+      assert.equal(list.includes(MON), false, "C's booking made during the lookup is busy");
+    } finally { h.db.close(); }
+  }
+});
+
 /* ---------------- the dashboard hooks, wired the way index.mjs wires them ---------------- */
 
 const OWNER = '966500000009';
