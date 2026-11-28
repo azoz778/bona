@@ -738,6 +738,14 @@ test('the guard metric (Codex r1 P1, Claude r3 P2-2): repairs, guard hand-overs 
   assert.deepEqual([g.falsePositives, g.refusals], [1, [{ reason: 'amount', amount: 12000, falseHit: true }]], 'a count of homes, Markdown or not');
   g = full('BONA-W010 سعرها 950 ألف ريال، والمشروع فيه أكثر من **12 ألف** وحدة سكنية.', [w010]);
   assert.deepEqual([g.falsePositives, g.refusals], [1, [{ reason: 'amount', amount: 12000, falseHit: true }]], 'a bold count: judged on the form the client reads');
+  // Codex r14 P1: every denied occurrence is its own, never keyed by its value: an invented SR price beside a count of the
+  // same value is a true hit (the guard read a currency on it), and a draft is a false positive only when every one is no money.
+  g = full('**SR** 12,000 upfront. The development has 12 thousand units.', [noPrice]);
+  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'amount', amount: 12000, falseHit: false }, { reason: 'amount', amount: 12000, falseHit: true }]], "Codex's draft");
+  g = full('SR 12,000 upfront. The development has 12 thousand units.', [noPrice]);
+  assert.deepEqual([g.falsePositives, g.refusals.map((x) => x.falseHit)], [0, [false, true]], 'its plain twin');
+  g = full('The development has 12 thousand units, and **12 thousand** homes.', [noPrice]);
+  assert.deepEqual([g.falsePositives, g.refusals.map((x) => x.falseHit)], [1, [true, true]], 'two counts: a false positive');
   // A refusal the guard's own check does not repeat on the draft names no reason the eval can judge: no false positive.
   g = r.guardStats({ responses: [draft('It is SAR 6.2 million.'), repair('It is SAR 6,200,000.', [tool('SAR 6,200,000')])], earlierReplies: [] });
   assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'unknown', falseHit: false }]], 'an unreproduced refusal');

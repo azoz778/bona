@@ -611,13 +611,18 @@ export function guardStats({ responses = [], code = null, earlierReplies = [], s
     if (typeof text !== 'string' || !text.trim()) continue;
     const allowed = guardAllowed({ toolResults: results, earlierReplies });
     // Codex r13 P1: the guard reads each of its forms (as written, as shown, shown of readable: guardForms, in that order)
-    // and refuses on a hit in any. A denied figure (one per raw value) is judged on the LAST form that denies it, the one
-    // closest to what the client reads: Markdown between a currency and its figure ("**SAR** 6,500") or around a count
-    // ("**12 ألف** وحدة") is read as the guard read it. A plain draft's forms are one text, so it is judged as before.
+    // and refuses on a hit in any. The denied amounts are judged on the LAST form that denies any, the one closest to what
+    // the client reads: Markdown between a currency and its figure ("**SAR** 6,500") or around a count ("**12 ألف** وحدة")
+    // is read as the guard read it. A plain draft's forms are one text, so it is judged as before. Codex r14 P1: each
+    // denied OCCURRENCE in that form is its own (never keyed by its value: "**SR** 12,000 … 12 thousand units" is two).
     const forms = guardForms(text);
     const badUnits = [...new Set(forms.flatMap((t) => unitRefs(t)))].filter((u) => !allowed.units.has(u));
-    const readings = new Map();
-    for (const t of forms) for (const a of findAmounts(t)) if (!amountAllowed(allowed, a)) readings.set(a.raw, { a, t });
+    let judgedForm = text;
+    let deniedHere = [];
+    for (const t of forms) {
+      const d = findAmounts(t).filter((a) => !amountAllowed(allowed, a));
+      if (d.length) { judgedForm = t; deniedHere = d; }
+    }
     // The guard's own reasons for the draft (Codex r12 P1): only an amount refusal can be a false hit; a link, a unit or
     // any other reason is a true hit, whatever amounts the draft also holds.
     const reasons = [...new Set(checkReply(text, { toolResults: results, earlierReplies, siteUrl }).hits.map((h) => h.kind))];
@@ -626,9 +631,11 @@ export function guardStats({ responses = [], code = null, earlierReplies = [], s
       // Each refused amount: a FALSE hit when the eval's own reading of its clause says it is no money (Claude r3 P2-2).
       // The guard's own parse first (Codex r5 P2): a figure it read WITH a currency (SAR, SR, ر.س …) is money, a true hit;
       // the eval's own reading judges only the figures the guard read without currency evidence.
-      for (const [raw, { a, t }] of readings) judged.push({ reason: 'amount', amount: raw, falseHit: a.raw !== null && a.currency === null && notMoney(t, a) });
+      // An occurrence the guard read with a currency (findAmounts' own field, r5) is money; one without is judged by the
+      // eval's reading of its clause. The draft is a false positive only when every occurrence is no money (below).
+      for (const a of deniedHere) judged.push({ reason: 'amount', amount: a.raw, falseHit: a.raw !== null && a.currency === null && notMoney(judgedForm, a) });
       // The guard refused an amount, yet no form holds one it denies (its check and ours disagree): a false hit.
-      if (!readings.size) judged.push({ reason: 'amount', amount: null, falseHit: true, kind: 'reading' });
+      if (!deniedHere.length) judged.push({ reason: 'amount', amount: null, falseHit: true, kind: 'reading' });
     }
     for (const k of reasons.filter((x) => x !== 'amount')) {
       if (k === 'unit' && badUnits.length) for (const u of badUnits) judged.push({ reason: 'unit', unit: u, falseHit: false });
