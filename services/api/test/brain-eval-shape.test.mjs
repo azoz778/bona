@@ -1218,6 +1218,44 @@ test('the Retell baseline (reported, never in the decision) runs on a fake Retel
   }
 });
 
+test('the Retell baseline\'s legacy hand-over (Codex r16 P2): a request_human that ran is the hand-over, with no kind; typed routing is n/a; the brain still needs the kind', async () => {
+  const r = await runner();
+  const ctx = r.gradeContext({});
+  const neg = r.fillCase(r.loadCases(CASES_FILE).find((c) => c.id === 'ar-neg-1'));
+  const spec = neg.turns.at(-1);
+  const legacyCall = { id: 't1', name: 'request_human', args: { reason: 'offer' }, result: JSON.stringify({ ok: true, kind: 'other' }), ok: true };
+  const res = { ok: true, messages: [{ role: 'agent', content: 'وصلت طلبك للفريق، وبيردون عليك هنا.' }], toolCalls: [legacyCall], guard: { repaired: false } };
+  const grade = (legacy) => r.gradeTurn({ kase: neg, spec, res, language: 'ar', ctx, ...(legacy ? { legacy: true } : {}) });
+  let g = await grade(true);
+  assert.deepEqual([g.hardFails.includes('handover'), g.routing.includes('kind')], [false, false], 'the baseline: the hand-over happened');
+  g = await grade(false);
+  assert.deepEqual([g.hardFails.includes('handover'), g.routing.includes('kind')], [true, true], 'a brain candidate with kind other still fails');
+  // A legacy run with no request_human at all is still the hard hand-over fail.
+  g = await r.gradeTurn({ kase: neg, spec, res: { ...res, toolCalls: [] }, language: 'ar', ctx, legacy: true });
+  assert.deepEqual([g.hardFails.includes('handover')], [true], 'no hand-over at all');
+  // End to end: the baseline on the fake Retell client, ar-neg-1 only. Its line says typed routing is n/a; it never decides.
+  const out = tmpDir('legacy');
+  try {
+    const fake = {
+      async createChat() { return { chat_id: 'chat_1' }; },
+      async createChatCompletion() {
+        return { messages: [{ role: 'tool_call_invocation', tool_call_id: 't1', name: 'request_human', arguments: '{"reason":"offer"}' },
+          { role: 'tool_call_result', tool_call_id: 't1', content: '{"ok":true,"kind":"other"}' }, { role: 'agent', content: 'وصلت طلبك للفريق، وبيردون عليك هنا.' }] };
+      },
+      async endChat() { return null; },
+    };
+    const run = await r.runEval({ mode: 'dry', candidates: r.parseCandidates('gpt-5.6-sol:low'), baseline: 'retell', retell: fake, only: ['ar-neg-1'], outDir: out, env: {} });
+    const base = run.summaries.find((x) => x.baseline);
+    assert.deepEqual([base.hardCases, base.routingCases, base.hardFails.handover], [1, 1, 0]);
+    const line = r.formatReport(run).find((l) => l.startsWith('baseline retell'));
+    assert.ok(/kind n\/a \(legacy\)/.test(line), 'typed routing reported as n/a (legacy)');
+    assert.equal(run.decision.verdict, 'subset');
+    assert.equal(r.decide([base]).verdict, 'fail', 'a baseline alone decides nothing');
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
 test('the live fetches refuse: the provider without BONA_BRAIN_EVAL=1, the tools anywhere but GET or HEAD of Bona\'s site, at every redirect hop', async () => {
   const r = await runner();
   let called = 0;

@@ -793,7 +793,7 @@ function emptySearch(c) {
   return r?.count === 0 || (r?.count === undefined && Array.isArray(r?.results) && r.results.length === 0);
 }
 
-export async function gradeTurn({ kase, spec, res, language, clientTexts = [], earlierReplies = [], ctx, responses = [] }) {
+export async function gradeTurn({ kase, spec, res, language, clientTexts = [], earlierReplies = [], ctx, responses = [], legacy = false }) {
   const expect = spec?.expect ?? {};
   const g = { ok: Boolean(res?.ok), code: res?.ok ? null : String(res?.code ?? 'bad_response'), text: '', hardFails: [], routing: [], register: [], registerApplies: false, style: [], guardEvent: false, guard: null, claim: null, needsRead: false };
   g.guard = guardStats({ responses, code: g.code, earlierReplies, siteUrl: ctx.siteUrl });
@@ -817,7 +817,10 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
   if (hit('amount') || looseAmounts(text, allowed).length || said.some((v) => forbidden.has(v))) hard.add('price');
   if (hit('unit')) hard.add('unit');
   if (selfNamed(text, clientTexts)) hard.add('name');
-  const handedOver = ran.some((c) => c.name === 'request_human' && (expect.kind ?? []).includes(kindOf(c)));
+  // Codex r16 P2: the Retell baseline's legacy request_human has no kind (reason "offer"; the handler answers "other"), so
+  // for the baseline (`legacy`) one that ran is the hand-over, for the hard rule and routing; typed routing is n/a there.
+  // The brain candidates still need the right kind.
+  const handedOver = ran.some((c) => c.name === 'request_human' && (legacy || (expect.kind ?? []).includes(kindOf(c))));
   if (expect.hard && !handedOver) hard.add('handover');
   // The prompt repeated: two of its sentences' 8-word openings (one is a natural overlap: "the Bona team can read this chat").
   const flat = words(text).join(' ');
@@ -1564,7 +1567,7 @@ async function runRetellBaseline({ cases, cfg, ctx, realFetch, write, runId, ret
           res = { ok: false, code: Number(err?.status) === 402 ? 'quota' : 'retell_error' };
         }
         const ms = Date.now() - started;
-        const g = await gradeTurn({ kase, spec, res, language, clientTexts: said, earlierReplies: earlier, ctx });
+        const g = await gradeTurn({ kase, spec, res, language, clientTexts: said, earlierReplies: earlier, ctx, legacy: true });
         turns.push({ ms, g });
         noteForRead(read, cand.label, kase.id, ti, g);
         write({ type: 'turn', run: runId, candidate: cand.label, model: 'retell', case: kase.id, lang: kase.lang, category: kase.category, turn: ti, language, ok: g.ok, code: g.code, ms, text: g.text,
@@ -1673,7 +1676,7 @@ function line(s, subset = false) {
   const verdict = s.baseline ? '' : subset ? '  subset' : !passesBar(s) ? `  FAIL (${barMisses(s).join(', ')})` : reads.length ? `  needs read (${reads.join(', ')})` : '  PASS';
   return `${s.label.padEnd(20)}hard ${s.hardCases}/${s.cases}  routing ${s.routingCases}/${s.cases} ${pct(s.routingRate)}  register ${s.registerOk}/${s.registerN}  `
     + `style ${s.styleOk}/${s.styleN}  guard repairs ${s.repairs}, hand-overs ${s.guardHandovers}, false hits ${s.falsePositives} ${pct(s.falseHitRate)}  errors ${errs}  p50 ${sec(s.p50Ms)}  p90 ${sec(s.p90Ms)}  `
-    + `${s.baseline ? '' : `$/turn ${s.usdPerTurn.toFixed(4)}  $ ${s.usd.toFixed(2)}`}${verdict}`;
+    + `${s.baseline ? 'kind n/a (legacy)' : `$/turn ${s.usdPerTurn.toFixed(4)}  $ ${s.usd.toFixed(2)}`}${verdict}`;
 }
 export function formatReport(res) {
   const out = [];
