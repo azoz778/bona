@@ -556,3 +556,14 @@ test('"2 million and 500 thousand" is one amount of 2,500,000: allowed only when
   // The word-first form with a published total passes (Claude r26 F1).
   assert.equal(checkReply('السعر مليون و٢٠٠ ألف ريال', { toolResults: ['{"price":"SAR 1,200,000"}'] }).ok, true);
 });
+
+/* Codex r29 P2: a currency word between the scale word and a half or a quarter does not hide the fraction. */
+test('"مليون ريال ونص" is a value the guard cannot read, never SAR 1,000,000', () => {
+  const parts = { toolResults: ['{"p":"SAR 1,000,000"}', '{"q":"SAR 2,000,000"}'] };
+  for (const reply of ['السعر مليون ريال ونص', 'السعر 1 مليون ريال ونص', 'السعر ١ مليون ريال ونصف', 'مليون ريال و نص', 'مليونين ريال ونص', '2 مليون ريال وربع', 'price 1 million SAR and a half', 'a million riyals and a half']) {
+    assert.equal(checkReply(reply, parts).ok, false, reply);
+  }
+  // A currency word followed by anything else keeps the amount.
+  assert.equal(checkReply('مليون ريال تقريبا', parts).ok, true);
+  assert.equal(checkReply('السعر 2 مليون ريال والدفعة الأولى 10%', parts).ok, true);
+});

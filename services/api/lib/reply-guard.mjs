@@ -105,6 +105,14 @@ const DIGIT_BEFORE_RE = /\d\s{0,2}$/;
 const FRACTION_BEFORE_RE = /(?:^|[^\p{L}])[وفبكل]?(?:نص|نصف|ربع|ثلث|ثلاث\s?(?:أرباع|ارباع)|half|quarter|three\s+quarters)(?:[\s-]+of)?(?:[\s-]+an?)?[\s-]{1,2}$/iu;
 /** "and a half" / "and a quarter" after a scale word ("مليون ونص", "مليون و نصف", "مليون إلا ربع", "a million and a half"). */
 const FRACTION_AFTER_RE = /^[\s-]{0,2}(?:و|and[\s-]+(?:an?[\s-]+)?|(?:إلا|الا)\s{0,2})\s{0,2}(?:نص|نصف|ربع|half|quarter)(?![\p{L}])/iu;
+/** A currency word right after a scale word: the fraction may come after it ("مليون ريال ونص", "a million riyals and a half"). */
+const CURRENCY_FIRST_RE = new RegExp(String.raw`^[\s-]{0,2}(?:${CUR})(?![\p{L}])`, 'iu');
+/** Whether a half or a quarter follows a scale word, straight away or after a currency word (Codex r29). */
+function fractionAfter(rest) {
+  if (FRACTION_AFTER_RE.test(rest)) return true;
+  const c = CURRENCY_FIRST_RE.exec(rest);
+  return Boolean(c) && FRACTION_AFTER_RE.test(rest.slice(c[0].length));
+}
 /**
  * The number right after a number, joined by a dash, a slash or a word: "2 and 3 million", "2.9–3.1 million",
  * "2 إلى 3 مليون", "2 و3 ملايين", "2-3m", "500-900k", "80,000–90,000 SAR", "1.2-1.5 م ريال", "80,000 – 90,000 SAR",
@@ -248,7 +256,7 @@ export function findAmounts(text) {
     if (/^:\d/.test(after)) continue; // 10:00
     const currency = currencyOf(cur1) ?? currencyOf(cur2) ?? shared.get(numStart) ?? null;
     if (word && !currency && AREA_AFTER_RE.test(s.slice(m.index + m[0].length))) { use(); continue; } // "85 ألف متر": an area
-    if (word && FRACTION_AFTER_RE.test(s.slice(m.indices.groups.word[1]))) { // "2 مليون ونص": a value the guard cannot read
+    if (word && fractionAfter(s.slice(m.indices.groups.word[1]))) { // "2 مليون ونص", "2 مليون ريال ونص": a value the guard cannot read
       use(); out.push({ raw: null, sar: null, currency, at: numStart }); continue;
     }
     const value = readNumber(num);
@@ -295,7 +303,7 @@ export function findAmounts(text) {
     // After a digit no amount used ("+5 مليون"), a spelled-out number ("تلاتة مليون", "twenty one million"), or
     // next to a half or a quarter ("مليون ونص", "نص مليون", "half a million"), the word alone says nothing of the value.
     const lead = s.slice(Math.max(0, m.index - 24), m.index);
-    const fraction = FRACTION_BEFORE_RE.test(lead) || FRACTION_AFTER_RE.test(s.slice(end));
+    const fraction = FRACTION_BEFORE_RE.test(lead) || fractionAfter(s.slice(end));
     if (!fraction && !DIGIT_BEFORE_RE.test(s.slice(Math.max(0, m.index - 6), m.index))) {
       if (w === 'مليون' || w === 'مليونين') {
         if (!NUMBER_WORD_BEFORE_RE.test(lead)) raw = w === 'مليون' ? 1e6 : 2e6;
