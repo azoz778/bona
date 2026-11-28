@@ -241,6 +241,18 @@ function startsThousands(s, groups, j) {
   return run.length >= 2 && thousandsEnd(run, gs, 0) >= 1;
 }
 
+/**
+ * A budget range of two ROUND amounts on one dash or slash ("15000-20000", "50000 - 150000"): both end in 00. A phone
+ * split in two on a dash ("98765-43210", Codex r24) almost never is, so the 10-11 digit rule keeps it a phone.
+ */
+function roundRange(run, gaps) {
+  const k = rangeSplit(run, gaps);
+  if (!k) return false;
+  const a = run.slice(0, k).map((g) => g.digits).join('');
+  const b = run.slice(k).map((g) => g.digits).join('');
+  return /00$/.test(a) && /00$/.test(b);
+}
+
 /** Whether a run is two or more amounts written in thousands groups side by side ("500.000 20.000", "500 000 25 000"). */
 function splitsIntoAmounts(run, gaps) {
   // Every way to cut the run (it is at most 11 digits): most[k] = the most amounts groups k.. split into, -1 when none.
@@ -338,11 +350,15 @@ function numberCuts(s) {
         continue;
       }
     }
+    // Two round amounts on one dash or slash are a range even when their digits make an ID or phone shape ("rent
+    // 15000-20000" is 1500020000): no ID or phone is written as two numbers ending in 00 (Codex r24).
+    if (best && !plus && best.j === acctLast && !wide && best.mask !== '[account-number]'
+      && roundRange(groups.slice(i, acctLast + 1), gaps.slice(0, acctLast - i))) best = null;
     // A whole run of 10-11 digits that no rule took, joined as a phone, is one of another country written locally
     // ("(415) 555-0147", Codex r23): no amount has 10 digits, and two amounts on one dash or slash stay a range.
     // Not across a soft gap ('/' or '_': "2026/2027 12 units").
     if (!best && !plus && !soft && acctDigits >= 10 && acctDigits <= 11 && groups[i].digits[0] !== '0'
-      && !rangeSplit(groups.slice(i, acctLast + 1), gaps.slice(0, acctLast - i))
+      && !roundRange(groups.slice(i, acctLast + 1), gaps.slice(0, acctLast - i))
       && !splitsIntoAmounts(groups.slice(i, acctLast + 1), gaps.slice(0, acctLast - i))) best = { j: acctLast, mask: '[phone]' };
     if (!best && acctDigits >= ACCOUNT_DIGITS) {
       // A range is left as written; its second amount is then read on its own (it may still be a phone).

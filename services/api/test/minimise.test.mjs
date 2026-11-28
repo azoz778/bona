@@ -259,7 +259,7 @@ test('two amounts written in thousands groups on one dash, slash or "+" stay as 
     // One group after the dash is no amount, so this 3-3-3 mobile stays masked (and "the 511.615 - 120 sqm flat", its digit shape, with it).
     ['call 512 345 - 678', 'call [phone]'],
     ['551 234 567 - 1 000', '[phone] - 1 000'],
-    ['budget 5.000 - 10.000', 'budget [phone]'],
+    ['budget 5.000 - 10.000', 'budget 5.000 - 10.000'], // two round amounts: a range (Codex r24)
   ]) assert.equal(minimise(input), want, input);
 });
 
@@ -425,6 +425,12 @@ test('10-11 digits joined as a phone are a phone of another country; two amounts
     ['budget 20.000 500.000 riyals', 'budget 20.000 500.000 riyals'],
     ['budget 25 000 500 000', 'budget 25 000 500 000'],
     ['415 555 0147', '[phone]'],
+    ['Please call my India mobile 98765-43210', 'Please call my India mobile [phone]'],
+    ['98123 - 98456', '[phone]'],
+    ['rent 15000-20000 a month', 'rent 15000-20000 a month'],
+    ['rent 20000 - 25000', 'rent 20000 - 25000'],
+    ['call 15000-20001', 'call [id-number]'],
+    ['budget 50000 - 150000', 'budget 50000 - 150000'],
   ]) assert.equal(minimise(input), want, input);
 });
 
