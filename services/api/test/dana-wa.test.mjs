@@ -3850,3 +3850,71 @@ test('T12 r27 3: refusedRun re-checks after the missed notifier before its cap h
   assert.deepEqual(r, { skipped: 'route_changed' });
   assert.equal(h.lead().dana_hold_reason, null, 'no cap_chat hold');
 });
+
+/* ======================================================================================
+ * PR-B3 r28 (Codex P1s, Claude P3): every hold write after an await goes through the commit point and uses the
+ * REFRESHED eligibility; the Retell gates read main's freshness (no ts).
+ * ====================================================================================== */
+
+test('T12 r28 1 (Codex P1-1): the last daily turn goes elsewhere during the missed notifier: the refreshed cap_day hand-over and alert, not a cap_chat hold', async () => {
+  let h;
+  let n = 0;
+  h = bh({ auto: true, pacing: strictTier(), notifyHandoff: async () => { n += 1; if (n === 1) fillDay(h, 40, T_IN - 30 * 60_000); }, turns: [] });
+  for (let i = 0; i < 20; i += 1) h.danaRow({ covers: T_IN - 5 * HOUR + i, created: T_IN - 50 * 60_000 + i * 1000 });
+  h.client('an old question', { ts: T_IN - 3 * HOUR });
+  const r = await ask(h, 'a new question');
+  await h.dana.flush();
+  assert.equal(n >= 1, true, 'the missed notifier ran');
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['missed', 'cap_day']);
+  assert.equal(h.lead().dana_hold_reason, 'cap_day', 'the day hold, not cap_chat');
+  assert.equal(h.pushed.length, 2, 'the cap_day alert too');
+  assert.equal(r.handover, 'cap_day');
+});
+
+test('T12 r28 2 (Codex P1-2): an auto chat at cap_day leaves auto mode during the hand-over notifier: escalation kept, no cap_day hold, the legacy route takes over', async () => {
+  let h;
+  let n = 0;
+  h = bh({ auto: true, pacing: strictTier(), notifyHandoff: async () => { n += 1; if (n === 1) h.ownerTest.setAuto(LEAD, false); }, turns: [] });
+  fillDay(h, 60, T_IN - 30 * 60_000);
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.equal(n >= 1, true);
+  assert.equal(h.lead().needs_human, 1, 'the escalation is kept');
+  assert.deepEqual(handoffTasks(h), ['cap_day']);
+  assert.equal(h.lead().dana_hold_reason, null, 'no brain-route hold on the now-legacy chat');
+  assert.ok(h.logs.some((l) => l.evt === 'dana.route_changed'));
+  assert.ok(h.logs.some((l) => l.evt === 'dana.skipped' && l.reason === 'needs_human'), 'the legacy re-run ran (and leaves it to the person)');
+});
+
+test('T12 r28 3 (Claude P3, U38): a legacy message 29m55s old whose createChat takes 10 s is still answered (main\'s freshness)', async () => {
+  const h = bh({ auto: false });
+  const create = h.retell.createChat;
+  h.retell.createChat = async function (body) { h.tick(10_000); return create.call(this, body); };
+  const ts = h.client('hello', { ts: h.now() - (30 * 60_000 - 5000) });
+  await h.dana.answer(LEAD, { ts });
+  await h.dana.flush();
+  assert.equal(h.retell.completions.length, 1);
+  assert.equal(h.sent().length, 1);
+});
+
+test('T12 r28 (rule): a sender rate limit returned while the route flips writes no cap_chat hold on the now-legacy chat; Retell answers', async () => {
+  let h;
+  h = bh({ auto: false, brainOn: true, turns: [brainReply('From the brain.')] });
+  const real = h.sender.sendTo.bind(h.sender);
+  let first = true;
+  h.sender.sendTo = async (o) => {
+    if (first) {
+      // As the real sender refuses (wa-send `refuse`): its row failed, the minute limit.
+      first = false;
+      h.team.setSetting('dana_brain', '0');
+      h.inbox.updateOutbox(o.sendId, { status: 'failed', error: 'rate_limited' });
+      return { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute', sendId: o.sendId };
+    }
+    return real(o);
+  };
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.notEqual(h.lead().dana_hold_reason, 'cap_chat');
+  assert.equal(h.retell.completions.length, 1);
+  assert.ok(h.sent().at(-1).endsWith('Of course. Which district do you prefer?'));
+});

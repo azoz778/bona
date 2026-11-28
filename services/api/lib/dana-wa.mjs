@@ -1301,6 +1301,8 @@ export function createDana({
    */
   function oweLine(leadId, reason, r, coversTs = null) {
     if (!defers(r)) return false;
+    // An owed line's hold is written after the line's await: through the commit point (r28); a flip owes nothing.
+    if (commitPoint(leadId, true, coversTs, { chat: false })) return false;
     if (coversTs !== null && coversTs !== undefined && !owedFor.has(leadId)) owedFor.set(leadId, { ts: Number(coversTs), rid: coverRid(leadId, coversTs) });
     let until;
     if (r.stopped === 'backlog') {
@@ -1435,7 +1437,8 @@ export function createDana({
       sent = Boolean(r.sent);
     }
     // A line owed (refused here, or no phone jid for now): a short hold, so the sweep tries the line again soon.
-    if (!sent) setTimedHold(leadId, 'brain_out', t + RATE_HOLD_MS);
+    // The short hold after the line's await goes through the commit point (r28): a flip re-queues instead.
+    if (!sent && !commitPoint(leadId, true, coversTs, { chat: false })) setTimedHold(leadId, 'brain_out', t + RATE_HOLD_MS);
     if (lined === undefined) await notifyHandoff(leadId);
     say({ evt: 'dana.brain_out', leadId, code, line: sent });
     return { held: 'brain_out', sent };
@@ -1567,7 +1570,11 @@ export function createDana({
       return skip(leadId, 'cap_day');
     }
     const out = await handover(leadId, language, cap.reason, coversTs, { checked, line: 'none', note: { kind: 'cap_day' }, viaBrain });
-    if (cap.reason === 'cap_day' && Number.isFinite(cap.until) && !out.skipped) setTimedHold(leadId, 'cap_day', cap.until);
+    // The hold after the hand-over's notifier await goes through the commit point (r28): on a flip the escalation stays
+    // (the task and the flag are facts), the brain-route hold is not written, and the batch is re-queued.
+    if (cap.reason === 'cap_day' && Number.isFinite(cap.until) && !out.skipped && !commitPoint(leadId, viaBrain, coversTs, { chat: false })) {
+      setTimedHold(leadId, 'cap_day', cap.until);
+    }
     return out;
   }
 
@@ -1699,6 +1706,8 @@ export function createDana({
         if (db.getLead(leadId)?.dana_hold_reason === 'brain_out') clearHold(leadId);
         return (await missedExpired(leadId, lead, built, viaBrain)) ?? skip(leadId, 'nothing');
       }
+      // The cap this step applies: the start's, or the one eligible() reads again after an await (r28).
+      let cap = e;
       if (viaBrain) {
         const m = await missedExpired(leadId, lead, built, viaBrain);
         if (m?.skipped === 'route_changed') return m;
@@ -1713,6 +1722,7 @@ export function createDana({
           return skip(leadId, 'nothing');
         }
         if (eNow.reason !== 'cap_chat' && !CAP_HANDOVERS.has(eNow.reason)) return skip(leadId, eNow.reason);
+        cap = eNow;
       }
       // A cap acts only for a client who is waiting: with nothing unanswered (a wake for a
       // batch another run answered) there is nobody to hand over — no flag, alert or line.
@@ -1728,7 +1738,7 @@ export function createDana({
         if (db.getLead(leadId)?.dana_hold_reason === 'brain_out') clearHold(leadId);
         return handover(leadId, language, 'missed', coversTs, { line: 'none', note: { kind: 'missed' }, viaBrain });
       }
-      return capped(leadId, language, e, coversTs, viaBrain);
+      return capped(leadId, language, cap, coversTs, viaBrain);
     }
     return skip(leadId, e.reason);
   }
@@ -1866,7 +1876,8 @@ export function createDana({
       // (An outage hold ends only once a reply of this turn was accepted: the post-send clear below, r4 A.)
     } else {
       // The gate before each Retell request (r27): the route (routeFlip re-queues) and eligibility, as at the start.
-      const gate = () => routeFlip(leadId, false, coversTs) ?? (() => { const eNow = eligible(leadId, { ts }); return eNow.ok ? null : { refused: eNow }; })();
+      // eligible() WITHOUT ts, as main's preSend does (r28): legacy freshness stays main's, decided once at the start.
+      const gate = () => routeFlip(leadId, false, coversTs) ?? (() => { const eNow = eligible(leadId); return eNow.ok ? null : { refused: eNow }; })();
       const c = await complete(lead, batch, language, gate);
       if (c.gated) return c.gated.refused ? refusedRun(leadId, c.gated.refused) : c.gated;
       // The same check on a Retell turn (r23): a flip to the brain while Retell answered writes and sends nothing.
@@ -2088,7 +2099,8 @@ export function createDana({
         }
         break;
       }
-      if (viaBrain && r.error === 'rate_limited') rateHold(leadId);
+      // The rate hold after the send's await goes through the commit point (r28): a flip re-queues instead.
+      if (viaBrain && r.error === 'rate_limited' && !commitPoint(leadId, true, coversTs, { chat: false })) rateHold(leadId);
       if (!sentAny) outcome = skip(leadId, viaBrain && r.error === 'rate_limited' ? 'cap_chat' : r.error);
       break;
     }
