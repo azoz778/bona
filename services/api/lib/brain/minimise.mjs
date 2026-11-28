@@ -54,7 +54,7 @@ const WA_LINK_BEFORE_RE = /(?:wa\.me\/|[?&]phone=)(?:\+|%2B)?$/i;
  * "send?phone=%2B1%20(202)%20555-0123"): everything after "wa.me/" or "?phone=" up to a space, "?", "&" or "#", when it
  * holds a digit. Masked whole as [phone] before any number rule reads it (Codex r20-r22).
  */
-const WA_VALUE_RE = /(?<=wa\.me\/|[?&]phone=)(?=[^\s&#?]*\d)[^\s&#?]+/gi;
+const WA_VALUE_RE = /(?<=wa\.me\/|[?&]phone=)(?=(?:[^\s&#?]*?\d){9})[^\s&#?]*\d/gi; // 9+ digits, to its last digit (Claude r23)
 const CLEAR_PHONE_RE = /^(?:0[1-9]\d{8}|00[1-9]\d{8,12}|966\d{8,9})$/;
 /** A phone that is already whole: a Saudi number (0 + 9, 966 + 9, 00966 + 9) or a 00 international one (Claude r15). */
 const COMPLETE_PHONE_RE = /^(?:0[1-9]\d{8}|(?:00)?966\d{9}|00(?!966)[1-9]\d{8,12})$/;
@@ -241,6 +241,21 @@ function startsThousands(s, groups, j) {
   return run.length >= 2 && thousandsEnd(run, gs, 0) >= 1;
 }
 
+/** Whether a run is two or more amounts written in thousands groups side by side ("500.000 20.000", "500 000 25 000"). */
+function splitsIntoAmounts(run, gaps) {
+  // Every way to cut the run (it is at most 11 digits): most[k] = the most amounts groups k.. split into, -1 when none.
+  const n = run.length;
+  const most = new Array(n + 1).fill(-1);
+  most[n] = 0;
+  for (let k = n - 1; k >= 0; k -= 1) {
+    for (let e = k + 1; e < n; e += 1) {
+      if (!/^[ .]$/.test(gaps[e - 1]) || run[e].digits.length !== 3) break;
+      if (most[e + 1] >= 0 && isAmount(run.slice(k, e + 1), gaps.slice(k, e))) most[k] = Math.max(most[k], 1 + most[e + 1]);
+    }
+  }
+  return most[0] >= 2;
+}
+
 /** Where the phone, ID and account numbers of `s` (a probe text) are: [{ start, end, mask }], in order. */
 function numberCuts(s) {
   const dates = [...s.matchAll(DATE_RE)].map((m) => [m.index, m.index + m[0].length]);
@@ -272,6 +287,8 @@ function numberCuts(s) {
     let acctLast = i;
     let acctDigits = 0;
     for (let j = i; j < groups.length; j += 1) {
+      // A "+" number that is already a whole Saudi one takes nothing after it ("+966551234567 - 1 500 000", Claude r23).
+      if (j > i && plus && best && /^966\d{9}$/.test(digits)) break;
       if (j > i) {
         const gap = s.slice(groups[j - 1].end, groups[j].start);
         if (groups[j].date || !PHONE_GAP_RE.test(gap)) break;
@@ -321,6 +338,12 @@ function numberCuts(s) {
         continue;
       }
     }
+    // A whole run of 10-11 digits that no rule took, joined as a phone, is one of another country written locally
+    // ("(415) 555-0147", Codex r23): no amount has 10 digits, and two amounts on one dash or slash stay a range.
+    // Not across a soft gap ('/' or '_': "2026/2027 12 units").
+    if (!best && !plus && !soft && acctDigits >= 10 && acctDigits <= 11 && groups[i].digits[0] !== '0'
+      && !rangeSplit(groups.slice(i, acctLast + 1), gaps.slice(0, acctLast - i))
+      && !splitsIntoAmounts(groups.slice(i, acctLast + 1), gaps.slice(0, acctLast - i))) best = { j: acctLast, mask: '[phone]' };
     if (!best && acctDigits >= ACCOUNT_DIGITS) {
       // A range is left as written; its second amount is then read on its own (it may still be a phone).
       const second = rangeSplit(groups.slice(i, acctLast + 1), gaps.slice(0, acctLast - i));

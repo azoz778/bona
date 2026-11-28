@@ -65,7 +65,9 @@ test('any long digit run that could be an account or card number (12+ digits, jo
   // A phone or ID shape at the start of a run is masked as that, the rest of the run on its own: no digit is left.
   for (const s of ['12 3456 7890 1234 5678 9012', '0512 3456 78 9012 3456 7890']) assert.doesNotMatch(minimise(s), /\d/, s);
   assert.equal(minimise('call 0500000000 12 bedrooms'), 'call [phone] 12 bedrooms', 'a phone then a count: the count stays');
-  for (const s of ['budget 2950000-3100000', 'from 2,950,000 to 31,000,000', 'SAR 12 500 000', 'ref 12345678901', '1,234,567,890,123 riyals']) {
+  // (An 11-digit reference is masked as a phone since Codex r23: minimise errs toward masking.)
+  assert.equal(minimise('ref 12345678901'), 'ref [phone]');
+  for (const s of ['budget 2950000-3100000', 'from 2,950,000 to 31,000,000', 'SAR 12 500 000', '1,234,567,890,123 riyals']) {
     assert.equal(minimise(s), s, s);
   }
 });
@@ -271,7 +273,7 @@ test('a 10-digit run that starts with "00" is no phone shape (a Saudi number sta
 test('a line break starts the next number; a range\'s second amount is read from its start; a cut never splits a number that runs past it (a "+" one, or one after a budget it took)', () => {
   for (const [input, want] of [
     ['+966 50 000 0000\n+44 7700 900000', '[phone]\n[phone]'],
-    ['+966 50 000 0000 +44 7700 900000', '[phone]'], // one mask over both: the second is never left half in clear
+    ['+966 50 000 0000 +44 7700 900000', '[phone] [phone]'],
     ['+966 50 000 0000\n44 7700 900000', '[phone]\n[account-number]'],
     ['ميزانيتي 500.000\n055 123 4567', 'ميزانيتي 500.000\n[phone]'],
     ['budget 500.000\n012 654 3210', 'budget 500.000\n[phone]'],
@@ -407,6 +409,33 @@ test('the number in a WhatsApp link is masked, whatever its country', () => {
     ['wa.me/+12025550123', 'wa.me/[phone]'],
   ]) assert.equal(minimise(input), want, input);
   assert.equal(minimise('see bona-real-estate.com/listings/BONA-W012'), 'see bona-real-estate.com/listings/BONA-W012', 'a listing link stays');
+});
+
+/* Codex r23 P0: a foreign number written locally (no "+", no 0). */
+test('10-11 digits joined as a phone are a phone of another country; two amounts on a dash stay a range', () => {
+  for (const [input, want] of [
+    ['Please call me at (415) 555-0147', 'Please call me at [phone]'],
+    ['my US cell 415-555-0147', 'my US cell [phone]'],
+    ['UK 7700 900123', 'UK [phone]'],
+    ['budget 50000-150000', 'budget 50000-150000'],
+    ['budget 950000 - 3100000', 'budget 950000 - 3100000'],
+    ['2.950.000 - 3.100.000', '2.950.000 - 3.100.000'],
+    ['budget 500.000 20.000 riyals', 'budget 500.000 20.000 riyals'],
+    ['budget 500 000\n25 000 riyals', 'budget 500 000\n25 000 riyals'],
+    ['budget 20.000 500.000 riyals', 'budget 20.000 500.000 riyals'],
+    ['budget 25 000 500 000', 'budget 25 000 500 000'],
+    ['415 555 0147', '[phone]'],
+  ]) assert.equal(minimise(input), want, input);
+});
+
+/* Claude r23: a WhatsApp link value typed with spaces; a "+" Saudi number keeps what follows. */
+test('a spaced link value falls back to the number rules; a whole "+966" number takes no amount or count after it', () => {
+  for (const [input, num] of [['wa.me/44 7700 900123', '447700900123'], ['wa.me/966551234567,وشكرا', '966551234567']]) {
+    assert.equal(sevenOf(minimise(input), num), null, input);
+  }
+  assert.equal(minimise('wa.me/966551234567,وشكرا'), 'wa.me/[phone],وشكرا', 'text glued after the value stays');
+  assert.equal(minimise('+966551234567 - 1 500 000'), '[phone] - 1 500 000');
+  assert.equal(minimise('+966 55 123 4567 - 3 bedrooms'), '[phone] - 3 bedrooms');
 });
 
 /** The first 7-digit run of `num` still readable in `out` (digits only), else null. */
