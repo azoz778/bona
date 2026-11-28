@@ -259,7 +259,7 @@ test('two amounts written in thousands groups on one dash, slash or "+" stay as 
     // One group after the dash is no amount, so this 3-3-3 mobile stays masked (and "the 511.615 - 120 sqm flat", its digit shape, with it).
     ['call 512 345 - 678', 'call [phone]'],
     ['551 234 567 - 1 000', '[phone] - 1 000'],
-    ['budget 5.000 - 10.000', 'budget 5.000 - 10.000'], // two round amounts: a range (Codex r24)
+    ['budget 5.000 - 10.000', 'budget [phone]'], // a 9-digit mobile shape end to end: masked (Codex r25)
   ]) assert.equal(minimise(input), want, input);
 });
 
@@ -427,9 +427,10 @@ test('10-11 digits joined as a phone are a phone of another country; two amounts
     ['415 555 0147', '[phone]'],
     ['Please call my India mobile 98765-43210', 'Please call my India mobile [phone]'],
     ['98123 - 98456', '[phone]'],
-    ['rent 15000-20000 a month', 'rent 15000-20000 a month'],
-    ['rent 20000 - 25000', 'rent 20000 - 25000'],
-    ['call 15000-20001', 'call [id-number]'],
+    ['رقمي 55100-1200', 'رقمي [phone]'], // a Saudi mobile in two round groups is still one (Codex r25)
+    ['rent 15000-20000 a month', 'rent [id-number] a month'], // an ID shape: masked (errs toward masking)
+    ['room 3 - 0551234567', 'room 3 - [phone]'], // a count before a phone stays (Claude r24)
+    ['غرف 3 0551234567', 'غرف 3 [phone]'],
     ['budget 50000 - 150000', 'budget 50000 - 150000'],
   ]) assert.equal(minimise(input), want, input);
 });
