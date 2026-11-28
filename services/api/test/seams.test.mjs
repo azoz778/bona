@@ -69,15 +69,14 @@ test('viewing stub: nothing is bookable or booked; every hook is a no-op', async
   assert.deepEqual(v.health(), { enabled: false, gcal: { configured: false, ok: false, lastErrorCode: null } });
 });
 
-test("pacing stub: today's 2 s batch, no typing floor, no queue, today's caps at any date", async () => {
+test('pacing (PR-B3 replaced the stub; test/pacing.test.mjs pins it): with no BONA_WA_LINKED_AT the strictest tier, the exported caps', async () => {
   const p = createPacing();
-  assert.equal(p.batchMs(), BATCH_MS);
-  assert.equal(p.typingFloorMs({ chars: 400, newestTs: NOW }), 0);
-  assert.equal(p.fifo(() => 'sent'), 'sent');
+  assert.notEqual(p.batchMs(), BATCH_MS, 'the brain path batches 4-7 s; BATCH_MS stays the legacy window');
+  assert.equal(p.typingFloorMs({ chars: 400, newestTs: NOW }), 0, 'long past: no floor');
   assert.equal(await p.fifo(async () => 'sent later'), 'sent later');
-  const today = { PER_DAY, PER_CHAT_PER_HOUR, MAX_LINKS, SEND_PER_MIN, SEND_PER_DAY };
-  assert.deepEqual(p.tier(NOW), today);
-  assert.deepEqual(p.tier(NOW + 30 * DAY), today, 'no warm-up tiers yet');
+  const t = p.tier(NOW);
+  assert.deepEqual([t.PER_DAY, t.PER_CHAT_PER_HOUR, t.MAX_LINKS, t.SEND_PER_MIN, t.SEND_PER_DAY], [PER_DAY, PER_CHAT_PER_HOUR, MAX_LINKS, SEND_PER_MIN, SEND_PER_DAY]);
+  assert.deepEqual(p.tier(NOW + 30 * DAY), t, 'no anchor: the strictest at any date');
   p.tier(NOW).PER_DAY = 1;
   assert.equal(p.tier(NOW).PER_DAY, PER_DAY, 'a caller cannot change the caps for the next one');
 });
@@ -423,7 +422,7 @@ test("the form's note is not on the one sender's note minute: it takes none of t
       const owner = `${OWNER_DIGITS}@s.whatsapp.net`;
       await (await enquiry(base)).json();
       for (let i = 0; i < 6; i += 1) assert.equal((await h.app.sender.sendTo({ jid: owner, text: `note ${i}`, kind: 'note' })).ok, true, `note ${i}`);
-      assert.deepEqual(await h.app.sender.sendTo({ jid: owner, text: 'note 7', kind: 'note' }), { ok: false, error: 'rate_limited' });
+      assert.deepEqual(await h.app.sender.sendTo({ jid: owner, text: 'note 7', kind: 'note' }), { ok: false, error: 'rate_limited', failure: 'local' });
       const { lead_id: leadId } = await (await enquiry(base, { event_id: 'seams-form-0000002' })).json();
       assert.equal(evo.sends().length, 2, 'both forms, today\'s way');
       assert.deepEqual(evo.sends().at(-1), { number: OWNER_DIGITS, text: leadNote(h.db.getLead(leadId), { siteUrl: SITE }) });
