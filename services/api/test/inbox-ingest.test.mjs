@@ -947,6 +947,100 @@ test("the Greeting/Away detector survives a restart: the stored copy counts, and
   h.s.close();
 });
 
+/** The detector's restart memory of the test chat's dropped copies (lib/team.mjs `greeting_seen`). */
+const GREETING_MARK = /^(?:[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{11}\.\d{1,16})(?:,[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{11}\.\d{1,16})*$/;
+const marksOf = (h) => String(h.team.getSetting('greeting_seen') ?? '').split(',').filter(Boolean);
+const markTimes = (h) => marksOf(h).map((m) => Number(m.split('.').pop()));
+
+test("the Greeting/Away detector remembers the test chat's dropped copy across a restart: its second copy in a client's chat raises one alert (Codex T07 r5)", () => {
+  // An away message with a number in it: the marker keeps a hash of it, never the text or its digits.
+  const away = 'Away till Sunday 09:30, call +966 50 000 0000';
+  const h = testChat();
+  h.s.insertLead({ ...LEAD, lead_id: T_THIRD, phone_e164: '966500000003', wa_jid: T_THIRD_JID, wa_lid: null });
+  assert.deepEqual(h.ingest(h.lead(), toOwner({ id: 'M-1', text: away, ts: NOW - 3_600_000 })), { stored: false, reason: 'test_chat_untracked' });
+  assert.equal(h.inbox.countMessages(T_LEAD), 0, 'the test chat stores nothing of it');
+  const marker = h.team.getSetting('greeting_seen');
+  assert.match(marker, GREETING_MARK);
+  assert.deepEqual(markTimes(h), [NOW - 3_600_000], "a hash of the text, a hash of the chat and the copy's time: nothing else");
+  for (const needle of [away, 'Sunday', '09:30', '0930', '966500000000', '500000000', T_LEAD, T_OWNER, T_INSTANCE, ...T_PERSONAL]) {
+    assert.equal(marker.includes(needle), false, `the marker holds ${needle}`);
+  }
+  h.restart();
+  // The same chat again after the restart is still one chat.
+  h.ingest(h.lead(), toOwner({ id: 'M-2', text: away, ts: NOW - 1_800_000 }));
+  assert.deepEqual(h.alerts, []);
+  assert.deepEqual(markTimes(h), [NOW - 1_800_000], "one mark per text and chat: the chat's newest copy");
+  h.restart();
+  assert.equal(h.ingest(h.lead(LEAD_ID), rec({ id: 'M-3', fromMe: true, jid: PHONE_JID, jidAlt: null, text: ` ${away}`, ts: NOW - 60_000 })).senderKind, 'owner_number');
+  assert.deepEqual(h.alerts.map((a) => a.code), ['greeting_away']);
+  // A third chat the same day: still one.
+  h.ingest(h.lead(T_THIRD), rec({ id: 'M-4', fromMe: true, jid: T_THIRD_JID, jidAlt: null, text: away, ts: NOW - 30_000 }));
+  assert.equal(h.alerts.length, 1);
+  assertCleanT(h.logs);
+  assert.equal(JSON.stringify(h.logs).includes(h.team.getSetting('greeting_seen')), false, 'no log line carries the marker');
+  h.s.close();
+
+  // The other order: the client's copy first, a restart, then the test chat's: the stored copy counts, as before.
+  const r = testChat();
+  r.ingest(r.lead(LEAD_ID), rec({ id: 'M-5', fromMe: true, jid: PHONE_JID, jidAlt: null, text: away, ts: NOW - 3_600_000 }));
+  r.restart();
+  r.ingest(r.lead(), toOwner({ id: 'M-6', text: away, ts: NOW - 60_000 }));
+  assert.deepEqual(r.alerts.map((a) => a.code), ['greeting_away']);
+  r.s.close();
+
+  // More than 24 h apart, across a restart: no alert.
+  const far = testChat({ lead: { history_from: NOW - 3 * T_DAY } });
+  far.at(NOW - T_DAY - 3_600_000);
+  assert.deepEqual(far.ingest(far.lead(), toOwner({ id: 'M-7', text: away, ts: far.now() - 60_000 })), { stored: false, reason: 'test_chat_untracked' });
+  assert.equal(marksOf(far).length, 1);
+  far.at(NOW);
+  far.restart();
+  far.ingest(far.lead(LEAD_ID), rec({ id: 'M-8', fromMe: true, jid: PHONE_JID, jidAlt: null, text: away, ts: NOW - 60_000 }));
+  assert.deepEqual(far.alerts, []);
+  far.s.close();
+});
+
+test('the Greeting/Away marker keeps the newest 50 dropped copies, prunes what can no longer count, and a junk marker breaks no record', () => {
+  const h = testChat();
+  for (let i = 0; i < 60; i++) h.ingest(h.lead(), toOwner({ id: `CAP-${i}`, text: `Typed on the Fold ${i}`, ts: NOW - 3_600_000 + i * 1000 }));
+  assert.match(h.team.getSetting('greeting_seen'), GREETING_MARK);
+  assert.deepEqual(markTimes(h), Array.from({ length: 50 }, (_, i) => NOW - 3_600_000 + (i + 10) * 1000), 'the oldest ten went');
+  // The oldest one's second copy, after a restart, no longer counts; the newest one's does.
+  h.restart();
+  h.ingest(h.lead(LEAD_ID), rec({ id: 'CAP-old', fromMe: true, jid: PHONE_JID, jidAlt: null, text: 'Typed on the Fold 0', ts: NOW - 60_000 }));
+  assert.deepEqual(h.alerts, []);
+  h.restart();
+  h.ingest(h.lead(LEAD_ID), rec({ id: 'CAP-new', fromMe: true, jid: PHONE_JID, jidAlt: null, text: 'Typed on the Fold 59', ts: NOW - 50_000 }));
+  assert.deepEqual(h.alerts.map((a) => a.code), ['greeting_away']);
+  h.s.close();
+
+  // Two days later every mark is past counting (a copy counts with one sent within 24 h of it, and a record only
+  // while it is at most 24 h old): the next write prunes them.
+  const p = testChat();
+  p.ingest(p.lead(), toOwner({ id: 'PR-1', text: 'An old one', ts: NOW - 60_000 }));
+  p.at(NOW + 2 * T_DAY + 60_000);
+  p.ingest(p.lead(), toOwner({ id: 'PR-2', text: 'A new one', ts: p.now() - 1000 }));
+  assert.deepEqual(markTimes(p), [p.now() - 1000]);
+  p.s.close();
+
+  // A marker that is junk (written by hand, say) is read as nothing and replaced; the record is handled as before.
+  const j = testChat();
+  j.s.db.prepare("INSERT INTO settings (key, value, updated, updated_by) VALUES ('greeting_seen', 'not a marker', 0, NULL)").run();
+  assert.deepEqual(j.ingest(j.lead(), toOwner({ id: 'J-1', text: GREETING, ts: NOW - 60_000 })), { stored: false, reason: 'test_chat_untracked' });
+  assert.match(j.team.getSetting('greeting_seen'), GREETING_MARK);
+  assert.equal(marksOf(j).length, 1);
+  j.restart();
+  j.ingest(j.lead(LEAD_ID), rec({ id: 'J-2', fromMe: true, jid: PHONE_JID, jidAlt: null, text: GREETING, ts: NOW - 30_000 }));
+  assert.deepEqual(j.alerts.map((a) => a.code), ['greeting_away']);
+  j.s.close();
+
+  // A client's stored copy is the transcript's to remember: it writes no mark.
+  const c = testChat();
+  c.ingest(c.lead(LEAD_ID), rec({ id: 'C-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: GREETING, ts: NOW - 60_000 }));
+  assert.equal(c.team.getSetting('greeting_seen'), '');
+  c.s.close();
+});
+
 test('the Greeting/Away detector has no shortest text: a short away message in English or Arabic, in two chats, raises the alert; in one chat it does not', () => {
   for (const away of ['Back tomorrow', 'بعود بكرة']) {
     // The test chat's dropped copy and a client's stored one.

@@ -31,15 +31,19 @@ export const ROLES = ['owner', 'staff'];
  * and `mail_since` (the mail poller), `mail_from_ok` (the reply sender checked),
  * `dana_month_alerted` / `brain_month_alerted` (the month alerts), `brain_out` (since when
  * the AI service has not answered), the restart-safe spend counters `brain_usd_day` /
- * `brain_usd_month` (micro-USD), and `owner_command_ts`, the time of the newest owner
+ * `brain_usd_month` (micro-USD), `owner_command_ts`, the time of the newest owner
  * `#dana …` command applied to each switch (lib/owner-test.mjs, PR-A2: `<switch>:<ms>`
- * pairs, comma-separated), so a restart never lets an older command undo a newer one.
+ * pairs, comma-separated), so a restart never lets an older command undo a newer one, and
+ * `greeting_seen`, the Greeting/Away detector's memory of the sent texts the owner's test chat
+ * drops (lib/inbox/ingest.mjs, PR-A2): `<text hash>.<chat hash>.<ms>` marks, comma-separated,
+ * at most 50, so a restart forgets no copy the transcript does not keep. Hashes and times
+ * only: never a text, a number or a lead id.
  */
 export const SETTINGS_DEFAULTS = {
   sending_enabled: '1', inbox_replies: '0', dana_enabled: '0', retell_funds_out: '', retell_funds_alerted: '',
   own_inbox: '0', owner_as_client: '0', calendar_booking: '0', owner_notes: '1', email_replies: '0', owner_mail_copy: '1', dana_brain: '0',
   owner_summary_day: '', mail_cursor: '', mail_since: '', mail_from_ok: '', dana_month_alerted: '',
-  brain_out: '', brain_usd_day: '', brain_usd_month: '', brain_month_alerted: '', owner_command_ts: '',
+  brain_out: '', brain_usd_day: '', brain_usd_month: '', brain_month_alerted: '', owner_command_ts: '', greeting_seen: '',
 };
 /**
  * A stored instant: `''` (none) or a whole ms timestamp. The Retell funds watch
@@ -60,6 +64,8 @@ const DAY = String.raw`${MONTH}-(?:0[1-9]|[12]\d|3[01])`;
 /** A whole number written the one way: no sign, no leading zero, no exponent, at most 15 digits. */
 const COUNT = String.raw`(?:0|[1-9]\d{0,14})`;
 const SWITCH = Object.freeze(['0', '1']);
+/** One Greeting/Away mark (lib/inbox/ingest.mjs): a text hash, a chat hash, the copy's time. */
+const GREETING_MARK = String.raw`[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{11}\.\d{1,16}`;
 /**
  * The values each setting may hold: a list, or a pattern the whole value must match. Every
  * key has an entry (team.test.mjs checks it), so none accepts any string.
@@ -80,6 +86,8 @@ export const SETTINGS_ALLOWED = {
   brain_usd_month: new RegExp(`^(?:|${MONTH}:${COUNT})$`),
   // `<switch>:<ms>` pairs, comma-separated, one per switch a command has set (six today).
   owner_command_ts: /^(?:|[a-z_]{1,32}:\d{1,16}(?:,[a-z_]{1,32}:\d{1,16}){0,15})$/,
+  // 16 + 11 base64url characters (two truncated SHA-256 hashes) and a time, at most 50 marks.
+  greeting_seen: new RegExp(`^(?:|${GREETING_MARK}(?:,${GREETING_MARK}){0,49})$`),
 };
 /** The owner's on/off switches: each one is '0' or '1' and nothing else, and fails closed. */
 export const SWITCH_KEYS = Object.keys(SETTINGS_ALLOWED).filter((k) => SETTINGS_ALLOWED[k] === SWITCH);

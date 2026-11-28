@@ -83,8 +83,11 @@
  *     tomorrow"); the same short reply typed into two chats raises it too, at most once a day,
  *     and the alert says the messages "look" on. A record with no text (a photo without a
  *     caption) never counts. A text is remembered as a hash only; the stored copies of other
- *     chats count too, so a restart forgets nothing, and a day's alert already in the
- *     owner-notes ledger is not raised again;
+ *     chats count too, and so does a copy the owner's test chat dropped, kept as a mark in the
+ *     `greeting_seen` setting (a hash of the text, a hash of the chat, the copy's time: never
+ *     the text, a number or a lead id; the newest 50, each until it can no longer count), so a
+ *     restart forgets nothing (Codex T07 r5), and a day's alert already in the owner-notes
+ *     ledger is not raised again;
  *   - a human message seen for the first time also ends a hold that waits for a person
  *     (`dana_hold_reason` with no `dana_hold_until`), when it was written after the hold: newer
  *     than every assistant send of the chat (store.mjs clearHumanHold), so an old reply a
@@ -129,6 +132,19 @@ const WARNED_MAX = 1000;
 export const GREETING_WINDOW_MS = 24 * 3_600_000;
 /** Distinct texts it remembers (as hashes) before the oldest is forgotten. */
 const GREETING_MEMORY = 500;
+/**
+ * The setting that remembers, across a restart, the copies the owner's test chat drops
+ * (lib/team.mjs `greeting_seen`): `<text hash>.<chat hash>.<ms>` marks, comma-separated. A
+ * client's chat stores its copy, and the stored copies are read already; the test chat stores
+ * none, so without its mark a restart between its copy and a client's would hide the pair.
+ */
+export const GREETING_SEEN_KEY = 'greeting_seen';
+/** Marks the setting keeps: the newest, by the copy's time. */
+export const GREETING_MARKS = 50;
+const GREETING_MARK_RE = /^([A-Za-z0-9_-]{16})\.([A-Za-z0-9_-]{11})\.(\d{1,16})$/;
+/** What a mark keeps of a text (its SHA-256, the memory's key) and of a chat: truncated hashes, never either. */
+const textMark = (key) => key.slice(0, 16);
+const chatMark = (leadId) => createHash('sha256').update(`greeting-chat\0${leadId}`).digest('base64url').slice(0, 11);
 /** The alert is once a day by Riyadh's calendar (UTC+3, no daylight saving). */
 const RIYADH_OFFSET_MS = 3 * 3_600_000;
 const DAY_MS = 86_400_000;
@@ -215,7 +231,7 @@ export function createIngest({
 } = {}) {
   if (!db || !inbox) throw new TypeError('createIngest needs the store and the inbox store');
   // `createTeam` only prepares statements when they are first used: this instance costs nothing.
-  const team = createTeam(db, { ownerTest });
+  const team = createTeam(db, { ownerTest, now });
   /** Bona's own number, identity checked (DESIGN §5.3); no switch, or one that throws, is false. */
   const ownNumberOk = () => {
     try { return ownerTest?.ownNumberOk?.() === true; } catch { return false; }
@@ -265,12 +281,52 @@ export function createIngest({
   let otherCopies = null;
   let ledgerToday = null;
 
+  /** The test chat's dropped copies, as the `greeting_seen` setting keeps them; junk reads as none. */
+  function readMarks(raw = team.getSetting(GREETING_SEEN_KEY)) {
+    const marks = [];
+    for (const part of String(raw ?? '').split(',')) {
+      const m = GREETING_MARK_RE.exec(part);
+      if (m) marks.push({ text: m[1], chat: m[2], at: Number(m[3]) });
+    }
+    return marks;
+  }
+
+  /**
+   * Remember a copy the transcript drops: one mark per text and chat (that chat's newest copy),
+   * the newest GREETING_MARKS by the copy's time, and none that can no longer count. A copy
+   * counts with one sent within GREETING_WINDOW_MS of it, and a record only while it is at most
+   * that old, so a mark older than twice the window never counts again. Written inside the
+   * record's transaction; a write that fails is logged (no text, no id) and never fails the
+   * record. Returns the marks now kept, or null when they could not be read or written.
+   */
+  function rememberDropped(key, leadId, ts, t) {
+    try {
+      const text = textMark(key);
+      const chat = chatMark(leadId);
+      const marks = readMarks();
+      const same = (m) => m.text === text && m.chat === chat;
+      const at = Math.max(Math.trunc(ts), ...marks.filter(same).map((m) => m.at));
+      const kept = marks.filter((m) => !same(m) && m.at >= t - 2 * GREETING_WINDOW_MS);
+      kept.push({ text, chat, at });
+      kept.sort((a, b) => a.at - b.at);
+      const next = kept.slice(-GREETING_MARKS);
+      team.setSetting(GREETING_SEEN_KEY, next.map((m) => `${m.text}.${m.chat}.${m.at}`).join(','));
+      return next;
+    } catch (err) {
+      log({ level: 'warn', evt: 'inbox.greeting_mark_failed', error: String(err?.code ?? err?.name ?? 'error').slice(0, 40) });
+      return null;
+    }
+  }
+
   /**
    * One untracked sent text, seen for the first time in this chat. True when the same text is
    * now in two or more chats within GREETING_WINDOW_MS of this copy and today's alert has not
-   * been raised yet (by this process, or by an earlier one: the ledger's row).
+   * been raised yet (by this process, or by an earlier one: the ledger's row). `dropped` is a
+   * copy the transcript does not keep (the owner's test chat): it is marked in the store too.
+   * Chats are counted by their mark (`chatMark`), whichever memory names them, so one chat is
+   * never two.
    */
-  function noteUntracked(leadId, body, ts) {
+  function noteUntracked(leadId, body, ts, { dropped = false } = {}) {
     const text = typeof body === 'string' ? body.trim() : '';
     const t = now();
     // Any length counts (an away message can be "Back tomorrow"); only no text at all does not.
@@ -283,8 +339,11 @@ export function createIngest({
       untracked.set(key, chats);
     }
     chats.set(leadId, Math.max(chats.get(leadId) ?? -Infinity, ts));
-    const near = new Set([...chats].filter(([, at]) => Math.abs(at - ts) <= GREETING_WINDOW_MS).map(([id]) => id));
-    if (near.size < 2) {
+    const near = (at) => Math.abs(at - ts) <= GREETING_WINDOW_MS;
+    const seen = new Set([...chats].filter(([, at]) => near(at)).map(([id]) => chatMark(id)));
+    // A copy nothing stores is marked before anything decides, so a restart after it forgets nothing.
+    let marks = dropped ? rememberDropped(key, leadId, ts, t) : null;
+    if (seen.size < 2) {
       // The stored copies (other chats' owner_number messages) remember what a restart forgot.
       try {
         otherCopies ??= db.db.prepare(`SELECT lead_id, text FROM wa_messages
@@ -292,11 +351,19 @@ export function createIngest({
                                           AND ts >= ? AND ts <= ? AND text IS NOT NULL
                                         ORDER BY ts DESC LIMIT 200`);
         for (const r of otherCopies.all(String(leadId), ts - GREETING_WINDOW_MS, ts + GREETING_WINDOW_MS)) {
-          if (String(r.text).trim() === text) near.add(r.lead_id);
+          if (String(r.text).trim() === text) seen.add(chatMark(r.lead_id));
         }
-      } catch { /* nothing stored to read: the memory alone decides */ }
+      } catch { /* nothing stored to read: the other memories decide */ }
     }
-    if (near.size < 2) return false;
+    if (seen.size < 2) {
+      // And the test chat's dropped copies, which nothing stores: their marks.
+      try {
+        marks ??= readMarks();
+        const mark = textMark(key);
+        for (const m of marks) if (m.text === mark && near(m.at)) seen.add(m.chat);
+      } catch { /* no marks to read: the other memories decide */ }
+    }
+    if (seen.size < 2) return false;
     const day = riyadhDay(t);
     if (alertedDay === day) return false;
     alertedDay = day;
@@ -440,7 +507,7 @@ export function createIngest({
         const tracked = kind === 'staff' || kind === 'dana';
         // The owner's test chat keeps only what the dashboard or the assistant sent (DESIGN §3.2).
         if (!tracked && current.inbox_via === 'owner_test') {
-          greeting = noteUntracked(current.lead_id, body, rec.ts);
+          greeting = noteUntracked(current.lead_id, body, rec.ts, { dropped: true });
           return { stored: false, reason: 'test_chat_untracked' };
         }
         senderKind = tracked ? kind : 'owner_number';

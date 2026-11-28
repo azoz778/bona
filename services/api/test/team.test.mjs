@@ -588,6 +588,24 @@ test("owner_command_ts (PR-A2) takes '' or comma-separated <switch>:<ms> pairs o
   s.close();
 });
 
+test("greeting_seen (PR-A2, Codex T07 r5) takes '' or up to 50 comma-separated <text hash>.<chat hash>.<ms> marks only, and is no switch", () => {
+  const { s, team } = teamHarness();
+  assert.equal(SETTINGS_DEFAULTS.greeting_seen, '');
+  const mark = (i = 0) => `${'aB3-_'.repeat(3)}${i % 10}.${'Zz9_-'.repeat(2)}x.${NOW + i}`;
+  for (const ok of ['', mark(), `${mark(0)},${mark(1)}`, Array.from({ length: 50 }, (_, i) => mark(i)).join(',')]) {
+    assert.equal(team.setSetting('greeting_seen', ok), ok);
+  }
+  const bad = [
+    Array.from({ length: 51 }, (_, i) => mark(i)).join(','), `${mark()},`, `,${mark()}`, mark().replace('.', ':'),
+    `${'a'.repeat(15)}.${'b'.repeat(11)}.${NOW}`, `${'a'.repeat(16)}.${'b'.repeat(12)}.${NOW}`, `${'a'.repeat(16)}.${'b'.repeat(11)}.`,
+    `${'a'.repeat(16)}.${'b'.repeat(11)}.12345678901234567`, `${'a'.repeat(16)}.${'b'.repeat(11)}.-1`, `${'a+/='.repeat(4)}.${'b'.repeat(11)}.${NOW}`,
+    'Back tomorrow', '966500000000', `${mark()} `,
+  ];
+  for (const v of bad) assert.equal(codeOf(() => team.setSetting('greeting_seen', v)), 'bad_setting_value', v.slice(0, 60));
+  assert.equal(team.isOn('greeting_seen'), false, 'a marker is never a switch');
+  s.close();
+});
+
 test('brain_usd_day / brain_usd_month take only YYYY-MM-DD:<int> / YYYY-MM:<int> micro-USD counters (or \'\')', () => {
   const { s, team } = teamHarness();
   assert.equal(SETTINGS_DEFAULTS.brain_usd_day, '');
