@@ -30,14 +30,20 @@ export const ROLES = ['owner', 'staff'];
  * code state, never buttons: `owner_summary_day` (the daily summary's day), `mail_cursor`
  * and `mail_since` (the mail poller), `mail_from_ok` (the reply sender checked),
  * `dana_month_alerted` / `brain_month_alerted` (the month alerts), `brain_out` (since when
- * the AI service has not answered) and the restart-safe spend counters `brain_usd_day` /
- * `brain_usd_month` (micro-USD).
+ * the AI service has not answered), the restart-safe spend counters `brain_usd_day` /
+ * `brain_usd_month` (micro-USD), `owner_command_ts`, the time of the newest owner
+ * `#dana …` command applied to each switch (lib/owner-test.mjs, PR-A2: `<switch>:<ms>`
+ * pairs, comma-separated), so a restart never lets an older command undo a newer one, and
+ * `greeting_seen`, the Greeting/Away detector's memory of the sent texts the owner's test chat
+ * drops (lib/inbox/ingest.mjs, PR-A2): `<text hash>.<chat hash>.<ms>` marks, comma-separated,
+ * at most 500, so a restart forgets no copy the transcript does not keep. Hashes and times
+ * only: never a text, a number or a lead id.
  */
 export const SETTINGS_DEFAULTS = {
   sending_enabled: '1', inbox_replies: '0', dana_enabled: '0', retell_funds_out: '', retell_funds_alerted: '',
   own_inbox: '0', owner_as_client: '0', calendar_booking: '0', owner_notes: '1', email_replies: '0', owner_mail_copy: '1', dana_brain: '0',
   owner_summary_day: '', mail_cursor: '', mail_since: '', mail_from_ok: '', dana_month_alerted: '',
-  brain_out: '', brain_usd_day: '', brain_usd_month: '', brain_month_alerted: '',
+  brain_out: '', brain_usd_day: '', brain_usd_month: '', brain_month_alerted: '', owner_command_ts: '', greeting_seen: '',
 };
 /**
  * A stored instant: `''` (none) or a whole ms timestamp. The Retell funds watch
@@ -58,6 +64,8 @@ const DAY = String.raw`${MONTH}-(?:0[1-9]|[12]\d|3[01])`;
 /** A whole number written the one way: no sign, no leading zero, no exponent, at most 15 digits. */
 const COUNT = String.raw`(?:0|[1-9]\d{0,14})`;
 const SWITCH = Object.freeze(['0', '1']);
+/** One Greeting/Away mark (lib/inbox/ingest.mjs): a text hash, a chat hash, the copy's time. */
+const GREETING_MARK = String.raw`[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{11}\.\d{1,16}`;
 /**
  * The values each setting may hold: a list, or a pattern the whole value must match. Every
  * key has an entry (team.test.mjs checks it), so none accepts any string.
@@ -76,6 +84,10 @@ export const SETTINGS_ALLOWED = {
   brain_month_alerted: new RegExp(`^(?:|${MONTH}(?::(?:80|100))?)$`),
   brain_usd_day: new RegExp(`^(?:|${DAY}:${COUNT})$`),
   brain_usd_month: new RegExp(`^(?:|${MONTH}:${COUNT})$`),
+  // `<switch>:<ms>` pairs, comma-separated, one per switch a command has set (six today).
+  owner_command_ts: /^(?:|[a-z_]{1,32}:\d{1,16}(?:,[a-z_]{1,32}:\d{1,16}){0,15})$/,
+  // 16 + 11 base64url characters (two truncated SHA-256 hashes) and a time, at most 500 marks (ingest's GREETING_MARKS).
+  greeting_seen: new RegExp(`^(?:|${GREETING_MARK}(?:,${GREETING_MARK}){0,499})$`),
 };
 /** The owner's on/off switches: each one is '0' or '1' and nothing else, and fails closed. */
 export const SWITCH_KEYS = Object.keys(SETTINGS_ALLOWED).filter((k) => SETTINGS_ALLOWED[k] === SWITCH);
@@ -127,10 +139,39 @@ function cleanName(raw, fallback = '') {
 
 /**
  * @param {ReturnType<import('./db.mjs').openDb>} store
- * @param {{ now?: () => number, log?: (e: object) => void }} [o]
+ * @param {{ now?: () => number, log?: (e: object) => void,
+ *           ownerTest?: object|(() => object|null)|null }} [o]
+ *   `ownerTest` is lib/owner-test.mjs (2026-11-27 DESIGN §3.2, PR-A2), or a function that returns
+ *   it: index.mjs builds it after the team, which it reads. While its `active()` is true, the
+ *   owner's own number (its `ownerDigits()`, BONA_OWNER_JID) and his users-row lid (its
+ *   `ownerLid()`) are not excluded, so his test chat is a client's chat; every other team number,
+ *   another owner-role account included, stays excluded, and the never list still wins. Left
+ *   out, or answering anything but true, nothing changes.
  */
-export function createTeam(store, { now = () => Date.now(), log = () => {} } = {}) {
+export function createTeam(store, { now = () => Date.now(), log = () => {}, ownerTest = null } = {}) {
   const { db, transaction } = store;
+  /** The test switch, read on every call; a missing one, or one that throws, is no switch. */
+  const testSwitch = () => {
+    try {
+      const t = typeof ownerTest === 'function' ? ownerTest() : ownerTest;
+      return t && t.active?.() === true ? t : null;
+    } catch { return null; }
+  };
+  /** The owner's digits while his test is in force, else null (fail closed: he stays excluded). */
+  function exceptPhone() {
+    const t = testSwitch();
+    if (!t) return null;
+    try { return normalisePhone(t.ownerDigits?.() ?? '') ?? null; } catch { return null; }
+  }
+  /** The owner's users-row lid while his test is in force, else null (isExcludedLead below reads it). */
+  function exceptLid() {
+    const t = testSwitch();
+    if (!t) return null;
+    try {
+      const lid = t.ownerLid?.();
+      return typeof lid === 'string' && lid ? lid : null;
+    } catch { return null; }
+  }
   const stmts = new Map();
   const prep = (sql) => {
     let s = stmts.get(sql);
@@ -262,12 +303,15 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
   /**
    * True for any team number (active or not) and any never-list number. Normalises
    * whatever it is given first, so a loosely formatted number still matches; anything
-   * that does not parse as a phone number is `false`, never a thrown error.
+   * that does not parse as a phone number is `false`, never a thrown error. The one
+   * exception is the owner's own number while his test switch is in force (`ownerTest`
+   * above): then only the never list counts for it.
    */
   function isExcludedPhone(phone) {
     const digits = normalisePhone(phone);
     if (!digits) return false;
-    return Boolean(prep('SELECT 1 FROM users WHERE phone_e164 = ?').get(digits) || prep('SELECT 1 FROM never_list WHERE phone_e164 = ?').get(digits));
+    const member = digits !== exceptPhone() && prep('SELECT 1 FROM users WHERE phone_e164 = ?').get(digits);
+    return Boolean(member || prep('SELECT 1 FROM never_list WHERE phone_e164 = ?').get(digits));
   }
 
   /* -------------------- switches -------------------- */
@@ -319,7 +363,7 @@ export function createTeam(store, { now = () => Date.now(), log = () => {} } = {
 
   return {
     ensureOwner, getUser, getUserByPhone, listUsers, addUser, deactivateUser, reactivateUser, setRole, touchLogin,
-    addNever, removeNever, listNever, isExcludedPhone,
+    addNever, removeNever, listNever, isExcludedPhone, exceptLid,
     getSetting, setSetting, sendingEnabled, repliesEnabled, danaEnabled,
     isOn, ownInboxEnabled, ownerAsClientEnabled, calendarBookingEnabled, ownerNotesEnabled, emailRepliesEnabled,
     ownerMailCopyEnabled, danaBrainEnabled, brainOutSince,
@@ -396,7 +440,9 @@ function phoneOfJid(jid) {
  * a colleague's by `learnTeamLid`. The Bona inbox's one exclusion test (§3.5, P2-7): the
  * dashboard routes refuse such a chat, ingest refuses its records, and the daily upkeep
  * takes it out of the inbox. A lid's own digits are an opaque id, never read as a phone
- * number.
+ * number. While the owner's test switch is in force, his own users-row lid is not a
+ * colleague's (`team.exceptLid()`, 2026-11-27 DESIGN §3.2): the same exception his number gets
+ * in `isExcludedPhone`. isTeamLid itself is unchanged.
  *
  * It decides from the identifier fields of the object it is handed — `phone_e164`,
  * `wa_jid`, `wa_lid` — and nothing else: it never reads the row again by `lead_id`.
@@ -409,7 +455,8 @@ function phoneOfJid(jid) {
  */
 export function isExcludedLead(team, store, lead) {
   if (!lead) return false;
-  return team.isExcludedPhone(lead.phone_e164)
-    || team.isExcludedPhone(phoneOfJid(lead.wa_jid))
-    || isTeamLid(store, lead.wa_lid);
+  if (team.isExcludedPhone(lead.phone_e164) || team.isExcludedPhone(phoneOfJid(lead.wa_jid))) return true;
+  if (!isTeamLid(store, lead.wa_lid)) return false;
+  const except = typeof team.exceptLid === 'function' ? team.exceptLid() : null;
+  return !(except && lead.wa_lid === except);
 }

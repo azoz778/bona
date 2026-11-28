@@ -1,14 +1,16 @@
 /**
  * The Evolution read client. The real API is never contacted: every test drives a
- * stub `fetch`. Response shapes are the ones the live instance `abdulaziz-personal`
+ * stub `fetch`, except the redirect test, which uses the real fetch between two
+ * servers on 127.0.0.1. Response shapes are the ones the live instance `abdulaziz-personal`
  * answered with on 2026-09-05 (see services/intake/test/evolution.test.mjs).
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import {
-  EvolutionError, MAX_PAGES, MAX_SPLIT_DEPTH, PAGE_SIZE, bareJid, contextOf, fetchWindow,
+  EvolutionError, MAX_PAGES, MAX_SPLIT_DEPTH, PAGE_SIZE, bareJid, contextOf, fetchInstance, fetchWindow,
   findMessagesPage, findMessagesWindow, isNoise, mediaOf, normaliseRecord, oldestFirst,
-  readWindow, recordsOf, textOf, toMs,
+  readWindow, recordsOf, textOf, toMs, whatsappNumbers,
 } from '../lib/evolution.mjs';
 import { isTkDocument, namesBona, namesTk, ownerOutboundJoins } from '../lib/inbox/eligibility.mjs';
 
@@ -1329,4 +1331,241 @@ test('normaliseRecord carries the placeholder, the cleaned file name and the noi
   assert.equal(reaction.noise, true);
   assert.equal(reaction.media, null);
   assert.equal(reaction.fileName, null);
+});
+
+/* ---------------- the two read-only probes of the identity guard (DESIGN §5.3, PR-L) ---------------- */
+
+/** Bona's own number and the owner's, both fake (+966 50 000 0000 style). */
+const OWN_DIGITS = '966500000001';
+const PROBE = { baseUrl: 'http://evo.example/', apiKey: 'evo-key', instance: 'bona-test' };
+
+/** A fetch double for any route: records method, URL, headers and body; answers from a queue (last repeats). */
+function probeRecorder(responses) {
+  const calls = [];
+  let i = 0;
+  const fetchImpl = async (url, init = {}) => {
+    calls.push({
+      url, method: init.method ?? 'GET', headers: init.headers ?? {}, body: init.body === undefined ? undefined : JSON.parse(init.body),
+      signal: init.signal, redirect: init.redirect,
+    });
+    const r = responses[Math.min(i, responses.length - 1)];
+    i += 1;
+    if (r.throw) throw Object.assign(new Error('boom'), { name: r.throw });
+    return { ok: r.status >= 200 && r.status < 300, status: r.status, text: async () => (typeof r.body === 'string' ? r.body : JSON.stringify(r.body)) };
+  };
+  return { fetchImpl, calls };
+}
+
+/** One instance as fetchInstances lists it (2.3.7, verify/T00.md step 2): its API key (`token`) sits next to the number. */
+const instanceRow = (over = {}) => ({
+  id: 'inst-1', name: 'bona-test', connectionStatus: 'open', ownerJid: `${OWN_DIGITS}@s.whatsapp.net`, profileName: 'Bona',
+  profilePicUrl: 'https://pps.example/p.jpg', integration: 'WHATSAPP-BAILEYS', number: '', token: 'INSTANCE-TOKEN-SECRET',
+  clientName: 'evolution', businessId: null, disconnectionReasonCode: null, Setting: { readMessages: false }, _count: { Message: 1 },
+  ...over,
+});
+
+test('fetchInstance asks fetchInstances for the one instance, by GET with the apikey header, and keeps only ownerJid and connectionStatus', async () => {
+  const { fetchImpl, calls } = probeRecorder([{ status: 200, body: [instanceRow()] }]);
+  const out = await fetchInstance({ ...PROBE, fetchImpl });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'http://evo.example/instance/fetchInstances?instanceName=bona-test');
+  assert.equal(calls[0].method, 'GET');
+  assert.equal(calls[0].body, undefined, 'a GET carries no body');
+  assert.equal(calls[0].headers.apikey, 'evo-key', 'the key rides in the header, never in the URL');
+  assert.ok(calls[0].signal, 'the request has a deadline');
+  assert.deepEqual(out, { ownerJid: `${OWN_DIGITS}@s.whatsapp.net`, connectionStatus: 'open' });
+  assert.doesNotMatch(JSON.stringify(out), /TOKEN|token|profile|pps\.example/, 'the instance key and the profile never leave this function');
+});
+
+test('fetchInstance picks the entry named after the instance, url-encodes the name, and refuses an answer that does not name it once', async () => {
+  const other = instanceRow({ name: 'abdulaziz-personal', ownerJid: '966500000009@s.whatsapp.net' });
+  const both = probeRecorder([{ status: 200, body: [other, instanceRow()] }]);
+  assert.deepEqual(await fetchInstance({ ...PROBE, fetchImpl: both.fetchImpl }), { ownerJid: `${OWN_DIGITS}@s.whatsapp.net`, connectionStatus: 'open' },
+    'a server that ignored the filter still answers for this instance, never for the first row');
+
+  const named = probeRecorder([{ status: 200, body: [instanceRow({ name: 'bona test/2' })] }]);
+  await fetchInstance({ ...PROBE, instance: 'bona test/2', fetchImpl: named.fetchImpl });
+  assert.equal(named.calls[0].url, 'http://evo.example/instance/fetchInstances?instanceName=bona%20test%2F2');
+
+  for (const body of [[other], [], [instanceRow(), instanceRow()], { name: 'bona-test' }, { instance: instanceRow() }, 'not json', null]) {
+    const { fetchImpl } = probeRecorder([{ status: 200, body }]);
+    await assert.rejects(fetchInstance({ ...PROBE, fetchImpl }), (err) => {
+      assert.ok(err instanceof EvolutionError, JSON.stringify(body));
+      assert.equal(err.code, 'bad_response');
+      assert.equal(err.body ?? null, null, 'nothing of the answer rides on the error');
+      assert.doesNotMatch(String(err.message), /TOKEN|966/);
+      return true;
+    });
+  }
+});
+
+test('fetchInstance: a missing, odd or non-string ownerJid / connectionStatus reads as null, never as text', async () => {
+  for (const [row, want] of [
+    [instanceRow({ ownerJid: null }), { ownerJid: null, connectionStatus: 'open' }],
+    [instanceRow({ ownerJid: 966500000001 }), { ownerJid: null, connectionStatus: 'open' }],
+    [instanceRow({ ownerJid: '' }), { ownerJid: null, connectionStatus: 'open' }],
+    [instanceRow({ connectionStatus: 'close' }), { ownerJid: `${OWN_DIGITS}@s.whatsapp.net`, connectionStatus: 'close' }],
+    [instanceRow({ connectionStatus: 'connecting' }), { ownerJid: `${OWN_DIGITS}@s.whatsapp.net`, connectionStatus: 'connecting' }],
+    [instanceRow({ connectionStatus: 'open <script>' }), { ownerJid: `${OWN_DIGITS}@s.whatsapp.net`, connectionStatus: null }],
+  ]) {
+    const { fetchImpl } = probeRecorder([{ status: 200, body: [row] }]);
+    assert.deepEqual(await fetchInstance({ ...PROBE, fetchImpl }), want);
+  }
+});
+
+test('fetchInstance: an HTTP error, a network failure and a timeout are EvolutionErrors with a code and no body', async () => {
+  for (const [r, status, code] of [
+    [{ status: 401, body: { error: 'Unauthorized', token: 'INSTANCE-TOKEN-SECRET' } }, 401, 'auth'],
+    [{ status: 403, body: { error: 'Forbidden' } }, 403, 'forbidden'],
+    [{ status: 404, body: { error: 'Not Found' } }, 404, 'not_found'],
+    [{ status: 500, body: { error: 'boom', token: 'INSTANCE-TOKEN-SECRET' } }, 500, 'bad_response'],
+    [{ throw: 'TypeError' }, 0, 'network'],
+    [{ throw: 'TimeoutError' }, 0, 'timeout'],
+    [{ throw: 'AbortError' }, 0, 'timeout'],
+  ]) {
+    const { fetchImpl } = probeRecorder([r]);
+    await assert.rejects(fetchInstance({ ...PROBE, fetchImpl }), (err) => {
+      assert.ok(err instanceof EvolutionError);
+      assert.equal(err.status, status);
+      assert.equal(err.code, code);
+      assert.equal(err.body ?? null, null);
+      assert.doesNotMatch(JSON.stringify({ ...err, message: err.message }), /TOKEN/);
+      return true;
+    });
+  }
+});
+
+test('fetchInstance and whatsappNumbers refuse a call they cannot make before anything is sent', async () => {
+  const { fetchImpl, calls } = probeRecorder([{ status: 200, body: [instanceRow()] }]);
+  await assert.rejects(fetchInstance({ ...PROBE, baseUrl: '', fetchImpl }), TypeError);
+  await assert.rejects(fetchInstance({ ...PROBE, instance: '', fetchImpl }), TypeError);
+  await assert.rejects(whatsappNumbers({ ...PROBE, baseUrl: '', numbers: [OWN_DIGITS], fetchImpl }), TypeError);
+  await assert.rejects(whatsappNumbers({ ...PROBE, instance: '', numbers: [OWN_DIGITS], fetchImpl }), TypeError);
+  for (const numbers of [undefined, [], [`${OWN_DIGITS}@s.whatsapp.net`], ['123456789012345@lid'], ['+966500000001'], ['1234567'], ['1234567890123456'],
+    [OWN_DIGITS, OWN_DIGITS], Array.from({ length: 11 }, (_, i) => `96650000001${i % 10}`), [966500000001]]) {
+    await assert.rejects(whatsappNumbers({ ...PROBE, numbers, fetchImpl }), TypeError, JSON.stringify(numbers));
+  }
+  assert.equal(calls.length, 0);
+});
+
+test('whatsappNumbers posts the digits to the instance with the curl User-Agent and keeps only digits and exists', async () => {
+  const { fetchImpl, calls } = probeRecorder([{ status: 200, body: [
+    { jid: `${OWN_DIGITS}@s.whatsapp.net`, exists: true, number: OWN_DIGITS, name: 'Bona Real Estate' },
+    { jid: '966500000002@s.whatsapp.net', exists: false, number: '966500000002' },
+  ] }]);
+  const out = await whatsappNumbers({ ...PROBE, numbers: [OWN_DIGITS, '966500000002'], fetchImpl });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'http://evo.example/chat/whatsappNumbers/bona-test');
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[0].headers.apikey, 'evo-key');
+  assert.equal(calls[0].headers['User-Agent'], 'curl/8.5.0');
+  assert.equal(calls[0].headers['Content-Type'], 'application/json');
+  assert.deepEqual(calls[0].body, { numbers: [OWN_DIGITS, '966500000002'] });
+  assert.ok(calls[0].signal);
+  assert.deepEqual(out, [{ digits: OWN_DIGITS, exists: true }, { digits: '966500000002', exists: false }]);
+  assert.doesNotMatch(JSON.stringify(out), /Bona Real Estate|name/, 'a contact name never leaves this function');
+});
+
+test('whatsappNumbers: only exists === true is a yes; an entry is matched by the number asked (a lid jid in the answer is fine)', async () => {
+  const { fetchImpl } = probeRecorder([{ status: 200, body: [
+    { jid: '123456789012345@lid', exists: true, number: OWN_DIGITS, lid: 'lid' },
+    { jid: '966500000002@s.whatsapp.net', exists: 'true', number: '966500000002' },
+    { jid: '966500000003@s.whatsapp.net', number: '966500000003' },
+    'junk', null,
+  ] }]);
+  assert.deepEqual(await whatsappNumbers({ ...PROBE, numbers: [OWN_DIGITS], fetchImpl }), [
+    { digits: OWN_DIGITS, exists: true }, { digits: '966500000002', exists: false }, { digits: '966500000003', exists: false },
+  ]);
+});
+
+test('whatsappNumbers: a closed connection (400), any other HTTP error, a non-array answer and a network failure are EvolutionErrors without the body', async () => {
+  for (const [r, status, code] of [
+    [{ status: 400, body: { status: 400, error: 'Bad Request', response: { message: [`Connection Closed ${OWN_DIGITS}`] } } }, 400, 'bad_response'],
+    [{ status: 401, body: { error: 'Unauthorized' } }, 401, 'auth'],
+    [{ status: 404, body: { error: 'The "bona-test" instance does not exist' } }, 404, 'not_found'],
+    [{ status: 200, body: { numbers: [OWN_DIGITS] } }, 200, 'bad_response'],
+    [{ status: 200, body: 'not json' }, 200, 'bad_response'],
+    [{ throw: 'TypeError' }, 0, 'network'],
+    [{ throw: 'TimeoutError' }, 0, 'timeout'],
+  ]) {
+    const { fetchImpl } = probeRecorder([r]);
+    await assert.rejects(whatsappNumbers({ ...PROBE, numbers: [OWN_DIGITS], fetchImpl }), (err) => {
+      assert.ok(err instanceof EvolutionError);
+      assert.equal(err.status, status);
+      assert.equal(err.code, code);
+      assert.equal(err.body ?? null, null, 'the answer echoes the number: it never rides on the error');
+      assert.doesNotMatch(String(err.message), /966/);
+      return true;
+    });
+  }
+});
+
+test('fetchInstance and whatsappNumbers never follow a redirect: each request says so, and a 3xx handed back is a failure', async () => {
+  const id = probeRecorder([{ status: 200, body: [instanceRow()] }]);
+  await fetchInstance({ ...PROBE, fetchImpl: id.fetchImpl });
+  assert.equal(id.calls[0].redirect, 'error', 'the apikey header is never carried to a redirect target');
+  const ln = probeRecorder([{ status: 200, body: [{ jid: `${OWN_DIGITS}@s.whatsapp.net`, exists: true, number: OWN_DIGITS }] }]);
+  await whatsappNumbers({ ...PROBE, numbers: [OWN_DIGITS], fetchImpl: ln.fetchImpl });
+  assert.equal(ln.calls[0].redirect, 'error', 'neither the apikey header nor the number is carried to a redirect target');
+  for (const status of [301, 302, 307, 308]) {
+    const answer = { status, body: '' };
+    await assert.rejects(fetchInstance({ ...PROBE, fetchImpl: probeRecorder([answer]).fetchImpl }),
+      (err) => err instanceof EvolutionError && err.status === status && err.code === 'bad_response', `fetchInstance ${status}`);
+    await assert.rejects(whatsappNumbers({ ...PROBE, numbers: [OWN_DIGITS], fetchImpl: probeRecorder([answer]).fetchImpl }),
+      (err) => err instanceof EvolutionError && err.status === status && err.code === 'bad_response', `whatsappNumbers ${status}`);
+  }
+});
+
+/**
+ * Two HTTP servers on this machine (no network beyond it): `from` answers every request with a 307
+ * to `to`, another origin, which records whatever reaches it and would answer as Evolution does.
+ */
+async function redirectPair() {
+  const reached = [];
+  const to = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      reached.push({ method: req.method, url: req.url, apikey: req.headers.apikey ?? null, body });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(req.url.startsWith('/instance/') ? [instanceRow()] : [{ jid: `${OWN_DIGITS}@s.whatsapp.net`, exists: true, number: OWN_DIGITS }]));
+    });
+  });
+  await new Promise((r) => to.listen(0, '127.0.0.1', r));
+  const target = `http://127.0.0.1:${to.address().port}`;
+  const from = http.createServer((req, res) => {
+    req.resume();
+    res.writeHead(307, { location: `${target}${req.url}` });
+    res.end();
+  });
+  await new Promise((r) => from.listen(0, '127.0.0.1', r));
+  const close = () => Promise.all([from, to].map((s) => new Promise((r) => { s.closeAllConnections(); s.close(r); })));
+  return { baseUrl: `http://127.0.0.1:${from.address().port}/`, reached, close };
+}
+
+test('a 307 to another origin with the real fetch: both probes fail, and the target never sees the apikey or the number', async () => {
+  const pair = await redirectPair();
+  try {
+    const opts = { ...PROBE, baseUrl: pair.baseUrl, fetchImpl: globalThis.fetch, timeoutMs: 5_000 };
+    await assert.rejects(fetchInstance(opts), (err) => err instanceof EvolutionError && err.code === 'network');
+    await assert.rejects(whatsappNumbers({ ...opts, numbers: [OWN_DIGITS] }), (err) => err instanceof EvolutionError && err.code === 'network');
+    assert.deepEqual(pair.reached, [], 'nothing reaches the redirect target: no key, no number, no answer that could pass for the instance');
+  } finally {
+    await pair.close();
+  }
+});
+
+test('fetchInstance and whatsappNumbers stop when the caller aborts (a stopped probe)', async () => {
+  const ac = new AbortController();
+  let seen = null;
+  const fetchImpl = (url, init) => new Promise((resolve, reject) => {
+    seen = init.signal;
+    init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+  });
+  const p = fetchInstance({ ...PROBE, fetchImpl, signal: ac.signal });
+  const q = whatsappNumbers({ ...PROBE, numbers: [OWN_DIGITS], fetchImpl, signal: ac.signal });
+  ac.abort();
+  await assert.rejects(p, (err) => err instanceof EvolutionError && err.code === 'timeout');
+  await assert.rejects(q, (err) => err instanceof EvolutionError && err.code === 'timeout');
+  assert.ok(seen.aborted);
 });

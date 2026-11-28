@@ -94,6 +94,21 @@ export function liveSummary(record, listing, now = new Date()) {
   return unitSummary(record);
 }
 
+/** The machine-readable copy of the units table (data-units-summary on its container, ProjectDetails.astro): the
+    summary the table prints, rebuilt key by key, so it carries only what the page shows (no unit ref, no plan, no
+    instalment price, not even the rows' internal key). bona-api's search_units quotes exactly this from the live page
+    (services/api/lib/published-units.mjs, DESIGN §4.5); null when there is no live summary (no table, no attribute). */
+export function unitsSummaryData(summary, listingId) {
+  if (!summary) return null;
+  return {
+    listingId, count: summary.count, areaMin: summary.areaMin, areaMax: summary.areaMax, cashFrom: summary.cashFrom,
+    delivery: summary.delivery, updated: summary.updated,
+    rows: summary.rows.map((r) => ({
+      label: { en: r.label.en, ar: r.label.ar }, count: r.count, areaMin: r.areaMin, areaMax: r.areaMax, cashFrom: r.cashFrom,
+    })),
+  };
+}
+
 const num = (n) => new Intl.NumberFormat('en-US').format(n);
 /** Long date in the page language: "2 September 2026" / "2 سبتمبر 2026"; month-only for YYYY-MM. Gregorian, Western digits. */
 export function sheetDateText(iso, locale) {

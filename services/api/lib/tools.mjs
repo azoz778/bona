@@ -16,11 +16,37 @@ import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normaliseSearchArgs } from './actions.mjs';
 import { toAsciiDigits } from './inventory.mjs';
 import { ensureHandoff } from './lead-tasks.mjs';
+import { createPublishedUnits } from './published-units.mjs';
 
 export const TOOL_NAMES = ['search_properties', 'show_property', 'search_units', 'create_lead', 'request_human'];
 /** The WhatsApp agent's hand-over tool (Phase 4): its invocation in a completion is what lib/dana-wa.mjs looks for. */
 export const HANDOVER_TOOL = 'request_human';
 const LEAD_ID_RE = /^LEAD-[A-Za-z0-9-]{1,60}$/;
+/**
+ * search_units sources that still get today's per-unit rows (refs, floors, every payment plan's price).
+ * Empty: every source, a missing or unknown one included, gets only the published per-bedroom "from" cut
+ * (DESIGN §4.5, deny by default). The owner's veto on the website-chat cut is this one line: ['bona-web'].
+ */
+export const FULL_UNIT_ROW_SOURCES = Object.freeze([]);
+
+/** search_units notes: the published cut, and nothing published for that project. */
+export const UNITS_NOTE = "These are the published starting cash prices per bedroom count; quote them as 'from'. Unit-level prices and payment plans are not published: offer a person for those.";
+export const UNITS_NOT_PUBLISHED_NOTE = 'Unit prices for that project are not published. Answer from search_properties only, never invent a unit, a price or a payment plan, and offer a person.';
+
+/**
+ * The allow-list a client may hear (DESIGN §4.5): the live listing page's per-bedroom rows (label, count, area
+ * range, lowest cash price), the delivery and the sheet date, from the summary lib/published-units.mjs read off
+ * that page. Built key by key, so nothing new in the summary passes.
+ */
+export function publishedUnitsCut(live) {
+  if (!live) return null;
+  return {
+    rows: live.rows.map((r) => ({
+      label: { en: r.label.en, ar: r.label.ar }, count: r.count, areaMin: r.areaMin, areaMax: r.areaMax, cashFrom: r.cashFrom,
+    })),
+    delivery: live.delivery, updated: live.updated,
+  };
+}
 
 /** A duplicate `create_lead` inside this window returns the first lead's id. */
 export const LEAD_DEDUPE_MS = 10 * 60 * 1000;
@@ -107,8 +133,11 @@ export function toolArgs(body = {}) {
 export function createToolHandlers({
   inventory, units = null, store, db, dataDir, siteUrl, env = {}, sendWhatsApp, log = () => {},
   now = () => Date.now(), leadDedupeMs = LEAD_DEDUPE_MS, notifyHandoff = async () => {},
+  fullUnitRowSources = FULL_UNIT_ROW_SOURCES, publishedUnits = null,
 }) {
   if (!db) throw new TypeError('createToolHandlers needs the store (db)');
+  /** The live listing pages' published unit summaries (one GET per search_units call, no cache, fail closed). */
+  const published = publishedUnits ?? createPublishedUnits({ siteUrl, log });
   /** leadKey → { at, id }. Bounded by the dedupe window, pruned on every save. */
   const recentLeads = new Map();
 
@@ -134,16 +163,43 @@ export function createToolHandlers({
   }
 
   /**
-   * Per-unit stock inside one project (today: Darco Prime Waterfront, BONA-W014).
-   * `search_properties` answers "which projects"; this answers "which unit, on
-   * which floor, facing where, and for how much" — the question a buyer actually
-   * asks. Prices come from the developer's own inventory sheet; the model must
-   * quote them exactly and never estimate.
+   * Unit prices inside one project (today: Darco Prime Waterfront, BONA-W014), for every source: WhatsApp,
+   * email, the website chat and a missing or unknown source. The answer is what the LIVE listing page publishes
+   * (DESIGN §4.5): the summary its units table carries (lib/published-units.mjs), one row per bedroom count with
+   * its lowest cash price, read by one GET of the live page on every call (no cache, no last-good fallback): the
+   * quote is what the page showed to this call's GET. Nothing (the "not published" note) when the
+   * inventory does not list the project as available, or the live page shows no table, a malformed one or another
+   * listing's, or could not be read on this call. units.json is not read here: the page alone says what is
+   * published. No unit refs, no per-unit prices, no payment plans: those are not published. The model's filters
+   * are ignored.
    */
   async function search_units(args, ctx) {
-    if (!units) return { count: 0, results: [], note: 'Unit-level stock is not loaded. Use search_properties and offer a specialist.' };
+    // The first id that is not blank; none (missing, null, '' or spaces) means W014, as the tool schema says.
+    const listingId = [args.listing_id, args.id, args.property]
+      .map((v) => (v == null ? '' : String(v).trim().toUpperCase())).find(Boolean) || 'BONA-W014';
+    const source = ctx.source ?? ctx.attr?.source ?? null;
+    if (units && fullUnitRowSources.includes(source)) return unitRows(args, ctx, listingId);
 
-    const listingId = String(args.listing_id ?? args.id ?? args.property ?? 'BONA-W014').trim().toUpperCase();
+    const listing = inventory.find(listingId);
+    // Both must hold: the inventory lists this exact id as available AND the live page shows the table. The live page
+    // is the ceiling: we never quote more than it shows. The local available/sold status can only remove a quote,
+    // never add one, so a sold listing is not quoted from a page that has not rebuilt yet (a delayed or failed Pages
+    // deploy). Kept on purpose (PR #86 review round 6); pinned by the tools.test.mjs test "a listing the inventory
+    // does not list as available".
+    const available = listing?.id === listingId && listing.status === 'available';
+    const live = available ? await published.get(listing) : null;
+    if (!live) return { count: 0, summary: null, note: UNITS_NOT_PUBLISHED_NOTE };
+
+    // Put the project card on screen so the visitor sees what is being discussed.
+    store.addCard(ctx.conversationId, inventory.card(listing));
+    return { count: live.count, summary: publishedUnitsCut(live), note: UNITS_NOTE };
+  }
+
+  /**
+   * The owner's veto path only (FULL_UNIT_ROW_SOURCES, empty by default): today's per-unit rows, with the
+   * developer's figures for the plan asked for. Unchanged from before the cut.
+   */
+  function unitRows(args, ctx, listingId) {
     const overview = units.summary(listingId);
     if (!overview) {
       return {
@@ -178,7 +234,6 @@ export function createToolHandlers({
 
     const results = rows.map((u) => units.toRow(u, plan));
 
-    // Put the project card on screen so the visitor sees what is being discussed.
     const listing = inventory.find(listingId);
     if (listing) store.addCard(ctx.conversationId, inventory.card(listing));
 

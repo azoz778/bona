@@ -34,6 +34,14 @@
  * remembered in memory per member; after a restart there are none, so a funds push still
  * queued reads as funds.
  *
+ * The full automation (2026-11-27 DESIGN §5.3, §14; DESIGN-brain §4, §10) adds four more reasons
+ * about no chat, pushed the same way to the active owners only, each spaced by its caller:
+ * `wa_link_down` (Bona's WhatsApp link failed two probes in a row) and `identity_mismatch` (the
+ * instance is not Bona's own number), from lib/wa-link.mjs; `dana_paused` (the breaker switched
+ * Dana off) and `brain` (the AI service refuses for credit or key). Until a caller sends one
+ * (PR-INT wires them), they change nothing. None of them is a chat push, so none quiets a chat
+ * alert or hides the funds one.
+ *
  * Each of the recipients' live devices gets one empty push (lib/push.mjs). 404/410 means the
  * browser dropped the subscription: the row goes. Anything else counts a failure and is
  * logged by its status only. Nothing is retried. `notify` never rejects. No endpoint, name,
@@ -55,8 +63,12 @@ export const MAX_DEVICES_PER_USER = 10;
 const MARKS_MAX = 5000;
 /** The reasons a push can be sent for; anything else is logged as `other` and follows the `inbound` rules. */
 const REASONS = new Set(['inbound', 'needs_human', 'check']);
-/** The owner-wide reasons, about no chat (`notifyOwners`). */
-const OWNER_REASONS = new Set(['funds']);
+/**
+ * The owner-wide reasons, about no chat (`notifyOwners`): Retell's credit (`funds`), and the
+ * automation's link, identity, breaker and AI-service alerts. Frozen: nothing adds one at run time.
+ */
+export const OWNER_ALERT_REASONS = Object.freeze(['funds', 'wa_link_down', 'identity_mismatch', 'dana_paused', 'brain']);
+const OWNER_REASONS = new Set(OWNER_ALERT_REASONS);
 /** The failure kinds lib/push.mjs `send` answers, plus `threw` for a send that rejected after all. */
 const SEND_ERRORS = new Set(['timeout', 'network', 'bad_endpoint', 'threw']);
 
@@ -216,7 +228,7 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
     return { users: users.size, devices: devices.length, ok, gone, failed };
   }
 
-  /** An owner-wide alert (`funds`): the active owners' live devices, each owner marked before the sends. */
+  /** An owner-wide alert (OWNER_ALERT_REASONS): the active owners' live devices. */
   async function runOwners(why) {
     if (!pusher) return { skipped: 'off' };
     const t = now();
@@ -269,8 +281,8 @@ export function createAlerts({ db, pusher = null, isExcludedLead, now = () => Da
   }
 
   /**
-   * Pushes one owner-wide alert (reason `funds`) to every active owner's live devices. Never
-   * rejects; a reason that is not owner-wide is refused, never sent as something else.
+   * Pushes one owner-wide alert (a reason in OWNER_ALERT_REASONS) to every active owner's live
+   * devices. Never rejects; a reason that is not owner-wide is refused, never sent as something else.
    * @returns {Promise<{ users: number, devices: number, ok: number, gone: number, failed: number }
    *   | { skipped: 'bad_reason' | 'off' | 'no_devices' } | { error: 'failed' }>}
    */
