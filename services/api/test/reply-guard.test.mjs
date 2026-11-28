@@ -639,3 +639,23 @@ test('"مليون ريال وخمس غرف نوم" and its kind keep the publish
   }
   for (const reply of ['السعر مليون وخمسمية', 'السعر مليون وخمسمية ريال', 'السعر مليون ومتين ألف']) assert.equal(checkReply(reply, parts).ok, false, reply);
 });
+
+/* Codex r34 P2: the short spoken 1.5M followed by any word other than a size is refused too. */
+test('"مليون وخمسمية كاش" is refused against a published 1,000,000', () => {
+  const parts = { toolResults: ['{"p":"SAR 1,000,000"}'] };
+  for (const reply of ['سعر الفيلا مليون وخمسمية كاش', 'سعر الفيلا مليون و500 كاش', 'السعر مليون وخمسمية نقدا', 'السعر مليون ريال وخمسمية تقريبا', 'السعر مليون و٥٠٠ للبيع']) {
+    assert.equal(checkReply(reply, parts).ok, false, reply);
+  }
+  for (const reply of ['السعر مليون و500 متر من البحر', 'السعر مليون ريال وتسعمية متر مربع', 'السعر مليون ريال و٣ غرف']) {
+    assert.equal(checkReply(reply, parts).ok, true, reply);
+  }
+});
+
+/* Claude r32 P2: a price and a fee, each with its own currency word, are two amounts. */
+test('"مليون ريال و50,000 ريال رسوم السعي" checks the price and the fee apart', () => {
+  const parts = { toolResults: ['{"p":"SAR 1,000,000"}', '{"f":"SAR 50,000"}', '{"q":"SAR 1,200,000"}', '{"t":"SAR 60,000"}', '{"r":"SAR 2,000,000"}', '{"d":"SAR 150,000"}', '{"s":"SAR 950,000"}'] };
+  for (const reply of ['السعر مليون ريال و50,000 ريال رسوم السعي', 'السعر 1.2 مليون ريال و60,000 ريال ضريبة', 'price 2 million SAR and 150,000 SAR deposit', 'السعر مليون ريال و 950,000 ريال للفيلا الثانية']) {
+    assert.equal(checkReply(reply, parts).ok, true, reply);
+  }
+  assert.equal(checkReply('سعر الفيلا مليون ريال الا ١٠٠٬٠٠٠ ريال', { toolResults: ['{"p":"SAR 1,000,000"}', '{"q":"SAR 100,000"}'] }).ok, false, 'a deduction naming its currency twice stays one amount');
+});

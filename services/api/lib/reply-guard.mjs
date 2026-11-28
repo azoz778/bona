@@ -108,15 +108,22 @@ const FRACTION_AFTER_RE = /^[\s-]{0,2}(?:و|and[\s-]+(?:an?[\s-]+)?|(?:إلا|ا
 /** A currency word right after a scale word: the fraction may come after it ("مليون ريال ونص", "a million riyals and a half"). */
 const CURRENCY_FIRST_RE = new RegExp(String.raw`^[\s-]{0,2}(?:${CUR})(?![\p{L}])`, 'iu');
 /**
- * After a million (and its currency word), "و" and a hundreds word ("مليون وخمسمية", "مليون ومتين ألف") or three bare
- * digits, either ending the amount ("مليون و٥٠٠", "مليون ريال و500."): the colloquial short form of 1.5M, a value the
- * guard cannot read (Claude r30). Never a count ("مليون ريال وخمس غرف", "وتسعمية متر", Claude r31), a word with "ال"
- * ("والرسمية"), "2 مليون و3 غرف", "مليون و500 ألف" (a compound) or "مليون و500 متر".
+ * After a million (and its currency word), "و" and a hundreds word or three bare digits ("مليون وخمسمية", "مليون و٥٠٠",
+ * "مليون وخمسمية كاش", "مليون ريال و500."): the colloquial short form of 1.5M, a value the guard cannot read (Claude
+ * r30, Codex r34). Not when a thousands word, "k", a percent or an area follows (a compound or a size: "مليون و500
+ * ألف", "وتسعمية متر"), never a count ("مليون ريال وخمس غرف", "2 مليون و3 غرف") or a word with "ال" ("والرسمية").
  */
-const LOOSE_AFTER_RE = new RegExp(
-  String.raw`^(?:[\s-]{0,2}(?:${CUR})(?![\p{L}]))?[\s-]{0,2}و\s{0,2}(?:(?!ال)(?:\p{L}{0,6}(?:مية|ميه|مئة|مائة)|ميتين|متين|مئتين|مائتين|مئتي)(?![\p{L}])(?=\s*(?:(?:${CUR})(?![\p{L}])|ألف|الف|آلاف|الاف|[.!?؟،,;:\n)]|$))|\d{3}(?![\d.,]\d)(?=\s*(?:(?:${CUR})(?![\p{L}])|[.!?؟،,;:\n)]|$)))`,
+const LOOSE_HEAD_RE = new RegExp(
+  String.raw`^(?:[\s-]{0,2}(?:${CUR})(?![\p{L}]))?[\s-]{0,2}و\s{0,2}(?:(?:(?:(?:ثلاث|ثلث|تلات|تلت|أربع|اربع|خمس|ست|سبع|ثمان|ثمن|تمان|تمن|تسع)\s?)?(?:مية|ميه|مئة|مائة)|ميتين|متين|مئتين|مائتين|مئتي)(?![\p{L}])|\d{3}(?!\d|[.,]\d))`,
   'iu',
 );
+const LOOSE_NOT_RE = /^\s{0,2}(?:ألف|الف|آلاف|الاف|thousand|k(?![\p{L}]))/iu;
+function looseAfter(rest) {
+  const m = LOOSE_HEAD_RE.exec(rest);
+  if (!m) return false;
+  const tail = rest.slice(m[0].length);
+  return !LOOSE_NOT_RE.test(tail) && !AREA_AFTER_RE.test(tail) && !PERCENT_AFTER_RE.test(tail);
+}
 /** Whether a half or a quarter follows a scale word, straight away or after a currency word (Codex r29). */
 function fractionAfter(rest) {
   if (FRACTION_AFTER_RE.test(rest)) return true;
@@ -266,7 +273,7 @@ export function findAmounts(text) {
     if (/^:\d/.test(after)) continue; // 10:00
     const currency = currencyOf(cur1) ?? currencyOf(cur2) ?? shared.get(numStart) ?? null;
     if (word && !currency && AREA_AFTER_RE.test(s.slice(m.index + m[0].length))) { use(); continue; } // "85 ألف متر": an area
-    if (word && (fractionAfter(s.slice(m.indices.groups.word[1])) || (scaleOf(word) >= 1e6 && LOOSE_AFTER_RE.test(s.slice(m.indices.groups.word[1]))))) { // "2 مليون ونص", "2 مليون ريال ونص": a value the guard cannot read
+    if (word && (fractionAfter(s.slice(m.indices.groups.word[1])) || (scaleOf(word) >= 1e6 && looseAfter(s.slice(m.indices.groups.word[1]))))) { // "2 مليون ونص", "2 مليون ريال ونص": a value the guard cannot read
       use(); out.push({ raw: null, sar: null, currency, at: numStart }); continue;
     }
     const value = readNumber(num);
@@ -303,7 +310,7 @@ export function findAmounts(text) {
     const raw = Math.round(value * scale);
     if (!(cur || scale > 1 || raw >= 100_000)) continue;
     use();
-    out.push({ raw, sar: Math.round(raw * SAR_RATE[cur ?? 'SAR']), currency: cur, at: numStart, scale, end: amountEnd });
+    out.push({ raw, sar: Math.round(raw * SAR_RATE[cur ?? 'SAR']), currency: cur, at: numStart, scale, end: amountEnd, own: Boolean(cur1 || cur2) });
   }
   for (const m of s.matchAll(MILLION_WORD_RE)) {
     const [at, end] = m.indices.groups.word;
@@ -313,7 +320,7 @@ export function findAmounts(text) {
     // After a digit no amount used ("+5 مليون"), a spelled-out number ("تلاتة مليون", "twenty one million"), or
     // next to a half or a quarter ("مليون ونص", "نص مليون", "half a million"), the word alone says nothing of the value.
     const lead = s.slice(Math.max(0, m.index - 24), m.index);
-    const fraction = FRACTION_BEFORE_RE.test(lead) || fractionAfter(s.slice(end)) || LOOSE_AFTER_RE.test(s.slice(end));
+    const fraction = FRACTION_BEFORE_RE.test(lead) || fractionAfter(s.slice(end)) || looseAfter(s.slice(end));
     if (!fraction && !DIGIT_BEFORE_RE.test(s.slice(Math.max(0, m.index - 6), m.index))) {
       if (w === 'مليون' || w === 'مليونين') {
         if (!NUMBER_WORD_BEFORE_RE.test(lead)) raw = w === 'مليون' ? 1e6 : 2e6;
@@ -326,7 +333,7 @@ export function findAmounts(text) {
     const c = CURRENCY_FIRST_RE.exec(s.slice(end));
     const currency = c ? currencyOf(c[0].replace(/^[\s-]+/, '')) : null;
     // It ends after that currency word, so "مليون ريال و500 ألف" is still one compound amount (Codex r31).
-    out.push({ raw, sar: raw == null ? null : Math.round(raw * SAR_RATE[currency ?? 'SAR']), currency, at, scale: 1e6, end: c ? end + c[0].length : end });
+    out.push({ raw, sar: raw == null ? null : Math.round(raw * SAR_RATE[currency ?? 'SAR']), currency, at, scale: 1e6, end: c ? end + c[0].length : end, own: Boolean(c) });
   }
   for (const m of s.matchAll(THOUSAND_WORD_RE)) {
     const [at, end] = m.indices.groups.word;
@@ -349,6 +356,9 @@ export function findAmounts(text) {
     const minus = /^\s*(?:إلا|الا)\s*$/u.test(gap);
     // Never across a comma: "1.5 million, 900 thousand SAR" is a list of two prices (Claude r26).
     if (!minus && !/^\s*(?:و|and|&)?\s*$/iu.test(gap)) continue;
+    // A currency written on BOTH parts of a sum makes them two amounts ("مليون ريال و50,000 ريال رسوم", "2 million SAR and
+    // 150,000 SAR deposit", Claude r32); a deduction often names it twice and stays one.
+    if (!minus && a.own && b.own) continue;
     if (a.currency && b.currency && a.currency !== b.currency) continue;
     const currency = a.currency ?? b.currency;
     const raw = minus ? a.raw - b.raw : a.raw + b.raw;
