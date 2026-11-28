@@ -52,6 +52,10 @@
  * (dana_enabled '0' by `system`, an owner push and a note). A local refusal (the switches, bad_*) is a skip.
  * A legacy chat keeps main's send_failed hand-over and has no hold or breaker.
  *
+ * A `missed` hand-over keeps what it covered with its hand-off task (`details.missed_rid`, `details.missed_at`;
+ * taskMissed, r16 G4). Known gap: lib/dashboard/render-tasks.mjs (T08's file) prints `details` raw, so both show
+ * on the task card until T14 hides them.
+ *
  * A run that throws after Dana's outbox row is written leaves that row `pending`; start-up or daily
  * upkeep turns it `uncertain` (it may have gone), the batch counts as answered and the chat is not
  * flagged — exactly like a staff reply cut off mid-send. Her answer is the chat's first reply when it has
@@ -252,12 +256,17 @@ export function batchText(messages) {
  * newer message pushed it out of the window), the batch's own rows are its parts. `batchParts` is left
  * out when there is no batch row at all: turn() takes an array over batchText even when it is empty.
  */
-export function brainInput({ rows = [], batch = [], pending = batch } = {}) {
+export function brainInput({ rows = [], batch = [], pending = batch, hideBefore = null } = {}) {
   // Every pending message (the batch, past the cap, expired) is never history (r14 I2).
   const pend = new Map();
   for (const m of [...(Array.isArray(pending) ? pending : []), ...batch]) if (m && !pend.has(m.key_id)) pend.set(m.key_id, m);
-  const exclude = new Set(pend.keys());
-  const history = (Array.isArray(rows) ? rows : []).filter((m) => m && !exclude.has(m.key_id));
+  const history = (Array.isArray(rows) ? rows : []).filter((m) => m && !pend.has(m.key_id));
+  // A client row sent before the last "answer again" (r16 follow-up) is masked with its neighbours but never shown
+  // to the model, not even as history: a judged stop request there must not read as one. Staff and assistant rows
+  // before it stay.
+  const hidden = hideBefore === null || hideBefore === undefined ? []
+    : history.filter((m) => m.direction === 'in' && Number(m.ts) < Number(hideBefore)).map((m) => m.key_id);
+  const exclude = new Set([...pend.keys(), ...hidden]);
   // The masking series in TRUE SEND ORDER (r16 G1): the history window's rows and every pending message, by (ts,
   // rowid), never history then batch, so a backfilled middle message stays next to its neighbours and a number split
   // across them is masked in every piece (and across the batch cap, r15). History and batch are taken from it only
@@ -808,7 +817,7 @@ export function createDana({
     const rows = prep('ctxRows', 'SELECT rowid AS rid, * FROM wa_messages WHERE lead_id = ? ORDER BY ts DESC, rowid DESC LIMIT ?')
       .all(String(lead.lead_id), Math.min(200, CONTEXT_MESSAGES + pendingAll.length)).map((r) => ({ ...r })).reverse()
       .filter((m) => !pendingKeys.has(m.key_id));
-    const input = brainInput({ rows, batch, pending: pendingAll });
+    const input = brainInput({ rows, batch, pending: pendingAll, hideBefore: againFloor(lead.lead_id) });
     try {
       const turn = await brain.turn({
         route: 'wa', leadId: lead.lead_id, language, autoMode: auto, ...input, leadFacts: rawFacts(lead),

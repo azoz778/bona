@@ -2382,7 +2382,8 @@ test('T12 r5 N6 P-a: "Let the AI answer again" after a stop-word false positive 
   assert.equal(h.lead().dana_off, 0);
   // r16 G2 (Claude N10): what was sent before the button is the person's judged past, history only, never the batch.
   assert.deepEqual(h.brain.calls[0].batchParts, ['so?']);
-  assert.ok(h.brain.calls[0].history.some((x) => /bus stop near the villa/.test(x.content)), 'still in the history');
+  // The r16 follow-up: nor as history (a client row before the button; staff and assistant rows would stay).
+  assert.ok(!h.brain.calls[0].history.some((x) => /bus stop near the villa|next stop/.test(x.content)), 'no pre-button client row');
 });
 
 test('T12 r5 N6 P-b: after an auto hand-over the handed-over request is not shown again as unanswered', async () => {
@@ -3212,6 +3213,7 @@ test('T12 r16 G2 (Claude N10, R3a): after the button, a stop-honouring model nev
   h.tick(60_000);
   await ask(h, 'hello?');
   assert.deepEqual(seen, [['hello?']], 'the model saw only what came after the button');
+  assert.doesNotMatch(JSON.stringify(h.brain.calls[0]), /please stop replying/, 'no pre-button client text in the request, history included');
   assert.equal(h.lead().dana_off, 0);
   assert.equal(h.notes.of('stopped').length, 1, 'no second stopped note');
   assert.equal(h.sent().length, 1);
