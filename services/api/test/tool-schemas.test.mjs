@@ -170,3 +170,11 @@ test('the viewing lines ask for the name when the record has no PLAUSIBLE name, 
   assert.match(wa, /if the client record has no plausible name for them \(viewing_slots says ask_name\), ask for it in that same message/);
   assert.match(TOOL_SCHEMAS.viewing_slots.description, /ask_name/);
 });
+
+test('the viewing line asks for the name on need_name and hands over only for another refusal (Codex r5 P2: the prompt agreed with the tool)', () => {
+  const wa = render();
+  assert.match(wa, /If book_viewing answers need_name, ask for their name and call it again; this is no hand-over\./);
+  assert.match(wa, /If the client has not picked a slot yet, ask which one suits them\./);
+  assert.match(wa, /Only when viewing_slots or book_viewing refuse for any other reason, call request_human with kind viewing\./);
+  assert.doesNotMatch(wa, /If viewing_slots or book_viewing cannot book it, call request_human/);
+});

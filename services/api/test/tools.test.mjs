@@ -1224,11 +1224,18 @@ test('listing_details: a published listing in the conversation language from lis
   } finally { h.cleanup(); }
 });
 
-test('the WhatsApp tool note does not offer the number; the concierge note still does (contact-numbers.test.mjs)', async () => {
+test('the WhatsApp tool note does not offer the number on the brain path; the concierge and the legacy agent keep main\'s note byte for byte (contact-numbers.test.mjs)', async () => {
   const site = JSON.parse(fs.readFileSync(new URL('../../../src/data/site.json', import.meta.url), 'utf8'));
   const h = harness();
   try {
-    const wa = JSON.parse(await h.tools.run('search_properties', { chat: { chat_id: 'wa:x', metadata: { source: 'bona-whatsapp', lead_id: B4_LEAD } }, args: { district: 'Atlantis' } }));
+    // main 7165b3a's no-match note, word for word: every HTTP caller (the concierge, the phone line, the legacy Retell WhatsApp
+    // agent, whose sessions also say source bona-whatsapp: dana-wa.mjs) still gets it (Codex r5 P0, strict inert).
+    const MAIN_NOTE = 'No match in Bona inventory. Do not invent a property or a price — offer to connect the visitor with a Bona specialist on WhatsApp +966 57 626 7694.';
+    for (const metadata of [{}, { source: 'bona-web' }, { source: 'bona-email' }, { source: 'bona-whatsapp', lead_id: B4_LEAD }]) {
+      const legacy = JSON.parse(await h.tools.run('search_properties', { chat: { chat_id: 'legacy', metadata }, args: { district: 'Atlantis' } }));
+      assert.equal(legacy.note, MAIN_NOTE, JSON.stringify(metadata));
+    }
+    const wa = JSON.parse(await h.tools.run('search_properties', { chat: { chat_id: 'wa:x', metadata: { source: 'bona-whatsapp', lead_id: B4_LEAD } }, args: { district: 'Atlantis' } }, { inProcess: true }));
     assert.equal(wa.count, 0);
     assert.doesNotMatch(wa.note, /\+966|WhatsApp \+|\d{3} \d{4}/, wa.note);
     assert.match(wa.note, /request_human/);

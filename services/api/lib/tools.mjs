@@ -235,7 +235,9 @@ export function createToolHandlers({
     const results = listings.map((l) => inventory.row(l, { assistant }))
       .map((r) => (assistant && r.has_brochure && blocked.has(r.id) ? { ...r, has_brochure: false } : r));
     for (const l of listings.slice(0, 3)) store.addCard(ctx.conversationId, inventory.card(l));
-    const onWhatsApp = (ctx.attr?.source ?? null) === WA_SOURCE;
+    // Only the brain's in-process WhatsApp route gets the new note: the legacy Retell WhatsApp agent's sessions say
+    // source bona-whatsapp too (dana-wa.mjs), and every HTTP caller keeps main's note byte for byte (strict inert).
+    const onWhatsApp = ctx.inProcess === true && (ctx.attr?.source ?? null) === WA_SOURCE;
     return {
       count: results.length,
       results,
