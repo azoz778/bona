@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { inspect, isDeepStrictEqual } from 'node:util';
-import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES, UNITS_NOTE, UNITS_NOT_PUBLISHED_NOTE } from '../lib/tools.mjs';
+import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES, UNITS_NOTE, UNITS_NOT_PUBLISHED_NOTE, BLOCKED_BROCHURES, BROCHURE_HEAD_MS, BROCHURE_CACHE_MS, BROCHURE_MAX_BYTES, HANDOVER_KINDS } from '../lib/tools.mjs';
 import { createInventory, readInventoryFile, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { createUnits, WORKTREE_UNITS } from '../lib/units.mjs';
 import { createPublishedUnits } from '../lib/published-units.mjs';
@@ -831,4 +831,438 @@ test('search_units on the real W014 sheet (src/data/units.json), as the page wou
       assertNoUnpublished(raw, sheet);
     }
   } finally { h.cleanup(); }
+});
+
+/* ------------------------------------------------------------------ */
+/* PR-B4 (PLAN T13 tests 1-2; DESIGN §4.3): the assistant's WhatsApp tools, listing_details, notes and locale */
+/* ------------------------------------------------------------------ */
+
+const R4 = (y, m, d, h = 0, min = 0) => Date.UTC(y, m - 1, d, h - 3, min); // Riyadh wall clock (UTC+3)
+const B4_NOW = R4(2026, 12, 2, 9); // a Wednesday
+const B4_SLOT = '2026-12-06T10:00+03:00'; // the Sunday after
+const B4_LEAD = 'LEAD-20261201-0000b4aa';
+const NEW_TOOLS = ['listing_details', 'viewing_slots', 'book_viewing', 'send_brochure', 'send_location', 'save_needs'];
+const WA_ONLY = ['viewing_slots', 'book_viewing', 'send_brochure', 'send_location', 'save_needs'];
+/** What a WhatsApp-only tool answers when it does nothing (DESIGN §4.3, the autoMode gate). */
+const OFF = { viewing_slots: ['bookable', false], book_viewing: ['reserved', false], send_brochure: ['will_send', false], send_location: ['precision', 'none'], save_needs: ['saved', false] };
+const ARGS = {
+  listing_details: { listing_id: 'BONA-W003' },
+  viewing_slots: { listing_id: 'BONA-W003' },
+  book_viewing: { listing_id: 'BONA-W003', slot_id: B4_SLOT, name: 'Sara Example' },
+  send_brochure: { listing_id: 'BONA-W003' },
+  send_location: { listing_id: 'BONA-W003' },
+  save_needs: { name: 'Sara Example', budget: 'around 3 million', district: 'Al Shati', timeline: 'this year' },
+};
+const MB = 1024 * 1024;
+
+/** Every row of every table: "nothing is written" is this before and after. */
+const dump = (db) => Object.fromEntries(db.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()
+  .map(({ name }) => [name, db.db.prepare(`SELECT * FROM "${name}"`).all()]));
+
+/** A HEAD answer: a status and the headers a fake server sends (never the network). */
+const head = (status, headers = {}) => new Response(null, { status, headers });
+
+/**
+ * The tools as the brain runs them (lib/brain.mjs runOne: source and lead id from code, language AND locale),
+ * with a fake owner test, a fake (or real) viewing module and a fake fetch for the brochure HEAD.
+ */
+function b4({ auto = true, viewing = null, fetchImpl = null, extra = {} } = {}) {
+  const h = harness();
+  const clock = { t: B4_NOW };
+  const heads = [];
+  const ownerTest = { autoMode: (lead) => Boolean(lead) && (typeof auto === 'function' ? auto(lead) : auto) };
+  const fetchFake = fetchImpl ?? (async (url, init) => { heads.push([url, init?.method]); return head(200, { 'content-length': String(3 * MB) }); });
+  const tools = createToolHandlers({ ...h.deps, ownerTest, viewing, fetchImpl: async (url, init) => { if (fetchImpl) heads.push([url, init?.method]); return fetchFake(url, init); }, now: () => clock.t, ...extra });
+  let seq = 40;
+  const lead = (id = B4_LEAD, over = {}) => {
+    seq += 1;
+    h.db.insertLead({
+      lead_id: id, created: B4_NOW - 3_600_000, updated: B4_NOW - 3_600_000, stage: 'new', phone_e164: `9665000000${seq}`, name: 'Sara Example',
+      channel: 'whatsapp', inbox_state: 'in', inbox_since: B4_NOW - 3_600_000, inbox_via: 'own_number', dana_introduced: 1, ...over,
+    });
+    return h.db.getLead(id);
+  };
+  const wa = async (name, args = ARGS[name], { leadId = B4_LEAD, source = 'bona-whatsapp', language = 'en' } = {}) => JSON.parse(await tools.run(name, {
+    chat: { chat_id: `wa:${leadId}`, metadata: { ...(source === null ? {} : { source }), lead_id: leadId }, retell_llm_dynamic_variables: { language, locale: language } },
+    args,
+  }));
+  return { ...h, tools, lead, wa, heads, clock };
+}
+
+/** A fake viewing module: what lib/viewing.mjs answers, and every call it got. */
+function fakeViewing({ slots = { bookable: true, timezone: 'Asia/Riyadh', slots: [{ slot_id: B4_SLOT, label_ar: 'الأحد 6 ديسمبر، 10:00 صباحاً', label_en: 'Sunday 6 December, 10:00 am' }] }, validate = null } = {}) {
+  const calls = [];
+  return {
+    calls,
+    async slots(o) { calls.push(['slots', o]); return typeof slots === 'function' ? slots(o) : slots; },
+    validate(o) {
+      calls.push(['validate', o]);
+      return validate ? validate(o) : { ok: true, leadId: o.lead.lead_id, listingId: o.listingId, slotId: o.slotId, startTs: R4(2026, 12, 6, 10), endTs: R4(2026, 12, 6, 11), name: o.name };
+    },
+    async commitBooking() { throw new Error('the tools never commit (dana-commit does, after preSend)'); },
+  };
+}
+
+test('TOOL_NAMES has the six new tools, so the HTTP route knows them too; the guarded five refuse without bona-whatsapp, with a bad lead id, and are idempotent', async () => {
+  for (const n of NEW_TOOLS) assert.ok(TOOL_NAMES.includes(n), n);
+  const h = b4({ viewing: fakeViewing() });
+  try {
+    h.lead();
+    for (const name of WA_ONLY) {
+      const [key, off] = OFF[name];
+      for (const source of [null, 'bona-web', 'bona-email', 'BONA-WHATSAPP']) {
+        const out = await h.wa(name, ARGS[name], { source });
+        assert.equal(out[key], off, `${name} from ${source}`);
+        assert.match(out.note, source === 'bona-email' ? /not on email/i : /not available here/i, `${name} from ${source}`);
+      }
+      for (const leadId of ['LEAD-20261201-0000ffff', '../etc', '', 'lead-1']) {
+        const out = await h.wa(name, ARGS[name], { leadId });
+        assert.equal(out[key], off, `${name} for ${leadId || 'no lead'}`);
+        assert.equal(out.reason, 'bad_lead');
+      }
+      const one = await h.wa(name);
+      const two = await h.wa(name);
+      assert.deepEqual(two, one, `${name} answers the same twice (the brain may retry a turn on the backup model)`);
+      assert.notEqual(one[key], off, `${name} works for the auto-mode WhatsApp lead`);
+    }
+    assert.equal(h.sent.length, 0, 'nothing is sent from inside a tool');
+  } finally { h.cleanup(); }
+});
+
+test('the autoMode gate (#8): a proof lead with the switches off gets bookable:false, will_send:false, precision none, saved:false, and nothing is written', async () => {
+  const viewing = fakeViewing();
+  const h = b4({ auto: false, viewing });
+  try {
+    h.lead(B4_LEAD, { name: null, budget: null });
+    const before = dump(h.db);
+    assert.deepEqual(await h.wa('viewing_slots'), { bookable: false, reason: 'not_auto', note: 'Not available here: call request_human with kind viewing.' });
+    const booked = await h.wa('book_viewing');
+    assert.equal(booked.reserved, false);
+    assert.equal(booked.reason, 'not_auto');
+    assert.deepEqual(await h.wa('send_brochure'), { will_send: false, reason: 'not_auto', note: 'Not available here.' });
+    assert.deepEqual(await h.wa('send_location'), { precision: 'none', reason: 'not_auto', note: 'Not available here.' });
+    assert.deepEqual(await h.wa('save_needs'), { saved: false, reason: 'not_auto', note: 'Not available here.' });
+    assert.deepEqual(dump(h.db), before, 'no row anywhere changed');
+    assert.equal(viewing.calls.length, 0, 'the calendar is not even asked');
+    assert.equal(h.heads.length, 0, 'no HEAD request');
+    // An ownerTest that throws reads as off; none at all (today's index.mjs wiring) too.
+    const t = b4({ auto: () => { throw new Error('boom'); }, viewing });
+    try { t.lead(); assert.equal((await t.wa('save_needs')).saved, false); } finally { t.cleanup(); }
+    const none = createToolHandlers({ ...h.deps });
+    const out = JSON.parse(await none.run('send_location', { chat: { chat_id: 'wa:x', metadata: { source: 'bona-whatsapp', lead_id: B4_LEAD } }, args: { listing_id: 'BONA-W003' } }));
+    assert.equal(out.precision, 'none');
+    assert.equal(out.reason, 'not_auto');
+  } finally { h.cleanup(); }
+});
+
+test('viewing_slots: outside auto mode, with booking off or without a calendar → {bookable:false, note}; otherwise the slots viewing gives, by id and labels', async () => {
+  const off = b4({ viewing: fakeViewing({ slots: { bookable: false } }) });
+  try {
+    off.lead();
+    assert.deepEqual(await off.wa('viewing_slots'), { bookable: false, note: 'Not available here: call request_human with kind viewing.' });
+  } finally { off.cleanup(); }
+  const busy = b4({ viewing: fakeViewing({ slots: { bookable: false, reason: 'calendar', code: 'timeout' } }) });
+  try {
+    busy.lead();
+    assert.deepEqual(await busy.wa('viewing_slots'), { bookable: false, reason: 'calendar', note: 'Not available here: call request_human with kind viewing.' }, 'a calendar code never reaches the model');
+  } finally { busy.cleanup(); }
+  const none = b4({ viewing: null });
+  try {
+    none.lead();
+    assert.equal((await none.wa('viewing_slots')).bookable, false, 'no viewing module wired (today): nothing bookable');
+  } finally { none.cleanup(); }
+  const viewing = fakeViewing();
+  const on = b4({ viewing });
+  try {
+    on.lead();
+    const out = await on.wa('viewing_slots');
+    assert.equal(out.bookable, true);
+    assert.equal(out.timezone, 'Asia/Riyadh');
+    assert.deepEqual(out.slots, [{ slot_id: B4_SLOT, label_ar: 'الأحد 6 ديسمبر، 10:00 صباحاً', label_en: 'Sunday 6 December, 10:00 am' }]);
+    assert.match(out.note, /3 or 4/);
+    assert.equal(viewing.calls[0][1].listingId, 'BONA-W003');
+    assert.equal(viewing.calls[0][1].lead.lead_id, B4_LEAD, 'the lead from the chat metadata, never from the model');
+  } finally { on.cleanup(); }
+});
+
+test('viewing_slots and book_viewing on the real viewing module: booking off → bookable:false; on → book_viewing validates, answers reserved or need_name, and writes nothing', async () => {
+  const { createViewing } = await import('../lib/viewing.mjs');
+  const { createTeam } = await import('../lib/team.mjs');
+  const fb = [];
+  const gcal = {
+    configured: true,
+    async freeBusy(w) { fb.push(w); return { ok: true, busy: [] }; },
+    async holidays() { return { ok: true, dates: new Set() }; },
+    cachedHolidays: () => new Set(),
+    async insert() { throw new Error('the tools never insert an event'); },
+    async get() { return { ok: false, code: 'not_found', gone: true }; },
+    health: () => ({ configured: true, ok: true, lastErrorCode: null }),
+  };
+  const h = b4();
+  try {
+    const team = createTeam(h.db);
+    const ownerTest = { autoMode: (l) => Boolean(l) };
+    const viewing = createViewing({ db: h.db, cfg: { siteUrl: 'https://bona.example.com', publicApi: 'https://api.example.com' }, team, ownerTest, inventory, gcal, now: () => h.clock.t });
+    const tools = createToolHandlers({ ...h.deps, ownerTest, viewing, now: () => h.clock.t });
+    const run = async (name, args, leadId = B4_LEAD) => JSON.parse(await tools.run(name, { chat: { chat_id: `wa:${leadId}`, metadata: { source: 'bona-whatsapp', lead_id: leadId } }, args }));
+    h.lead();
+    h.lead('LEAD-20261201-0000b4bb', { name: '🙂' });
+    // calendar_booking is '0' by default.
+    assert.equal((await run('viewing_slots', { listing_id: 'BONA-W003' })).bookable, false);
+    assert.equal((await run('book_viewing', { listing_id: 'BONA-W003', slot_id: B4_SLOT })).reserved, false);
+    team.setSetting('calendar_booking', '1');
+    const slots = await run('viewing_slots', { listing_id: 'BONA-W003' });
+    assert.equal(slots.bookable, true);
+    assert.ok(slots.slots.some((s) => s.slot_id === B4_SLOT), 'the Sunday 10:00 slot is offered');
+    const before = dump(h.db);
+    const ok = await run('book_viewing', { listing_id: 'BONA-W003', slot_id: B4_SLOT });
+    assert.equal(ok.reserved, true);
+    assert.match(ok.note, /never state it as confirmed — the system sends the confirmation/);
+    const nameless = await run('book_viewing', { listing_id: 'BONA-W003', slot_id: B4_SLOT }, 'LEAD-20261201-0000b4bb');
+    assert.deepEqual([nameless.reserved, nameless.need_name], [false, true], 'an emoji is no name: ask for it');
+    const named = await run('book_viewing', { listing_id: 'BONA-W003', slot_id: B4_SLOT, name: 'Nora Example' }, 'LEAD-20261201-0000b4bb');
+    assert.equal(named.reserved, true, 'the name in the call is enough');
+    for (const [args, reason] of [[{ listing_id: 'BONA-W003', slot_id: '2026-12-06T11:00+03:00' }, 'slot'], [{ listing_id: 'BONA-W003', slot_id: '2026-12-02T14:00+03:00' }, null], [{ listing_id: 'BONA-W008', slot_id: B4_SLOT }, 'listing'], [{ listing_id: 'BONA-W003', slot_id: 'tomorrow' }, 'slot']]) {
+      const out = await run('book_viewing', args);
+      assert.equal(out.reserved, false, JSON.stringify(args));
+      if (reason) assert.equal(out.reason, reason, JSON.stringify(args));
+      assert.doesNotMatch(out.note, /booked|confirmed/i, 'never says booked');
+    }
+    assert.deepEqual(dump(h.db), before, 'book_viewing validates and writes nothing: no booking row, no task, no lead change');
+    assert.equal(h.db.db.prepare('SELECT COUNT(*) n FROM viewing_bookings').get().n, 0);
+  } finally { h.cleanup(); }
+});
+
+test('send_brochure: BLOCKED_BROCHURES (W011, W018, W024) and a home without one → false; Dana\'s first message → the link; otherwise the PDF (3 MB)', async () => {
+  assert.deepEqual([...BLOCKED_BROCHURES], ['BONA-W011', 'BONA-W018', 'BONA-W024']);
+  const h = b4();
+  try {
+    h.lead();
+    h.lead('LEAD-20261201-0000b4cc', { dana_introduced: 0 });
+    for (const id of BLOCKED_BROCHURES) {
+      assert.ok(inventory.find(id)?.brochureUrl, `${id} has a brochure in listings.json (held back, not missing)`);
+      assert.deepEqual(await h.wa('send_brochure', { listing_id: id }), { will_send: false, reason: 'held', note: 'There is no brochure to send for this home: offer its page.' });
+    }
+    const without = inventory.all().find((l) => !l.brochureUrl);
+    assert.deepEqual(await h.wa('send_brochure', { listing_id: without.id }), { will_send: false, reason: 'no_brochure', note: 'There is no brochure to send for this home: offer its page.' });
+    assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W999' })).will_send, false);
+    assert.equal(h.heads.length, 0, 'no HEAD for a held, missing or unknown brochure');
+    const first = await h.wa('send_brochure', { listing_id: 'BONA-W003' }, { leadId: 'LEAD-20261201-0000b4cc' });
+    assert.deepEqual(first, { will_send: 'link', reason: 'first_message', url: inventory.find('BONA-W003').brochureUrl, note: 'Give this link on its own line; no PDF is sent.' });
+    assert.equal(h.heads.length, 0, 'the first message never carries a PDF: no HEAD either');
+    const pdf = await h.wa('send_brochure', { listing_id: 'BONA-W003' });
+    assert.deepEqual(pdf, { will_send: 'pdf', reason: 'ok', note: 'The PDF goes right after your message: say one short line that you are sending it.' });
+    assert.deepEqual(h.heads, [[inventory.find('BONA-W003').brochureUrl, 'HEAD']]);
+    // A search row says whether a home has a brochure; a held one says no.
+    const rows = JSON.parse(await h.tools.run('search_properties', { chat: { chat_id: 'c', metadata: { source: 'bona-whatsapp' } }, args: { query: 'Sadana' } })).results;
+    const held = rows.find((r) => r.id === 'BONA-W011');
+    if (held) assert.equal(held.has_brochure, false);
+  } finally { h.cleanup(); }
+});
+
+test('send_brochure size (#18): a HEAD on brochureUrl, 5 s; 22 MB, no Content-Length, a 404 or a timeout → the link; cached 12 h per URL', async () => {
+  assert.equal(BROCHURE_HEAD_MS, 5_000);
+  assert.equal(BROCHURE_CACHE_MS, 12 * 3_600_000);
+  assert.equal(BROCHURE_MAX_BYTES, 8 * MB);
+  const cases = [
+    ['22 MB', async () => head(200, { 'content-length': String(22 * MB) }), 'too_big'],
+    ['no Content-Length', async () => head(200), 'size_unknown'],
+    ['a 404', async () => head(404, { 'content-length': '1000' }), 'size_unknown'],
+    ['a network error', async () => { throw new TypeError('fetch failed'); }, 'size_unknown'],
+    ['a timeout', () => new Promise(() => {}), 'size_unknown'],
+  ];
+  for (const [what, fetchImpl, reason] of cases) {
+    const h = b4({ fetchImpl, extra: { brochureHeadMs: 30 } });
+    try {
+      h.lead();
+      const out = await h.wa('send_brochure');
+      assert.equal(out.will_send, 'link', what);
+      assert.equal(out.reason, reason, what);
+      assert.equal(out.url, inventory.find('BONA-W003').brochureUrl, what);
+    } finally { h.cleanup(); }
+  }
+  // The timeout really is the deadline: a HEAD that never answers is abandoned on time, with its signal aborted.
+  let signal = null;
+  const slow = b4({ fetchImpl: (url, init) => { signal = init.signal; return new Promise(() => {}); }, extra: { brochureHeadMs: 30 } });
+  try {
+    slow.lead();
+    const t0 = Date.now();
+    await slow.wa('send_brochure');
+    assert.ok(Date.now() - t0 < 2_000);
+    assert.equal(signal?.aborted, true);
+  } finally { slow.cleanup(); }
+  // The cache: a second call within 12 h makes no HEAD, whatever the first answered; after 12 h it asks again.
+  const h = b4();
+  try {
+    h.lead();
+    assert.equal((await h.wa('send_brochure')).will_send, 'pdf');
+    h.clock.t += 12 * 3_600_000 - 1;
+    assert.equal((await h.wa('send_brochure')).will_send, 'pdf');
+    assert.equal(h.heads.length, 1, 'cached');
+    h.clock.t += 2;
+    await h.wa('send_brochure');
+    assert.equal(h.heads.length, 2, 'asked again after 12 h');
+  } finally { h.cleanup(); }
+  const miss = b4({ fetchImpl: async () => head(404) });
+  try {
+    miss.lead();
+    await miss.wa('send_brochure');
+    await miss.wa('send_brochure');
+    assert.equal(miss.heads.length, 1, 'a failed size is cached too: no HEAD storm');
+  } finally { miss.cleanup(); }
+});
+
+test('send_location: an exact pin → exact (the commit adds the map link); a district centroid → described in words; no pin → none', async () => {
+  const h = b4();
+  try {
+    h.lead();
+    const exact = inventory.all().find((l) => l.mapPrecision === 'exact' && l.map);
+    const district = inventory.all().find((l) => l.mapPrecision === 'district');
+    const none = inventory.all().find((l) => !l.mapPrecision);
+    const e = await h.wa('send_location', { listing_id: exact.id });
+    assert.equal(e.precision, 'exact');
+    assert.doesNotMatch(JSON.stringify(e), /maps\.google|\d{2}\.\d{3}/, 'no link or coordinates for the model to write');
+    const d = await h.wa('send_location', { listing_id: district.id });
+    assert.equal(d.precision, 'district');
+    assert.equal(d.district, district.location.district.en);
+    assert.equal(d.city, district.location.city.en);
+    assert.match(d.note, /in words; never give a pin/);
+    const ar = await h.wa('send_location', { listing_id: district.id }, { language: 'ar' });
+    assert.equal(ar.district, district.location.district.ar, 'in the conversation language');
+    assert.equal((await h.wa('send_location', { listing_id: none.id })).precision, 'none');
+    assert.equal((await h.wa('send_location', { listing_id: 'BONA-W999' })).precision, 'none');
+  } finally { h.cleanup(); }
+});
+
+test('save_needs (#5): lead-tasks saveNeeds with name, interest, budget, district, property_type, timeline, listing_id; no hand-over, nothing sent', async () => {
+  const calls = [];
+  const all = { name: 'Sara Example', interest: 'a home to buy', budget: 'around 3 million', district: 'Al Shati', property_type: 'villa', timeline: 'this year', listing_id: 'BONA-W003' };
+  const spy = b4({ extra: { saveNeeds: (db, o) => { calls.push(o); return { saved: true, fields: Object.keys(o.needs) }; } } });
+  try {
+    spy.lead();
+    const out = await spy.wa('save_needs', { ...all, phone: '0500000099', area: 'ignored', kind: 'x' });
+    assert.equal(out.saved, true);
+    assert.deepEqual(calls, [{ leadId: B4_LEAD, needs: all, now: B4_NOW }], 'exactly the seven keys, nothing the schema does not name');
+  } finally { spy.cleanup(); }
+  let handed = 0;
+  const h = b4({ extra: { notifyHandoff: async () => { handed += 1; } } });
+  try {
+    h.lead(B4_LEAD, { name: null, budget: null, district: null, timeline: null, interest: null, listing_id: null });
+    assert.equal((await h.wa('save_needs', all)).saved, true);
+    const lead = h.db.getLead(B4_LEAD);
+    assert.equal(lead.name, 'Sara Example');
+    assert.equal(lead.budget, 'around 3 million');
+    assert.equal(lead.district, 'Al Shati');
+    assert.equal(lead.timeline, 'this year');
+    assert.equal(lead.listing_id, 'BONA-W003');
+    assert.equal(lead.interest, 'a home to buy · villa');
+    assert.equal(lead.needs_human, 0, 'no hand-over');
+    assert.equal(h.db.db.prepare('SELECT COUNT(*) n FROM lead_tasks').get().n, 0, 'no task');
+    assert.equal(handed, 0);
+    assert.equal(h.sent.length, 0);
+    assert.equal((await h.wa('save_needs', all)).saved, true, 'idempotent: the same needs again is still saved');
+    assert.equal(h.db.getLead(B4_LEAD).interest, 'a home to buy · villa', 'merged once, not twice');
+    assert.deepEqual(await h.wa('save_needs', { name: '', budget: '  ' }), { saved: false, reason: 'nothing_to_save', note: 'Nothing to save: pass only what the client said.' });
+  } finally { h.cleanup(); }
+});
+
+test('request_human: the kind enum; an unknown kind is other; the note and the log are as before', async () => {
+  assert.deepEqual([...HANDOVER_KINDS], ['person', 'offer', 'complaint', 'contract', 'selling', 'viewing', 'other', 'stop', 'privacy', 'deletion']);
+  const logs = [];
+  const h = harness();
+  const tools = createToolHandlers({ ...h.deps, log: (o) => logs.push(o) });
+  try {
+    const ask = async (kind) => JSON.parse(await tools.run('request_human', { chat: { chat_id: 'wa:x', metadata: { source: 'bona-whatsapp', lead_id: B4_LEAD } }, args: { reason: 'r', kind } }));
+    for (const k of HANDOVER_KINDS) assert.equal((await ask(k)).kind, k);
+    assert.equal((await ask('refund')).kind, 'other');
+    assert.equal((await ask(undefined)).kind, 'other');
+    assert.match((await ask('privacy')).note, /team will reply shortly/);
+    assert.deepEqual(logs.at(-1), { evt: 'tool.request_human', leadId: B4_LEAD });
+  } finally { h.cleanup(); }
+});
+
+test('listing_details: a published listing in the conversation language from listings.json; unknown → {found:false}; any source, read-only (in TOOL_NAMES: the HTTP route serves it)', async () => {
+  const h = b4();
+  let cards = 0;
+  h.store.addCard = () => { cards += 1; };
+  try {
+    const en = await h.wa('listing_details', { listing_id: 'BONA-W003' });
+    const w003 = inventory.find('BONA-W003');
+    assert.equal(en.found, true);
+    assert.equal(en.title, w003.title.en);
+    assert.equal(en.description, w003.description.en);
+    assert.equal(en.url, inventory.card(w003).url.en);
+    const ar = JSON.parse(await h.tools.run('listing_details', { chat: { chat_id: 'c', retell_llm_dynamic_variables: { language: 'ar' } }, args: { listing_id: 'bona-w003' } }));
+    assert.equal(ar.title, w003.title.ar, 'dyn.language alone gives Arabic (the brain sets both keys)');
+    assert.equal(ar.url, inventory.card(w003).url.ar);
+    for (const id of ['BONA-W999', '', 'Al Shati villa', null]) {
+      assert.deepEqual(JSON.parse(await h.tools.run('listing_details', { call: { call_id: 'v1' }, args: { listing_id: id } })), { found: false }, String(id));
+    }
+    // Read-only: no card on a screen, no lead, nothing sent, for every source.
+    for (const source of [null, 'bona-web', 'bona-email', 'bona-whatsapp']) {
+      assert.equal((await h.wa('listing_details', { listing_id: 'BONA-W003' }, { source })).found, true, String(source));
+    }
+    assert.equal(cards, 0, 'no card is put on a screen');
+    assert.equal(h.db.db.prepare('SELECT COUNT(*) n FROM leads').get().n, 0, 'no lead');
+    assert.equal(h.sent.length, 0);
+    assert.ok(TOOL_NAMES.includes('listing_details'));
+  } finally { h.cleanup(); }
+});
+
+test('the WhatsApp tool note does not offer the number; the concierge note still does (contact-numbers.test.mjs)', async () => {
+  const site = JSON.parse(fs.readFileSync(new URL('../../../src/data/site.json', import.meta.url), 'utf8'));
+  const h = harness();
+  try {
+    const wa = JSON.parse(await h.tools.run('search_properties', { chat: { chat_id: 'wa:x', metadata: { source: 'bona-whatsapp', lead_id: B4_LEAD } }, args: { district: 'Atlantis' } }));
+    assert.equal(wa.count, 0);
+    assert.doesNotMatch(wa.note, /\+966|WhatsApp \+|\d{3} \d{4}/, wa.note);
+    assert.match(wa.note, /request_human/);
+    for (const metadata of [{}, { source: 'bona-web' }, { source: 'bona-email' }]) {
+      const web = JSON.parse(await h.tools.run('search_properties', { chat: { chat_id: 'web', metadata }, args: { district: 'Atlantis' } }));
+      assert.ok(web.note.includes(`WhatsApp ${site.whatsapp.display}`), web.note);
+    }
+  } finally { h.cleanup(); }
+});
+
+test('conversationLocale reads dyn.language too (the brain and the WhatsApp agent set it; dyn.locale still wins)', () => {
+  assert.equal(conversationLocale({ chat: { retell_llm_dynamic_variables: { language: 'ar' } } }), 'ar');
+  assert.equal(conversationLocale({ chat: { retell_llm_dynamic_variables: { language: 'en' } } }), 'en');
+  assert.equal(conversationLocale({ chat: { retell_llm_dynamic_variables: { locale: 'en', language: 'ar' } } }), 'en');
+  assert.equal(conversationLocale({ chat: { retell_llm_dynamic_variables: { language: 'fr' } } }), 'en');
+  assert.equal(conversationLocale({ chat: { metadata: { locale: 'ar' } } }), 'ar');
+});
+
+test('create_lead passes `created` to the owner notes (why concierge); with the ledger a merge sends no note; without notes, today\'s path', async () => {
+  const events = [];
+  const h = harness();
+  try {
+    const notes = { leadEvent: async (lead, o) => { events.push([lead.lead_id, o]); } };
+    const tools = createToolHandlers({ ...h.deps, notes });
+    const first = JSON.parse(await tools.run('create_lead', { chat: { chat_id: 'n1' }, args: { phone: '0500000061', name: 'Sara Example' } }));
+    const merged = JSON.parse(await tools.run('create_lead', { chat: { chat_id: 'n2' }, args: { phone: '0500000061', name: 'Sara Example' } }));
+    assert.equal(merged.id, first.id, 'the same person: a merge');
+    assert.deepEqual(events.map(([id, o]) => [id, o]), [[first.id, { why: 'concierge', created: true }], [first.id, { why: 'concierge', created: false }]]);
+    assert.equal(h.sent.length, 0, 'the notes send it, not sendWhatsApp');
+  } finally { h.cleanup(); }
+  // The real ledger (PR-B2, ledger:true, as PR-INT wires it): the created lead's note is queued, a merge's is not.
+  const { createOwnerNotes } = await import('../lib/owner-notes.mjs');
+  const { createTeam } = await import('../lib/team.mjs');
+  const l = harness();
+  try {
+    const team = createTeam(l.db);
+    const notes = createOwnerNotes({ db: l.db, siteUrl: 'https://bona.azoz.uk', sendNote: async () => ({ ok: true }), team, ownerTest: { autoMode: () => false }, ledger: true, now: () => B4_NOW });
+    const tools = createToolHandlers({ ...l.deps, notes });
+    const first = JSON.parse(await tools.run('create_lead', { chat: { chat_id: 'm1' }, args: { phone: '0500000062', name: 'Sara Example' } }));
+    await tools.run('create_lead', { chat: { chat_id: 'm2' }, args: { phone: '0500000062', name: 'Sara Example' } });
+    const rows = l.db.db.prepare('SELECT kind, lead_id, dedupe_key FROM owner_notes').all().map((r) => ({ ...r }));
+    assert.deepEqual(rows, [{ kind: 'new_client', lead_id: first.id, dedupe_key: `new:${first.id}` }], 'one note: the created lead; the merge queued nothing');
+    notes.stop?.();
+  } finally { l.cleanup(); }
+  // No notes handed in (index.mjs today): sendWhatsApp exactly as before, merges told too.
+  const t = harness();
+  try {
+    await t.tools.run('create_lead', { chat: { chat_id: 'o1' }, args: { phone: '0500000063', name: 'Sara Example' } });
+    await t.tools.run('create_lead', { chat: { chat_id: 'o2' }, args: { phone: '0500000063', name: 'Sara Example' } });
+    assert.equal(t.sent.length, 2, "today's concierge path, byte for byte (PR-F2b)");
+  } finally { t.cleanup(); }
 });
