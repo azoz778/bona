@@ -107,8 +107,15 @@ const EN_BASE = String.raw`book|confirm|reserve|schedule|arrange|sort|fix|set|lo
  * clause or before for / on / at / a day / a time ("I've put it in the brochure" is none).
  */
 const EN_PHRASAL_DONE = String.raw`(?:got|put|pencil(?:l)?ed|slotted|added|signed|lined|fitted|squeezed)\s+(?:you|it|the\s+viewing)\s+(?:down|in|up|on)`;
-/** A booking noun, a day or a time right after "for" ("signed you up for Sunday", "you're in for the viewing"), never "for updates" or "for a treat". */
-const FOR_BOOKING = String.raw`\s+for\s+(?:the\s+|your\s+|a\s+)?(?:viewing|visit|appointment|slot|booking|(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|\d{1,2}(?=\s*(?::\d{2}|am|pm|a\.m|p\.m|o['’]clock|$|[.!?,;])))`;
+/** A clock time: a one- or two-digit hour, never "3-bedroom", "3 bedrooms", "2 million" or a count of homes. */
+const TIME_DIGIT = String.raw`\d{1,2}(?::\d{2})?(?![\d\-‑])(?!\s*(?:bed|bath|sq|m²|million|thousand|k(?![\p{L}])|units?|villas?|apartments?|homes?))`;
+/**
+ * A booking noun, a day or a time right after "for" ("signed you up for Sunday", "you're in for the viewing"), never "for
+ * updates", "for a treat" or "for a 3-bedroom"; for "signed / lined you up" also "at | on" + a day or a time (Codex r12:
+ * "I've lined you up at 10 on Sunday").
+ */
+const FOR_BOOKING = String.raw`\s+for\s+(?:the\s+|your\s+|a\s+)?(?:viewing|visit|appointment|slot|booking|(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|${TIME_DIGIT})`;
+const AT_ON_BOOKING = String.raw`\s+(?:at|on)\s+(?:the\s+)?(?:(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|${TIME_DIGIT})`;
 const EN_PHRASAL_BASE = String.raw`(?:get|put|pencil|slot|add|sign|line|fit|squeeze)\s+(?:you|it|the\s+viewing)\s+(?:down|in|up|on)`;
 const EN_PHRASAL_END = String.raw`(?=\s*(?:$|[.!?,;:—–)]|for(?![\p{L}])|on(?![\p{L}])|at(?![\p{L}])|(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|\d))`;
 /** The done-verbs said to the client («… لك»). */
@@ -204,7 +211,7 @@ const EXTRA_CLAIM_RE = new RegExp([
   // "all done for …", «الموعد لك» (not «الموعد لك تختاره»)
   // "signed / lined you up" only before a booking noun, a day or a time (Claude r11 P3)
   String.raw`(?<![\p{L}])(?:got|put|pencil(?:l)?ed|slotted|added|fitted|squeezed)\s+(?:you|it|the\s+viewing)\s+(?:down|in|up|on)${EN_PHRASAL_END}`,
-  String.raw`(?<![\p{L}])(?:signed|lined)\s+(?:you|it|the\s+viewing)\s+up(?=${FOR_BOOKING})`,
+  String.raw`(?<![\p{L}])(?:signed|lined)\s+(?:you|it|the\s+viewing)\s+up(?=${FOR_BOOKING}|${AT_ON_BOOKING})`,
   String.raw`(?<![\p{L}])you(?:['’]re|\s+are)\s+(?:down|in|on|good)(?=${FOR_BOOKING})`,
   String.raw`(?<![\p{L}])it['’]s\s+yours(?![\p{L}])(?!\s+to(?![\p{L}]))`,
   String.raw`(?<![\p{L}])all\s+done\s+for(?![\p{L}])(?!\s+(?:now|today|the\s+day)(?![\p{L}]))`,
@@ -232,7 +239,7 @@ const PERSONAL_CLAIM_RE = new RegExp([
   String.raw`(?<![\p{L}])you(?:['’]ve|\s+have)\s+got\s+(?:the|your)\s+(?:slot|viewing|appointment|spot)(?![\p{L}])`,
   String.raw`(?<![\p{L}])the\s+(?:slot|time|spot|appointment)\s+is\s+yours(?![\p{L}])`,
   String.raw`(?<![\p{L}])that['’]s\s+you\s+sorted(?![\p{L}])`,
-  String.raw`(?<![\p{L}])[وف]?(?:${AR_ENTERED_YOU})(?:\s+(?!و)\S+){0,3}?\s+(?:يوم\s+)?(?:${AR_THING}|${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة)`,
+  String.raw`(?<![\p{L}])[وف]?(?:${AR_ENTERED_YOU})(?:\s+(?!و)\S+){0,3}?\s+و?(?:يوم\s+)?(?:${AR_THING}|${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة)`,
   String.raw`(?<![\p{L}])[وف]?(?:(?:اعتمدت|اعتمدنا)\s*(?:لك\s+)?${AR_THING}|تم\s+(?:ال)?اعتماد\s+${AR_THING})`,
   String.raw`(?:الموعد|المعاينة|موعدك)\s+(?:صار|صارت)\s+(?:لك|لكم)|(?:صار|صارت)\s+(?:الموعد|المعاينة)\s+(?:لك|لكم)`,
   String.raw`(?<![\p{L}])خلاص\s*[،,]?\s*(?:موعدك|معاينتك|حجزك)`,

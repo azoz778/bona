@@ -872,6 +872,11 @@ const CORPUS = [
   ['ordinary', "You're good for a 3-bedroom within your budget.", 'en', false, false],
   ['ordinary', "Once you sign the contract, it's yours.", 'en', false, false],
   ['ordinary', 'All done for now, the brochure is below.', 'en', false, false],
+  // r12 (Codex P2, Claude): the regressions of the r11 tweaks, restored
+  ['claim', "I've lined you up at 10 on Sunday.", 'en', true, true],
+  ['claim', "I've signed you up on Sunday at 10.", 'en', true, true],
+  ['claim', 'Signed you up at 10 on Monday.', 'en', true, true],
+  ['claim', 'سجلتك وموعدك يوم الأحد الساعة 10', 'ar', true, true],
 ].map(([kind, text, lang, trips, viewing]) => ({ kind, text, lang, trips, viewing }));
 
 test(`the claim corpus: ${CORPUS.filter((r) => r.trips).length} claims trip and ${CORPUS.filter((r) => !r.trips).length} non-claims pass, with no tool, with save_needs only, and with a viewing tool where the row says`, async () => {
@@ -920,4 +925,28 @@ test('a second PDF reaching the commit becomes its link inside the link allowanc
   const capped = await commitWith({ log: (o) => logs.push(o) }).afterPreSend({ lead: LEAD, turn: brainReply(full, { tools: [pdf('BONA-W003'), pdf('BONA-W006')] }), text: full, language: 'en' });
   assert.equal(capped.bubbles[0].text, full);
   assert.ok(logs.some((l) => l.evt === 'dana.commit_brochure_link_cap' && l.listingId === 'BONA-W006'));
+});
+
+/**
+ * No class of claim is ever dropped again (the r12 regression guard): every corpus claim row, plus the class claims of
+ * Claude's r11 probe (review-scratch/t13-claude/r11-probe.mjs), must keep tripping with no tool and with save_needs only.
+ * A later tweak that narrows a form for an over-trigger fails here before it reaches review.
+ */
+const R11_PROBE_CLAIMS = [
+  ["I've got you down for Sunday at 10.", 'en'], ["Sunday at 10 works. I've got you down.", 'en'], ["You're down for Sunday at 10.", 'en'],
+  ["I've pencilled you in for Monday 12:00.", 'en'], ['The slot is yours!', 'en'], ["That's you sorted for Sunday.", 'en'],
+  ['سجلتك يوم الأحد الساعة 10', 'ar'], ['حطيتك على موعد الأحد', 'ar'], ['خلاص، موعدك الأحد الساعة 10', 'ar'], ['اعتمدت لك الموعد', 'ar'],
+  ['الموعد صار لك', 'ar'], ['تمام، الأحد الساعة 10. الموعد لك ✅', 'ar'],
+];
+
+test(`regression guard: all ${CORPUS.filter((r) => r.trips).length} corpus claims and the ${R11_PROBE_CLAIMS.length} r11 probe claims still trip (no class dropped)`, async () => {
+  const c = commitWith({ viewing: fakeViewing() });
+  const claims = [...CORPUS.filter((r) => r.trips).map((r) => [r.text, r.lang]), ...R11_PROBE_CLAIMS];
+  const dropped = [];
+  for (const [text, lang] of claims) {
+    for (const [label, tools] of [['no tool', []], ['save_needs', [NEEDS]]]) {
+      if (!(await caughtWith(c, text, lang, tools))) dropped.push(`${label}: ${text}`);
+    }
+  }
+  assert.deepEqual(dropped, [], dropped.join('\n'));
 });
