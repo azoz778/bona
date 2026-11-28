@@ -1025,7 +1025,7 @@ export function createDana({
    * A fixed line (hand-over, closing, outage). A brain chat's goes through the global FIFO and its send
    * failures count like an answer's (DESIGN §6.2, §4.2); a legacy chat's goes at once, as on main.
    */
-  async function sendFixed(lead, text, language, coversTs, viaBrain, { closing = false, mark = null, owed = null } = {}) {
+  async function sendFixed(lead, text, language, coversTs, viaBrain, { closing = false, mark = null, owed = null, legacyText = null } = {}) {
     if (!viaBrain) return send(lead, text, language, coversTs);
     const wait = safely(() => pace.typingFloorMs({ chars: text.length, newestTs: coversTs })) ?? 0;
     if (wait > 0) await sleep(wait);
@@ -1042,6 +1042,9 @@ export function createDana({
         if (g.reserve) backlogReserved.delete(lead.lead_id);
       }
     });
+    // A hand-over or closing line decided on the brain route whose chat left it while the line waited (r23 P3): it goes
+    // the legacy way (main's line, at once), so the client is not left without it. Never an outage or owed line.
+    if (r.stopped === 'not_brain' && legacyText) return { ...(await send(db.getLead(lead.lead_id) ?? lead, legacyText, language, coversTs)), legacy: true };
     if (r.uncertain || (!r.sent && r.failure === 'evolution')) afterFailure(lead, { alert: true });
     return r;
   }
@@ -1169,7 +1172,7 @@ export function createDana({
     let text = null;
     if (line === 'closing') text = auto ? CLOSING[language] : HANDOVER[language];
     else if (line === 'handover' && !already) text = auto ? autoHandoverLine(language, now()) : HANDOVER[language];
-    const r = !text || noJid ? { sent: false } : await sendFixed(fresh, text, language, coversTs, viaBrain, { closing: line === 'closing' });
+    const r = !text || noJid ? { sent: false } : await sendFixed(fresh, text, language, coversTs, viaBrain, { closing: line === 'closing', legacyText: HANDOVER[language] });
     const sent = Boolean(r.sent);
     let outcome = why;
     if (r.stopped === 'missed') {
@@ -1177,7 +1180,7 @@ export function createDana({
       outcome = 'missed';
       taskMissed(taskId, { leadId, rid: rid ?? coverRid(leadId, coversTs) });
       if (auto) noteHandover(fresh, { kind: 'missed', coversTs });
-    } else if (viaBrain) {
+    } else if (viaBrain && !r.legacy) {
       // Deferred by the backlog gate, a cap or the sender's rate limit: the line is OWED (r6), like an outage line; the
       // sweep sends it itself. A brain chat's only (r8 N7): a legacy line goes at once or not at all, as on main.
       oweLine(leadId, line === 'closing' ? 'owed_closing' : 'owed_handover', r, coversTs);
@@ -1537,6 +1540,21 @@ export function createDana({
     setTimedHold(leadId, 'cap_chat', now() + Math.min(RATE_HOLD_MAX_MS, RATE_HOLD_MS * 2 ** (n - 1)));
   }
 
+  /**
+   * A route flip (r22, r23): the chat's route now (brain or Retell, read from the lead) is not the one the turn was made
+   * on. Checked at every point where the turn commits to an outcome (the model's return, preSend, the send queue);
+   * a flip writes and sends nothing more and re-queues the batch (pendingAgain, at its newest ts) on the new route.
+   * Null when the route held.
+   */
+  function routeFlip(leadId, viaBrain, coversTs) {
+    const routeNow = useBrain(db.getLead(leadId));
+    if (routeNow === Boolean(viaBrain)) return null;
+    const id = String(leadId);
+    pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, Number(coversTs)));
+    say({ evt: 'dana.route_changed', leadId, brain: routeNow });
+    return skip(leadId, 'route_changed');
+  }
+
   /** What only delays a stop's closing line, never the stop (r14 I1): its line goes over them. */
   const STOP_OVERRIDES = new Set(['hold', 'cap_chat', 'cap_day', 'cap_chat_day', 'old', 'needs_human', 'no_open_chat', 'backlog']);
   /**
@@ -1725,6 +1743,9 @@ export function createDana({
         safely(() => later(safely(() => pace.readDelayMs?.()) ?? 1500, () => sender.markRead({ jid: readJid, keyIds }).catch(() => {})));
       }
       turn = await think(lead, batch, language, e.auto, built.all);
+      // A route flip while the model ran (r23): before any branch (a hand-over, a refusal, the reply) writes or sends.
+      const flipped = routeFlip(leadId, viaBrain, coversTs);
+      if (flipped) return flipped;
       if (!turn.ok) {
         if (turn.code === 'refusal') return handover(leadId, language, 'brain_refusal', coversTs, { note: { kind: 'other', reason: 'brain_refusal' }, viaBrain });
         if (turn.code === 'guard') return handover(leadId, language, 'price_guard', coversTs, { note: { kind: 'price_guard' }, viaBrain });
@@ -1735,6 +1756,9 @@ export function createDana({
       // (An outage hold ends only once a reply of this turn was accepted: the post-send clear below, r4 A.)
     } else {
       const c = await complete(lead, batch, language);
+      // The same check on a Retell turn (r23): a flip to the brain while Retell answered writes and sends nothing.
+      const flipped = routeFlip(leadId, viaBrain, coversTs);
+      if (flipped) return flipped;
       if (c.error) return handover(leadId, language, c.error, coversTs);
       turn = c.completion;
       newChat = c.newChat;
@@ -1788,12 +1812,8 @@ export function createDana({
     // other path, so it is dropped (no commit hook, no send) and the chat is re-woken to answer the batch on the new
     // route.
     // Read from the lead itself, so a refusal on the new route (a cap, a switch) is never handled on the old one.
-    const routeNow = useBrain(db.getLead(leadId));
-    if (routeNow !== Boolean(viaBrain)) {
-      pendingAgain.set(String(leadId), Math.max(pendingAgain.get(String(leadId)) ?? 0, Number(coversTs)));
-      say({ evt: 'dana.route_changed', leadId, brain: routeNow });
-      return skip(leadId, 'route_changed');
-    }
+    const flippedAtSend = routeFlip(leadId, viaBrain, coversTs);
+    if (flippedAtSend) return flippedAtSend;
     // A stop, privacy or deletion request stored while she worked (preSend's refresh included) wins before anything
     // else this step would decide (r13, r14 I1): no booking, no bubble; the chat is woken so the stop flow runs.
     if (viaBrain) {
@@ -1900,6 +1920,12 @@ export function createDana({
           backlog.delete(leadId);
           clearEnded(leadId, now(), { owed: true });
           outcome = await handover(leadId, language, 'missed', coversTs, { checked: true, line: 'none', note: { kind: 'missed' }, viaBrain });
+          break;
+        }
+        // The chat left the brain path while the reply waited in the queue (r23 N13): nothing went, so the batch is
+        // re-queued on the new route. Once a bubble went, the new route sees nothing unanswered: nothing twice.
+        if (r.stopped === 'not_brain' && !sentAny) {
+          outcome = routeFlip(leadId, viaBrain, coversTs) ?? skip(leadId, 'not_brain');
           break;
         }
         if (!sentAny) outcome = r.cap ? await capped(leadId, language, r.cap, coversTs, viaBrain, { checked: true }) : skip(leadId, r.stopped);

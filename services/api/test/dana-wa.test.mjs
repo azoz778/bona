@@ -2878,12 +2878,14 @@ test('T12 r11 1: a model answer waiting in the FIFO is dropped when a stop reque
   assert.equal(h.brain.calls.length, 1, 'the stop flow makes no model call');
 });
 
-test('T12 r11 1: a chat that leaves auto mode while its bubble is queued gets nothing sent', async () => {
+test('T12 r11 1 (amended r23): a chat that leaves auto mode while its bubble is queued gets no brain bubble; its batch goes to the new route', async () => {
   const h = bh({ pacing: { ...immediate, fifo: async (fn) => { h.ownerTest.setAuto(LEAD, false); return fn(); } }, turns: [brainReply('Of course.')] });
   await ask(h, 'hello');
   await h.dana.flush();
-  assert.equal(h.sent().length, 0);
-  assert.equal(h.retell.completions.length, 0, 'not re-run on the legacy path either');
+  assert.ok(!h.sent().some((t) => t === 'Of course.' || t.endsWith(' Of course.')), 'no brain bubble');
+  // r23 N13: re-queued, the legacy path answers the batch (it was silently dropped before).
+  assert.equal(h.retell.completions.length, 1);
+  assert.equal(h.sent().length, 1);
 });
 
 test('T12 r11 2: when an owed line ends as missed, a newer waiting question is re-woken and answered at its own pace', async () => {
@@ -3521,4 +3523,75 @@ test('T12 r22 1: brain → legacy while the brain answers: no brain text, the re
 test('T12 r22 2: an abbreviation first label keeps "x.word/…" text; real links stay links', () => {
   for (const t of ['Sun.Thu/9:00-17:00', 'Al.Rawdah/north', 'St.Andalus/5', 'Ref.BONA/001', 'Mon.Fri/9-5']) assert.deepEqual(linksIn(t), [], t);
   for (const t of ['example.finance/contact', 'Lender.co/apply', 'st.com/x']) assert.equal(linksIn(t).length, 1, t);
+});
+
+/* ======================================================================================
+ * PR-B3 r23 (Codex P1, Claude N13, P3): a route flip is checked at every point where the turn commits to an outcome
+ * (the model's return, the send queue) and always re-queues the batch on the new route; a hand-over line the gate
+ * refuses as not_brain goes the legacy way.
+ * ====================================================================================== */
+
+const retellAsksPerson = () => ({ messages: [{ role: 'tool_call_invocation', name: 'request_human', arguments: JSON.stringify({ kind: 'person' }) }, { role: 'agent', content: 'The team will reply shortly.' }] });
+
+test('T12 r23 1 (Codex P1): the switch flips during a Retell request_human completion: no hand-over at all, the re-wake answers through the brain', async () => {
+  let h;
+  h = bh({ auto: false, turns: [brainReply('From the brain.')], retellAnswer: () => { h.team.setSetting('dana_brain', '1'); return retellAsksPerson(); } });
+  await ask(h, 'a person please');
+  await h.dana.flush();
+  assert.equal(h.retell.completions.length, 1);
+  assert.ok(!h.sent().some((t) => t.endsWith(HANDOVER.en) || /team will reply/.test(t)), h.sent().join(' | '));
+  assert.equal(h.lead().needs_human, 0, 'nothing written for the old route');
+  assert.equal(h.s.db.prepare("SELECT COUNT(*) AS n FROM lead_tasks WHERE lead_id = ?").get(LEAD).n, 0, 'no task');
+  assert.equal(h.pushed.length, 0, 'no alert');
+  assert.equal(h.brain.calls.length, 1);
+  assert.ok(h.sent().at(-1).endsWith('From the brain.'));
+});
+
+test('T12 r23 1 (U4): brain → legacy while the brain asks for a person: no brain hand-over, the re-wake answers through Retell', async () => {
+  let h;
+  h = bh({ auto: false, brainOn: true, turns: [async () => { h.team.setSetting('dana_brain', '0'); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }] });
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.equal(h.lead().needs_human, 0);
+  assert.equal(h.retell.completions.length, 1);
+  assert.equal(h.sent().length, 1);
+  assert.ok(h.sent()[0].endsWith('Of course. Which district do you prefer?'));
+});
+
+test('T12 r23 2 (Claude N13, U9): dana_brain off while the reply waits in the send queue: Retell answers the batch on the re-wake', async () => {
+  let h;
+  let flipped = false;
+  const pacing = { ...immediate, fifo: (fn) => { if (!flipped) { flipped = true; h.team.setSetting('dana_brain', '0'); } return fn(() => {}); } };
+  h = bh({ auto: false, brainOn: true, pacing, turns: [brainReply('From the brain.')] });
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.ok(!h.sent().some((t) => /From the brain/.test(t)));
+  assert.equal(h.retell.completions.length, 1, 'the batch is answered on the new route');
+  assert.ok(h.sent().at(-1).endsWith('Of course. Which district do you prefer?'));
+  assert.ok(h.logs.some((l) => l.evt === 'dana.route_changed'));
+});
+
+test('T12 r23 2 (Claude N13, U10): auto mode off while the reply waits in the send queue: Retell answers on the re-wake', async () => {
+  let h;
+  let flipped = false;
+  const pacing = { ...immediate, fifo: (fn) => { if (!flipped) { flipped = true; h.ownerTest.setAuto(LEAD, false); } return fn(() => {}); } };
+  h = bh({ auto: true, pacing, turns: [brainReply('From the brain.')] });
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.ok(!h.sent().some((t) => /From the brain/.test(t)));
+  assert.equal(h.retell.completions.length, 1);
+  assert.ok(h.sent().at(-1).endsWith('Of course. Which district do you prefer?'));
+});
+
+test('T12 r23 3 (P3): a hand-over line decided on the brain route that the queue refuses as not_brain goes the legacy way', async () => {
+  let h;
+  let flipped = false;
+  const pacing = { ...immediate, fifo: (fn) => { if (!flipped) { flipped = true; h.team.setSetting('dana_brain', '0'); } return fn(() => {}); } };
+  h = bh({ auto: false, brainOn: true, pacing, turns: [brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] })] });
+  await ask(h, 'a person please');
+  await h.dana.flush();
+  assert.equal(h.lead().needs_human, 1);
+  assert.equal(h.sent().length, 1, h.sent().join(' | '));
+  assert.ok(h.sent()[0].endsWith(HANDOVER.en), 'the client still gets the line');
+  assert.equal(h.retell.completions.length, 0, 'the hand-over is open: no Retell answer');
 });
