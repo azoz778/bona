@@ -107,6 +107,8 @@ const EN_BASE = String.raw`book|confirm|reserve|schedule|arrange|sort|fix|set|lo
  * clause or before for / on / at / a day / a time ("I've put it in the brochure" is none).
  */
 const EN_PHRASAL_DONE = String.raw`(?:got|put|pencil(?:l)?ed|slotted|added|signed|lined|fitted|squeezed)\s+(?:you|it|the\s+viewing)\s+(?:down|in|up|on)`;
+/** A booking noun, a day or a time right after "for" ("signed you up for Sunday", "you're in for the viewing"), never "for updates" or "for a treat". */
+const FOR_BOOKING = String.raw`\s+for\s+(?:the\s+|your\s+|a\s+)?(?:viewing|visit|appointment|slot|booking|(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|\d{1,2}(?=\s*(?::\d{2}|am|pm|a\.m|p\.m|o['’]clock|$|[.!?,;])))`;
 const EN_PHRASAL_BASE = String.raw`(?:get|put|pencil|slot|add|sign|line|fit|squeeze)\s+(?:you|it|the\s+viewing)\s+(?:down|in|up|on)`;
 const EN_PHRASAL_END = String.raw`(?=\s*(?:$|[.!?,;:—–)]|for(?![\p{L}])|on(?![\p{L}])|at(?![\p{L}])|(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|\d))`;
 /** The done-verbs said to the client («… لك»). */
@@ -166,6 +168,8 @@ const FUTURE_RE = new RegExp([
   String.raw`(?<![\p{L}])(?:once|when|after|as\s+soon\s+as|until|if)\s+(?:it['’]s|it\s+is|it\s+has\s+been|(?:a|the|your)\s+(?:\w+\s+)?(?:is|has\s+been))\s+(?:${EN_DONE})(?![\p{L}])`,
   // a modal offer with the phrasal class ("I can fit you in on Sunday — shall I?", "I'll get you down once …")
   String.raw`(?:(?<![\p{L}])(?:will|would|can|could|may|might|should|must|shall)|['’]ll)\s+(?:${EN_PHRASAL_BASE})(?![\p{L}])`,
+  // a condition the client still has to meet: "Once you sign the contract, it's yours" (Claude r11 P3)
+  String.raw`(?<![\p{L}])(?:once|when|after|as\s+soon\s+as|if)\s+you\s+[^.!?;]*?,\s*it['’]s\s+yours(?![\p{L}])`,
   // "'ll" after any word ("You'll", "it’ll", "we'll": Codex r9)
   String.raw`(?:(?<![\p{L}])(?:will|would|can|could|may|might|should|must)|['’]ll)\s+be\s+(?:${EN_DONE})(?![\p{L}])`,
   // "sorted / arranged (it|them|the …) (for you) by|according to|in order|as a" is how a list is laid out, no booking (Claude r9 P3-1)
@@ -198,11 +202,13 @@ const EXTRA_CLAIM_RE = new RegExp([
   String.raw`(?<![\p{L}])(?:مؤكد|مسجل|مرتب|متأكد)(?:ة|ه)?\s+${AR_THING}`,
   // the phrasal class (Codex r10): "I've got you down for …", "you're down|in|on|good for …", "it's yours" (not "… to keep"),
   // "all done for …", «الموعد لك» (not «الموعد لك تختاره»)
-  String.raw`(?<![\p{L}])${EN_PHRASAL_DONE}${EN_PHRASAL_END}`,
-  String.raw`(?<![\p{L}])you(?:['’]re|\s+are)\s+(?:down|in|on|good)\s+for(?![\p{L}])`,
+  // "signed / lined you up" only before a booking noun, a day or a time (Claude r11 P3)
+  String.raw`(?<![\p{L}])(?:got|put|pencil(?:l)?ed|slotted|added|fitted|squeezed)\s+(?:you|it|the\s+viewing)\s+(?:down|in|up|on)${EN_PHRASAL_END}`,
+  String.raw`(?<![\p{L}])(?:signed|lined)\s+(?:you|it|the\s+viewing)\s+up(?=${FOR_BOOKING})`,
+  String.raw`(?<![\p{L}])you(?:['’]re|\s+are)\s+(?:down|in|on|good)(?=${FOR_BOOKING})`,
   String.raw`(?<![\p{L}])it['’]s\s+yours(?![\p{L}])(?!\s+to(?![\p{L}]))`,
-  String.raw`(?<![\p{L}])all\s+done\s+for(?![\p{L}])`,
-  String.raw`(?:الموعد|المعاينة|موعدك)\s+(?:لك|لكم)(?![\p{L}])(?!\s+(?:ت|ي)?(?:ختار|حدد|قرر))`,
+  String.raw`(?<![\p{L}])all\s+done\s+for(?![\p{L}])(?!\s+(?:now|today|the\s+day)(?![\p{L}]))`,
+  String.raw`(?:الموعد|المعاينة|موعدك)\s+(?:لك|لكم)(?![\p{L}])(?!\s+(?:(?:ت|ي)?(?:ختار|حدد|قرر)|مجان))`,
   // a first-person past verb with a booking noun as its object, «لك» or not («حجزنا موعدك», «أكدنا المعاينة»: Codex r9)
   String.raw`(?<![\p{L}])[وف]?(?:${AR_VERB})\s+(?:لك(?:م)?\s+)?(?:ال)?(?:موعد|معاين|حجز|زيار)`,
   String.raw`(?<![\p{L}])[وف]?تأكد\s+${AR_THING}`,
@@ -226,7 +232,7 @@ const PERSONAL_CLAIM_RE = new RegExp([
   String.raw`(?<![\p{L}])you(?:['’]ve|\s+have)\s+got\s+(?:the|your)\s+(?:slot|viewing|appointment|spot)(?![\p{L}])`,
   String.raw`(?<![\p{L}])the\s+(?:slot|time|spot|appointment)\s+is\s+yours(?![\p{L}])`,
   String.raw`(?<![\p{L}])that['’]s\s+you\s+sorted(?![\p{L}])`,
-  String.raw`(?<![\p{L}])[وف]?(?:${AR_ENTERED_YOU})(?:\s+\S+){0,3}?\s+(?:يوم\s+)?(?:${AR_THING}|${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة)`,
+  String.raw`(?<![\p{L}])[وف]?(?:${AR_ENTERED_YOU})(?:\s+(?!و)\S+){0,3}?\s+(?:يوم\s+)?(?:${AR_THING}|${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة)`,
   String.raw`(?<![\p{L}])[وف]?(?:(?:اعتمدت|اعتمدنا)\s*(?:لك\s+)?${AR_THING}|تم\s+(?:ال)?اعتماد\s+${AR_THING})`,
   String.raw`(?:الموعد|المعاينة|موعدك)\s+(?:صار|صارت)\s+(?:لك|لكم)|(?:صار|صارت)\s+(?:الموعد|المعاينة)\s+(?:لك|لكم)`,
   String.raw`(?<![\p{L}])خلاص\s*[،,]?\s*(?:موعدك|معاينتك|حجزك)`,
@@ -365,18 +371,39 @@ export function createDanaCommit(deps = {}) {
     }
   }
 
-  /** The brochure documents the turn's send_brochure calls asked for as PDFs, by the inventory's URL. */
-  function documents(calls) {
-    const out = [];
+  /**
+   * The brochure documents the turn's send_brochure calls asked for as PDFs, by the inventory's URL: at most
+   * MAX_DOCUMENTS (one PDF per chat per day); every other one comes back in `extra`, to go as its link (Codex r11).
+   */
+  function brochures(calls) {
+    const docs = [];
+    const extra = [];
     for (const c of calls) {
       if (c.name !== 'send_brochure' || !c.ok || c.result?.will_send !== 'pdf') continue;
       const listing = exact(c.args.listing_id);
       const url = listing ? brochureUrlOn(listing.brochureUrl, siteUrl) : null;
-      if (!url || blocked.has(listing.id) || out.some((d) => d.listingId === listing.id)) continue;
-      out.push({ kind: 'document', url, caption: `${listing.id} brochure`, fileName: `${listing.id}-brochure.pdf`, mediaKind: 'document', listingId: listing.id });
-      if (out.length >= MAX_DOCUMENTS) break;
+      if (!url || blocked.has(listing.id) || [...docs, ...extra].some((d) => d.listingId === listing.id)) continue;
+      if (docs.length < MAX_DOCUMENTS) {
+        docs.push({ kind: 'document', url, caption: `${listing.id} brochure`, fileName: `${listing.id}-brochure.pdf`, mediaKind: 'document', listingId: listing.id });
+      } else {
+        extra.push({ listingId: listing.id, url });
+      }
     }
-    return out;
+    return { docs, extra };
+  }
+
+  /** The extra brochures as links at the end of the text, inside the link allowance; one that does not fit is journalled, never silent. */
+  function withBrochureLinks(body, extra, lang, leadId) {
+    let s = String(body ?? '');
+    for (const e of extra) {
+      if (s.includes(e.url)) continue;
+      if ((s.match(LINK_RE) ?? []).length >= maxLinks) {
+        say({ level: 'warn', evt: 'dana.commit_brochure_link_cap', leadId, listingId: e.listingId });
+        continue;
+      }
+      s = `${s.trimEnd()}\n\n${lang === 'en' ? `${e.listingId} brochure` : `بروشور ${e.listingId}`}: ${e.url}`;
+    }
+    return extra.length ? s : body;
   }
 
   /** The text with the exact pin's maps link of the last send_location that said `exact`, within MAX_LINKS. */
@@ -428,9 +455,11 @@ export function createDanaCommit(deps = {}) {
       say({ evt: 'dana.commit', leadId, booking: 'claim' });
     }
     if (!booking && !handover) body = withLocation(body, calls, lang);
+    const { docs, extra } = brochures(calls);
+    body = withBrochureLinks(body, extra, lang, leadId);
     const first = booking ? { kind: 'text', text: body, bookingId: booking.bookingId } : { kind: 'text', text: body };
     return {
-      bubbles: [first, ...documents(calls)],
+      bubbles: [first, ...docs],
       ...(booking ? { booking } : {}),
       ...(handover ? { handover } : {}),
     };

@@ -52,6 +52,13 @@ export const BROCHURE_CACHE_MS = 12 * 3_600_000;
 export const BROCHURE_FAIL_CACHE_MS = 10 * 60_000;
 /** One PDF per chat per day (DESIGN §6.3, the brochure row): a second brochure within it goes as a link. */
 export const PDF_PER_CHAT_MS = 24 * 3_600_000;
+/**
+ * How long send_brochure's in-memory PDF promise lives (Codex r11): one turn and its send. A brain turn ends within
+ * 40 s (lib/brain.mjs LIMITS.turnMs, the backup restart included), and dana-wa then batches, paces and writes the
+ * document's wa_outbox row (pending) within about a minute; 2 min covers both with margin. After that the outbox
+ * alone enforces the daily cap, so a turn that never sent (dropped by preSend, a person writing) blocks nothing later.
+ */
+export const PDF_PROMISE_MS = 2 * 60_000;
 /** The only hosts a brochure may come from (https, no user, no port, no redirect), besides the configured site's. */
 export const BROCHURE_HOSTS = Object.freeze(['bona-real-estate.com', 'www.bona-real-estate.com']);
 
@@ -530,13 +537,16 @@ export function createToolHandlers({
   /**
    * This chat already has its PDF for the day (DESIGN §6.3): a document row in wa_outbox in the last 24 h (accepted,
    * pending or uncertain: one that may have gone counts; it survives a restart), or a PDF this process promised it for
-   * another home within 24 h (two brochures in one turn: one PDF, one link). The same home again stays a PDF, so the
-   * brain's retry of a turn gets the same answer; dana-commit sends at most one document a turn anyway.
+   * another home within PDF_PROMISE_MS (one turn and its send). The promise is RESERVED synchronously, before the HEAD
+   * is awaited, so two concurrent calls of one turn (the brain runs them in parallel) never both promise a PDF: at most
+   * one is in flight per lead, the others answer 'link'. The same home again stays a PDF (the brain's retry of a turn
+   * gets the same answer); a reservation whose HEAD gives no PDF is let go. dana-commit turns any extra document into
+   * its link.
    */
   const pdfPromised = new Map();
   function pdfToday(lead, listingId) {
     const t = now();
-    for (const [k, v] of pdfPromised) if (t - v.at >= PDF_PER_CHAT_MS) pdfPromised.delete(k);
+    for (const [k, v] of pdfPromised) if (t - v.at >= PDF_PROMISE_MS) pdfPromised.delete(k);
     const promised = pdfPromised.get(lead.lead_id);
     if (promised && promised.listingId !== listingId) return true;
     return Boolean(db.db.prepare("SELECT 1 FROM wa_outbox WHERE lead_id = ? AND media_kind = 'document' AND status IN ('accepted','pending','uncertain') AND created >= ? LIMIT 1")
@@ -559,10 +569,14 @@ export function createToolHandlers({
     const link = (reason) => ({ will_send: 'link', reason, url, note: 'Give this link on its own line; no PDF is sent.' });
     if (firstMessage(who.lead)) return link('first_message');
     if (pdfToday(who.lead, listing.id)) return link('pdf_today');
+    // Check-and-set with no await between: the reservation is taken before the HEAD.
+    const held = pdfPromised.get(who.lead.lead_id);
+    const mine = held && held.listingId === listing.id ? held : { listingId: listing.id, at: now() };
+    pdfPromised.set(who.lead.lead_id, mine);
+    const release = () => { if (pdfPromised.get(who.lead.lead_id) === mine && mine !== held) pdfPromised.delete(who.lead.lead_id); };
     const size = await brochureSize(url);
-    if (size === null) return link('size_unknown');
-    if (size > BROCHURE_MAX_BYTES) return link('too_big');
-    pdfPromised.set(who.lead.lead_id, { listingId: listing.id, at: now() });
+    if (size === null) { release(); return link('size_unknown'); }
+    if (size > BROCHURE_MAX_BYTES) { release(); return link('too_big'); }
     return { will_send: 'pdf', reason: 'ok', note: 'The PDF goes right after your message: say one short line that you are sending it.' };
   }
 

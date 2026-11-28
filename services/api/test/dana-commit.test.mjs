@@ -842,8 +842,8 @@ const CORPUS = [
   ['denial', "You're not down for Sunday yet; may I have your name?", 'en', false, false],
   ['ordinary', "Here's the brochure, it's yours to keep.", 'en', false, false],
   ['ordinary', 'The choice is yours: Sunday or Monday?', 'en', false, false],
-  ['ordinary', "You're in for a treat: the sea view is lovely.", 'en', false],
-  ['ordinary', "I've signed you up for our new-listing updates.", 'en', false],
+  ['ordinary', "You're in for a treat: the sea view is lovely.", 'en', false, false],
+  ['ordinary', "I've signed you up for our new-listing updates.", 'en', false, false],
   ['ordinary', 'All done for the brochure request.', 'en', false],
   ['claim', 'سجلتك يوم الأحد الساعة 10', 'ar', true, true],
   ['claim', 'حطيتك الأحد الساعة 10', 'ar', true, true],
@@ -861,6 +861,17 @@ const CORPUS = [
   ['denial', 'لسه ما اعتمدت الموعد، أرسل لي اسمك', 'ar', false, false],
   ['ordinary', 'بسجلك الأحد بعد ما ترسل اسمك', 'ar', false, false],
   ['ordinary', 'بيتم اعتماد الموعد بعد ما ترسل اسمك', 'ar', false, false],
+  // r11 (Claude P3): "signed / lined you up" and "you're in|down|on|good for" only before a booking noun, a day or a time;
+  // «المعاينة لك مجانية»; «سجلتك …» never across «و»; a conditional "…, it's yours"; "all done for now"
+  ['ordinary', "I've signed you up for updates. Free times this week: Sunday 10 am or Monday 12 pm.", 'en', false, false],
+  ['ordinary', "You're in for a treat! Shall I check Sunday at 10 for you?", 'en', false, false],
+  ['ordinary', "You're in for a treat — here are the free times: Sunday 10 am, Monday 12 pm.", 'en', false, false],
+  ['ordinary', 'المعاينة لك مجانية بالكامل', 'ar', false, false],
+  ['ordinary', 'سجلتك عندنا والفريق يكلمك بكرة', 'ar', false, false],
+  ['ordinary', "I've signed you up for our new-listings updates.", 'en', false, false],
+  ['ordinary', "You're good for a 3-bedroom within your budget.", 'en', false, false],
+  ['ordinary', "Once you sign the contract, it's yours.", 'en', false, false],
+  ['ordinary', 'All done for now, the brochure is below.', 'en', false, false],
 ].map(([kind, text, lang, trips, viewing]) => ({ kind, text, lang, trips, viewing }));
 
 test(`the claim corpus: ${CORPUS.filter((r) => r.trips).length} claims trip and ${CORPUS.filter((r) => !r.trips).length} non-claims pass, with no tool, with save_needs only, and with a viewing tool where the row says`, async () => {
@@ -892,4 +903,21 @@ test('at most one brochure document per turn (DESIGN §6.3 one PDF per chat per 
   const pdf = (id) => ({ name: 'send_brochure', args: { listing_id: id }, result: { will_send: 'pdf', reason: 'ok' } });
   const out = await c.afterPreSend({ lead: LEAD, turn: brainReply('Sending both.', { tools: [pdf('BONA-W003'), pdf('BONA-W006')] }), text: 'Sending both.', language: 'en' });
   assert.deepEqual(out.bubbles.map((b) => [b.kind, b.listingId ?? null]), [['text', null], ['document', 'BONA-W003']]);
+});
+
+test('a second PDF reaching the commit becomes its link inside the link allowance, never a silent drop (Codex r11 P2)', async () => {
+  const pdf = (id) => ({ name: 'send_brochure', args: { listing_id: id }, result: { will_send: 'pdf', reason: 'ok' } });
+  const w006 = inventory.find('BONA-W006').brochureUrl;
+  const out = await commitWith().afterPreSend({ lead: LEAD, turn: brainReply('Sending both.', { tools: [pdf('BONA-W003'), pdf('BONA-W006')] }), text: 'Sending both.', language: 'en' });
+  assert.deepEqual(out.bubbles.map((b) => b.kind), ['text', 'document']);
+  assert.equal(out.bubbles[1].listingId, 'BONA-W003');
+  assert.equal(out.bubbles[0].text, `Sending both.\n\nBONA-W006 brochure: ${w006}`);
+  const ar = await commitWith().afterPreSend({ lead: LEAD, turn: brainReply('أرسلتها لك.', { tools: [pdf('BONA-W003'), pdf('BONA-W006')] }), text: 'أرسلتها لك.', language: 'ar' });
+  assert.equal(ar.bubbles[0].text, `أرسلتها لك.\n\nبروشور BONA-W006: ${w006}`);
+  // No room left in the link allowance: the link is not added, and the journal says so (never silent).
+  const logs = [];
+  const full = 'See https://bona.example.com/properties/a/ and https://bona.example.com/properties/b/';
+  const capped = await commitWith({ log: (o) => logs.push(o) }).afterPreSend({ lead: LEAD, turn: brainReply(full, { tools: [pdf('BONA-W003'), pdf('BONA-W006')] }), text: full, language: 'en' });
+  assert.equal(capped.bubbles[0].text, full);
+  assert.ok(logs.some((l) => l.evt === 'dana.commit_brochure_link_cap' && l.listingId === 'BONA-W006'));
 });

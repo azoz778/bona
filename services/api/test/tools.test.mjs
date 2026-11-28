@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { inspect, isDeepStrictEqual } from 'node:util';
-import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES, UNITS_NOTE, UNITS_NOT_PUBLISHED_NOTE, BLOCKED_BROCHURES, BROCHURE_HEAD_MS, BROCHURE_CACHE_MS, BROCHURE_MAX_BYTES, BROCHURE_FAIL_CACHE_MS, HANDOVER_KINDS, WA_ONLY_TOOLS, PDF_PER_CHAT_MS } from '../lib/tools.mjs';
+import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES, UNITS_NOTE, UNITS_NOT_PUBLISHED_NOTE, BLOCKED_BROCHURES, BROCHURE_HEAD_MS, BROCHURE_CACHE_MS, BROCHURE_MAX_BYTES, BROCHURE_FAIL_CACHE_MS, HANDOVER_KINDS, WA_ONLY_TOOLS, PDF_PER_CHAT_MS, PDF_PROMISE_MS } from '../lib/tools.mjs';
 import { saveNeeds as realSaveNeeds } from '../lib/lead-tasks.mjs';
 import { createInventory, readInventoryFile, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { createUnits, WORKTREE_UNITS } from '../lib/units.mjs';
@@ -1459,4 +1459,40 @@ test('one PDF per chat per day across a restart (Claude r9 P3-4): a fresh handle
       if (want === 'link') assert.equal(out.reason, 'pdf_today', what);
     } finally { h.cleanup(); }
   }
+});
+
+test('the PDF promise is reserved before the HEAD (Codex r11 P2): two concurrent send_brochure calls with slow HEADs give one pdf and one link', async () => {
+  // The brain runs a response's tool calls concurrently (lib/brain.mjs runTools): both start before either HEAD answers.
+  const slow = (url) => new Promise((resolve) => setTimeout(() => resolve(head(200, { 'content-length': String(MB) })), 30));
+  const h = b4({ fetchImpl: slow });
+  try {
+    h.lead();
+    const [a, b] = await Promise.all([h.wa('send_brochure', { listing_id: 'BONA-W003' }), h.wa('send_brochure', { listing_id: 'BONA-W006' })]);
+    assert.deepEqual([a.will_send, b.will_send], ['pdf', 'link']);
+    assert.equal(b.reason, 'pdf_today');
+    assert.equal(h.heads.length, 1, 'the second call never measured a PDF it may not send');
+    // The same home again (the backup model's retry of the turn) is still the PDF.
+    assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W003' })).will_send, 'pdf');
+  } finally { h.cleanup(); }
+  // A reservation whose HEAD did not give a PDF is let go, so another home may take the turn's PDF.
+  const big = b4({ fetchImpl: async (url) => head(200, { 'content-length': String(url.includes('al-wareef') ? 30 * MB : MB) }) });
+  try {
+    big.lead();
+    assert.equal((await big.wa('send_brochure', { listing_id: 'BONA-W003' })).will_send, 'link');
+    assert.equal((await big.wa('send_brochure', { listing_id: 'BONA-W006' })).will_send, 'pdf');
+  } finally { big.cleanup(); }
+});
+
+test(`a PDF promise lives ${PDF_PROMISE_MS / 60_000} min (one turn and its send), then only wa_outbox counts: a discarded turn's promise never blocks a later turn (Codex r11 P2)`, async () => {
+  assert.equal(PDF_PROMISE_MS, 2 * 60_000);
+  const h = b4();
+  try {
+    h.lead();
+    assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W003' })).will_send, 'pdf');
+    h.clock.t += PDF_PROMISE_MS - 1;
+    assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W006' })).will_send, 'link', 'still the same turn and its send');
+    h.clock.t += 2;
+    // The first turn never sent (no document row): the new turn may send its PDF.
+    assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W006' })).will_send, 'pdf');
+  } finally { h.cleanup(); }
 });
