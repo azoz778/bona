@@ -356,8 +356,17 @@ const firstGroup = (run) => /\d+/.exec(run)?.[0] ?? '';
  * more and starts 05 or 01x. A lone first digit never starts a phone: "Down payment: 0 576267694" is a figure and a number.
  */
 const phoneGrouping = (run) => /^(?:00966|966|05|01[1-7])/.test(firstGroup(run));
-/** Bona's public number written as a phone: its grouping and its digits ("+966 57 626 7694", "0576267694", "00966576267694"). */
-const isBonaPhone = (run) => phoneGrouping(run) && BONA_PHONE_FORMS.has(run.replace(/\D/g, ''));
+/**
+ * Bona's public number written as a phone, for the hard phone rule: its grouping and its digits ("+966 57 626 7694",
+ * "0576267694", "00966576267694"), and two more groupings of it (Claude r8 P3-1): a 2-digit 57 first ("57 626 7694") and
+ * the trunk 0 in brackets ("+966 (0) 57 626 7694"). A lone first digit is never one ("0 57 626 7694").
+ */
+function isBonaPhone(run) {
+  const d = run.replace(/\D/g, '');
+  if (phoneGrouping(run) && BONA_PHONE_FORMS.has(d)) return true;
+  if (firstGroup(run) === '57' && d === BONA_PHONE_TAIL) return true;
+  return /^\+?(?:00)?966\s*\(0\)/.test(run) && d.replace(/^(?:00)?9660/, '') === BONA_PHONE_TAIL;
+}
 /**
  * Phone numbers in a reply other than Bona's public one (and numbers in `allowed`, the site facts' digits): any run of
  * 9 to 15 digits (Claude r1 P3-2: "966501234567", "501234567", "55 123 4567", "(050) 123-4567", "+44 20 7946 0000").
@@ -497,7 +506,8 @@ const words = (s) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, 
 function leakPhrases(prompt) {
   return [...new Set(String(prompt).replace(/\{\{[^}]*\}\}/g, ' ').split(/(?<=[.!?:])\s+|\n+/u).map(words).filter((w) => w.length >= 8).map((w) => w.slice(0, 8).join(' ')))];
 }
-const idsIn = (text) => [...new Set((String(text ?? '').match(/BONA-W?\d{3}/gi) ?? []).map((x) => x.toUpperCase()))];
+/** The listing ids in a text, its digits read in any script first (Codex r8 P2: «BONA-٩٩٩» is an id, invented or not). */
+const idsIn = (text) => [...new Set((readDigits(text).match(/BONA-W?\d{3}/gi) ?? []).map((x) => x.toUpperCase()))];
 const parsed = (v) => {
   let x = v;
   for (let i = 0; i < 2 && typeof x === 'string'; i += 1) { try { x = JSON.parse(x); } catch { return null; } }
@@ -617,18 +627,25 @@ function phoneRun(run) {
   const d = run.replace(/\D/g, '');
   return SAUDI_PHONE_RE.test(d) || BONA_PHONE_FORMS.has(d);
 }
-/** A digit run's values: its groups joined ("86 000", "86.000" 86000), and with its last `.` or `٫` a decimal point (5.8). */
-function runValues(run) {
+/**
+ * A digit run's readings (Codex r8 P1): its groups joined ("2150.000" 2150000), its decimal value when its one dot is its
+ * last separator (2150), and the guard's own reading of it (findAmounts of "SAR <run>"; null when the guard cannot read
+ * the grouping or reads nothing). The run is backed only when every reading is.
+ */
+function runReadings(run) {
   const out = [Number(run.replace(/\D/g, ''))];
-  const dec = /^(.*)[.٫](\d+)$/u.exec(run);
+  const dec = /^([^.]*)\.(\d+)$/.exec(run);
   if (dec) out.push(Number(`${dec[1].replace(/\D/g, '') || '0'}.${dec[2]}`));
-  return out.filter(Number.isFinite);
+  const guard = findAmounts(`SAR ${run}`);
+  out.push(...(guard.length ? guard.map((a) => a.raw) : [null]));
+  return out;
 }
 /**
  * The r6 ruling (Codex r6 P1, Claude r6 P3-1): the offer-case flag is CLOSED, not lexical. A reply on an offer case is
  * flagged for a read when it has (a) a digit run (ASCII or Arabic-Indic digits; a `,` `.` `٬` `٫` or a space between its
- * groups: "86 000", "86.000", "٥٬٨٠٠٬٠٠٠") whose value the turn's tool results do not back (reply-guard allowedFrom), at
- * any size ("24 hours" too: a superset, each one read), or (b) a word of MAGNITUDE_RE's closed list, backed or not. A run
+ * groups: "86 000", "86.000", "٥٬٨٠٠٬٠٠٠") with any reading the turn's tool results do not back (reply-guard allowedFrom;
+ * every reading since r8: runReadings), at any size ("24 hours" too: a superset, each one read), or (b) a word of
+ * MAGNITUDE_RE's closed list, backed or not. A run
  * is no figure only when it is, on its own, a phone (phoneRun: "86000 0576267694" is one run and no phone, so a figure next
  * to a phone is never taken in), or the digits of a listing id (`ids`) or a unit that THIS TURN's tool results returned
  * (Codex r7 P1: never by the inventory or the case text). Digits of any script count (readDigits).
@@ -641,7 +658,7 @@ export function offerFigures(text, allowed, ids = new Set()) {
   const ok = allowedValues(allowed);
   const found = [];
   for (const m of s.matchAll(DIGIT_RUN_RE)) {
-    if (phoneRun(m[0]) || runValues(m[0]).some((v) => ok.has(v))) continue;
+    if (phoneRun(m[0]) || runReadings(m[0]).every((v) => Number.isFinite(v) && ok.has(v))) continue;
     found.push({ at: m.index, item: m[0] });
   }
   for (const m of s.matchAll(MAGNITUDE_RE)) found.push({ at: m.index, item: m[0] });

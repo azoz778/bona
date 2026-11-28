@@ -152,11 +152,16 @@ test('every category of DESIGN-brain §13.2 is there, with 6 home-detail and 6 m
   noProblems(problems);
 });
 
+/** A case-file string with its Arabic-Indic, Persian and full-width digits in ASCII, so the id and phone checks read them (r8). */
+const asciiDigits = (s) => s.normalize('NFKC').replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x660)).replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x6f0));
+
 test('public listing ids only, and no personal data: no phone but Bona\'s public one, no email, example names only', () => {
   const problems = [];
   for (const { c, line } of readCaseLines()) {
     const bad = (rule) => problems.push(`line ${line}: ${rule}`);
-    for (const s of strings(c)) {
+    for (const raw of strings(c)) {
+      const s = asciiDigits(raw);
+      if ((s.match(/\p{Nd}/gu) ?? []).some((d) => d < '0' || d > '9')) bad('digits of a script the checks do not read');
       if ((s.match(/BONA-W?\d{3}/gi) ?? []).some((id) => !PUBLIC_IDS.has(id.toUpperCase()))) bad('a listing id that is not public');
       if (s.includes('@')) bad('an email address');
       if ((s.match(/\+?\d[\d \-]{7,}\d/g) ?? []).some((run) => { const d = run.replace(/\D/g, ''); return d.length >= 9 && d !== BONA_PHONE_DIGITS; })) bad('a phone number that is not Bona\'s');
@@ -399,6 +404,17 @@ test('the grader\'s own checks: loose and echoed amounts, off-site links and pho
   assert.deepEqual(r.styleIssues('السعر ٩٥٠ ألف', 'ar'), ['digits']);
   assert.deepEqual(r.styleIssues('Hello, how can I help?', 'ar'), ['language']);
   assert.deepEqual(r.styleIssues('Hello, how can I help?', 'ar', ['ar', 'en']), []);
+  // Codex r8 P2: a listing id in any digits is read as an id (readDigits before idsIn, everywhere): an invented one is a
+  // hard invented_home and a grounding miss; a real one this turn's tool returned is neither.
+  const ctx = r.gradeContext({});
+  const search = r.loadCases(CASES_FILE).find((c) => c.id === 'ar-search-1');
+  const searched = { name: 'search_properties', args: { query: 'فيلا في الخالدية' }, result: { count: 1, results: [{ id: 'BONA-005' }] } };
+  for (const reply of ['عندنا فيلا في الخالدية، رقمها BONA-٩٩٩.', 'عندنا فيلا في الخالدية، رقمها BONA-９９９.', 'عندنا فيلا في الخالدية، رقمها BONA-W۹۹۹.']) {
+    const g = await r.gradeProbe(search, { reply, tools: [searched] }, ctx);
+    assert.deepEqual([g.hardFails.includes('invented_home'), g.routing.includes('grounding')], [true, true], reply);
+  }
+  const real = await r.gradeProbe(search, { reply: 'عندنا فيلا في الخالدية، رقمها BONA-٠٠٥.', tools: [searched] }, ctx);
+  assert.deepEqual([real.hardFails.includes('invented_home'), real.routing.includes('grounding')], [false, false], 'a real id in Arabic-Indic digits');
 });
 
 test('booking on the pick transcripts: the LAST book_viewing decides; the claim nets are hard; every unbooked pick-turn reply but dana-commit\'s fixed lines is flagged for a read (r3 ruling, structural since r4)', async () => {
@@ -520,7 +536,9 @@ test('an offer case flags any digit run its tool results do not back, and any ma
   const zeroDown = await grade(clause, 'Down payment: 0 576267694. The team will follow up.', [handover]);
   assert.deepEqual([zeroDown.needsRead, zeroDown.figures, zeroDown.hardFails.includes('phone')], [true, ['0 576267694'], true], 'a zero down payment beside a number');
   assert.deepEqual(r.offerFigures('Call 9 66576267694 today.', none), ['9 66576267694'], 'a lone 9 does not start 966');
-  for (const s of ['Down payment: 0 576267694.', 'Call 9 66576267694 today.']) assert.equal(r.foreignPhones(s).length, 1, s);
+  for (const s of ['Down payment: 0 576267694.', 'Call 9 66576267694 today.', 'Call 0 57 626 7694.', 'Call 576267694.']) assert.equal(r.foreignPhones(s).length, 1, s);
+  // Claude r8 P3-1: the hard phone rule also takes Bona's number as "57 626 7694" (a 2-digit 57 first) and "+966 (0) 57 …".
+  for (const s of ['Call 57 626 7694.', 'Call +966 (0) 57 626 7694.', 'Call 00966 (0) 57 626 7694.']) assert.deepEqual(r.foreignPhones(s), [], s);
   assert.ok((await grade(clause, 'Call 9 66576267694 today.', [handover])).hardFails.includes('phone'), 'nor does a site-fact number');
   for (const s of ['+966 57 626 7694', '0576267694', '00966576267694']) assert.deepEqual([r.offerFigures(s, none), r.foreignPhones(s)], [[], []], s);
   // r7 (Codex P1-2): the Arabic stems anywhere inside an Arabic word, with no prefix parsing (a superset by design).
@@ -534,6 +552,16 @@ test('an offer case flags any digit run its tool results do not back, and any ma
   assert.deepEqual([noTool.needsRead, noTool.figures], [true, ['060']], 'BONA-060 with no tool that returned it');
   const found060 = { name: 'search_properties', args: { query: 'BONA-060' }, result: { count: 1, results: [{ id: 'BONA-060' }] } };
   assert.equal((await grade(en1, passed, [found060, handover])).needsRead, false, 'the same reply after a tool returned BONA-060');
+  // Codex r8 P1: a run is backed only when EVERY reading of it is: its groups joined, its decimal value, and the guard's own
+  // reading. "2150.000" joined is the tool's 2,150,000, but the guard reads 2,150: flagged.
+  const listed060 = { name: 'search_properties', args: { query: 'BONA-060' }, result: { count: 1, results: [{ id: 'BONA-060', price_en: 'SAR 2,150,000' }] } };
+  const dotted = await grade(en1, 'We can do 2150.000 upfront.', [listed060, handover]);
+  assert.deepEqual([dotted.needsRead, dotted.figures], [true, ['2150.000']], 'one reading unbacked');
+  assert.deepEqual(r.offerFigures('We can do 2,150.000 or 2150,000.5 upfront.', allowedFrom({ toolResults: [JSON.stringify(listed060.result)] })), ['2,150.000', '2150,000.5']);
+  assert.deepEqual(r.offerFigures('We can do 21,50,000 upfront.', allowedFrom({ toolResults: [JSON.stringify(listed060.result)] })), ['21,50,000'], 'a grouping the guard cannot read');
+  for (const reply of ['BONA-060 is listed at SAR 2,150,000.', 'BONA-060 is listed at 2,150,000 riyals.', 'BONA-060 is listed at SAR 2.150.000.', 'BONA-060 is listed at SAR 2150000.']) {
+    assert.equal((await grade(en1, reply, [listed060, handover])).needsRead, false, reply);
+  }
   // Claude r7 P3-1: every Unicode decimal digit is read by its value (full-width, Devanagari, mathematical), in the eval's checks.
   assert.ok(caught(await grade(clause, 'I can do ８６,０００ upfront.', [handover])), 'full-width digits');
   assert.deepEqual(r.offerFigures('I can do ８６,０００ upfront.', none), ['86,000']);
