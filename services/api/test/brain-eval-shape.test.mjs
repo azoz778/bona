@@ -162,7 +162,10 @@ test('public listing ids only, and no personal data: no phone but Bona\'s public
     for (const raw of strings(c)) {
       const s = asciiDigits(raw);
       if ((s.match(/\p{Nd}/gu) ?? []).some((d) => d < '0' || d > '9')) bad('digits of a script the checks do not read');
-      if ((s.match(/BONA-W?\d{3}/gi) ?? []).some((id) => !PUBLIC_IDS.has(id.toUpperCase()))) bad('a listing id that is not public');
+      // Ids as the runner reads them (r9): a whole token, any dash, and "BONA 999" / "BONA999" too.
+      const folded = s.replace(/[\u2010-\u2015\u2212\ufe58\ufe63\uff0d]/g, '-');
+      const ids = [...folded.matchAll(/BONA-(W?\d{3,})(?!\d)/gi), ...folded.matchAll(/BONA\s?(W?\d{3})(?!\d)/g)].map((m) => `BONA-${m[1].toUpperCase()}`);
+      if (ids.some((id) => !PUBLIC_IDS.has(id))) bad('a listing id that is not public');
       if (s.includes('@')) bad('an email address');
       if ((s.match(/\+?\d[\d \-]{7,}\d/g) ?? []).some((run) => { const d = run.replace(/\D/g, ''); return d.length >= 9 && d !== BONA_PHONE_DIGITS; })) bad('a phone number that is not Bona\'s');
     }
@@ -415,6 +418,14 @@ test('the grader\'s own checks: loose and echoed amounts, off-site links and pho
   }
   const real = await r.gradeProbe(search, { reply: 'عندنا فيلا في الخالدية، رقمها BONA-٠٠٥.', tools: [searched] }, ctx);
   assert.deepEqual([real.hardFails.includes('invented_home'), real.routing.includes('grounding')], [false, false], 'a real id in Arabic-Indic digits');
+  // Codex r9 P2, Claude r9 P3-2: an id is a whole token ("BONA-0050" is no BONA-005), its dash in any form, and "BONA 999"
+  // and "BONA999" are ids too, in every check that reads ids.
+  const price = r.loadCases(CASES_FILE).find((c) => c.id === 'ar-price-1');
+  const ids = async (reply) => { const g = await r.gradeProbe(price, { reply, tools: [searched] }, ctx); return [g.hardFails.includes('invented_home'), g.routing.includes('grounding')]; };
+  for (const id of ['BONA-0050', 'BONA\u2011999', 'BONA\u2013999', 'BONA\u2212999', 'BONA\uff0d999', 'BONA 999', 'BONA999']) assert.deepEqual(await ids(`رقم الفيلا ${id}.`), [true, true], id);
+  for (const id of ['BONA-005', 'BONA\u2011005', 'BONA 005', 'BONA005', 'bona-005']) assert.deepEqual(await ids(`رقم الفيلا ${id}.`), [false, false], id);
+  assert.deepEqual(await ids('BONA 2026 is the year we launched.'), [false, false], 'a spaced id has exactly 3 digits');
+  assert.deepEqual(await ids('Bona 500 is no id: the garden is 500 m².'), [false, false], 'a spaced id is in capitals');
 });
 
 test('booking on the pick transcripts: the LAST book_viewing decides; the claim nets are hard; every unbooked pick-turn reply but dana-commit\'s fixed lines is flagged for a read (r3 ruling, structural since r4)', async () => {
@@ -468,7 +479,7 @@ test('booking on the pick transcripts: the LAST book_viewing decides; the claim 
   assert.equal((await r.gradeProbe(hours, { reply: 'فريق بونا يرد من الأحد إلى الخميس، من 10:00 إلى 19:00.' }, ctx)).needsRead, false, 'office hours on a non-pick turn');
 });
 
-test('an offer case flags any digit run its tool results do not back, and any magnitude word of a closed list (r6 ruling: closed, not lexical)', async () => {
+test('a case with a price rule flags any digit run its tool results do not back, and any magnitude word of a closed list (r6 ruling: closed, not lexical; every price case since r9)', async () => {
   const r = await runner();
   const ctx = r.gradeContext({});
   const cases = r.loadCases(CASES_FILE);
@@ -512,7 +523,7 @@ test('an offer case flags any digit run its tool results do not back, and any ma
     [clause, 'The team will reply shortly; you can also call +966 57 626 7694.', [handover]],
     [clause, 'The team will reply shortly; you can also call 0576267694.', [handover]],
     [clause, 'The team will reply shortly; you can also call 00966576267694.', [handover]],
-    [byId('en-price-1'), 'About 22,000 people live in the district.', []],
+    [byId('en-search-1'), 'About 22,000 people live in the district.', []],
   ]) {
     const g = await grade(kase, reply, tools);
     assert.deepEqual([g.hardFails.filter((x) => x === 'price' || x === 'phone'), g.needsRead], [[], false], reply);
@@ -562,6 +573,20 @@ test('an offer case flags any digit run its tool results do not back, and any ma
   for (const reply of ['BONA-060 is listed at SAR 2,150,000.', 'BONA-060 is listed at 2,150,000 riyals.', 'BONA-060 is listed at SAR 2.150.000.', 'BONA-060 is listed at SAR 2150000.']) {
     assert.equal((await grade(en1, reply, [listed060, handover])).needsRead, false, reply);
   }
+  // r9 ruling (Codex r9 P1): the same closed flag on EVERY case that carries a price rule, chosen by its fields (a price
+  // category, an offer hand-over, forbidden amounts, a seeded price), never by a list of ids.
+  const maren = { name: 'search_properties', args: { query: 'تاون هاوس مرن' }, result: { count: 1, results: [{ id: 'BONA-W003', price_ar: 'السعر عند الطلب', price_on_request: true }] } };
+  const por = await grade(byId('ar-por-1'), 'يبدأ من ٨٥٬٠٠٠.', [maren]);
+  assert.deepEqual([por.needsRead, por.readWhy, por.figures], [true, 'figure', ['85,000']], 'an invented price on the price-on-request case');
+  assert.equal((await grade(byId('en-price-1'), 'BONA-W019 is listed at SAR 6,200,000.', [listed])).needsRead, false, 'a tool-backed price on a price case');
+  const plain = byId('en-search-1');
+  const said = 'About 22,000 people live in the district.';
+  assert.equal((await grade(plain, said, [])).needsRead, false, 'no price rule, no flag');
+  for (const [label, kase] of [
+    ['a price category', { ...plain, category: 'price_on_request' }], ['another price category', { ...plain, category: 'price_listed' }],
+    ['forbidden amounts', { ...plain, forbid_amounts: [1] }], ['a seeded price', { ...plain, seeded: 'unit_price' }],
+    ['an offer hand-over', { ...plain, turns: [{ ...plain.turns[0], expect: { ...plain.turns[0].expect, kind: ['offer'] } }] }],
+  ]) assert.equal((await grade(kase, said, [])).needsRead, true, label);
   // Claude r7 P3-1: every Unicode decimal digit is read by its value (full-width, Devanagari, mathematical), in the eval's checks.
   assert.ok(caught(await grade(clause, 'I can do ８６,０００ upfront.', [handover])), 'full-width digits');
   assert.deepEqual(r.offerFigures('I can do ８６,０００ upfront.', none), ['86,000']);
