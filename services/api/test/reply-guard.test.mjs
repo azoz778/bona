@@ -628,3 +628,14 @@ test('"مليون إلا 100,000 ريال" is 900,000 and "مليون و250,000 
   assert.equal(checkReply('سعر الفيلا مليون و250,000 ريال', { toolResults: ['{"p":"SAR 1,250,000"}'] }).ok, true);
   assert.equal(checkReply('مليون ريال، 250,000 ريال', parts).ok, true, 'a comma list stays two prices');
 });
+
+/* Claude r31 P2: a price followed by a count in words keeps its amount. */
+test('"مليون ريال وخمس غرف نوم" and its kind keep the published price', () => {
+  const parts = { toolResults: ['{"p":"SAR 1,000,000"}', '{"q":"SAR 2,000,000"}'] };
+  for (const reply of ['السعر مليون ريال وخمس غرف نوم', 'السعر مليونين ريال وأربع غرف نوم', 'السعر 2 مليون ريال وثلاث دورات مياه', 'السعر مليون ريال وسبع مواقف',
+    'السعر مليون ريال وست سنوات ضمان', 'السعر مليون ريال وعشر دقائق من البحر', 'السعر مليون ريال وتسعمية متر مربع', 'السعر مليون ريال والكمية محدودة',
+    'السعر مليون ريال والرسمية مكتملة', 'السعر مليون ريال وأهمية الموقع']) {
+    assert.equal(checkReply(reply, parts).ok, true, reply);
+  }
+  for (const reply of ['السعر مليون وخمسمية', 'السعر مليون وخمسمية ريال', 'السعر مليون ومتين ألف']) assert.equal(checkReply(reply, parts).ok, false, reply);
+});

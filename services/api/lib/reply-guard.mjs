@@ -108,12 +108,13 @@ const FRACTION_AFTER_RE = /^[\s-]{0,2}(?:و|and[\s-]+(?:an?[\s-]+)?|(?:إلا|ا
 /** A currency word right after a scale word: the fraction may come after it ("مليون ريال ونص", "a million riyals and a half"). */
 const CURRENCY_FIRST_RE = new RegExp(String.raw`^[\s-]{0,2}(?:${CUR})(?![\p{L}])`, 'iu');
 /**
- * After a million (and its currency word), "و" and a spelled-out number ("مليون وخمسمية", "مليون ومتين ألف") or three
- * bare digits that end the amount ("مليون و٥٠٠", "مليون ريال و500."): the colloquial short form of 1.5M, a value the
- * guard cannot read (Claude r30). "2 مليون و3 غرف", "مليون و500 ألف" (a compound) and "مليون و500 متر" are not it.
+ * After a million (and its currency word), "و" and a hundreds word ("مليون وخمسمية", "مليون ومتين ألف") or three bare
+ * digits, either ending the amount ("مليون و٥٠٠", "مليون ريال و500."): the colloquial short form of 1.5M, a value the
+ * guard cannot read (Claude r30). Never a count ("مليون ريال وخمس غرف", "وتسعمية متر", Claude r31), a word with "ال"
+ * ("والرسمية"), "2 مليون و3 غرف", "مليون و500 ألف" (a compound) or "مليون و500 متر".
  */
 const LOOSE_AFTER_RE = new RegExp(
-  String.raw`^(?:[\s-]{0,2}(?:${CUR})(?![\p{L}]))?[\s-]{0,2}و\s{0,2}(?:(?:${AR_NUMBER_WORDS})(?![\p{L}])|\d{3}(?![\d.,]\d)(?=\s*(?:(?:${CUR})(?![\p{L}])|[.!?؟،,;:\n)]|$)))`,
+  String.raw`^(?:[\s-]{0,2}(?:${CUR})(?![\p{L}]))?[\s-]{0,2}و\s{0,2}(?:(?!ال)(?:\p{L}{0,6}(?:مية|ميه|مئة|مائة)|ميتين|متين|مئتين|مائتين|مئتي)(?![\p{L}])(?=\s*(?:(?:${CUR})(?![\p{L}])|ألف|الف|آلاف|الاف|[.!?؟،,;:\n)]|$))|\d{3}(?![\d.,]\d)(?=\s*(?:(?:${CUR})(?![\p{L}])|[.!?؟،,;:\n)]|$)))`,
   'iu',
 );
 /** Whether a half or a quarter follows a scale word, straight away or after a currency word (Codex r29). */
