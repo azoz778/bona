@@ -3336,3 +3336,46 @@ test('T12 r17 2: a first reply with ordinary text and an e-mail address goes unc
   await ask(h, 'Hi');
   assert.ok(h.sent()[0].endsWith(text), h.sent()[0]);
 });
+
+/* ======================================================================================
+ * PR-B3 r18 (Codex P1s, Claude P3): a bare link is matched by its WHOLE host (a prefix never passes the allow-list);
+ * the first-reply exception reads the same matcher, so an e-mail address is never "the client pointed at a home".
+ * ====================================================================================== */
+
+test('T12 r18 1: linksIn takes the whole host; ordinary text (Claude\'s links probe) still never matches', () => {
+  const none = [
+    'Villas start from SAR 3.5 million.', 'السعر ٣.٥ مليون ريال', 'المساحة 3.5 م', 'Unit B08-19 is on floor 8.', 'Email us at info@bona-real-estate.com please',
+    'Viewings at 10.30 or 14.00', 'Near King Abdullah St. and Tahlia', 'e.g. a villa, i.e. detached, from 9 a.m. to 5 p.m.', 'U.S. buyers welcome',
+    'Version 2.0, plot no.12, Mr.Smith, etc.)', 'It is available.Contact us', 'BONA-W005 and BONA-001', 'Call +966 50 000 0012',
+    'The villa.Co-owned', 'سعر الفيلا 2.950.000 ريال', 'see 1.5bn', 'price is 3.5m SAR', 'Dr. Ahmed',
+  ];
+  for (const t of none) assert.deepEqual(linksIn(t), [], t);
+  const hosts = (t) => linksIn(t).map((l) => l.replace(/^https?:\/\//i, '').split(/[/:?#]/)[0].toLowerCase());
+  assert.deepEqual(hosts('see bona-real-estate.com.au/contact'), ['bona-real-estate.com.au']);
+  assert.deepEqual(hosts('see bona-real-estate.com.evil.io now'), ['bona-real-estate.com.evil.io']);
+  assert.deepEqual(hosts('see x.bona-real-estate.com.au'), ['x.bona-real-estate.com.au']);
+  for (const t of ['Visit maps.bona-real-estate.com/abc', 'See example.sa/villas/1', 'bona-real-estate.com.sa/path', 'WWW.EXAMPLE.COM',
+    'tinyurl.com/xyz', 'bit.ly/abc', 'example.estate', 'something.club', 'bona.azoz.uk/properties/x/', '(www.bona-real-estate.com)', 'link: bona-real-estate.com.']) {
+    assert.equal(linksIn(t).length, 1, t);
+  }
+});
+
+test('T12 r18 1 (Codex P1-1): a later reply strips a host that only starts like Bona\'s', async () => {
+  const text = 'Our partners: bona-real-estate.com.au/contact and bona-real-estate.com.evil.io and x.bona-real-estate.com.au today.';
+  const h = bh({ turns: [brainReply('Hello! How can I help?'), brainReply(text), brainReply('See bona-real-estate.com/villas for photos.')] });
+  await ask(h, 'Hi');
+  h.tick(60_000);
+  await ask(h, 'any partners?');
+  assert.doesNotMatch(h.sent().join('\n'), /bona-real-estate\.com\.au|evil\.io/, h.sent().join(' | '));
+  h.tick(60_000);
+  await ask(h, 'photos?');
+  assert.match(h.sent().at(-1), /bona-real-estate\.com\/villas/, 'Bona\'s own host stays within the allowance');
+});
+
+test('T12 r18 2 (Codex P1-2): an e-mail address with Bona\'s domain is not the client pointing at a home: the first reply has no link', async () => {
+  const homes = inventory.all().slice(0, 3);
+  const h = bh({ turns: [brainReply('Yes, that is our e-mail. Here are some homes.', { tools: [{ name: 'search_properties', result: { results: homes.map((l) => ({ id: l.id, slug: l.slug })) } }] })] });
+  await ask(h, 'Is info@bona-real-estate.com your email?');
+  assert.equal(h.sent().length >= 1, true);
+  assert.equal((h.sent().join('\n').match(/https:\/\//g) ?? []).length, 0, 'a first reply: no link');
+});

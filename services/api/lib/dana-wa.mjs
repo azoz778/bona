@@ -172,14 +172,23 @@ const PLACEHOLDER_RE = /^\[[^\]\n]{1,40}\]$/;
 const LISTING_ID_RE = /\bBONA-W?\d{3}\b/i;
 const LINK_RE = /https?:\/\/[^\s<>"'`]+/giu;
 /**
- * A brain chat's links (r17): a URL with a scheme, a bare `www.` host, or a bare domain with a known top-level domain
- * (WhatsApp makes each clickable), with its path. Never inside an e-mail address or another host, never a number
- * ("3.5 million") or an abbreviation ("e.g.", "a.m."): the last label must be one of these TLDs.
+ * A brain chat's links (r17, r18): a URL with a scheme, or a bare host with its port and path, matched by its WHOLE
+ * host (every dot label, so `bona-real-estate.com.au` is never read as `bona-real-estate.com`). A bare host is a link
+ * when it starts with `www.`, or its last label is a known TLD or any 2-letter country code and some label before it
+ * has 2 characters or more (so "e.g.", "a.m.", "U.S." stay text). Never inside an e-mail address or another host
+ * (the lookbehind), never a number ("3.5 million": a TLD is letters).
  */
-const LINK_TLDS = 'com|net|org|info|biz|io|co|me|app|dev|ai|sa|ae|qa|kw|bh|om|eg|jo|uk|us|eu|de|fr|in|tv|ly|gl|to|cc|ws|xyz|online|site|store|tech|link|page|gov|edu|realestate|properties|homes';
-const BRAIN_LINK_RE = new RegExp(String.raw`https?:\/\/[^\s<>"'\x60]+|(?<![@\w./-])www\.[^\s<>"'\x60]+|(?<![@\w./-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:${LINK_TLDS})(?![a-z0-9-])(?:\/[^\s<>"'\x60]*)?`, 'giu');
-/** Every link a brain chat's text carries, by BRAIN_LINK_RE (r17), as written (a trailing stop included). */
-export const linksIn = (text) => String(text ?? '').match(BRAIN_LINK_RE) ?? [];
+const LINK_TLDS = new Set(('com net org info biz io co me app dev ai gov edu xyz online site store tech link page realestate properties homes '
+  + 'shop estate club top live world group agency website space news blog cloud digital media house land').split(' '));
+const LINK_CANDIDATE_RE = new RegExp(String.raw`https?:\/\/[^\s<>"'\x60]+|(?<![@\w./-])[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?::\d{1,5})?(?:[/?#][^\s<>"'\x60]*)?`, 'giu');
+function bareLink(candidate) {
+  const labels = candidate.split(/[:/?#]/)[0].toLowerCase().split('.');
+  if (labels[0] === 'www') return true;
+  const tld = labels[labels.length - 1];
+  return (LINK_TLDS.has(tld) || /^[a-z]{2}$/.test(tld)) && labels.slice(0, -1).some((l) => l.length >= 2);
+}
+/** Every link a brain chat's text carries (r17, r18), as written (a trailing stop included). */
+export const linksIn = (text) => (String(text ?? '').match(LINK_CANDIDATE_RE) ?? []).filter((c) => /^https?:\/\//i.test(c) || bareLink(c));
 const hasLink = (text) => linksIn(text).length > 0;
 /** The code-built maps link (DESIGN §4.1, §6.5): the one off-site URL a reply may carry. */
 const MAPS_RE = /^https:\/\/maps\.google\.com\/\?q=-?\d{1,3}(?:\.\d+)?,-?\d{1,3}(?:\.\d+)?$/;
@@ -1389,10 +1398,10 @@ export function createDana({
   }
   /** DESIGN §6.5: the first message carries a link only when the client sent a Ref, a listing id or a site URL. */
   function clientPointed(batch) {
-    const host = safely(() => new URL(siteUrl).host);
+    // A Ref, a listing id, or a link to Bona's site by the whole-host matcher (r18): never an e-mail address.
     return batch.some((m) => {
       const s = typeof m.text === 'string' ? m.text : '';
-      return REF_RE.test(s) || LISTING_ID_RE.test(s) || /bona-real-estate\.com/i.test(s) || (host ? s.toLowerCase().includes(host.toLowerCase()) : false);
+      return REF_RE.test(s) || LISTING_ID_RE.test(s) || linksIn(s).some((u) => onSite(u.replace(/[).,;:!?»”]+$/u, '')));
     });
   }
 
