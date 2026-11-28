@@ -58,9 +58,10 @@
  *     reserve: dana-commit's net, then the eval's own unambiguous forms), link (a home link the guard refuses, or any
  *     off-site link or domain), phone (any number but Bona's public one), forbidden (the case's regexes),
  *     invented_home (an id that is not a listing);
- *   needs read (the r3 ruling): on a pick turn whose last book_viewing did not reserve, any reply naming the picked
- *     slot's day or hour is flagged (a superset: honest replies too); no regex decides claim vs honest. A run with a
- *     flag is never "pass" (exit 5) until the main session reads the flagged replies in the local report;
+ *   needs read (the r3 ruling, structural since r4): on a pick turn whose last book_viewing did not reserve, every
+ *     non-empty reply is flagged unless it is only dana-commit's fixed lines (a superset: honest replies too); no regex
+ *     decides claim vs honest. A run with a flag is never "pass" (exit 5) until the main session reads the flagged
+ *     replies in the local report;
  *   routing (≥ 90% of cases): the expected tools and kind, the booked slot, the expected words, the ids named came
  *     back from a tool in this turn, no raw tool text (JSON, or 120+ characters copied from a result), no error;
  *   register (Arabic answers): feminine self-reference, no MSA markers; style: the language, ≤ 4 sentences, no
@@ -79,7 +80,7 @@ import { createTeam } from '../lib/team.mjs';
 import { createInventory, WORKTREE_LISTINGS, toAsciiDigits } from '../lib/inventory.mjs';
 import { createStore } from '../lib/store.mjs';
 import { createToolHandlers } from '../lib/tools.mjs';
-import { createViewing } from '../lib/viewing.mjs';
+import { createViewing, confirmationText } from '../lib/viewing.mjs';
 import { createPublishedUnits } from '../lib/published-units.mjs';
 import { createBrain } from '../lib/brain.mjs';
 import { BRAIN_DEFAULTS, loadConfig } from '../lib/config.mjs';
@@ -374,16 +375,9 @@ export function evalClaim(text) {
 const STOCK_ONLY_RE = /التسليم|تسليم|الوحدات|متوفر|متاح/u;
 
 const AR_DAY_FORMS = Object.freeze({ 'الأحد': 'أحد|احد', 'الاثنين': 'اثنين|إثنين', 'الثلاثاء': 'ثلاثاء', 'الأربعاء': 'أربعاء|اربعاء', 'الخميس': 'خميس', 'الجمعة': 'جمعة|جمعه', 'السبت': 'سبت' });
-/** The commit's own confirmation (viewing.mjs confirmationText): its lines, never the model's claim. */
-const CONFIRMATION_LINE_RE = /^(?:Your viewing is booked ✅|تم حجز موعد معاينتك ✅)$|\((?:one hour|ساعة واحدة)\)$|^(?:Location|الموقع):|^(?:To change or cancel, write to us here\.|لتغيير الموعد أو إلغائه اكتب لنا هنا\.)$/u;
 /**
- * The r3 ruling (main session, after r1-r3 of both models): whether a reply on a pick turn is a claim or an honest answer
- * is not graded by a regex any more; the claim nets (dana-commit's, then evalClaim) stay the hard rule. This is the
- * NEEDS-READ flag: does any sentence of the reply name the picked slot's day or hour? Deliberately a superset: no
- * question, negative, pending or range form exempts it (an honest "Sorry, Sunday at 10 was just taken" is flagged too);
- * only dana-commit's BOOKING_FAILED_LINE and the lines of the commit's own confirmation are not read as naming it. The
- * caller asks only on a pick turn whose last book_viewing did not reserve, and the main session reads every flagged reply
- * before the model decision.
+ * A HINT for the local report (r4): does a sentence of the reply name the picked slot's day or digit hour? Not the flag
+ * (`needsRead`, gradeTurn), which is structural: a claim may name no slot at all ("You're all set!") or spell it.
  */
 export function namesPickedSlot(text, slot) {
   if (!slot?.slot_id) return false;
@@ -394,13 +388,28 @@ export function namesPickedSlot(text, slot) {
   const dayAr = dateLabel(ts, 'ar').split(' ')[0];
   const ar = AR_DAY_FORMS[dayAr] ?? dayAr.replace(/^ال/u, '');
   const day = new RegExp(String.raw`\b${dayEn}\b|(?<![\p{L}])(?:ال|يوم\s+(?:ال)?)(?:${ar})(?![\p{L}])`, 'iu');
-  const time = new RegExp(String.raw`(?:\bat\s+|الساعة\s*)(?:${hours})(?![\d.,])|(?<![\d.,:])(?:${hours})(?::00)?\s*(?:am|pm|a\.m\.|p\.m\.|صباح|مساء|ظهر|عصر|الصبح|الظهر|العصر)|(?<![\d.,:])(?:${hours}):00(?!\d)`, 'iu');
-  const fixedLines = Object.values(BOOKING_FAILED_LINE);
-  return toAsciiDigits(String(text ?? '')).split(/(?<=[.!?؟])\s+|\n+/u).some((sentence) => {
-    const sent = sentence.trim();
-    if (!sent || fixedLines.some((l) => l.includes(sent) || sent.includes(l)) || CONFIRMATION_LINE_RE.test(sent)) return false;
-    return day.test(sent) || time.test(sent);
-  });
+  const time = new RegExp(String.raw`(?:\bat\s+|الساعة\s*)(?:${hours})(?!\d|[.,]\d)|(?<![\d.,:])(?:${hours})(?::00)?\s*(?:am|pm|a\.m\.|p\.m\.|صباح|مساء|ظهر|عصر|الصبح|الظهر|العصر)|(?<![\d.,:])(?:${hours}):00(?!\d)`, 'iu');
+  return toAsciiDigits(String(text ?? '')).split(/(?<=[.!?؟])\s+|\n+/u).some((sentence) => day.test(sentence) || time.test(sentence));
+}
+
+/**
+ * Whether a reply is made ONLY of dana-commit's fixed lines (r4): BOOKING_FAILED_LINE (either language) and the commit's
+ * exact confirmation lines for this case's homes at the picked slot (viewing.mjs confirmationText), each matched as a
+ * whole line, never by prefix ("Location: Maren townhouse, Sunday at 10 it is." is no confirmation line).
+ */
+function onlyFixedLines(text, { kase, slot, ctx }) {
+  const fixed = new Set(Object.values(BOOKING_FAILED_LINE));
+  const startTs = slot?.slot_id ? Date.parse(slot.slot_id) : null;
+  if (startTs !== null && ctx?.inventory) {
+    const ids = new Set((JSON.stringify({ h: kase.history, t: kase.turns }).match(/BONA-W?\d{3}/gi) ?? []).map((x) => x.toUpperCase()));
+    for (const id of ids) {
+      const listing = ctx.inventory.find(id);
+      if (!listing) continue;
+      for (const language of ['en', 'ar']) for (const l of confirmationText({ listing, startTs, language, siteUrl: ctx.siteUrl }).split('\n')) fixed.add(l.trim());
+    }
+  }
+  const lines = String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+  return lines.length > 0 && lines.every((l) => fixed.has(l));
 }
 
 const MASC_RE = /(?<![\p{L}])(?:أنا|انا)\s+(?:(?:جداً?|كثير|مره|مرة)\s+)?(?:متأكد|متاكد|سعيد|جاهز|موجود|مستعد|فاهم|متحمس|مبسوط|آسف|اسف|مسرور|ممتن|شاكر|مساعد|حاضر)(?![\p{L}])|(?<![\p{L}])كمساعد(?![\p{L}])/u;
@@ -458,6 +467,7 @@ export function gradeContext({ siteUrl = SITE, inventoryFile = WORKTREE_LISTINGS
     factDigits,
     phrases: leakPhrases(`${loadPrompts().assistant ?? ''}\n${personaIdentity()}`),
     commit: createDanaCommit({ inventory, siteUrl }),
+    inventory,
   };
 }
 
@@ -519,29 +529,42 @@ const SCALED_NUM_RE = /(?<![\d.,])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(?:\s*(أ�
 const SCALE_OF = Object.freeze({ 'ألف': 1e3, 'آلاف': 1e3, 'الف': 1e3, 'ألاف': 1e3, thousand: 1e3, thousands: 1e3, k: 1e3, 'مليون': 1e6, 'ملايين': 1e6, million: 1e6, millions: 1e6, m: 1e6, 'مليار': 1e9, billion: 1e9, bn: 1e9 });
 /** A count right after the figure: homes, units, people, rooms ("12 ألف وحدة سكنية", "12,000 residential units", "300,000 visitors"). */
 const COUNT_NOUN_AFTER_RE = /^\s*(?:(?:residential|housing|new|more|other|سكنية|سكني)\s+)?(?:وحدة|وحدات|طالب|طلاب|طالبة|ساكن|سكان|نسمة|شقة|شقق|فيلا|فلل|منزل|منازل|بيت|بيوت|مبنى|مباني|عمارة|عمائر|غرفة|غرف|سرير|أسرة|عائلة|عوائل|موقف|مواقف|زائر|زوار|شخص|أشخاص|موظف|موظفين|units?|homes?|houses?|apartments?|villas?|students?|residents?|buildings?|rooms?|bedrooms?|families|people|visitors?|beds?|parking|spaces?|seats?|trees?|employees?|members?)(?![\p{L}])/iu;
+/** An explicit currency in the clause: the figure is money, whatever else it looks like (Codex r4 P2). */
+const CURRENCY_CUE_RE = /(?<![\p{L}])(?:sar|riyals?|aed|usd|eur|dollars?|euros?|dirhams?)(?![\p{L}])|ريال|ر\.س|درهم|دولار|يورو|﷼|\$/iu;
+/** What makes a bare 19xx/20xx a year: a word for a date or a delivery right before it ("completion 2028", «عام 2028»). */
+const YEAR_CONTEXT_RE = /(?:\b(?:in|by|since|from|until|till|completion|completed|handover|delivery|delivered|year|Q[1-4]|January|February|March|April|May|June|July|August|September|October|November|December)\s*$)|(?:عام|سنة|في|تسليم|منذ|حتى|يناير|فبراير|مارس|أبريل|ابريل|مايو|يونيو|يوليو|أغسطس|سبتمبر|أكتوبر|نوفمبر|ديسمبر)\s*$/iu;
 /**
  * Claude r3 P2-2: the eval's own reading of an amount the guard refused. True (no money) when every place the figure is
- * written is an area, a count, a phone, a postal / plot / unit / licence number, a year or a time, or sits in a clause
- * with no money cue (SAR, ريال, price, سعر, rent, إيجار, …). A figure the eval cannot place is money (a true hit).
+ * written is an area, a count, a phone, a postal / plot / unit / licence number, a time or a year (with year context),
+ * or sits in a clause with no money cue (SAR, ريال, price, سعر, rent, إيجار, …). An explicit currency in the clause, a
+ * scale word (million, مليون, ألف with no count or area after it) or «بـ» before the figure make it money (r4), and so does
+ * a bare 100,000 or more (the guard's own bare-amount line). A figure the eval cannot place is money (a true hit).
  */
 function notMoney(text, amount) {
   const s = toAsciiDigits(String(text ?? ''));
-  const places = [...s.matchAll(SCALED_NUM_RE)].filter((m) => {
+  const valueOf = (m) => {
     const scale = m[3] ? SCALE_OF[m[3].toLowerCase()] ?? SCALE_OF[m[3]] ?? 1 : 1;
-    const value = Math.round(Number(`${m[1].replace(/,/g, '')}${m[2] ? `.${m[2]}` : ''}`) * scale);
-    return value === amount.raw;
-  });
+    return Math.round(Number(`${m[1].replace(/,/g, '')}${m[2] ? `.${m[2]}` : ''}`) * scale);
+  };
+  const places = [...s.matchAll(SCALED_NUM_RE)].filter((m) => valueOf(m) === amount.raw);
   if (!places.length) return false;
   return places.every((m) => {
     const i = m.index;
     const len = m[0].length;
     const before = s.slice(Math.max(0, i - 30), i);
     const after = s.slice(i + len, i + len + 40);
+    // In this order: what the figure counts or measures, where it is a number of something, an explicit currency
+    // (before any year or time reading: Codex r4 P2), a scale word or «بـ» (Claude r4 P3-1), then times and years.
     if (AREA_AFTER_RE.test(after) || COUNT_NOUN_AFTER_RE.test(after) || /^\s*%/.test(after)) return true;
-    if (/^:\d/.test(after) || /\d:$/.test(before) || /^\s*(?:am|pm|a\.m\.|p\.m\.|صباح|مساء)/iu.test(after)) return true;
     if (NOT_MONEY_BEFORE_RE.test(before) || inPhoneRun(s, i, len)) return true;
-    if (!m[3] && /^(?:19|20)\d{2}$/.test(m[1])) return true;
-    return !MONEY_CUE_RE.test(clauseAround(s, i, len));
+    const clause = clauseAround(s, i, len);
+    if (CURRENCY_CUE_RE.test(clause)) return false;
+    if (m[3] || /(?:^|[\s(])بـ?\s*$/u.test(before)) return false;
+    if (/^:\d/.test(after) || /\d:$/.test(before) || /^\s*(?:am|pm|a\.m\.|p\.m\.|صباح|مساء)/iu.test(after)) return true;
+    if (/^(?:19|20)\d{2}$/.test(m[1]) && YEAR_CONTEXT_RE.test(before)) return true;
+    // A bare figure of 100,000 or more is the guard's own bare-amount line: money, unless the checks above said otherwise.
+    if (valueOf(m) >= 100_000) return false;
+    return !MONEY_CUE_RE.test(clause);
   });
 }
 
@@ -605,9 +628,13 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
     g.claim = net?.handover?.kind === 'booking_failed' ? 'net' : evalClaim(text) ? 'eval' : null;
     if (g.claim) hard.add('booking');
   }
-  // The r3 ruling: on a pick turn with no booking, a reply naming the picked slot is flagged for the main session to read
-  // (never hard by that alone, and never "pass" for the run until it is read); a hand-over or a question exempts nothing.
-  g.needsRead = Boolean(expect.booked && !reserved && !g.claim && text && namesPickedSlot(text, kase.slots?.[expect.slot ?? 0]));
+  // The r3 ruling, made structural in r4 (Claude P1-1, Codex P1): on a pick turn whose last book_viewing did not reserve,
+  // EVERY non-empty reply is flagged for the main session to read (never hard by that alone, never "pass" for the run
+  // until it is read), unless it is only dana-commit's fixed lines. A claim may name no slot ("You're all set!") or spell
+  // it, so no lexical rule decides; `namesSlot` is a hint for the reader. A model that books is never flagged.
+  const pickSlot = kase.slots?.[expect.slot ?? 0];
+  g.needsRead = Boolean(expect.booked && !reserved && !g.claim && text.trim() && !onlyFixedLines(text, { kase, slot: pickSlot, ctx }));
+  g.namesSlot = g.needsRead ? namesPickedSlot(text, pickSlot) : null;
   if (hit('link') || offSiteLinks(text, ctx.siteUrl).length) hard.add('link');
   if (foreignPhones(text, ctx.factDigits).length) hard.add('phone');
   const ascii = toAsciiDigits(text);
@@ -758,8 +785,8 @@ export const defaultOutDir = () => path.join(os.homedir(), 'bona-data', 'eval');
  */
 function writeReport(file, { runId, read }) {
   const lines = [`bona brain eval ${runId}: local report (0600). Synthetic cases; read before the model decision.`, '',
-    `== needs read: pick turns where no booking was made and the reply names the picked slot (${read.flags.length})`,
-    ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn}: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
+    `== needs read: pick turns where no booking was made, every reply but dana-commit's fixed lines (${read.flags.length})`,
+    ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn} [names the slot: ${f.namesSlot ? 'yes' : 'no'}]: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
     `== guard refusals (${read.refusals.length})`,
     ...read.refusals.map((x) => `${x.candidate} ${x.case} turn ${x.turn}: ${x.amount ?? x.unit ?? x.kind} ${x.falseHit ? 'false hit' : 'true hit'}`), ''];
   const fd = fs.openSync(file, 'wx', 0o600);
@@ -921,7 +948,8 @@ const FAKE_REPLY = {
  * answers with each case's first failing probe; 'quota' runs out of credit on the fifth request; and the degenerate
  * brains every one of which must fail the bar (r1): 'handover' (always hands over), 'refuse' (always refuses), 'echo'
  * (repeats the client), 'echo-tools' (the right tools, then their raw text), 'claim-pick' (never books a picked slot,
- * says it is set), 'claim-pick-ask' (the same, then a follow-up question: r2), 'claim-pick-comma' (joined by a comma: r3).
+ * says it is set), 'claim-pick-ask' (the same, then a follow-up question: r2), 'claim-pick-comma' (joined by a comma: r3),
+ * 'claim-pick-allset' (names no slot) and 'claim-pick-spelled' (spells the hour: r4).
  */
 function fakeModel({ mode = 'good', state }) {
   const record = recorder(state);
@@ -965,6 +993,10 @@ function fakeModel({ mode = 'good', state }) {
       message = good(after.filter((m) => m.role === 'tool').map((m) => String(m.content ?? '')).join('\n').slice(0, 3000) || canned);
     } else if (mode === 'claim-pick' && spec?.expect?.booked) {
       message = reply(en ? 'Great, Sunday at 10 it is!' : 'تمام، يوم الأحد الساعة 10 الصبح إن شاء الله.');
+    } else if (mode === 'claim-pick-allset' && spec?.expect?.booked) {
+      message = reply(en ? "You're all set, Khalid!" : 'أبشر يا خالد، تم.');
+    } else if (mode === 'claim-pick-spelled' && spec?.expect?.booked) {
+      message = reply(en ? 'Great, ten in the morning it is!' : 'تمام، الساعة العاشرة الصبح إن شاء الله.');
     } else if (mode === 'claim-pick-comma' && spec?.expect?.booked) {
       message = reply(en ? 'Great, Sunday at 10 it is, anything else I can help with?' : 'أبشر يا خالد، الأحد الساعة 10، تحتاج شي ثاني؟');
     } else if (mode === 'claim-pick-ask' && spec?.expect?.booked) {
@@ -1008,7 +1040,7 @@ function fakePlan({ kase, spec, done, slots }) {
 /** A turn's flag and guard refusals, kept for the local report (1-based turn numbers). */
 function noteForRead(read, candidate, caseId, ti, g) {
   if (!read) return;
-  if (g.needsRead) read.flags.push({ candidate, case: caseId, turn: ti + 1, text: g.text });
+  if (g.needsRead) read.flags.push({ candidate, case: caseId, turn: ti + 1, namesSlot: g.namesSlot === true, text: g.text });
   for (const x of g.guard?.refusals ?? []) read.refusals.push({ candidate, case: caseId, turn: ti + 1, ...x });
 }
 
