@@ -712,11 +712,15 @@ export function createViewing(deps = {}) {
     for (const r of judgedGone) out.cancelled += cancelRow(r);
     const booked = new Map(prep("SELECT booking_id, task_id, start_ts, end_ts FROM viewing_bookings WHERE status = 'booked'").all()
       .map((x) => [x.booking_id, x]));
-    // What changes, from the rows as they are now (a purge may have taken one while Google answered).
+    // What changes, from the rows as they are now (a purge may have taken one while Google answered). A plan
+    // applies only to the row its read was for, unchanged: a row whose times changed since (a newer read, a
+    // lookup's settle(), followed the owner's move meanwhile) is left as it is, and the next read decides. An
+    // older read never undoes a newer one (Codex r14).
     const changes = [];
     for (const p of plans) {
       const cur = p.cancel ? null : booked.get(p.r.booking_id);
       if (!cur) continue;
+      if (cur.start_ts !== p.r.start_ts || cur.end_ts !== p.r.end_ts) continue;
       const moved = p.start !== cur.start_ts || p.end !== cur.end_ts;
       if (moved || p.status === 'done') changes.push({ ...p, cur, moved });
     }
