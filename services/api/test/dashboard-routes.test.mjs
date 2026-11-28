@@ -2419,6 +2419,70 @@ test('T08-2 an invalid next on the code step page clears an earlier lead\'s cook
   });
 });
 
+test('T08-2 a code request refused by the limit decides the return-to too: without next it forgets an earlier lead\'s, with one it takes the new one', async () => {
+  for (const later of [null, 'new lead']) {
+    await withDash({}, async (h) => {
+      const a = seedLead(h.db, { phone: '966500000076', inboxState: 'in' });
+      const b = seedLead(h.db, { id: 'LEAD-20260908-aaaa0002', phone: '966500000075', inboxState: 'in' });
+      // This browser: a code from lead A's link.
+      const asked = await codeWith(h, { next: `/dashboard/leads/${a}` });
+      const jar = { bona_dash_try: asked.nonce, bona_dash_next: h.cookieValue(asked.res, 'bona_dash_next') };
+      const cookie = () => Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+      const apply = (res) => {
+        for (const name of ['bona_dash_try', 'bona_dash_next', 'bona_dash']) {
+          const v = h.cookieValue(res, name);
+          if (v === null) delete jar[name]; else if (v !== undefined) jar[name] = v;
+        }
+      };
+      // Two other browsers on the same address use up its three codes; they never touch this one's cookies,
+      // and their numbers are not this one's, so its code stays live.
+      for (const phone of ['0511111111', '0522222222']) assert.equal((await codeWith(h, { phone })).res.headers.get('location'), '/dashboard/login?step=code&sent=1', phone);
+      apply(await h.get(later ? `/dashboard/login?${withNextQuery(`/dashboard/leads/${b}`)}` : '/dashboard/login', { cookie: cookie() }));
+      const fields = later ? { next: `/dashboard/leads/${b}` } : {};
+      const limited = await codeWith(h, fields, { cookie: cookie() });
+      assert.equal(limited.res.headers.get('location'), later ? `/dashboard/login?step=code&error=rate_limited&${withNextQuery(`/dashboard/leads/${b}`)}` : '/dashboard/login?step=code&error=rate_limited');
+      assert.equal(limited.code, null, 'no new code: the earlier one is still live');
+      apply(limited.res);
+      assert.equal(jar.bona_dash_try, asked.nonce, 'the try nonce is untouched');
+      // The code form it lands on, then the earlier code typed in (the form's field as the page drew it).
+      const page = await (await h.get(limited.res.headers.get('location'), { cookie: cookie() })).text();
+      const field = /name="next" value="([^"]+)"/.exec(page)?.[1];
+      const verified = await h.postForm('/dashboard/login/verify', { _dash: '1', code: asked.code, ...(field ? { next: field } : {}) }, { cookie: cookie() });
+      assert.equal(verified.status, 303);
+      assert.equal(verified.headers.get('location'), later ? `/dashboard/leads/${b}` : '/dashboard', later ? 'the newest request\'s lead' : 'not the earlier lead');
+    });
+  }
+});
+
+test('T08-2 a finished code (five wrong tries) takes its return-to cookie with its try nonce; the page still carries next for a new code', async () => {
+  await withDash({}, async (h) => {
+    const id = seedLead(h.db, { phone: '966500000074', inboxState: 'in' });
+    const deep = `/dashboard/leads/${id}`;
+    const asked = await codeWith(h, { next: deep });
+    const browser = `bona_dash_try=${asked.nonce}; bona_dash_next=${h.cookieValue(asked.res, 'bona_dash_next')}`;
+    const wrong = String((Number(asked.code) + 1) % 1_000_000).padStart(6, '0');
+    for (let i = 0; i < 5; i += 1) {
+      const res = await h.postForm('/dashboard/login/verify', { _dash: '1', code: wrong }, { cookie: browser });
+      assert.equal(h.cookieValue(res, 'bona_dash_next'), undefined, `guess ${i + 1}: the code is still live, so is its return-to`);
+    }
+    const burnt = await h.postForm('/dashboard/login/verify', { _dash: '1', code: asked.code }, { cookie: browser });
+    assert.equal(burnt.headers.get('location'), `/dashboard/login?step=code&error=attempts&${withNextQuery(deep)}`);
+    assert.equal(h.cookieValue(burnt, 'bona_dash_try'), null);
+    assert.equal(h.cookieValue(burnt, 'bona_dash_next'), null, 'cleared with the burnt code');
+  });
+});
+
+test('T08-2 logging out forgets a return-to the browser still holds', async () => {
+  await withDash({}, async (h) => {
+    const { cookie } = await h.login();
+    const out = await h.postForm('/dashboard/logout', { _dash: '1' }, { cookie: `${cookie}; bona_dash_next=%2Fdashboard%2Fleads%2FLEAD-1` });
+    assert.equal(out.headers.get('location'), '/dashboard/login');
+    assert.equal(h.cookieValue(out, 'bona_dash_next'), null, 'cleared with the try nonce');
+    const plain = await h.postForm('/dashboard/logout', { _dash: '1' }, { cookie });
+    assert.equal(h.cookieValue(plain, 'bona_dash_next'), undefined, 'and untouched when there is none');
+  });
+});
+
 /** An inbox chat (DESIGN §3.1 rule 1: `in`, with a jid) for the T08 inbox tests. */
 function chatLead(db, { id, name, phone, ...over }) {
   db.insertLead({

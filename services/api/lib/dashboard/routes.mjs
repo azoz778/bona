@@ -613,6 +613,11 @@ export function createDashboardRoutes({
     // The login form's hidden return-to (DESIGN §3.3); anything else is no return-to at all.
     const next = loginNext(parsed.fields.next);
     const out = await authenticator.requestCode({ phone: parsed.fields.phone, ip });
+    // Every code request decides the return-to, whatever its outcome: a refused one (a limit)
+    // leaves the earlier code and its try nonce live, so an earlier lead's cookie must not
+    // outlast a request that did not name it. A valid next sets it; anything else clears it.
+    if (next) setNextCookie(res, next);
+    else clearNextCookie(req, res);
     if (!out.ok) {
       // A number that is not a number goes back to the first step to be retyped; a limit
       // stays on the code step (a code may already be on its way).
@@ -622,9 +627,6 @@ export function createDashboardRoutes({
     // The nonce is what lets this browser — and only this browser — spend the code's
     // five attempts. See the header of `auth.mjs`.
     authenticator.setTryCookie(res, out.nonce);
-    // The return-to lives as long as the code; a login started over without one forgets an old one.
-    if (next) setNextCookie(res, next);
-    else clearNextCookie(req, res);
     return toLogin(res, withNext('?step=code&sent=1', next), 303);
   }
 
@@ -686,6 +688,7 @@ export function createDashboardRoutes({
     }
     authenticator.clearCookie(res);
     authenticator.clearTryCookie(res);
+    clearNextCookie(req, res);
     return toLogin(res, '', 303);
   }
 
