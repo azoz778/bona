@@ -252,13 +252,17 @@ export function createViewing(deps = {}) {
    */
   const holds = (t) => prep("SELECT booking_id, task_id, start_ts, end_ts, created FROM viewing_bookings WHERE status = 'booked' AND task_id IS NULL").all()
     .filter((r) => live(r, t));
-  /** The `booked` rows whose event is in Google now: place() sets a row's task only once its insert answered. */
-  const withEvent = () => new Set(prep("SELECT booking_id FROM viewing_bookings WHERE status = 'booked' AND task_id IS NOT NULL").all()
+  /**
+   * The rows whose event is in Google now: place() sets a row's task only once its insert answered, so a `booked`
+   * row with a task, and a `cancel_pending` one with a task (its event stays until the worker deletes it, wherever
+   * the owner moved it: Codex r13), is one freeBusy shows where it is.
+   */
+  const withEvent = () => new Set(prep("SELECT booking_id FROM viewing_bookings WHERE status IN ('booked','cancel_pending') AND task_id IS NOT NULL").all()
     .map((r) => r.booking_id));
   /**
    * The local busy time of one freeBusy answer (slots()): every live row whose event may be in Google but missing
    * from that answer, i.e. every live `booked` or `cancel_pending` row not in `before`, the withEvent() read right
-   * before that request went out. That is the holds now, a row that was a hold then or was reserved since whose
+   * before that request went out (a row with its task then is in Google, so it goes by Google even once cancelled). That is the holds now, a row that was a hold then or was reserved since whose
    * task landed while Google answered (another lead's commit), and a row whose insert went uncertain (Codex r12: its
    * event may be in the calendar until the worker deletes it). Each counts by its stored times, for that answer
    * only. A booking Google had before the request goes by Google, as everywhere else: an owner move frees its first

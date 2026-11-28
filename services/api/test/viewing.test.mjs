@@ -2261,6 +2261,30 @@ test("a start another lead books while this lookup's freeBusy is on its way is n
       assert.equal((await h.offered(a)).includes(SLOT), true, 'free once the worker deleted the event');
     } finally { h.db.close(); }
   }
+
+  // Codex r13: a confirmed booking the owner moved in Google, then cancelled (its row cancel_pending, its task kept)
+  // before the worker deleted the event: Google decides, so its old start is offered and the moved one is busy.
+  {
+    const h = harness();
+    try {
+      const a = h.lead('LEAD-20261201-0000aaaa');
+      const b = h.lead('LEAD-20261201-0000bbbb');
+      const got = await h.viewing.commitBooking({ lead: b, listingId: 'BONA-W901', slotId: SLOT });
+      assert.equal(got.ok, true, JSON.stringify(got));
+      moveEvent(h, got.eventId, '2026-12-06T16:00:00+03:00', '2026-12-06T17:00:00+03:00');
+      assert.equal(h.viewing.cancelForLead(b.lead_id), 1);
+      assert.equal(rowOf(h, got.bookingId).status, 'cancel_pending');
+      assert.ok(rowOf(h, got.bookingId).task_id, 'the row keeps its task until the worker settles it');
+      const list = await h.offered(a);
+      assert.equal(list.includes(SLOT), true, "the moved booking's old start is free: its stored times never count");
+      assert.equal(list.includes(SUN16), false, 'where Google shows it until the worker deletes it is busy');
+      await h.viewing.tick();
+      assert.equal(rowOf(h, got.bookingId).status, 'cancelled');
+      // The offer is a spread of starts, so the commit's own freeBusy check says whether 16:00 is free now.
+      const at16 = await h.viewing.commitBooking({ lead: a, listingId: 'BONA-W901', slotId: SUN16 });
+      assert.equal(at16.ok, true, `free once the worker deleted the event: ${JSON.stringify(at16)}`);
+    } finally { h.db.close(); }
+  }
 });
 
 /* ---------------- the dashboard hooks, wired the way index.mjs wires them ---------------- */
