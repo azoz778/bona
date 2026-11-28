@@ -236,6 +236,9 @@ const RATE_HOLD_MAX_MS = 30 * 60_000;
 /** An owed line's retries while the link has not held back off the same way, at most 10 min (bounded by its 2-h mark). */
 const OWED_BACKOFF_MAX_MS = 10 * 60_000;
 const STOP_KINDS = new Set(['stop', 'privacy', 'deletion']);
+/** Hand-overs that RECORD what already happened (r25 N14): a send that failed, a booking made but not told. Always
+ * written (all `line: 'none'`): the commit point never drops them. */
+const RECORDED = new Set(['send_failed', 'booking_unconfirmed', 'booking_failed']);
 /** The raw lead fields the brain's client record reads (lib/brain/prompt.mjs clientTurn masks each before its clip). */
 const FACT_FIELDS = ['name', 'interest', 'budget', 'district', 'listing_id', 'stage', 'timeline'];
 /**
@@ -1046,7 +1049,9 @@ export function createDana({
     // the legacy way (main's line, at once), so the client is not left without it. Never an outage or owed line.
     if (r.stopped === 'not_brain' && legacyText) {
       // Through the commit point first (r24): the legacy route still, and the chat's own checks, right before the send.
-      if (commitPoint(lead.lead_id, false, coversTs, { closing })) return { sent: false, stopped: 'not_brain', legacy: true };
+      const cp = commitPoint(lead.lead_id, false, coversTs, { closing, deadline: !closing });
+      // Past the 2-h mark in the queue: `missed` (handover() marks the task and notes it; r25), never the line.
+      if (cp) return { sent: false, stopped: cp.skipped === 'missed' ? 'missed' : 'not_brain', legacy: cp.skipped !== 'missed' };
       return { ...(await send(db.getLead(lead.lead_id) ?? lead, legacyText, language, coversTs)), legacy: true };
     }
     if (r.uncertain || (!r.sent && r.failure === 'evolution')) afterFailure(lead, { alert: true });
@@ -1093,7 +1098,7 @@ export function createDana({
     if (fixed && l.dana_hold_reason && (l.dana_hold_until === null || l.dana_hold_until === undefined)) return no('hold');
     // The chat's own checks, whatever its route (chatRefusal: identity, a rule off, Dana off, Sending off, the chat
     // stopped, a person's answer after what this covers).
-    const refused = chatRefusal(l, coversTs, { closing });
+    const refused = chatRefusal(l, coversTs, { closing, deadline: fixed && !closing });
     if (refused) return no(refused);
     // A person active in the chat: no closing line over him (r16 G3), the same 24-h rule as stopFirst's.
     if (closing && personActive(l, t)) return no('human_recent');
@@ -1153,7 +1158,9 @@ export function createDana({
     // THE commit point before any state write (r24): the route (a flip writes nothing and re-queues) and, on a brain
     // chat, its own checks. A stop request is always recorded, on any route and with no line when they fail (r15).
     // A legacy chat: the route only, so it is main's hand-over when nothing flips.
-    const cp = commitPoint(leadId, viaBrain, coversTs, { route: !stop, chat: viaBrain && !stop });
+    // A hand-over that records what already happened (RECORDED, r25 N14) is exempt too: dropping it leaves nobody told.
+    const record = stop || RECORDED.has(why);
+    const cp = commitPoint(leadId, viaBrain, coversTs, { route: !record, chat: viaBrain && !record });
     if (cp) return cp;
     // Past the 2-h mark a brain chat's message is a person's: the hand-over is `missed`, with no line (r5).
     // A stop request still stops the chat.
@@ -1561,8 +1568,16 @@ export function createDana({
   function routeFlip(leadId, viaBrain, coversTs) {
     const routeNow = useBrain(db.getLead(leadId));
     if (routeNow === Boolean(viaBrain)) return null;
+    return requeue(leadId, coversTs, routeNow);
+  }
+  /**
+   * Re-queue a chat's batch on its new route (r22-r25): woken at the newest of the covered message and the chat's newest
+   * client message (a legacy re-run reads the woken ts for its freshness, so an expired set's ts would read `old`).
+   */
+  function requeue(leadId, coversTs, routeNow = useBrain(db.getLead(leadId))) {
     const id = String(leadId);
-    pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, Number(coversTs)));
+    const newest = Number(prep('newestIn', "SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ? AND direction = 'in'").get(id)?.ts ?? 0) || 0;
+    pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, Number(coversTs) || 0, newest));
     say({ evt: 'dana.route_changed', leadId, brain: routeNow });
     return skip(leadId, 'route_changed');
   }
@@ -1572,7 +1587,7 @@ export function createDana({
    * Sending off, the chat stopped (dana_off; a closing line excepted), a person's answer after the covered message.
    * The reason, or null.
    */
-  function chatRefusal(l, coversTs, { closing = false } = {}) {
+  function chatRefusal(l, coversTs, { closing = false, deadline = false } = {}) {
     if (!l || l.inbox_state !== 'in' || isExcludedLead(l)) return 'not_in_inbox';
     if (identityBlocked()) return 'identity';
     if (ruleOff(l)) return 'rule_off';
@@ -1580,6 +1595,8 @@ export function createDana({
     if (!team.sendingEnabled()) return 'sending_off';
     if (!closing && Number(l.dana_off) === 1) return 'chat_off';
     if (coversTs !== null && coversTs !== undefined && inbox.humanOutboundAfter(l.lead_id, coversTs)) return 'dropped_human';
+    // A non-closing fixed line past its message's 2-h mark (r25): `missed`, whatever its route (the legacy fallback too).
+    if (deadline && now() - Number(coversTs) > FRESH_MS) return 'missed';
     return null;
   }
   /**
@@ -1589,13 +1606,13 @@ export function createDana({
    * writes (its line then goes through sendGate, or at once on a legacy chat), before lastResort's, before every
    * legacy bubble (a brain bubble's is sendGate, in the queue), and before the legacy fallback of a hand-over line.
    */
-  function commitPoint(leadId, viaBrain, coversTs, { route = true, chat = true, closing = false } = {}) {
+  function commitPoint(leadId, viaBrain, coversTs, { route = true, chat = true, closing = false, deadline = false } = {}) {
     if (route) {
       const flipped = routeFlip(leadId, viaBrain, coversTs);
       if (flipped) return flipped;
     }
     if (!chat) return null;
-    const why = chatRefusal(db.getLead(leadId), coversTs, { closing });
+    const why = chatRefusal(db.getLead(leadId), coversTs, { closing, deadline });
     return why ? skip(leadId, why) : null;
   }
 
@@ -1659,7 +1676,10 @@ export function createDana({
         if (db.getLead(leadId)?.dana_hold_reason === 'brain_out') clearHold(leadId);
         return (await missedExpired(leadId, lead, built, viaBrain)) ?? skip(leadId, 'nothing');
       }
-      if (viaBrain) await missedExpired(leadId, lead, built, viaBrain);
+      if (viaBrain) {
+        const m = await missedExpired(leadId, lead, built, viaBrain);
+        if (m?.skipped === 'route_changed') return m;
+      }
       // A cap acts only for a client who is waiting: with nothing unanswered (a wake for a
       // batch another run answered) there is nobody to hand over — no flag, alert or line.
       if (!waiting.length) {
@@ -1715,6 +1735,8 @@ export function createDana({
       }
       const flagged = Number(e.lead.needs_human) === 1;
       const m = await missedExpired(leadId, e.lead, built, viaBrain);
+      // Any sub-step's route_changed ends the run at once (r25): the batch is re-queued on the new route.
+      if (m?.skipped === 'route_changed') return m;
       if (m && !e.auto) return m;
       if (m?.handover && !flagged) silentFlag.add(String(leadId));
     }
@@ -1975,10 +1997,7 @@ export function createDana({
         // re-queued on the new route. Once a bubble went, the new route sees nothing unanswered: nothing twice.
         if (r.stopped === 'not_brain' && !sentAny) {
           // Always re-queued (r24 P3-b), whatever a second read says: the re-run decides on a fresh read.
-          const id = String(leadId);
-          pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, Number(coversTs)));
-          say({ evt: 'dana.route_changed', leadId, brain: useBrain(db.getLead(leadId)) });
-          outcome = skip(leadId, 'route_changed');
+          outcome = requeue(leadId, coversTs);
           break;
         }
         if (!sentAny) outcome = r.cap ? await capped(leadId, language, r.cap, coversTs, viaBrain, { checked: true }) : skip(leadId, r.stopped);
@@ -1989,8 +2008,8 @@ export function createDana({
         // either. The outage hold ends and the chat is handed over like a failed send (the flag, the note, no line).
         afterFailure(pre.lead, { alert: true });
         // Only the outage hold ends (handover() does it); a person-wait hold afterFailure just set stays (r6).
-        await handover(leadId, language, 'send_failed', coversTs, { checked: true, line: 'none', note: { kind: 'send_failed' }, viaBrain });
-        outcome = { handover: 'send_failed', sent: false };
+        const ho = await handover(leadId, language, 'send_failed', coversTs, { checked: true, line: 'none', note: { kind: 'send_failed' }, viaBrain });
+        outcome = ho?.skipped ? ho : { handover: 'send_failed', sent: false };
         sentAny = true;
         break;
       }
@@ -2008,8 +2027,9 @@ export function createDana({
         const held = viaBrain ? afterFailure(pre.lead, { alert: sentAny }) : false;
         if (sentAny) break;
         // Main's send_failed hand-over (the flag, the task, the push); a brain chat's owner note once it is held.
-        await handover(leadId, language, 'send_failed', coversTs, { checked: true, line: 'none', note: held ? { kind: 'send_failed' } : null, viaBrain });
-        outcome = { handover: 'send_failed', sent: false };
+        const ho = await handover(leadId, language, 'send_failed', coversTs, { checked: true, line: 'none', note: held ? { kind: 'send_failed' } : null, viaBrain });
+        // The outcome says a hand-over happened only when it did (r25; a legacy chat's as on main).
+        outcome = viaBrain && ho?.skipped ? ho : { handover: 'send_failed', sent: false };
         break;
       }
       // A local refusal is no send failure (DESIGN §4.2; PLAN §2 row 7): a skip. A brain chat's rate limit is a

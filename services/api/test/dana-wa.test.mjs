@@ -3646,3 +3646,100 @@ test('T12 r24 3 (Claude P3-b, U18): a not_brain refusal from one transient read 
   assert.ok(h.sent().at(-1)?.endsWith('Second try.'), JSON.stringify(h.sent()));
   assert.equal(h.sent().length, 1);
 });
+
+/* ======================================================================================
+ * PR-B3 r25 (Claude N14, Codex P1s): a hand-over that RECORDS what already happened (send_failed, booking_*) is
+ * never dropped by the commit point; a route_changed from any sub-step ends the run; a queued fixed line past its
+ * 2-h mark is `missed`, the legacy fallback included.
+ * ====================================================================================== */
+
+const handoffTasks = (h, id = LEAD) => h.s.db.prepare("SELECT reason FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff'").all(id).map((t) => t.reason);
+
+test('T12 r25 1 (Claude N14, U25b): an outage of definite 4xx on three brain chats trips the breaker on the third, and every chat is handed over', async () => {
+  const h = bh({ auto: false, brainOn: true, evo: () => ({ status: 400, body: { error: 'bad' } }), turns: [brainReply('A answer.'), brainReply('B answer.'), brainReply('C answer.')] });
+  const ids = [LEAD, 'LEAD-20260930-0000eeee', 'LEAD-20260930-0000ffff'];
+  ids.slice(1).forEach((id, i) => h.s.insertLead({ lead_id: id, created: h.now() - DAY, updated: h.now() - DAY, phone_e164: `9665000000${51 + i}`, wa_jid: `9665000000${51 + i}@s.whatsapp.net`,
+    name: `C${i}`, channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: h.now() - DAY, inbox_state: 'in', inbox_since: h.now() - DAY }));
+  const out = [];
+  for (const id of ids) {
+    h.tick(10_000);
+    h.inbox.upsertMessage({ key_id: `K-${id}`, lead_id: id, jid: h.s.getLead(id).wa_jid, direction: 'in', sender_kind: 'client', text: 'hello', ts: h.now() });
+    out.push(await h.dana.answer(id, { ts: h.now() }));
+    await h.dana.flush();
+  }
+  assert.equal(h.team.getSetting('dana_enabled'), '0', 'the breaker tripped');
+  for (const id of ids) {
+    assert.equal(h.s.getLead(id).needs_human, 1, `${id} flagged`);
+    assert.deepEqual(handoffTasks(h, id), ['send_failed'], `${id} task`);
+  }
+  assert.deepEqual(out.map((o) => o.handover), ['send_failed', 'send_failed', 'send_failed']);
+  assert.equal(h.pushed.length, 3);
+});
+
+test('T12 r25 1 (Claude N14, U26): Dana turned off while a brain send fails: the chat is still handed over', async () => {
+  let h;
+  h = bh({ auto: false, brainOn: true, evo: () => { h.team.setSetting('dana_enabled', '0', { by: 'USR-owner' }); return { status: 400, body: {} }; }, turns: [brainReply('A answer.')] });
+  const r = await ask(h, 'hello');
+  await h.dana.flush();
+  assert.equal(r.handover, 'send_failed');
+  assert.equal(h.lead().needs_human, 1);
+  assert.deepEqual(handoffTasks(h), ['send_failed']);
+  assert.equal(h.pushed.length, 1);
+});
+
+test('T12 r25 1 (Claude N14, U12): auto mode off during the commit hook that made a booking: needs_human and a task follow', async () => {
+  let h;
+  let hooked = false;
+  h = bh({ auto: true, commit: {
+    afterPreSend: async () => { if (!hooked) { hooked = true; h.ownerTest.setAuto(LEAD, false); } return { bubbles: [{ kind: 'text', text: 'Booked for Sunday 10:00.', bookingId: 'BK-1' }], booking: { id: 'BK-1' } }; },
+    afterSend: async (o) => (o.accepted ? {} : { handover: { kind: 'booking_unconfirmed' } }),
+  }, turns: [brainReply('Booked for Sunday 10:00.')] });
+  await ask(h, 'book Sunday 10');
+  await h.dana.flush();
+  assert.equal(h.lead().needs_human, 1);
+  assert.deepEqual(handoffTasks(h), ['booking_unconfirmed']);
+  assert.equal(h.lead().dana_hold_reason, 'booking_unconfirmed');
+});
+
+test('T12 r25 1 (Claude N14, U12b): a staff reply while the booking confirmation waits in the queue: needs_human and a task follow', async () => {
+  let h;
+  let armed = true;
+  const pacing = { ...immediate, fifo: (fn) => { if (armed) { armed = false; h.tick(2000); h.staff('I will confirm your booking myself.'); } return fn(() => {}); } };
+  h = bh({ auto: true, pacing, commit: {
+    afterPreSend: async () => ({ bubbles: [{ kind: 'text', text: 'Booked for Sunday 10:00.', bookingId: 'BK-1' }], booking: { id: 'BK-1' } }),
+    afterSend: async (o) => (o.accepted ? { told: true } : { handover: { kind: 'booking_unconfirmed' } }),
+  }, turns: [brainReply('Booked for Sunday 10:00.')] });
+  await ask(h, 'book Sunday 10');
+  await h.dana.flush();
+  assert.equal(h.sent().length, 0);
+  assert.equal(h.lead().needs_human, 1);
+  assert.deepEqual(handoffTasks(h), ['booking_unconfirmed']);
+});
+
+test('T12 r25 2 (Codex P1-1): auto mode off during the expired set\'s backfill: no OpenAI call, Retell answers on the re-run', async () => {
+  let h;
+  let armed = true;
+  const backfill = { refresh: async () => { if (armed) { armed = false; h.ownerTest.setAuto(LEAD, false); } } };
+  h = bh({ auto: true, backfill, turns: [brainReply('never')] });
+  h.client('an old question', { ts: T_IN - 3 * HOUR });
+  const q = h.client('is the villa available?', { ts: T_IN - 60_000 });
+  await h.dana.answer(LEAD, { ts: q });
+  await h.dana.flush();
+  assert.equal(h.brain.calls.length, 0, 'no OpenAI call on the old route');
+  assert.equal(h.retell.completions.length, 1, 'Retell answers on the re-run');
+  assert.ok(h.sent().at(-1).endsWith('Of course. Which district do you prefer?'));
+});
+
+test('T12 r25 3 (Codex P1-2): a brain hand-over queued at 1h59m50s, the route flips while it waits past 2 h: no legacy line, the task reads missed', async () => {
+  let h;
+  let armed = true;
+  const pacing = { ...immediate, fifo: (fn) => { if (armed) { armed = false; h.tick(20_000); h.team.setSetting('dana_brain', '0'); } return fn(() => {}); } };
+  h = bh({ auto: false, brainOn: true, pacing, link: { identityOk: () => true, linkStable: () => true },
+    turns: [brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] })] });
+  h.client('a person please', { ts: T_IN - 2 * HOUR + 10_000 });
+  const r = await h.dana.answer(LEAD, { ts: T_IN - 2 * HOUR + 10_000 });
+  await h.dana.flush();
+  assert.equal(h.sent().length, 0, h.sent().join(' | '));
+  assert.equal(r.handover, 'missed');
+  assert.deepEqual(handoffTasks(h), ['missed']);
+});
