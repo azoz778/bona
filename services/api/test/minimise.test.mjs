@@ -358,6 +358,18 @@ test('a wrapped "+" number of any country stays one; a 7-digit run starting with
   for (const t of ['551 234 567 - 1 000', 'budget 500 000 - 600 000 2 bedrooms', '2 950 000 SAR', 'call 0500000000  -  12 bedrooms']) assert.equal(minimise(t).includes(t.includes('551') ? '1 000' : t.split(' ').at(-1)), true, t);
 });
 
+/* Claude r15: a whole number never takes the next line; two of a client's messages that are each an amount stay two. */
+test('a number already whole keeps the next line to itself; two messages that are each a thousands amount stay two amounts', () => {
+  assert.equal(minimise('00966551234567\n1 500 000 is my budget'), '[phone]\n1 500 000 is my budget');
+  assert.equal(minimise('00966 55 123 4567\n3 bedrooms'), '[phone]\n3 bedrooms');
+  assert.equal(minimise('0551234567\n3 bedrooms'), '[phone]\n3 bedrooms');
+  assert.equal(minimise('+966 50 000 00\n00'), '[phone]', 'an incomplete one still goes on');
+  assert.equal(minimise('+44 7700 900123\n3 bedrooms'), '[phone]\n3 bedrooms', 'a whole foreign mobile keeps the next line too');
+  assert.deepEqual(minimiseParts(['ميزانيتي 500.000', '600.000']), ['ميزانيتي 500.000', '600.000']);
+  assert.deepEqual(minimiseParts(['budget 1 200 000', '1 500 000 max']), ['budget 1 200 000', '1 500 000 max']);
+  assert.deepEqual(minimiseParts(['my number is 055 123', '4567']), ['my number is [phone]', '[phone]'], 'a phone split across two messages still joins');
+});
+
 /** The first 7-digit run of `num` still readable in `out` (digits only), else null. */
 function sevenOf(out, num) {
   const ds = String(out).replace(/\D/g, '');

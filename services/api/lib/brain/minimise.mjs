@@ -48,6 +48,10 @@ const MAX_DIGITS = 15;
 const ACCOUNT_DIGITS = 12;
 /** A phone whose first digits say so: 0 then 1-9 (10 digits), 00 then a country code, or 966. Never "000" (an amount's tail). */
 const CLEAR_PHONE_RE = /^(?:0[1-9]\d{8}|00[1-9]\d{8,12}|966\d{8,9})$/;
+/** A phone that is already whole: a Saudi number (0 + 9, 966 + 9, 00966 + 9) or a 00 international one (Claude r15). */
+const COMPLETE_PHONE_RE = /^(?:0[1-9]\d{8}|(?:00)?966\d{9}|00(?!966)[1-9]\d{8,12})$/;
+/** Between two of a client's messages (minimiseParts): a paragraph separator, so a message boundary is told from a line break inside one. */
+const PART_SEP = '\u2029';
 /** A date (2026-11-29, 29-11-2026, 29.11.2026, 29/11/2026, 2026/11/29): its groups are never part of a phone or an ID. */
 const DATE_RE = /(?<!\d)(?:(?:19|20)\d{2}([-./])(?:0?[1-9]|1[0-2])\1(?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])([-./])(?:0?[1-9]|1[0-2])\2(?:19|20)\d{2})(?!\d)/g;
 
@@ -216,6 +220,19 @@ function lineCompletes(s, groups, j, digits) {
   return false;
 }
 
+/** Whether the groups from `j` on start an amount written in thousands groups ("600.000", "1 200 000"). */
+function startsThousands(s, groups, j) {
+  const run = [groups[j]];
+  const gs = [];
+  for (let m = j + 1; m < groups.length && run.length < 4; m += 1) {
+    const gap = s.slice(groups[m - 1].end, groups[m].start);
+    if (!/^[ .]$/.test(gap) || groups[m].digits.length !== 3) break;
+    run.push(groups[m]);
+    gs.push(gap);
+  }
+  return run.length >= 2 && thousandsEnd(run, gs, 0) >= 1;
+}
+
 /** Where the phone, ID and account numbers of `s` (a probe text) are: [{ start, end, mask }], in order. */
 function numberCuts(s) {
   const dates = [...s.matchAll(DATE_RE)].map((m) => [m.index, m.index + m[0].length]);
@@ -254,12 +271,17 @@ function numberCuts(s) {
         // line break split, as a plain-text email wraps one ("055 123\n4567", Claude r13 F1).
         // ...and a phone found before the break goes on when the next line completes it into a longer clear one
         // ("+966 50 000 00\n00", Codex r9).
-        // A `+` number of another country goes on too while it can still grow (E.164: 15 digits), unless it is a
-        // complete Saudi one ("+44 7700 900\n001", Codex r10; "+966 50 000 0000\n12 bedrooms" keeps its count).
         if (/[\r\n\u2028\u2029]/.test(gap)) {
-          const goesOn = best && (lineCompletes(s, groups, j, digits)
-            || (plus && !/^966\d{9}$/.test(digits) && digits.length + groups[j].digits.length <= MAX_DIGITS));
-          if (lineStartsNumber(s, groups, j, gap.includes('+')) || (best && !goesOn)) break;
+          // A number that is already whole never takes the next line (COMPLETE_PHONE_RE: "00966 55 123 4567\n3
+          // bedrooms" keeps its count, Claude r15 F1).
+          // A `+` number of another country goes on while it is still short of a whole one (under 11 digits: an
+          // international mobile has 11-13), "+44 7700 900\n001" (Codex r10); "+44 7700 900123\n3 bedrooms" keeps its count.
+          const goesOn = best && !COMPLETE_PHONE_RE.test(digits) && (lineCompletes(s, groups, j, digits)
+            || (plus && digits.length < 11 && digits.length + groups[j].digits.length <= MAX_DIGITS));
+          // Two of a client's messages that are each an amount in thousands groups stay two amounts ("ميزانيتي
+          // 500.000", our question, "600.000", Claude r15 F2); a line break inside one message joins as before.
+          const apart = gap.includes(PART_SEP) && !plus && thousandsEnd(groups.slice(i, j), gaps, 0) === j - 1 - i && startsThousands(s, groups, j);
+          if (lineStartsNumber(s, groups, j, gap.includes('+')) || (best && !goesOn) || apart) break;
         }
         if (!GAP_RE.test(gap)) { if (tail) break; wide = true; }
         gaps.push(gap);
@@ -402,7 +424,8 @@ export function minimise(text) {
 }
 
 /**
- * Several texts of one writer, in order (a client's messages), masked as ONE text with `sep` between them: a number
+ * Several texts of one writer, in order (a client's messages), masked as ONE text with `sep` (a paragraph separator,
+ * PART_SEP) between them: a number
  * split across two of them ("my number is 050", then "000 0000") is masked in both pieces, never left whole across
  * the two (Codex r9). Each part comes back as minimise() would give it, plus the masks of such a number. A non-string
  * part is ''.
@@ -410,7 +433,7 @@ export function minimise(text) {
  * @param {string} [sep]
  * @returns {string[]}
  */
-export function minimiseParts(parts, sep = '\n') {
+export function minimiseParts(parts, sep = PART_SEP) {
   const list = (Array.isArray(parts) ? parts : []).map((x) => (typeof x === 'string' ? asciiDigits(x) : ''));
   const s = list.join(sep);
   const p = probe(s);

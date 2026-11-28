@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createBrain, LIMITS, historyFromInbox, retellMessages, KEY_NAME } from '../lib/brain.mjs';
+import { createBrain, LIMITS, historyFromInbox, inboxTurn, retellMessages, KEY_NAME } from '../lib/brain.mjs';
 import { createFakeBrain, brainReply, brainError } from '../lib/brain/fake.mjs';
 import { REPAIR_NOTE } from '../lib/reply-guard.mjs';
 import { openDb } from '../lib/db.mjs';
@@ -767,6 +767,25 @@ test('the breaker: 3 turns that fail on every model in 10 min open it for 5 min 
   assert.equal(h.brain.health().ok, true);
 });
 
+test("Codex r11: a turn whose request went out before the breaker opened never closes it with its success: only the half-open trial does", async () => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const h = harness({ backupMode: 'handover', script: [http(500, {}), http(500, {}), async () => { await held; return reply('Late but fine.'); }, http(500, {}), reply('The trial.')] });
+  for (let i = 0; i < 2; i += 1) { assert.equal((await h.brain.turn(turnArgs())).code, 'down'); h.advance(MIN); }
+  const slow = h.brain.turn(turnArgs());
+  for (let i = 0; i < 200 && h.calls.length < 3; i += 1) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.calls.length, 3, "the slow turn's request is out");
+  assert.equal((await h.brain.turn(turnArgs())).code, 'down', 'the third failure opens the breaker');
+  assert.equal(h.brain.health().ok, false);
+  release();
+  assert.equal((await slow).ok, true, 'the slow turn answers');
+  const n = h.calls.length;
+  assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'down' }, 'still open: its success came from before');
+  assert.equal(h.calls.length, n, 'no call while open');
+  h.advance(5 * MIN);
+  assert.equal((await h.brain.turn(turnArgs())).ok, true, 'the half-open trial closes it');
+});
+
 test('a turn that throws during the half-open trial frees the trial: the next turn is the trial again, never a stuck breaker', async () => {
   let throwing = false;
   const h = harness({ backupMode: 'handover', script: [http(500, {}), http(500, {}), http(500, {}), reply('Draft.'), reply('Fine now.')] });
@@ -1160,6 +1179,28 @@ test("Codex r9: a number the client split across two messages never reaches the 
   const j = harness({ script: [reply('Hello.')] });
   await j.brain.turn(turnArgs({ history: [{ role: 'assistant', content: 'from SAR 2 950 000' }, { role: 'user', content: '500 000 is my budget' }] }));
   assert.equal(j.calls[0].body.messages.some((x) => x.content.includes('2 950 000')), true);
+});
+
+test("Claude r15 F2: two budget answers on either side of our question both reach the model as written", async () => {
+  const h = harness({ script: [reply('Noted.')] });
+  await h.brain.turn(turnArgs({ language: 'ar', history: [{ role: 'user', content: 'ميزانيتي 500.000' }, { role: 'assistant', content: 'والحد الأعلى؟' }], batchText: '600.000' }));
+  const all = h.calls[0].body.messages.map((x) => x.content).join('\n');
+  assert.equal(all.includes('500.000'), true, all);
+  assert.equal(all.includes('600.000'), true, all);
+});
+
+test("Codex r11: inboxTurn masks the client's history rows and this batch as one series before any clip: a long row ending inside a number never leaves the rest in the batch", () => {
+  const rows = [
+    { key_id: 'k1', direction: 'in', text: `${'x'.repeat(320)} my number is 050` },
+    { key_id: 'k2', direction: 'out', sender_kind: 'dana', text: 'Thanks!' },
+    { key_id: 'k3', direction: 'in', text: '123 4567' },
+    { key_id: 'k4', direction: 'in', text: 'is it still free?' },
+  ];
+  const { history, batchText } = inboxTurn(rows, { exclude: new Set(['k3', 'k4']) });
+  assert.deepEqual(history.map((t) => t.role), ['user', 'assistant']);
+  assert.equal(batchText, '[phone]\nis it still free?');
+  assert.deepEqual(historyFromInbox(rows, { exclude: new Set(['k3', 'k4']) }), history, 'historyFromInbox is its history');
+  assert.deepEqual(inboxTurn(rows).batchText, '', 'no batch rows: an empty batch');
 });
 
 test("Codex r10: historyFromInbox masks the client's rows as one series before it clips them: a long row that ends inside a number does not leave the rest in the next row", async () => {

@@ -142,18 +142,28 @@ const textOrMedia = (m) => (typeof m?.text === 'string' && m.text.trim() ? m.tex
  * Each row is masked before it is clipped, so a phone across the cut never leaves part of it.
  */
 export function historyFromInbox(rows, { exclude = new Set() } = {}) {
-  const all = (Array.isArray(rows) ? rows : []).filter((m) => m && !exclude.has(m.key_id));
-  // The client's rows are masked as one series (minimiseParts) before any is clipped, so a number split across two
-  // of them, or cut by the 300-character clip, never leaves a piece in clear (Codex r10); ours on their own.
+  return inboxTurn(rows, { exclude }).history;
+}
+
+/**
+ * What a turn gets from the inbox rows, as dana-wa hands them to turn() (PLAN T12): `history` (historyFromInbox's
+ * turns: the rows not in `exclude`) and `batchText` (the client's rows in `exclude`, this batch, one per line). The
+ * client's rows, the batch's included, are masked as ONE series (minimiseParts) before any is clipped, so a number
+ * split across two of them, or cut by the 300-character clip, never leaves a piece in clear (Codex r10, r11); ours
+ * are masked on their own.
+ */
+export function inboxTurn(rows, { exclude = new Set() } = {}) {
+  const all = (Array.isArray(rows) ? rows : []).filter(Boolean);
   const texts = all.map((m) => String(textOrMedia(m)));
   const ins = all.flatMap((m, i) => (m.direction === 'in' ? [i] : []));
   const masked = texts.map((t) => defaultMinimise(t));
   minimiseParts(ins.map((i) => texts[i])).forEach((t, k) => { masked[ins[k]] = t; });
-  const list = all.map((m, i) => ({ m, text: masked[i] })).slice(-CONTEXT_ROWS);
+  const batchText = all.flatMap((m, i) => (exclude.has(m.key_id) && m.direction === 'in' ? [masked[i]] : [])).join('\n');
+  const list = all.map((m, i) => ({ m, text: masked[i] })).filter(({ m }) => !exclude.has(m.key_id)).slice(-CONTEXT_ROWS);
   const turns = list.map(({ m, text }) => ({ role: m.direction === 'in' ? 'user' : m.sender_kind === 'dana' ? 'assistant' : 'team', content: oneLine(text, ROW_CHARS) }));
   const size = () => turns.reduce((n, t) => n + t.content.length, 0);
   while (turns.length > 1 && size() > LIMITS.historyChars) turns.shift();
-  return turns;
+  return { history: turns, batchText };
 }
 
 /** Retell-shaped messages: each tool call's invocation and result, then the answer. */
@@ -593,7 +603,9 @@ export function createBrain(deps = {}) {
     const b = state.breaker;
     if (code === null) {
       clearOutAfter(outTrial);
-      if (b.open || wasTrial) { b.open = false; b.fails = []; }
+      // Only the half-open trial closes an open breaker: any other answer while it is open came from a request sent
+      // before it opened (Codex r11).
+      if (wasTrial) { b.open = false; b.fails = []; }
       b.trial = false;
       return;
     }
