@@ -426,6 +426,27 @@ test('at most 40 sends a day, the summary one of them: after the day\'s summary,
   assert.equal(h.sent.length, MAX_PER_DAY + 1);
 });
 
+test("Codex T11 r14: over the day's 40, a note that would no longer render (a viewing cancelled meanwhile) is dropped, never held over as a note lost to the limit", async () => {
+  const h = harness({ inventory: inventory('exact') });
+  const lead = addLead(h, { name: 'Sara Example', phone_e164: '966500000011' });
+  h.autoIds.add(lead.lead_id);
+  await alertsEvery25s(h, MAX_PER_DAY, NOW, 'C');
+  assert.equal(h.sent.length, MAX_PER_DAY);
+  const id = bookingFixture(h, lead);
+  h.at(NOW + MAX_PER_DAY * MIN_GAP_MS);
+  assert.equal(h.notes.booking(id, { told: false }).queued, true);
+  h.db.db.prepare("UPDATE viewing_bookings SET status = 'cancelled' WHERE booking_id = ?").run(id);
+  await h.notes.tick();
+  assert.equal(h.sent.length, MAX_PER_DAY);
+  assert.equal(h.row(`bk-untold:${id}`).status, 'dropped', 'dropped, as it would be under the limit');
+  assert.deepEqual(overRows(h), [], 'nothing counted over the limit');
+  // A booking still on is held over as before.
+  const live = bookingFixture(h, lead, { id: 'BK-0002', start: Date.UTC(2026, 10, 30, 11, 0, 0) });
+  assert.equal(h.notes.booking(live, { told: false }).queued, true);
+  await h.notes.tick();
+  assert.deepEqual(overRows(h).map((r) => [r.kind, r.status]), [['booking', 'merged']]);
+});
+
 test("before the day's summary has gone, one of the 40 is kept for it: 39 other sends, then the summary is the 40th", async () => {
   const h = harness();
   h.team.setSetting('owner_as_client', '1');

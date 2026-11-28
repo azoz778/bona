@@ -966,7 +966,12 @@ function createLedgerNotes({
           if (!folded.length && !c.row.meta.asked) dropped.push(c.row);
           else over.push(c.row, ...folded.map((h) => ({ ...h, meta: { ...h.meta, into: c.row.note_id } })));
         } else {
-          over.push(c.row);
+          // Held over only if it would still go: a note whose render now drops it (a viewing cancelled meanwhile, a
+          // lead that left) is dropped as it would be under the limit, never counted as lost to it (Codex T11 r14).
+          let still = null;
+          try { still = render(c.row, t, queued); } catch { still = null; }
+          if (!still || still.none) dropped.push(c.row, ...(still?.drop ?? []));
+          else over.push(c.row);
         }
         continue;
       }
