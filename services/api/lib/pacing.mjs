@@ -9,7 +9,8 @@
  *   typingFloorMs({ chars, newestTs })  how long a send must still wait: no earlier than the newest client
  *                      message + clamp(2 s + 40 ms a character + U(0,3) s, 8 s, 25 s). Measured from the
  *                      CLIENT's message, so it has usually passed while the model answered;
- *   fifo(fn)           the one global queue for Dana's sends: a random 4-8 s gap between two sends, at most
+ *   fifo(fn)           the one global queue for Dana's sends (`fn(release)`: a callback that sends nothing after all calls
+ *                      release() and gives its slot back): a random 4-8 s gap between two sends, at most
  *                      8 a minute and FIFO_PER_HOUR an hour (40 on days 0-21, then 60). One send at a time,
  *                      in order; a send that throws never jams it. In memory: a restart starts it empty
  *                      (wa-send's day cap is read from the outbox, so a restart never hands out a fresh day);
@@ -102,9 +103,20 @@ export function createPacing({ cfg = {}, now = () => Date.now(), random = Math.r
     const run = tail.then(async () => {
       await slot();
       const t = now();
+      const before = last;
       last = { at: t, gap: between(FIFO_GAP_MIN_MS, FIFO_GAP_MAX_MS) };
       sent.push(t);
-      return fn();
+      // `release()`: the caller sent nothing after all (its send-time gate dropped it). The slot is given back
+      // and no gap is kept after it, so dropped callbacks never push a real send into the next minute or hour.
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        const k = sent.lastIndexOf(t);
+        if (k >= 0) sent.splice(k, 1);
+        if (last?.at === t) last = before;
+      };
+      return fn(release);
     });
     // The next send waits for this one to settle, whatever it answered.
     tail = run.then(() => {}, () => {});

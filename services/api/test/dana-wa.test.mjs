@@ -2359,3 +2359,103 @@ test('T12 r4 E: one sweep runs a chat once — a cap_day chat also in the backlo
   await sweepFor(h, T_IN + HOUR + 15 * 60_000, T_IN + HOUR + 20 * 60_000);
   assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['missed']);
 });
+
+/* ======================================================================================
+ * PR-B3 r5 (Claude N5/N6, Codex P1/P2): only the outage line is a non-answer; a recovery that hands over
+ * ends the outage hold; fixed lines take the backlog gate and the caps; missed and uncertain escalate.
+ * ====================================================================================== */
+
+const timeoutErr = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
+
+test('T12 r5 N6 P-a: "Let the AI answer again" after a stop-word false positive answers the new message; the stop never fires again', async () => {
+  const h = bh({ turns: [brainReply('Yes, there is a bus stop two minutes from the villa.')] });
+  await ask(h, 'next stop?');
+  assert.ok(h.sent()[0].endsWith(CLOSING.en));
+  h.tick(60_000);
+  assert.deepEqual(await ask(h, 'no, I meant is there a bus stop near the villa'), { skipped: 'chat_off' });
+  h.s.updateLead(LEAD, { dana_off: 0, dana_hold_until: null, dana_hold_reason: null }); // the dashboard button
+  h.tick(60_000);
+  await ask(h, 'so?');
+  assert.equal(h.sent().filter((t) => t.endsWith(CLOSING.en)).length, 1, 'no second closing line');
+  assert.equal(h.sent().at(-1), 'Yes, there is a bus stop two minutes from the villa.');
+  assert.equal(h.lead().dana_off, 0);
+  assert.deepEqual(h.brain.calls[0].batchParts, ['no, I meant is there a bus stop near the villa', 'so?'], 'the closing line answered "next stop?"');
+});
+
+test('T12 r5 N6 P-b: after an auto hand-over the handed-over request is not shown again as unanswered', async () => {
+  const h = bh({ turns: [brainReply('', { tools: [{ name: 'request_human', args: { kind: 'offer' } }] }), brainReply('Yes, two covered spaces.')] });
+  await ask(h, 'I want to make an offer on the villa');
+  assert.ok(h.sent()[0].endsWith(HANDOVER.en));
+  h.tick(60_000);
+  await ask(h, 'also, is there parking?');
+  assert.deepEqual(h.brain.calls[1].batchParts, ['also, is there parking?']);
+});
+
+test('T12 r5 N6: a cap between two failed retries of one outage sends no second holding line (read from the outbox, not the hold type)', async () => {
+  const h = bh({ pacing: strictTier(), turns: [brainError('quota'), brainError('quota')] });
+  await ask(h, 'is it free?');
+  assert.equal(h.sent().length, 1);
+  const base = T_IN + 12 * 60_000 - DAY;
+  fillDay(h, 59, base);
+  h.set(T_IN + 10 * 60_000);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.equal(h.lead().dana_hold_reason, 'cap_day', 'the cap replaced the outage hold');
+  h.set(base + DAY + 1);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.equal(h.brain.calls.length, 2, 'the brain was tried again');
+  assert.equal(h.sent().length, 1, 'still one holding line for the outage');
+});
+
+test('T12 r5 N5 P-c: a recovery that ends in a hand-over (refusal, guard, request_human with no text) ends the outage hold: 1 brain call, no loop', async () => {
+  for (const second of [brainError('refusal'), brainError('guard'), brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] })]) {
+    const h = bh({ lead: { needs_human: 1 }, turns: [brainError('quota'), second, brainReply('never')] });
+    await ask(h, 'hello');
+    await sweepFor(h, T_IN + 10 * 60_000, T_IN + 70 * 60_000);
+    assert.equal(h.brain.calls.length, 2, 'the outage call and one recovery call');
+    assert.equal(h.lead().dana_hold_reason, null);
+  }
+});
+
+test('T12 r5: a queued fixed line takes the backlog gate and the caps at send time', async () => {
+  // The message turns 30 min old while the hand-over line waits, and the link has not held: the line waits too.
+  const b = bh({ link: { identityOk: () => true, linkStable: () => false },
+    turns: [async () => { b.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }] });
+  b.client('a person please', { ts: T_IN - 30 * 60_000 + 1000 });
+  await b.dana.answer(LEAD, { ts: T_IN - 30 * 60_000 + 1000 });
+  assert.equal(b.sent().length, 0, 'backlog at send time: the line does not go');
+  // The strict day at 59: another chat takes the 60th turn while the outage line waits, so the line does not make a 61st.
+  const pacing = strictTier();
+  const c = bh({ turns: [brainError('quota')], pacing: { ...pacing, fifo: async (fn) => { c.danaRow({ covers: T_IN - 1, created: T_IN - 1, id: 'LEAD-R058' }); return fn(); } } });
+  fillDay(c, 59, T_IN - HOUR); // 59 turns: the run passes; the race row in the queue makes 60
+  await ask(c, 'hello');
+  assert.equal(c.sent().length, 0, 'the cap holds at send time');
+  assert.equal(c.inbox.countDanaTurns({ sinceTs: T_IN - DAY }), 60, 'never 61');
+});
+
+test('T12 r5: a hand-over whose message passes 2 h before its line goes is recorded as missed (a refusal at 1h59m50s)', async () => {
+  const h = bh({ turns: [async () => { h.tick(15_000); return brainError('refusal'); }], link: { identityOk: () => true, linkStable: () => true } });
+  h.client('hello', { ts: T_IN - 2 * HOUR + 10_000 });
+  const r = await h.dana.answer(LEAD, { ts: T_IN - 2 * HOUR + 10_000 });
+  assert.equal(r.handover, 'missed');
+  assert.equal(h.sent().length, 0);
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['missed'], 'no lingering brain_refusal');
+  assert.equal(h.s.db.prepare("SELECT reason FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff'").get(LEAD).reason, 'missed');
+});
+
+test('T12 r5: an uncertain recovery send is not counted as recovered: the hold ends, a send_failed hand-over (flag + note, no line), no resend', async () => {
+  let n = 0;
+  const h = bh({ turns: [brainError('quota'), brainReply('Back now.'), brainReply('never')], evo: (k, body) => ((n += 1) === 2 ? { throws: timeoutErr() } : { status: 201, body: { key: { id: `K${k}` } } }) });
+  await ask(h, 'is it free?');
+  h.set(T_IN + 10 * 60_000);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.equal(h.lead().dana_hold_reason, null);
+  assert.equal(h.lead().needs_human, 1);
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['brain', 'send_failed']);
+  const lines = h.calls.filter((c) => c.url.includes('/message/')).length;
+  await sweepFor(h, T_IN + 11 * 60_000, T_IN + 40 * 60_000);
+  assert.equal(h.calls.filter((c) => c.url.includes('/message/')).length, lines, 'never sent again');
+  assert.equal(h.brain.calls.length, 2);
+});

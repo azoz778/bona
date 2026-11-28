@@ -110,3 +110,13 @@ test('pacing: with no clock of its own the module still answers (no deps)', asyn
   assert.ok(b >= 4000 && b < 7000);
   assert.deepEqual(p.tier(Date.now()), TIERS[0], 'no BONA_WA_LINKED_AT: the strictest');
 });
+
+test('pacing (r5): a callback the gate drops gives back its minute and hour slot and leaves no gap', async () => {
+  const { p, now, slept } = rig({ randoms: Array(400).fill(0) });
+  const t0 = now();
+  for (let i = 0; i < 45; i += 1) await p.fifo((release) => { release(); return { dropped: true }; });
+  const at = [];
+  await p.fifo(() => at.push(now()));
+  assert.ok(at[0] - t0 < 60_000, 'not pushed into the next minute, let alone the next hour');
+  assert.equal(slept.length, 0, 'no gap after a dropped callback');
+});
