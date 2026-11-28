@@ -11,7 +11,7 @@ import {
   OUT_OF_HOURS, OUTAGE_OUT_OF_HOURS, inOfficeHours, handoverLine, outageLine, variantIndex, identity, EMAIL_FIRST_LINE, emailFirstLine,
   GREETING, greeting, CALENDAR_LINE, calendarLine,
 } from '../lib/persona.mjs';
-import { DISCLOSURE as TODAY_DISCLOSURE, HANDOVER as TODAY_HANDOVER } from '../lib/dana-wa.mjs';
+import { LEGACY_DISCLOSURE as TODAY_DISCLOSURE, HANDOVER as TODAY_HANDOVER } from '../lib/dana-wa.mjs';
 import { loadPrompts, systemPrompt } from '../lib/brain/prompt.mjs';
 
 const DANA = Object.freeze({ en: 'Dana', ar: 'دانة' });

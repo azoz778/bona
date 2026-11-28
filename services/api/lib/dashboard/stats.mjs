@@ -19,13 +19,14 @@
 import { STAGES } from '../db.mjs';
 import { sourceFromTouch } from '../attribution.mjs';
 import { OWNER_METHODS } from '../leads.mjs';
-import { HANDOVER } from '../dana-wa.mjs';
+import { FIXED_LINES } from '../dana-wa.mjs';
 
 /**
- * The fixed lines code sends as a `dana` row that are never an answer: the hand-over (and holding) line of
- * lib/dana-wa.mjs, alone or after the disclosure line. A task that adds another such line adds it here.
+ * The fixed lines code sends as a `dana` row that are never an answer, alone or after a disclosure line:
+ * lib/dana-wa.mjs FIXED_LINES (every hand-over variant, the out-of-hours and outage lines, the closing line,
+ * the booking_failed line). A task that adds another such line adds it there.
  */
-export const NOT_ANSWER_LINES = Object.freeze(Object.values(HANDOVER));
+export const NOT_ANSWER_LINES = FIXED_LINES;
 
 /** Asia/Riyadh, permanently UTC+3. */
 export const TZ_OFFSET_MS = 3 * 3_600_000;
