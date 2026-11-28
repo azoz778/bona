@@ -133,7 +133,7 @@ function maskFor(digits, plus) {
   if (plus && /^\d{9,15}$/.test(digits)) return '[phone]';
   if (/^00\d{9,13}$/.test(digits)) return '[phone]';
   if (/^966\d{8,9}$/.test(digits)) return '[phone]';
-  if (/^0\d{9}$/.test(digits)) return '[phone]';
+  if (/^0[1-9]\d{8}$/.test(digits)) return '[phone]';
   if (/^5\d{8}$/.test(digits)) return '[phone]';
   if (/^[12]\d{9}$/.test(digits)) return '[id-number]';
   return null;
@@ -156,6 +156,25 @@ function rangeSplit(run, gaps) {
   if (at.length !== 1 || !/^[\s/-]+$/.test(gaps[at[0]])) return 0;
   const k = at[0];
   return isAmount(run.slice(0, k + 1), gaps.slice(0, k)) && isAmount(run.slice(k + 1), gaps.slice(k + 1)) ? k + 1 : 0;
+}
+
+/** The last group of an amount written in thousands groups (2 or 3 groups: "500.000", "1 200 000") that starts at run[k], else -1. */
+function thousandsEnd(run, gaps, k) {
+  let end = k;
+  while (end + 1 < run.length && /^[ .]$/.test(gaps[end]) && run[end + 1].digits.length === 3) end += 1;
+  return end > k && isAmount(run.slice(k, end + 1), gaps.slice(k, end)) ? end : -1;
+}
+
+/**
+ * Two amounts written in thousands groups on one dash, slash or `+` at the start of a run ("500.000 - 600.000",
+ * "500 000  -  750 000", "(500 000) - (600 000)", "500 000 + 600 000"): [the index of the second amount's first
+ * group, of its last], else null. Whole amounts ("500000000 - 500000001") are never one: they may be two phones.
+ */
+function thousandsRange(run, gaps) {
+  const aEnd = thousandsEnd(run, gaps, 0);
+  if (aEnd < 0 || aEnd + 1 >= run.length || !/^[\s()/+-]+$/.test(gaps[aEnd]) || !/[-/+]/.test(gaps[aEnd])) return null;
+  const bEnd = thousandsEnd(run, gaps, aEnd + 1);
+  return bEnd < 0 ? null : [aEnd + 1, bEnd];
 }
 
 /** Where the phone, ID and account numbers of `s` (a probe text) are: [{ start, end, mask }], in order. */
@@ -203,6 +222,19 @@ function numberCuts(s) {
       const glued = !plus && !digits.startsWith('00') && groups[j].digits.length <= 3 && after === ',' && /\d/.test(s[groups[j].end + 1] ?? '');
       const mask = glued ? null : maskFor(digits, plus);
       if (mask && (!soft || mask === '[phone]')) best = { j, mask };
+    }
+    if (best && !plus) {
+      // A phone or ID shape read from the first amount of a thousands range into the second is a budget, never a phone
+      // ("500.000 - 600.000" is 500000600 then ".000"; "20.000 - 30.000" is 2000030000): left as written, and the text
+      // after it read on its own (the second amount too when it is a phone shape itself, "500 000 000"). A run that is a
+      // phone from end to end ("966 551 - 234 567", "5.000 - 10.000") stays one, and so does one after a `+`.
+      const at = best.j - i;
+      const range = thousandsRange(groups.slice(i, i + gaps.length + 1), gaps);
+      if (range && at >= range[0] && at <= range[1] && !(at === range[1] && best.mask === '[phone]')) {
+        const second = groups.slice(i + range[0], i + range[1] + 1).map((g) => g.digits).join('');
+        i += maskFor(second, false) ? range[0] : range[1] + 1;
+        continue;
+      }
     }
     if (!best && acctDigits >= ACCOUNT_DIGITS) {
       // A range is left as written; its second amount is then read on its own (it may still be a phone).

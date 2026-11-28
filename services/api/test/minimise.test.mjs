@@ -239,6 +239,33 @@ test('a wide separator run joins only into a phone: an ID, an account number or 
   assert.equal(minimise('call 0500000000  -  12 bedrooms'), 'call [phone]  -  12 bedrooms', 'a count after a phone stays');
 });
 
+/* Claude r11 P2: "500.000 - 600.000" was read as the phone 500000600 plus ".000" (and "20.000 - 30.000" as the ID 2000030000). */
+test('two amounts written in thousands groups on one dash, slash or "+" stay as written, even when their digits start a phone or an ID shape', () => {
+  for (const s of ['budget 500.000 - 600.000 riyals', 'budget 500 000 - 750 000', 'budget 500.000-600.000', 'ميزانيتي 500.000 - 600.000 ريال',
+    '500.000  -  600.000', 'budget: 500 000  -  600 000', '500 000 + 600 000', '500 000  /  600 000', '550 000  -  700 000 SAR', '(500 000) - (600 000)',
+    'budget 500.000 - 600.000 - 700.000', '500 000 - 600 000 2 bedrooms', 'rent 20.000 - 30.000 a year', '10 000 - 20 000', '15.000-20.000 SAR', 'budget 1.000 - 200.000']) {
+    assert.equal(minimise(s), s, s);
+  }
+  assert.equal(minimise('٥٠٠٫٠٠٠ - ٦٠٠٫٠٠٠'), '500.000 - 600.000', 'Arabic-Indic digits and the Arabic decimal sign: only made ASCII');
+  assert.equal(minimise('Budget: 500.000 - 600.000\nPhone: 050 000 0000'), 'Budget: 500.000 - 600.000\nPhone: [phone]', 'the enquiry form text');
+  // Still phones: whole amounts, a run that is a phone end to end, a "+", a last group that is no thousands group, an amount that is itself a phone.
+  for (const [input, want] of [
+    ['500000000 - 500000001', '[phone] - [phone]'],
+    ['966 551 - 234 567', '[phone]'],
+    ['+966 551 - 234 567', '[phone]'],
+    ['call 55 123 - 4567', 'call [phone]'],
+    // One group after the dash is no amount, so this 3-3-3 mobile stays masked (and "the 511.615 - 120 sqm flat", its digit shape, with it).
+    ['call 512 345 - 678', 'call [phone]'],
+    ['551 234 567 - 1 000', '[phone] - 1 000'],
+    ['budget 5.000 - 10.000', 'budget [phone]'],
+  ]) assert.equal(minimise(input), want, input);
+});
+
+test('a 10-digit run that starts with "00" is no phone (a Saudi number starts 0 then 1-9)', () => {
+  for (const s of ['ref 000 310 0000', 'code 0000000000']) assert.equal(minimise(s), s, s);
+  assert.equal(minimise('call 0130000000'), 'call [phone]');
+});
+
 /** A small deterministic PRNG (mulberry32), so the property test reads the same formats on every run. */
 function prng(seed) {
   let a = seed >>> 0;
