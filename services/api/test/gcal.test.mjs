@@ -539,3 +539,46 @@ test('T18a outage(): only transport, timeout, auth and 5xx failures open or exte
   await slow.gcal.freeBusy(WINDOW);
   assert.equal(slow.gcal.outage()?.code, 'timeout');
 });
+
+test('T18a outage(): an event get or delete answered 404/410, or a get 200 without readable times, leaves it as it is (health ok, as before); only a usable or cancelled event, or another real success, ends it', async () => {
+  let ev = { status: 404, body: { error: { code: 404 } } };
+  const EV = 'abcde12345';
+  const routes = {
+    [`POST ${FB_PATH}`]: () => json(503, {}),
+    [`GET /calendar/v3/calendars/${encodeURIComponent(CAL)}/events/${EV}`]: () => json(ev.status, ev.body),
+    [`DELETE /calendar/v3/calendars/${encodeURIComponent(CAL)}/events/${EV}`]: () => json(ev.status, ev.body),
+  };
+  const { gcal, clock } = client({ routes });
+  await gcal.freeBusy(WINDOW);
+  const open = { since: clock.t, last: clock.t, code: 'bad_response' };
+  for (const [status, body] of [[404, { error: { code: 404 } }], [410, {}]]) {
+    ev = { status, body };
+    clock.t += MIN;
+    assert.equal((await gcal.get(EV)).gone, true);
+    assert.equal(gcal.health().ok, true, `a get ${status} still reads as a call that went through`);
+    assert.equal((await gcal.delete(EV)).gone, true);
+    assert.deepEqual(gcal.outage(), open, `a get or delete ${status} neither ends nor extends the outage`);
+  }
+  for (const body of [{}, { start: { dateTime: 'not a time' }, end: {} }, { start: { dateTime: '2026-12-06T10:00:00+03:00' }, end: { dateTime: '2026-12-06T09:00:00+03:00' } }]) {
+    ev = { status: 200, body };
+    clock.t += MIN;
+    assert.equal((await gcal.get(EV)).ok, true, 'the caller still gets the event and decides');
+    assert.deepEqual(gcal.outage(), open, `odd data leaves it: ${JSON.stringify(body)}`);
+  }
+  ev = { status: 200, body: { status: 'cancelled' } };
+  await gcal.get(EV);
+  assert.equal(gcal.outage(), null, 'a cancelled event is a usable answer: it ends the outage');
+  await gcal.freeBusy(WINDOW);
+  assert.ok(gcal.outage());
+  ev = { status: 200, body: { start: { dateTime: '2026-12-06T10:00:00+03:00' }, end: { dateTime: '2026-12-06T11:00:00+03:00' } } };
+  await gcal.get(EV);
+  assert.equal(gcal.outage(), null, 'an event with readable times ends it');
+  await gcal.freeBusy(WINDOW);
+  ev = { status: 200, body: { start: { date: '2026-12-06' }, end: { date: '2026-12-07' } } };
+  await gcal.get(EV);
+  assert.equal(gcal.outage(), null, 'all-day times are readable too');
+  await gcal.freeBusy(WINDOW);
+  ev = { status: 200, body: {} };
+  await gcal.delete(EV);
+  assert.equal(gcal.outage(), null, 'a delete that went through ends it');
+});

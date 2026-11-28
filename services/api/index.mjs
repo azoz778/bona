@@ -109,6 +109,8 @@ const RECONCILE_HOUR = 5;
 const GCAL_ALERT_AFTER_MS = 3_600_000;
 /** The month answer alert's levels (DESIGN §6.3), the highest first: percent of BONA_DANA_TURNS_MONTH_ALERT. */
 const TURNS_MONTH_LEVELS = Object.freeze([100, 80]);
+/** A T18a check that keeps throwing says so at most this often (ops.alert_failed). */
+const OPS_FAILED_LINE_MS = 3_600_000;
 /** DESIGN §5.4: latencyOk = p90 ≤ 60 s over the answers' ring, once it holds 5 answers. */
 const LATENCY_OK_MS = 60_000;
 const LATENCY_MIN_ANSWERS = 5;
@@ -893,11 +895,13 @@ export function createApp(options = {}) {
     const limit = cfg.danaTurnsMonthAlert;
     if (!Number.isSafeInteger(limit) || limit <= 0) return;
     const { month, start } = riyadhMonth(t);
+    // The level this month's marker says went; once 100% has, there is nothing left to count.
+    const sent = /^(\d{4}-\d{2}):(80|100)$/.exec(String(team.getSetting('dana_month_alerted') ?? ''));
+    const done = sent && sent[1] === month ? Number(sent[2]) : 0;
+    if (done >= 100) return;
     const turns = inboxStore.countDanaTurns({ sinceTs: start });
     const level = TURNS_MONTH_LEVELS.find((pct) => turns * 100 >= limit * pct);
-    if (!level) return;
-    const sent = /^(\d{4}-\d{2}):(80|100)$/.exec(String(team.getSetting('dana_month_alerted') ?? ''));
-    if (sent && sent[1] === month && Number(sent[2]) >= level) return;
+    if (!level || level <= done) return;
     if (!automationOn()) { quietAlert('turns_month', t); return; }
     team.setSetting('dana_month_alerted', `${month}:${level}`, { by: 'system' });
     notes.alert('turns_month', { level: String(level) });
@@ -912,11 +916,21 @@ export function createApp(options = {}) {
     gcalAlertedSince = out.since;
     notes.alert('gcal', { code: out.code });
   }
-  /** Both checks, each on its own: one that throws is an `ops.alert_failed` line naming it, never its message. */
+  /**
+   * Both checks, each on its own: one that throws is an `ops.alert_failed` line naming it (never its message), at
+   * most one an hour per check, and a logger that throws on that line costs the other check nothing.
+   */
+  const failedLineAt = new Map();
   app.opsAlerts = function opsAlerts() {
     const t = clock();
     for (const [code, check] of [['turns_month', turnsMonthCheck], ['gcal', gcalCheck]]) {
-      try { check(t); } catch (err) { log({ level: 'error', evt: 'ops.alert_failed', code, name: loggableName(err) }); }
+      try {
+        check(t);
+      } catch (err) {
+        if (t - (failedLineAt.get(code) ?? -Infinity) < OPS_FAILED_LINE_MS) continue;
+        failedLineAt.set(code, t);
+        try { log({ level: 'error', evt: 'ops.alert_failed', code, name: loggableName(err) }); } catch { /* the next check goes on */ }
+      }
     }
   };
 
@@ -988,7 +1002,11 @@ export function createApp(options = {}) {
       if (wa.ownNumberFrom === 'instance' && waLink.identityOk?.() !== true) return undefined;
       return notes.tick?.();
     }),
-    summary: tick('summary', () => { app.opsAlerts(); return summaryMinute(); }),
+    summary: tick('summary', () => {
+      // The alert checks never cost the summary or the 05:00 reconcile their minute.
+      try { app.opsAlerts(); } catch { /* the summary goes on */ }
+      return summaryMinute();
+    }),
     sweep: tick('sweep', () => dana.sweep?.()),
     viewing: tick('viewing', () => viewing.tick?.()),
     brainProbe: tick('brainProbe', async () => {

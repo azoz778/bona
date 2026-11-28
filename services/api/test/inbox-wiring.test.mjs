@@ -20,6 +20,8 @@ import { JOIN_HISTORY_MS } from '../lib/inbox/backfill.mjs';
 import { generateVapidKeys } from '../lib/push.mjs';
 import { isExcludedLead } from '../lib/team.mjs';
 import { createFakeBrain, brainReply, brainError } from '../lib/brain/fake.mjs';
+import { createGcal } from '../lib/gcal.mjs';
+import { createViewing } from '../lib/viewing.mjs';
 
 const NOW = 1_790_500_000_000;
 const DAY = 86_400_000;
@@ -2493,6 +2495,13 @@ test('T18a turns_month: 80% then 100% of the month level, each once (a later hou
   try {
     const a = rig14({ db, config: { danaTurnsMonthAlert: T18A_LEVEL } });
     try {
+      // The marker as notes.alert sees it: already written (a restart in between could not send it twice).
+      const atAlert = [];
+      const realAlert = a.app.notes.alert;
+      a.app.notes.alert = (code, meta) => {
+        if (code === 'turns_month') atAlert.push(a.app.team.getSetting('dana_month_alerted'));
+        return realAlert(code, meta);
+      };
       a.app.team.setSetting('owner_as_client', '1');
       danaTurns(a, 7);
       await a.app.ticks.summary();
@@ -2512,6 +2521,15 @@ test('T18a turns_month: 80% then 100% of the month level, each once (a later hou
       await a.app.ticks.summary();
       assert.deepEqual(monthAlerts(a).map((r) => r.meta.level), ['80', '100'], '10 of 10: the 100% alert, once');
       assert.equal(a.app.team.getSetting('dana_month_alerted'), '2026-12:100');
+      assert.deepEqual(atAlert, ['2026-12:80', '2026-12:100'], 'each level marked before notes.alert is called');
+      // 100% sent this month: the marker alone decides, and the month is not counted again.
+      let counted = 0;
+      const realCount = a.app.inboxStore.countDanaTurns;
+      a.app.inboxStore.countDanaTurns = (o) => { counted += 1; return realCount(o); };
+      await a.app.ticks.summary();
+      await a.app.ticks.summary();
+      assert.equal(counted, 0, 'no month count once 100% is sent');
+      a.app.inboxStore.countDanaTurns = realCount;
       // An alert only (DESIGN §6.3): no hand-over, nothing stopped.
       assert.deepEqual(a.notes("kind <> 'alert'"), []);
       const lead = db.getLead(T18A_LEAD);
@@ -2576,7 +2594,10 @@ test('T18a gcal: failed calls spanning 59 min → nothing, 61 min → one alert 
     h.advance(59 * 60_000);
     await t18aRound(h);
     assert.deepEqual(gcalAlerts(h), [], '59 minutes: nothing');
-    h.advance(2 * 60_000);
+    h.advance(60_000);
+    await t18aRound(h);
+    assert.deepEqual(gcalAlerts(h), [], 'exactly 60 minutes is not over an hour: nothing');
+    h.advance(60_000);
     await t18aRound(h);
     assert.equal(gcalAlerts(h).length, 1, '61 minutes: one alert');
     assert.equal(gcalAlerts(h)[0].meta.code, 'bad_response');
@@ -2731,5 +2752,132 @@ test('T18a inert: with default settings, a month past 100% and a calendar failin
   } finally {
     db.close();
     cal.cleanup();
+  }
+});
+
+/**
+ * The app on a real viewing module and a real gcal client that the test calls itself, so each Calendar call
+ * lands at the minute the case says (its own fake Google: the token, then whatever `answer` holds).
+ */
+function t18aDriven() {
+  const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
+  const sa = JSON.stringify({ type: 'service_account', client_email: 'robot@example.iam.gserviceaccount.com', private_key: privateKey });
+  const db = openDb(':memory:');
+  let answer = { status: 503, json: {} };
+  let h = null;
+  const fetchImpl = async (url) => (String(url).startsWith('https://oauth2.googleapis.com/token')
+    ? reply(200, { access_token: 'gtok', expires_in: 3600, token_type: 'Bearer' })
+    : reply(answer.status, answer.json));
+  const gcal = createGcal({ saFile: '/example/sa.json', calendarId: 'test-calendar@example.com', fetchImpl, now: () => h.now, readFile: () => sa });
+  h = rig14({ db, viewing: createViewing({ db, gcal, now: () => h.now }) });
+  return {
+    h, gcal,
+    answer: (status, json = {}) => { answer = { status, json }; },
+    /** One free/busy read (a 503 while down): the calendar's not-answering failure. */
+    freeBusy: () => gcal.freeBusy({ timeMin: '2026-12-06T00:00:00+03:00', timeMax: '2026-12-07T00:00:00+03:00' }),
+    async close() { await h.close(); db.close(); },
+  };
+}
+const T18A_EVENT = 'abcde12345';
+
+test('T18a gcal: an event lookup or delete answered 404 in the middle of an outage neither ends nor extends it: 503 at 0, a get 404 at 30 min, a delete 404 at 45, 503 at 61 → one alert', async () => {
+  const d = t18aDriven();
+  try {
+    t18aBookingOn(d.h);
+    d.answer(503);
+    await d.freeBusy();
+    await d.h.app.ticks.summary();
+    d.h.advance(30 * 60_000);
+    d.answer(404, { error: { code: 404 } });
+    assert.equal((await d.gcal.get(T18A_EVENT)).gone, true);
+    assert.equal(d.h.app.viewing.health().gcal.ok, true, '/health reads it as before: the call went through');
+    await d.h.app.ticks.summary();
+    d.h.advance(15 * 60_000);
+    assert.equal((await d.gcal.delete(T18A_EVENT)).gone, true);
+    await d.h.app.ticks.summary();
+    assert.deepEqual(gcalAlerts(d.h), []);
+    d.h.advance(16 * 60_000);
+    d.answer(503);
+    await d.freeBusy();
+    await d.h.app.ticks.summary();
+    assert.equal(gcalAlerts(d.h).length, 1, 'one outage from 0 to 61 min: one alert');
+  } finally {
+    await d.close();
+  }
+});
+
+test('T18a gcal: an event read that answers 200 with unusable data ({}) between two 503s 61 min apart neither ends nor extends the outage → one alert; a usable event then ends it', async () => {
+  const d = t18aDriven();
+  try {
+    t18aBookingOn(d.h);
+    d.answer(503);
+    await d.freeBusy();
+    await d.h.app.ticks.summary();
+    d.h.advance(30 * 60_000);
+    d.answer(200, {});
+    assert.equal((await d.gcal.get(T18A_EVENT)).ok, true, 'the caller still gets it, and rejects its shape');
+    await d.h.app.ticks.summary();
+    d.h.advance(31 * 60_000);
+    d.answer(503);
+    await d.freeBusy();
+    await d.h.app.ticks.summary();
+    assert.equal(gcalAlerts(d.h).length, 1, 'odd data did not end the outage: one alert');
+    d.answer(200, { start: { dateTime: '2026-12-06T10:00:00+03:00' }, end: { dateTime: '2026-12-06T11:00:00+03:00' } });
+    await d.gcal.get(T18A_EVENT);
+    assert.equal(d.h.app.viewing.calendarOutage(), null, 'a usable event is a real success: the outage is over');
+  } finally {
+    await d.close();
+  }
+});
+
+test('T18a isolation: a check that throws, with a logger that throws on its failure line, costs neither the other check nor the summary minute nor the 05:00 reconcile', async () => {
+  const at = (hh, mm) => Date.parse(`2026-12-03T${hh}:${mm}:00+03:00`);
+  const lines = [];
+  const h = rig14({
+    startAt: at('08', '00'),
+    config: { danaTurnsMonthAlert: T18A_LEVEL, gcalSaFile: '/nonexistent/example-sa.json', gcalCalendarId: 'test-calendar@example.com' },
+    log: (e) => {
+      if (e?.evt === 'ops.alert_failed') throw new Error('the journal is gone');
+      lines.push(e);
+    },
+  });
+  try {
+    h.app.team.setSetting('owner_as_client', '1');
+    h.app.inboxStore.countDanaTurns = () => { throw new Error('the month count failed'); };
+    let outageRead = 0;
+    h.app.viewing.calendarOutage = () => { outageRead += 1; return null; };
+    let reconciled = 0;
+    const realReconcile = h.app.viewing.reconcile;
+    h.app.viewing.reconcile = async () => { reconciled += 1; return realReconcile(); };
+    await h.app.ticks.summary();
+    assert.equal(outageRead, 1, 'the gcal check still ran');
+    assert.equal(reconciled, 1, 'the reconcile still ran');
+    assert.equal(h.notes("kind = 'summary'").length, 1, 'the 08:00 summary was still queued');
+    assert.ok(!lines.some((l) => l.evt === 'timer.failed'), 'the summary tick never failed');
+    // The next morning the checks themselves throw (outside both of their guards): the minute still goes on.
+    h.set(Date.parse('2026-12-04T08:00:00+03:00'));
+    h.app.opsAlerts = () => { throw new Error('the checks broke'); };
+    await h.app.ticks.summary();
+    assert.equal(reconciled, 2, 'that day\'s reconcile ran');
+    assert.equal(h.notes("kind = 'summary'").length, 2, 'and that day\'s summary was queued');
+    assert.ok(!lines.some((l) => l.evt === 'timer.failed'));
+  } finally {
+    await h.close();
+  }
+});
+
+test('T18a isolation: a check that keeps throwing is one ops.alert_failed line an hour, not one a minute', async () => {
+  const h = rig14({ config: { danaTurnsMonthAlert: T18A_LEVEL } });
+  try {
+    h.app.inboxStore.countDanaTurns = () => { throw new Error('the month count failed'); };
+    for (let i = 0; i < 120; i += 1) {
+      await h.app.ticks.summary();
+      h.advance(60_000);
+    }
+    const failedLines = h.logs.filter((l) => l.evt === 'ops.alert_failed');
+    assert.equal(failedLines.length, 2, 'two hours: two lines');
+    assert.ok(failedLines.every((l) => l.code === 'turns_month' && l.level === 'error'));
+  } finally {
+    await h.close();
   }
 });

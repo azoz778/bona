@@ -30,10 +30,12 @@
  * calendar id, the service account's address, the key, a name or a phone: an operation and a code.
  *
  * outage() (T18a, DESIGN §14 "calendar failing over 1 h"): the calls that found the calendar NOT
- * ANSWERING since the last success, in memory: a network error, a timeout, auth (the key or the
+ * ANSWERING since the last real success, in memory: a network error, a timeout, auth (the key or the
  * token), or a 5xx (its code is bad_response). The first and the latest such failure and the latest
- * one's code; a success ends it. A calendar that answers, however oddly (not_found, forbidden,
- * quota, another 4xx, a 200 that is not what was asked), neither opens nor extends nor ends it.
+ * one's code. A calendar that answers, however oddly (not_found, forbidden, quota, another 4xx, a 200
+ * that is not what was asked), neither opens nor extends nor ends it; that includes an event get or
+ * delete answered 404/410 and a get whose event has no usable times, which health() still reads as a
+ * call that went through, as before. Only a real success ends it.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -66,6 +68,16 @@ const TAG_RE = /^[0-9a-v]{8}$/;
 const TAGGED_ID_RE = /^bonc([0-9a-v]{8})[0-9a-v]{26}$/;
 
 const fail = (code, extra = {}) => ({ ok: false, code, ...extra });
+
+/** An event part's time as lib/viewing.mjs reads it (its eventTime): a dateTime, or an all-day date. */
+const eventPartTime = (part) => (part?.dateTime ? Date.parse(part.dateTime) : (part?.date ? dayStart(part.date) : NaN));
+/** An event the viewing module can use (its planOf): cancelled, or readable times with the end after the start. */
+function usableEvent(ev) {
+  if (ev?.status === 'cancelled') return true;
+  const start = eventPartTime(ev?.start);
+  const end = eventPartTime(ev?.end);
+  return Number.isFinite(start) && Number.isFinite(end) && end > start;
+}
 
 /** Lowercase base32hex (RFC 4648 §7) without padding: the alphabet Google takes for event ids. */
 function base32hex(buf) {
@@ -205,7 +217,9 @@ export function createGcal({
   let token = null; // { value, until }
   let holidayCopy = null; // { dates: Set<string>, fetchedAt }
 
-  const succeeded = () => { state.ok = true; state.lastErrorCode = null; state.outage = null; };
+  /** A call Google answered as asked: health ok. The outage is left as it is (answered() alone) or over (succeeded()). */
+  const answered = () => { state.ok = true; state.lastErrorCode = null; };
+  const succeeded = () => { answered(); state.outage = null; };
   /** A failed call. `serverError`: Google answered 5xx (code bad_response), which counts as not answering. */
   function failed(op, code, extraOut = {}, serverError = false) {
     state.ok = false;
@@ -389,9 +403,11 @@ export function createGcal({
     if (r.notConfigured) return fail('auth');
     if (r.reported) return fail(r.error);
     if (r.error) return failed('get', r.error);
-    if (r.status === 404 || r.status === 410) { succeeded(); return fail('not_found', { gone: true }); }
+    // A 404/410 proves nothing about the calendar's events being readable: health ok, the outage left as it is.
+    if (r.status === 404 || r.status === 410) { answered(); return fail('not_found', { gone: true }); }
     if (r.status !== 200 || !r.parseOk || !r.body || typeof r.body !== 'object') return failedStatus('get', r);
-    succeeded();
+    // The caller judges the event; one it cannot use (no readable times) ends no outage either.
+    if (usableEvent(r.body)) succeeded(); else answered();
     return { ok: true, event: r.body };
   }
 
@@ -421,7 +437,7 @@ export function createGcal({
     if (r.notConfigured) return fail('auth');
     if (r.reported) return fail(r.error);
     if (r.error) return failed('delete', r.error);
-    if (r.status === 404 || r.status === 410) { succeeded(); return { ok: true, gone: true }; }
+    if (r.status === 404 || r.status === 410) { answered(); return { ok: true, gone: true }; }
     if (r.status === 200 || r.status === 204) { succeeded(); return { ok: true }; }
     return failedStatus('delete', r);
   }
