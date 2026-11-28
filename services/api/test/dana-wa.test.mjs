@@ -3424,3 +3424,47 @@ test('T12 r19 (Codex P1-2): an off-site bare link with any TLD and a path is str
   assert.doesNotMatch(h.sent()[1], /example\.finance/);
   assert.match(h.sent()[1], /We can also help\./);
 });
+
+/* ======================================================================================
+ * PR-B3 r20 (Claude N12, Codex P1): a 2-letter last label is decided the same way with or without a path or port
+ * (the curated list; or 3+ labels; or an all-lowercase host whose label before it has 4+ characters); the path rule
+ * (any TLD) is for 3-24-letter labels only.
+ * ====================================================================================== */
+
+test('T12 r20: linksIn — the slash and colon strings of links-probe-r20 stay text; lender.co, example.co/path, homes.us are links', () => {
+  const text = ['3.5/4 bedrooms', 'sq.m/price', 'Sun.Mo/Tue', 'B08.19/A', 'ref.no/123', 'sq.ft/month', 'SAR 120 per sq.ft/year', '1200 sq.ft/villa',
+    'price/sq.ft', 'SAR 1,200/sq.ft', 'Tel.no/fax', 'No.of/rooms', 'Ph.D/MBA', 'a.m./p.m.', 'e.g./i.e.', '4.5/5 rating', 'AED/SAR', 'Sat.Su/Mo',
+    'Mon.Tu/We 10:00', 'Dr.Al/Harbi', 'unit no.12/B', 'Blk.A/12', 'approx.5/7 km', 'Tue/Wed', 'ref.no:12', 'sq.ft:1200', 'Sun.Mo:10', 'time 10.30/11.00',
+    // and the r19 set
+    'Dr.Al Harbi will meet you', 'vs.us', 'Inc.co', 'Sun.Mo', 'ok.so what next', 'Qty.ok', 'Tel.no 0126', 'ref.no BONA-001', '1200 sq.ft villa'];
+  for (const t of text) assert.deepEqual(linksIn(t), [], t);
+  for (const t of ['lender.co', 'visit lender.co for details', 'example.co/path', 'homes.us', 'example.finance/contact', 'bona-real-estate.com.au/x',
+    'maps.bona-real-estate.com/abc', 'example.sa/villas/1', 'store.shop', 'example.estate', 'www.x.y', 'bit.ly/abc', 'WWW.EXAMPLE.COM',
+    'example.com:8080/a', 'Al-Rawdah.in/north', 'go.to', 'x.com.au', 'example.co.uk']) {
+    assert.equal(linksIn(t).length, 1, t);
+  }
+});
+
+test('T12 r20 (Claude N12, T1): a later reply with an abbreviation and a slash or colon arrives untouched; an off-site link still goes', async () => {
+  for (const text of ['The villa is 1,200 sq.ft with a private pool.', 'Plot ref.no BONA-001 is in Obhur; Dr.Al Harbi will show it.',
+    'Viewing slots: Sun.Mo 10:00 or Tue 14:00.', 'The rent is quoted per sq.ft/year and paid yearly, with maintenance included.',
+    'Viewings Sun.Mo/Tue at 10:00.', 'Plot ref.no/123 in Obhur.']) {
+    const h = bh({ turns: [brainReply('Hello! How can I help?'), brainReply(text)] });
+    await ask(h, 'hi');
+    h.tick(60_000);
+    await ask(h, 'tell me more');
+    assert.equal(h.sent()[1], text);
+  }
+  const h = bh({ turns: [brainReply('Hello! How can I help?'), brainReply('Visit example.finance/contact for loans.')] });
+  await ask(h, 'hi');
+  h.tick(60_000);
+  await ask(h, 'loans?');
+  assert.doesNotMatch(h.sent()[1], /example\.finance/);
+});
+
+test('T12 r20 (Codex P1): a bare lender.co on a first reply is stripped', async () => {
+  const h = bh({ turns: [brainReply('For a mortgage you can visit lender.co for details. We are happy to help.')] });
+  await ask(h, 'Hi');
+  assert.doesNotMatch(h.sent()[0], /lender\.co/);
+  assert.match(h.sent()[0], /We are happy to help\./);
+});
