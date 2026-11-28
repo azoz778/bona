@@ -984,6 +984,30 @@ test("Codex r15: a spend marker that cannot be READ blocks paid requests and is 
   assert.deepEqual(await again.turn(turnArgs()), { ok: false, code: 'budget' }, 'a restart still sees it');
 });
 
+test("Codex r16: a charge metered while the marker cannot be read is added to the saved total exactly once when reads work again; a stop is decided by the same read as readability", async () => {
+  const env = { BONA_BRAIN_MONTH_STOP_USD: '50' };
+  // The response is metered while reads fail: the charge waits unsaved, then lands on top of the saved $49.99.
+  let failRead = false;
+  const h = harness({ env, script: [async () => { failRead = true; return reply('Hello.'); }, reply('never')] });
+  h.team.setSetting('brain_usd_month', '2026-11:49990000');
+  const realGet = h.team.getSetting.bind(h.team);
+  h.team.getSetting = (k) => { if (failRead && String(k).startsWith('brain_usd_')) throw new Error('disk I/O error'); return realGet(k); };
+  assert.equal((await h.brain.turn(turnArgs())).ok, true, 'the answer already paid for is delivered');
+  failRead = false;
+  assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'budget' }, '49.99 + the charge reaches the $50 stop');
+  assert.equal(h.calls.length, 1);
+  const saved = Number(realGet('brain_usd_month').split(':')[1]);
+  assert.ok(saved > 49990000 && saved < 49990000 + 1_000_000, `added once: ${saved}`);
+  // A total at the stop whose read fails every other time: never a paid request.
+  const k = harness({ env, script: [reply('never')] });
+  k.team.setSetting('brain_usd_month', '2026-11:50000000');
+  const kGet = k.team.getSetting.bind(k.team);
+  let n = 0;
+  k.team.getSetting = (key) => { if (String(key).startsWith('brain_usd_') && (n += 1) % 2 === 1) throw new Error('busy'); return kGet(key); };
+  for (let i = 0; i < 3; i += 1) assert.deepEqual(await k.brain.turn(turnArgs()), { ok: false, code: 'budget' }); // eslint-disable-line no-await-in-loop
+  assert.equal(k.calls.length, 0);
+});
+
 test('the runaway stops are checked before every paid request and after every response: crossing one mid-turn stops the turn at once, with the stop alert in that turn', async () => {
   const stopAlerts = (h) => h.alerts.filter((a) => a.code === 'brain_spend' && a.meta.stop);
   // A tool round takes the day from $19.99 past $20: no second round.
