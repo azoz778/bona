@@ -268,7 +268,8 @@ export function createBrain(deps = {}) {
 
   /* ---------------- state ---------------- */
   const setting = (k) => { try { return team?.getSetting?.(k) ?? ''; } catch { return ''; } };
-  const store = (k, v) => { try { team?.setSetting?.(k, v, { by: 'system' }); } catch { /* a marker write never breaks a turn */ } };
+  /** A marker write; never breaks a turn. True when it was saved (or there is no store). */
+  const store = (k, v) => { try { team?.setSetting?.(k, v, { by: 'system' }); return true; } catch { return false; } };
   const state = {
     // A marker from before a restart: not ok until a call works, but the next turn tries at once.
     outCode: configured && /^\d+$/.test(setting('brain_out')) ? 'restored' : null,
@@ -367,7 +368,27 @@ export function createBrain(deps = {}) {
     }
     const d = /^(\d{4}-\d{2}-\d{2}):(\d{1,15})$/.exec(setting('brain_usd_day'));
     const m = /^(\d{4}-\d{2}):(\d{1,15})$/.exec(setting('brain_usd_month'));
-    return { day, month, dayMicro: d && d[1] === day ? Number(d[2]) : 0, monthMicro: m && m[1] === month ? Number(m[2]) : 0 };
+    // Never less than this process counted: a total the store refused to save still counts (Codex r14).
+    const mine = { day: state.spend.day === day ? state.spend.dayMicro : 0, month: state.spend.month === month ? state.spend.monthMicro : 0 };
+    return {
+      day, month,
+      dayMicro: Math.max(d && d[1] === day ? Number(d[2]) : 0, mine.day),
+      monthMicro: Math.max(m && m[1] === month ? Number(m[2]) : 0, mine.month),
+    };
+  }
+  /**
+   * Save this process's spend totals; false when the store refused (a full disk, a locked file). While they cannot be
+   * saved the meter fails closed (stopReached()): no paid request goes out until a save works again (Codex r14).
+   */
+  function flushSpend() {
+    if (!team || !state.spend.day) return true;
+    const s = state.spend;
+    const okDay = store('brain_usd_day', `${s.day}:${s.dayMicro}`);
+    const okMonth = store('brain_usd_month', `${s.month}:${s.monthMicro}`);
+    const ok = okDay && okMonth;
+    if (!ok && !state.meterBroken) say({ level: 'error', evt: 'brain.meter_failed' });
+    state.meterBroken = !ok;
+    return ok;
   }
   function spend(micro) {
     if (!(micro > 0)) return;
@@ -375,8 +396,7 @@ export function createBrain(deps = {}) {
     const dayMicro = Math.min(cur.dayMicro + micro, 999_999_999_999_999);
     const monthMicro = Math.min(cur.monthMicro + micro, 999_999_999_999_999);
     state.spend = { ...state.spend, day: cur.day, dayMicro, month: cur.month, monthMicro };
-    store('brain_usd_day', `${cur.day}:${dayMicro}`);
-    store('brain_usd_month', `${cur.month}:${monthMicro}`);
+    flushSpend();
     const level = monthMicro >= usd.alert * 1e6 ? 100 : monthMicro >= usd.alert * 0.8 * 1e6 ? 80 : 0;
     if (!level) return;
     const marked = /^(\d{4}-\d{2}):(80|100)$/.exec(team ? setting('brain_month_alerted') : state.spend.alerted);
@@ -393,6 +413,8 @@ export function createBrain(deps = {}) {
     const which = cur.dayMicro >= usd.dayStop * 1e6 ? 'day' : cur.monthMicro >= usd.monthStop * 1e6 ? 'month' : null;
     return which ? { which, period: which === 'day' ? cur.day : cur.month } : null;
   }
+  /** True while the spend totals cannot be saved: no paid request may be SENT (a response already paid for still counts). */
+  const meterBlocked = () => state.meterBroken && !flushSpend();
   /** 'day' | 'month' when a runaway stop is reached (one alert per day or month), else null. */
   function overBudget() {
     const stop = stopReached();
@@ -415,7 +437,7 @@ export function createBrain(deps = {}) {
    * (`ctx.allow[slot]`), whatever comes back; a rate-limit retry only when one is left.
    */
   async function call(model, ctx, messages, toolChoice, acc, { retried = false, noRetry = false, slot = null } = {}) {
-    if (overBudget()) return fail('budget');
+    if (overBudget() || meterBlocked()) return fail('budget');
     const held = outGate(ctx);
     if (held) return { ...fail(held), gated: true };
     // While the breaker is open only the half-open trial's own requests go out: a turn whose first request was sent
@@ -691,7 +713,7 @@ export function createBrain(deps = {}) {
       return out;
     };
     // Gates that make no model call: the runaway stops, `out`, the open breaker, a cooling main model without a backup.
-    if (overBudget()) return end(fail('budget'));
+    if (overBudget() || meterBlocked()) return end(fail('budget'));
     const outCode = outBlocked(started);
     if (outCode) return end(fail(outCode));
     const b = state.breaker;
@@ -790,7 +812,7 @@ export function createBrain(deps = {}) {
     let outTrial = null;
     try {
       if (!configured || typeof prompts.classify !== 'string' || !prompts.classify.trim()) return { error: 'off' };
-      if (overBudget()) return { error: 'budget' };
+      if (overBudget() || meterBlocked()) return { error: 'budget' };
       const t = now();
       const outCode = outBlocked(t);
       if (outCode) return { error: outCode };

@@ -238,7 +238,9 @@ export function findAmounts(text) {
     const before = s[numStart - 1] ?? '';
     const head = s.slice(Math.max(0, numStart - 12), numStart);
     if (!cur1 && /[A-Za-z]/.test(before)) continue; // W012, B08, NOBAL5
-    if (before === '+') continue; // +966…
+    // +966…: a "+" before a phone, never one before an amount with a currency or thousands commas ("+15,000 SAR",
+    // a surcharge, Codex r14).
+    if (before === '+' && !cur1 && !cur2 && !shared.has(numStart) && !num.includes(',')) continue;
     if (/(?<![\d.,])[A-Za-z]\d*-$/.test(head)) continue; // BONA-014, B08-19 (never the "M" of "2.5M-3M")
     const after = s.slice(numEnd);
     if (PERCENT_AFTER_RE.test(after)) continue;

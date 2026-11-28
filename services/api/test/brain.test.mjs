@@ -925,6 +925,36 @@ test('without a team the money still counts in memory and the stops still hold',
   assert.equal(h.calls.length, 2, 'over the stop: no call');
 });
 
+test("Codex r14 P1: the spend meter fails closed: a total the store refused to save still counts, and while it cannot be saved no paid request goes out", async () => {
+  const full = (h) => {
+    const real = h.team.setSetting.bind(h.team);
+    const ctl = { on: true };
+    h.team.setSetting = (k, v, o) => {
+      if (ctl.on && String(k).startsWith('brain_usd_')) throw Object.assign(new Error('database or disk is full'), { code: 'SQLITE_FULL' });
+      return real(k, v, o);
+    };
+    return ctl;
+  };
+  // The answer crosses $20 while the store refuses the write: the in-process total still stops it, and the next turn.
+  const a = harness({ script: [reply('Hello.'), reply('never')] });
+  a.team.setSetting('brain_usd_day', '2026-11-26:19990000');
+  full(a);
+  assert.deepEqual(await a.brain.turn(turnArgs()), { ok: false, code: 'budget' });
+  assert.deepEqual(await a.brain.turn(turnArgs()), { ok: false, code: 'budget' });
+  assert.equal(a.calls.length, 1, 'no paid request after the crossing one');
+  // Far from the stop, but the meter cannot save: the next turn makes no paid request until a save works again.
+  const b = harness({ script: [reply('Hello.'), reply('Back.')] });
+  b.team.setSetting('brain_usd_day', '2026-11-26:1000000');
+  const ctl = full(b);
+  assert.equal((await b.brain.turn(turnArgs())).ok, true, 'this turn was paid before the write failed');
+  assert.deepEqual(await b.brain.turn(turnArgs()), { ok: false, code: 'budget' }, 'no meter, no spending');
+  assert.equal(b.calls.length, 1);
+  ctl.on = false;
+  assert.equal((await b.brain.turn(turnArgs())).ok, true, 'the save works again: the brain answers');
+  assert.match(b.team.getSetting('brain_usd_day'), /^2026-11-26:\d+$/);
+  assert.ok(Number(b.team.getSetting('brain_usd_day').split(':')[1]) > 1000000, 'the refused total was saved once it could be');
+});
+
 test('the runaway stops are checked before every paid request and after every response: crossing one mid-turn stops the turn at once, with the stop alert in that turn', async () => {
   const stopAlerts = (h) => h.alerts.filter((a) => a.code === 'brain_spend' && a.meta.stop);
   // A tool round takes the day from $19.99 past $20: no second round.

@@ -528,3 +528,12 @@ test('invisible and look-alike characters never hide an amount or a unit ref: th
     assert.deepEqual(checkReply(text, { toolResults: [] }), { ok: true, hits: [] }, JSON.stringify(text));
   }
 });
+
+/* Codex r14 P2: a "+" before an amount with a currency or thousands commas is a surcharge, never a phone. */
+test('a "+" amount with a currency or thousands commas is checked like any amount; a "+" phone is not', () => {
+  for (const reply of ['Parking: +15,000 SAR', 'موقف السيارات: +15,000 ريال', 'Maid room: + 25,000 SAR extra']) {
+    assert.deepEqual(checkReply(reply, { toolResults: [] }).hits.map((h) => h.kind), ['amount'], reply);
+  }
+  assert.deepEqual(checkReply('Parking: +15,000 SAR', { toolResults: ['{"parking":"SAR 15,000"}'] }).ok, true, 'a published surcharge passes');
+  for (const reply of ['Call us on +966 12 345 6789', 'اتصل على +966126543210']) assert.equal(checkReply(reply, { toolResults: [] }).ok, true, reply);
+});
