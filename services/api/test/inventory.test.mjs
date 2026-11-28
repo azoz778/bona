@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   createInventory, WORKTREE_LISTINGS, formatPrice, parsePriceValue, toCard, toToolRow,
-  search, findOne, normalise, tokenise, absoluteUrl, kindOf, resolveInventoryFile, STAT_MS, pinOf, DETAILS_MAX_CHARS,
+  search, findOne, normalise, tokenise, absoluteUrl, kindOf, resolveInventoryFile, STAT_MS, pinOf, DETAILS_MAX_CHARS, typeLabel,
 } from '../lib/inventory.mjs';
 
 const inv = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
@@ -225,8 +225,28 @@ test('a healthy inventory says so, and recovers if the file arrives late', () =>
 
 /* ---------------- PR-B4 (PLAN T13 tests 1 and 3; DESIGN §4.3, brain/DESIGN-brain.md §5.2) ---------------- */
 
-test('toToolRow gains has_brochure, pin, lat/lng only for an exact pin, and city (no brochure_mb: listings.json has no size, #18)', () => {
+/** main 7165b3a's toToolRow, copied: the row every caller but the brain route still gets (PR-B4 r2, Codex r1 P0). */
+const mainRow = (listing, { siteUrl = 'https://bona.azoz.uk' } = {}) => {
+  const card = toCard(listing, { siteUrl });
+  return {
+    id: card.id, slug: card.slug, title_en: card.title.en, title_ar: card.title.ar, type: typeLabel(listing.type, 'en'), category: listing.category,
+    district_en: card.district.en, district_ar: card.district.ar, city: listing.location?.city?.en ?? null, price_en: card.price.en,
+    price_ar: card.price.ar, beds: card.beds, baths: card.baths, area_sqm: card.areaSqm, url_en: card.url.en, url_ar: card.url.ar,
+  };
+};
+
+test("toToolRow without the assistant flag is main's row byte for byte, for every real listing (the concierge, the legacy WhatsApp agent, the phone line)", () => {
   const site = { siteUrl: 'https://bona.azoz.uk' };
+  for (const l of all) {
+    assert.equal(JSON.stringify(toToolRow(l, site)), JSON.stringify(mainRow(l, site)), l.id);
+    assert.equal(JSON.stringify(inv.row(l)), JSON.stringify(mainRow(l, site)), `${l.id} through inventory.row`);
+  }
+  assert.deepEqual(Object.keys(toToolRow(all[0], site)), ['id', 'slug', 'title_en', 'title_ar', 'type', 'category', 'district_en', 'district_ar', 'city',
+    'price_en', 'price_ar', 'beds', 'baths', 'area_sqm', 'url_en', 'url_ar']);
+});
+
+test('toToolRow gains has_brochure, pin, lat/lng only for an exact pin, and city (no brochure_mb: listings.json has no size, #18)', () => {
+  const site = { siteUrl: 'https://bona.azoz.uk', assistant: true };
   const exact = all.find((l) => l.mapPrecision === 'exact' && l.map);
   const district = all.find((l) => l.mapPrecision === 'district' && l.map);
   const none = all.find((l) => !l.mapPrecision);
@@ -259,6 +279,7 @@ test('toToolRow gains has_brochure, pin, lat/lng only for an exact pin, and city
   // The worst five rows still fit the 4,000-character tool result.
   const widest = [...all].map((l) => JSON.stringify(toToolRow(l, site))).sort((a, b) => b.length - a.length).slice(0, 5);
   assert.ok(`[${widest.join(',')}]`.length < 4000, 'five rows fit the tool result cap');
+  assert.deepEqual(Object.keys(inv.row(exact, { assistant: true })).slice(-4), ['has_brochure', 'pin', 'lat', 'lng'], 'inventory.row passes the flag');
 });
 
 test('pinOf is the same rule as the booking confirmation (lib/viewing.mjs pinOf) on every real listing', async () => {

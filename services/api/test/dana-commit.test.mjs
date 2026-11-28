@@ -7,11 +7,11 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDanaCommit, turnToolCalls, BOOKING_FAILED_LINE } from '../lib/dana-commit.mjs';
+import fs from 'node:fs';
+import { createDanaCommit, turnToolCalls, BOOKING_FAILED_LINE, DEFAULT_MAX_LINKS } from '../lib/dana-commit.mjs';
 import { brainReply } from '../lib/brain/fake.mjs';
 import { retellMessages } from '../lib/brain.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
-import { MAX_LINKS } from '../lib/dana-wa.mjs';
 import { openDb } from '../lib/db.mjs';
 import { createTeam } from '../lib/team.mjs';
 import { createViewing } from '../lib/viewing.mjs';
@@ -144,7 +144,7 @@ test('an exact location → a maps link at the end of the text, within MAX_LINKS
   assert.deepEqual(en.bubbles, [{ kind: 'text', text: `It is in Al Shati.\n\nLocation: ${link}` }]);
   const ar = await c.afterPreSend({ lead: LEAD, turn: brainReply('في الشاطئ.', { tools: [loc('BONA-W003')] }), text: 'في الشاطئ.', language: 'ar' });
   assert.equal(ar.bubbles[0].text, `في الشاطئ.\n\nالموقع: ${link}`);
-  const full = Array.from({ length: MAX_LINKS }, (_, i) => `https://bona.example.com/properties/x${i}/`).join('\n');
+  const full = Array.from({ length: DEFAULT_MAX_LINKS }, (_, i) => `https://bona.example.com/properties/x${i}/`).join('\n');
   const capped = await c.afterPreSend({ lead: LEAD, turn: brainReply(full, { tools: [loc('BONA-W003')] }), text: full, language: 'en' });
   assert.equal(capped.bubbles[0].text, full, 'MAX_LINKS already used: no map link');
   const already = `See ${link}`;
@@ -157,8 +157,10 @@ test('an exact location → a maps link at the end of the text, within MAX_LINKS
 
 test('the safety net: a brain answer that claims a booking with no successful commit → the "team will confirm" line and a booking_failed hand-over', async () => {
   const c = commitWith({ viewing: fakeViewing() });
+  const slots = { name: 'viewing_slots', args: { listing_id: 'BONA-W003' }, result: { bookable: true, slots: [] } };
   for (const [text, lang] of [['Your viewing is booked for Sunday at 10.', 'en'], ['All confirmed, see you then!', 'en'], ['تم الحجز يوم الأحد الساعة 10', 'ar'], ['تم تأكيد موعدك', 'ar']]) {
-    const out = await c.afterPreSend({ lead: LEAD, turn: brainReply(text), text, language: lang });
+    // A viewing tool in the turn is the booking intent.
+    const out = await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools: [slots] }), text, language: lang });
     assert.deepEqual(out, { bubbles: [{ kind: 'text', text: BOOKING_FAILED_LINE[lang] }], handover: { kind: 'booking_failed' } }, text);
   }
   // A claim next to a book_viewing that was not reserved: still caught.
@@ -213,7 +215,7 @@ test('end to end on the real modules (a fake calendar): the tools validate, the 
       publishedUnits: createPublishedUnits({ fetch: async () => { throw new Error('no network in tests'); } }),
       fetchImpl: async () => { throw new Error('no network in tests'); },
     });
-    const run = async (name, args) => tools.run(name, { chat: { chat_id: `wa:${LEAD.lead_id}`, metadata: { source: 'bona-whatsapp', lead_id: LEAD.lead_id }, retell_llm_dynamic_variables: { language: 'en', locale: 'en' } }, args });
+    const run = async (name, args) => tools.run(name, { chat: { chat_id: `wa:${LEAD.lead_id}`, metadata: { source: 'bona-whatsapp', lead_id: LEAD.lead_id }, retell_llm_dynamic_variables: { language: 'en', locale: 'en' } }, args }, { inProcess: true });
     const args = { slot_id: SLOT, listing_id: 'BONA-W003' };
     const result = await run('book_viewing', args);
     assert.equal(JSON.parse(result).reserved, true);
@@ -235,4 +237,86 @@ test('end to end on the real modules (a fake calendar): the tools validate, the 
     assert.deepEqual({ ...note }, { kind: 'booking', dedupe_key: `bk:${row.booking_id}`, status: 'queued' });
     notes.stop?.();
   } finally { db.close(); }
+});
+
+/* ---------------- PR-B4 r2 (the r1 reviews) ---------------- */
+
+test('the safety net fires only with booking intent: a viewing tool in the turn, or a viewing word with a day or a time; delivery, availability and price sentences are untouched', async () => {
+  const c = commitWith({ viewing: fakeViewing() });
+  const search = { name: 'search_properties', args: { query: 'x' }, result: { count: 1, results: [] } };
+  const details = { name: 'listing_details', args: { listing_id: 'BONA-W014' }, result: { found: true } };
+  const untouched = [
+    ['Yes, the developer has confirmed delivery in Q4 2027.', 'en'],
+    ['Confirmed: it has a private pool', 'en'],
+    ['The 2-bedroom units are fully booked right now, but the 3-bedroom ones are available.', 'en'],
+    ['تم تأكيد موعد التسليم في الربع الرابع 2027', 'ar'],
+    ['تم حجز كل الشقق بغرفتين، والمتاح الحين 3 غرف', 'ar'],
+    ['The price is confirmed by the developer.', 'en'],
+    ['Delivery is confirmed for 15 December 2027.', 'en'],
+    ['تم تأكيد السعر من المطور يوم الأحد', 'ar'],
+  ];
+  for (const [text, lang] of untouched) {
+    for (const tools of [[], [search], [details]]) {
+      const out = await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools }), text, language: lang });
+      assert.deepEqual(out, { bubbles: [{ kind: 'text', text }] }, `${text} (${tools.map((t) => t.name).join(',') || 'no tool'})`);
+    }
+  }
+  const caught = [
+    ['Your viewing is booked for Sunday at 10.', 'en'],
+    ['Great, your visit is confirmed for Monday 12:00 pm.', 'en'],
+    ['Done! The viewing is booked for 6 December.', 'en'],
+    ['تم حجز موعد معاينتك يوم الأحد الساعة 10', 'ar'],
+    ['تم تأكيد زيارتك بكرة الساعة ٢ ظهراً', 'ar'],
+  ];
+  for (const [text, lang] of caught) {
+    for (const tools of [[], [search]]) {
+      const out = await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools }), text, language: lang });
+      assert.deepEqual(out, { bubbles: [{ kind: 'text', text: BOOKING_FAILED_LINE[lang] }], handover: { kind: 'booking_failed' } }, text);
+    }
+  }
+  // With a viewing tool in the turn, a bare claim is enough.
+  const slots = { name: 'viewing_slots', args: { listing_id: 'BONA-W003' }, result: { bookable: true, slots: [] } };
+  assert.deepEqual((await c.afterPreSend({ lead: LEAD, turn: brainReply('Booked!', { tools: [slots] }), text: 'Booked!', language: 'en' })).handover, { kind: 'booking_failed' });
+});
+
+test('the LAST book_viewing decides: Sunday reserved then Monday refused commits nothing; two homes both reserved → only the last is booked (one booking per lead)', async () => {
+  const viewing = fakeViewing();
+  const c = commitWith({ viewing });
+  const sunday = book({ slot_id: SLOT, listing_id: 'BONA-W003' });
+  const monday = book({ slot_id: '2026-12-07T12:00+03:00', listing_id: 'BONA-W003' }, { reserved: false, reason: 'busy' });
+  const text = 'Monday at 12 is taken; shall I keep Sunday at 10?';
+  const out = await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools: [sunday, monday] }), text, language: 'en' });
+  assert.equal(viewing.calls.length, 0, 'Sunday is not booked behind the client\'s back');
+  assert.deepEqual(out, { bubbles: [{ kind: 'text', text }] }, 'the question goes as written');
+  // Refused, then reserved: the last one (reserved) is committed.
+  await c.afterPreSend({ lead: LEAD, turn: brainReply('Booking Sunday.', { tools: [monday, sunday] }), text: 'Booking Sunday.', language: 'en' });
+  assert.deepEqual(viewing.calls.map((o) => o.slotId), [SLOT]);
+  // Two homes in one turn: both validate (nothing is written by a tool), the last is the one committed; the
+  // confirmation names that home, and the other is not booked (DESIGN §8.4: one active booking per lead).
+  const two = fakeViewing();
+  const w006 = book({ slot_id: '2026-12-07T12:00+03:00', listing_id: 'BONA-W006' }, { ...RESERVED, listing_id: 'BONA-W006' });
+  const r = await commitWith({ viewing: two }).afterPreSend({ lead: LEAD, turn: brainReply('Booking both.', { tools: [sunday, w006] }), text: 'Booking both.', language: 'en' });
+  assert.deepEqual(two.calls.map((o) => [o.listingId, o.slotId]), [['BONA-W006', '2026-12-07T12:00+03:00']]);
+  assert.equal(r.bubbles[0].text, CONFIRMATION, 'one confirmation, from the commit');
+});
+
+test('dana-commit does not import lib/dana-wa.mjs (dana-wa imports BOOKING_FAILED_LINE from here); maxLinks comes from deps', async () => {
+  const src = fs.readFileSync(new URL('../lib/dana-commit.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /from\s+['"]\.\/dana-wa\.mjs['"]/);
+  assert.equal(DEFAULT_MAX_LINKS, 2, 'DESIGN §6.5');
+  const loc = { name: 'send_location', args: { listing_id: 'BONA-W003' }, result: { precision: 'exact' } };
+  const one = 'See https://bona.example.com/properties/x/';
+  assert.equal((await commitWith({ maxLinks: 1 }).afterPreSend({ lead: LEAD, turn: brainReply(one, { tools: [loc] }), text: one, language: 'en' })).bubbles[0].text, one);
+  assert.match((await commitWith({ maxLinks: 3 }).afterPreSend({ lead: LEAD, turn: brainReply(one, { tools: [loc] }), text: one, language: 'en' })).bubbles[0].text, /maps\.google\.com/);
+});
+
+test("a brochure document is only ever a PDF on Bona's site (https, the site's hosts), whatever the listing says", async () => {
+  const listing = (id, brochureUrl) => ({ ...EXACT, id, slug: `example-${id.toLowerCase()}`, brochureUrl });
+  const list = [listing('BONA-W961', 'https://evil.example/b.pdf'), listing('BONA-W962', 'http://bona-real-estate.com/b.pdf'), listing('BONA-W965', 'https://www.bona-real-estate.com/b.pdf')];
+  const c = commitWith({ inventory: { exact: (ref) => list.find((l) => l.id === ref) ?? null } });
+  const pdf = (id) => ({ name: 'send_brochure', args: { listing_id: id }, result: { will_send: 'pdf' } });
+  for (const id of ['BONA-W961', 'BONA-W962']) {
+    assert.deepEqual((await c.afterPreSend({ lead: LEAD, turn: brainReply('Here.', { tools: [pdf(id)] }), text: 'Here.', language: 'en' })).bubbles.length, 1, id);
+  }
+  assert.equal((await c.afterPreSend({ lead: LEAD, turn: brainReply('Here.', { tools: [pdf('BONA-W965')] }), text: 'Here.', language: 'en' })).bubbles[1].url, 'https://www.bona-real-estate.com/b.pdf');
 });

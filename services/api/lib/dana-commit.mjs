@@ -9,17 +9,22 @@
  * `tool_call_invocation` / `tool_call_result` messages). The tools only read, validate or save needs;
  * everything that is sent or booked is done here, from the SAME turn's calls and results (no intent store,
  * no held rows: nothing of a dropped turn is ever committed later):
- *   - book_viewing: the LAST invocation whose result says `reserved: true` → viewing.commitBooking(); ok →
- *     the code-built confirmation REPLACES the model's text (only code states a booked time); a failure →
- *     BOOKING_FAILED_LINE and a `booking_failed` hand-over for the caller (non-sticky);
+ *   - book_viewing: the LAST invocation decides. Only when its result says `reserved: true` →
+ *     viewing.commitBooking(); ok → the code-built confirmation REPLACES the model's text (only code states a
+ *     booked time); a failure → BOOKING_FAILED_LINE and a `booking_failed` hand-over for the caller
+ *     (non-sticky). An earlier reserved call never books when a later one was refused (the client moved on),
+ *     and with two homes in one turn only the last is booked: a lead has one active booking (DESIGN §8.4);
  *   - send_brochure with `will_send: 'pdf'` → a document bubble after the text, its URL read again from the
- *     inventory (never the model's string), never a held brochure (BLOCKED_BROCHURES);
+ *     inventory (never the model's string), only https on Bona's site, never a held brochure (BLOCKED_BROCHURES);
  *   - send_location with `precision: 'exact'` (and an exact pin in the inventory) → a maps link at the end of
  *     the text, only while the text has fewer than MAX_LINKS links and not with a booking (the confirmation
  *     carries its own);
  *   - the safety net: a brain answer that claims a booking (reply-guard claimsBooking: booked, confirmed,
- *     تم الحجز, تم تأكيد …) with no successful commit → BOOKING_FAILED_LINE and the hand-over. Only on a brain
- *     turn: a legacy Retell completion has no booking tool and keeps today's behaviour (the same-release rule).
+ *     تم الحجز, تم تأكيد …) with no successful commit → BOOKING_FAILED_LINE and the hand-over, but only with
+ *     booking intent: the turn called viewing_slots or book_viewing, or the text names a viewing (viewing,
+ *     visit, appointment, booking, معاينة, زيارة, موعدك, حجزك) together with a day, a date or a time. "The
+ *     developer has confirmed delivery in Q4 2027" or "fully booked" is no claim. Only on a brain turn: a
+ *     legacy Retell completion has no booking tool and keeps today's behaviour (the same-release rule).
  * The hand-over itself (needs_human, the alert, notes.handover) stays dana-wa's: `afterPreSend` answers it as
  * `handover: { kind }`, and dana-wa applies it as any other.
  *
@@ -32,9 +37,9 @@
  * Logs carry lead ids, booking ids and codes only, never the text.
  */
 import { claimsBooking } from './reply-guard.mjs';
-import { exactListing, pinOf } from './inventory.mjs';
-import { BLOCKED_BROCHURES } from './tools.mjs';
-import { MAX_LINKS } from './dana-wa.mjs';
+import { exactListing, pinOf, toAsciiDigits } from './inventory.mjs';
+import { BLOCKED_BROCHURES, brochureUrlOn } from './tools.mjs';
+// Not lib/dana-wa.mjs: dana-wa imports BOOKING_FAILED_LINE from here, so the link cap comes in through deps.
 
 /** Instead of a model text, when a booking could not be made or was claimed without one (DESIGN §4.3, §8.3 step 5). */
 export const BOOKING_FAILED_LINE = Object.freeze({
@@ -43,6 +48,26 @@ export const BOOKING_FAILED_LINE = Object.freeze({
 });
 /** Brochure documents one answer may carry (one per home asked for). */
 export const MAX_DOCUMENTS = 2;
+/** Links one answer may carry when the caller passes no `maxLinks` (DESIGN §6.5: MAX_LINKS goes from 3 to 2). */
+export const DEFAULT_MAX_LINKS = 2;
+
+/** A word that names a viewing (the booking intent of a claim with no viewing tool in the turn). */
+const VIEWING_WORD_RE = /(?<![\p{L}])(?:viewings?|visits?|appointments?|bookings?)(?![\p{L}])|معاين|زيار|موعدك|حجزك/iu;
+/** A weekday, tomorrow or today (Arabic weekdays only with the article: «أحد» alone is "someone"). */
+const DAY_RE = /(?<![\p{L}])(?:(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|today|tonight)(?![\p{L}])|(?<![\p{L}])ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس|جمعة|جمعه|سبت)(?![\p{L}])|(?<![\p{L}])(?:بكرة|بكره|غدا|غداً|اليوم)(?![\p{L}])/iu;
+/** A clock time: 10 am, 2:00 pm, 14:00, at 10, noon, الساعة 2, 2 ظهراً. */
+const TIME_RE = /(?<![\d:])\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)(?![\p{L}])|(?<![\d:])\d{1,2}:\d{2}(?![\d:])|(?<![\p{L}])at\s+\d{1,2}(?!\d|[,.]\d)|(?<![\p{L}])(?:noon|o'clock)(?![\p{L}])|الساعة\s*\d|(?<![\d:])\d{1,2}\s*(?:صباح|مساء|ظهر|عصر|الصبح|الظهر|العصر)/iu;
+const MONTHS_EN = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec';
+const MONTHS_AR = 'يناير|فبراير|مارس|أبريل|ابريل|مايو|يونيو|يوليو|أغسطس|اغسطس|سبتمبر|أكتوبر|اكتوبر|نوفمبر|ديسمبر';
+/** A day of a month: 6 December, December 6, ٦ ديسمبر (a month alone, "December 2027", is no date). */
+const DATE_RE = new RegExp(`(?<!\\d)\\d{1,2}(?:st|nd|rd|th)?\\s+(?:${MONTHS_EN})(?![\\p{L}])|(?<![\\p{L}])(?:${MONTHS_EN})\\s+\\d{1,2}(?![\\d])|(?<!\\d)\\d{1,2}\\s+(?:${MONTHS_AR})`, 'iu');
+
+/** The booking intent a claim needs before the safety net replaces it (Claude + Codex r1). */
+function bookingIntent(calls, body) {
+  if (calls.some((c) => c.name === 'viewing_slots' || c.name === 'book_viewing')) return true;
+  const t = toAsciiDigits(String(body ?? ''));
+  return VIEWING_WORD_RE.test(t) && (DAY_RE.test(t) || TIME_RE.test(t) || DATE_RE.test(t));
+}
 
 const LINK_RE = /https?:\/\/[^\s<>"'`]+/giu;
 
@@ -87,11 +112,14 @@ const errClass = (err) => (err && typeof err === 'object' && typeof err.name ===
 
 /**
  * @param {{ viewing?: object, notes?: object, inventory?: object, sender?: object, maxLinks?: number,
- *           blockedBrochures?: string[], log?: Function }} [deps]  `sender` is unused: dana-wa sends the bubbles
+ *           siteUrl?: string, blockedBrochures?: string[], log?: Function }} [deps]  `sender` is unused: dana-wa
+ *   sends the bubbles; `maxLinks` is the caller's link cap (dana-wa MAX_LINKS), DEFAULT_MAX_LINKS without it;
+ *   `siteUrl` (or inventory.siteUrl) is the one host a brochure may have besides bona-real-estate.com
  * @returns {DanaCommit}
  */
 export function createDanaCommit(deps = {}) {
-  const { viewing = null, notes = null, inventory = null, maxLinks = MAX_LINKS, log = () => {} } = deps;
+  const { viewing = null, notes = null, inventory = null, maxLinks = DEFAULT_MAX_LINKS, log = () => {} } = deps;
+  const siteUrl = deps.siteUrl ?? inventory?.siteUrl ?? null;
   const blocked = new Set(deps.blockedBrochures ?? BLOCKED_BROCHURES);
   const exact = (ref) => {
     if (typeof inventory?.exact === 'function') return inventory.exact(ref);
@@ -118,7 +146,7 @@ export function createDanaCommit(deps = {}) {
     for (const c of calls) {
       if (c.name !== 'send_brochure' || !c.ok || c.result?.will_send !== 'pdf') continue;
       const listing = exact(c.args.listing_id);
-      const url = typeof listing?.brochureUrl === 'string' && /^https:\/\//i.test(listing.brochureUrl.trim()) ? listing.brochureUrl.trim() : null;
+      const url = listing ? brochureUrlOn(listing.brochureUrl, siteUrl) : null;
       if (!url || blocked.has(listing.id) || out.some((d) => d.listingId === listing.id)) continue;
       out.push({ kind: 'document', url, caption: `${listing.id} brochure`, fileName: `${listing.id}-brochure.pdf`, mediaKind: 'document', listingId: listing.id });
       if (out.length >= MAX_DOCUMENTS) break;
@@ -146,7 +174,9 @@ export function createDanaCommit(deps = {}) {
     let body = answer;
     let booking = null;
     let handover = null;
-    const book = calls.filter((c) => c.name === 'book_viewing' && c.ok && c.result?.reserved === true).at(-1);
+    // The LAST book_viewing decides (Codex + Claude r1): a refused later call never books an earlier slot.
+    const last = calls.filter((c) => c.name === 'book_viewing').at(-1);
+    const book = last && last.ok && last.result?.reserved === true ? last : null;
     if (book) {
       const r = await commit(lead, book, lang);
       if (r?.ok === true && typeof r.text === 'string' && r.text) {
@@ -158,7 +188,7 @@ export function createDanaCommit(deps = {}) {
         handover = { kind: 'booking_failed' };
         say({ evt: 'dana.commit', leadId, booking: 'failed', reason: typeof r?.reason === 'string' ? r.reason : 'error' });
       }
-    } else if (brainTurn && claimsBooking(body)) {
+    } else if (brainTurn && claimsBooking(body) && bookingIntent(calls, body)) {
       // The safety net (DESIGN §4.3): only a commit may say a viewing is booked.
       body = BOOKING_FAILED_LINE[lang];
       handover = { kind: 'booking_failed' };

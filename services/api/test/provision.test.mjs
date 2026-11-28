@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   knowledgeBasePayload, knowledgeBaseFreshness, toolsPayload, llmPayload, voiceAgentPayload,
   chatAgentPayload, redactPayload, provision, ensureEnvFile, PROMPT_FILE, PREFERRED_MODEL, FALLBACK_MODEL,
@@ -580,10 +581,11 @@ test('the WhatsApp tools are the two inventory searches plus request_human — n
   const tools = whatsappToolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN });
   assert.deepEqual(tools.map((t) => t.name), ['search_properties', 'search_units', 'request_human']);
   const site = toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN });
+  // search_units' description is pinned on its own (LEGACY_WA_SEARCH_UNITS, below): PR-B4 reworded the site's.
   const SAME = ['type', 'name', 'url', 'headers', 'description', 'parameters', 'timeout_ms'];
   for (const [i, name] of [[0, 'search_properties'], [1, 'search_units']]) {
     const siteTool = site.find((t) => t.name === name);
-    for (const k of SAME) assert.deepEqual(tools[i][k], siteTool[k], `${name}.${k} is the same as the site's`);
+    for (const k of SAME.filter((k) => !(name === 'search_units' && k === 'description'))) assert.deepEqual(tools[i][k], siteTool[k], `${name}.${k} is the same as the site's`);
     assert.equal(tools[i].speak_during_execution, false, 'no "one moment" message on WhatsApp');
     assert.equal('execution_message_type' in tools[i], false);
     assert.equal('execution_message_description' in tools[i], false);
@@ -992,4 +994,20 @@ test('--dry-run --site-only prints the site payloads only, with the nameless beg
   assert.ok(text.includes(JSON.stringify(BEGIN_MESSAGE).slice(1, 40)), 'the begin message is in the printed payload');
   assert.ok(!text.includes(TOKEN));
   cleanup();
+});
+
+/* ---------------- PR-B4 r2: the legacy WhatsApp payload is frozen until T27 (Codex r1 P1) ---------------- */
+
+/** The legacy WhatsApp agent's search_units description at main 7165b3a, word for word. */
+const LEGACY_WA_SEARCH_UNITS = "Look inside a project at the developer's per-unit stock list, and answer WHICH units are still available and at what price. Call this instead of search_properties as soon as the visitor asks about a specific project's apartments — how many bedrooms, which floor, which view, which building, what it costs, or what payment plans exist. Returns matching units with their reference (e.g. B08-19), floor, facing, area and exact price, plus an `availability` summary of the whole project. Quote these figures exactly; never estimate a price and never invent a unit number.";
+
+test('the legacy WhatsApp payload keeps its search_units description and is byte for byte main 7165b3a, whatever the site tool says', () => {
+  const tools = whatsappToolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN });
+  assert.equal(tools.find((t) => t.name === 'search_units').description, LEGACY_WA_SEARCH_UNITS);
+  assert.notEqual(toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN }).find((t) => t.name === 'search_units').description, LEGACY_WA_SEARCH_UNITS, 'the site\'s was reworded');
+  // sha256 of JSON.stringify(whatsappToolsPayload) at main 7165b3a with this PUBLIC_API and TOKEN.
+  const sha = createHash('sha256').update(JSON.stringify(tools)).digest('hex');
+  assert.equal(sha, 'e0fb0721ba36783e928fdc023b48986096cebdd72a694c298d178b4a7e819535');
+  const llm = whatsappLlmPayload({ prompt: waPrompt, model: 'claude-4.6-sonnet', knowledgeBaseIds: ['kb_1'], publicApi: PUBLIC_API, toolToken: TOKEN });
+  assert.equal(JSON.stringify(llm.general_tools), JSON.stringify(tools));
 });

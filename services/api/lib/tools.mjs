@@ -15,7 +15,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { createOrMergeLead, leadNote } from './leads.mjs';
 import { normaliseSearchArgs } from './actions.mjs';
 import { toAsciiDigits, exactListing, pinOf } from './inventory.mjs';
-import { ensureHandoff, saveNeeds as saveLeadNeeds } from './lead-tasks.mjs';
+import { ensureHandoff, plausibleName, saveNeeds as saveLeadNeeds } from './lead-tasks.mjs';
 import { createPublishedUnits } from './published-units.mjs';
 
 export const TOOL_NAMES = [
@@ -34,7 +34,9 @@ const LEAD_ID_RE = /^LEAD-[A-Za-z0-9-]{1,60}$/;
 export const WA_SOURCE = 'bona-whatsapp';
 /**
  * The tools keyed on the chat's lead (ctx.attr.lead_id) and refused outside a WhatsApp chat in auto mode
- * (DESIGN §2's same-release rule, §4.3). listing_details is not one of them: it only reads published text.
+ * (DESIGN §2's same-release rule, §4.3). They run only in-process (`run(name, body, { inProcess: true })`,
+ * `runInProcess`: the brain), never on the HTTP /v1/tools route, where a token holder could forge the
+ * metadata. listing_details is not one of them: it only reads published text.
  */
 export const WA_ONLY_TOOLS = Object.freeze(['viewing_slots', 'book_viewing', 'send_brochure', 'send_location', 'save_needs']);
 /**
@@ -45,7 +47,25 @@ export const BLOCKED_BROCHURES = Object.freeze(['BONA-W011', 'BONA-W018', 'BONA-
 /** send_brochure (critic round 2 #18): the PDF goes as a document only up to this size, read by a HEAD request. */
 export const BROCHURE_MAX_BYTES = 8 * 1024 * 1024;
 export const BROCHURE_HEAD_MS = 5_000;
+/** A measured size is kept 12 h per URL; a failed HEAD (timeout, 404, no length) only 10 min. */
 export const BROCHURE_CACHE_MS = 12 * 3_600_000;
+export const BROCHURE_FAIL_CACHE_MS = 10 * 60_000;
+/** The only hosts a brochure may come from (https, no user, no port, no redirect), besides the configured site's. */
+export const BROCHURE_HOSTS = Object.freeze(['bona-real-estate.com', 'www.bona-real-estate.com']);
+
+/** The brochure URL when it is an https URL on Bona's site (BROCHURE_HOSTS or `siteUrl`'s https host), else null. */
+export function brochureUrlOn(url, siteUrl = null) {
+  if (typeof url !== 'string' || !url.trim()) return null;
+  let u;
+  try { u = new URL(url.trim()); } catch { return null; }
+  if (u.protocol !== 'https:' || u.username || u.password || u.port) return null;
+  const hosts = new Set(BROCHURE_HOSTS);
+  try {
+    const site = new URL(String(siteUrl ?? ''));
+    if (site.protocol === 'https:' && !site.port) hosts.add(site.hostname.toLowerCase());
+  } catch { /* no site configured */ }
+  return hosts.has(u.hostname.toLowerCase()) ? u.href : null;
+}
 /** The answers of the five tools when they do nothing (DESIGN §4.3: each with "not available here"). */
 export const NOT_HERE_NOTE = 'Not available here.';
 export const NOT_ON_EMAIL_NOTE = 'Not on email.';
@@ -158,6 +178,20 @@ export function toolArgs(body = {}) {
   return rest && typeof rest === 'object' ? rest : {};
 }
 
+const oneLineNeed = (v, max) => String(v).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+const foldNeed = (v) => String(v ?? '').toLowerCase();
+/** Whether the lead row holds this save_needs value as lead-tasks saveNeeds writes it (its own allow-list). */
+function storedNeed(lead, key, value) {
+  switch (key) {
+    case 'name': return plausibleName(value) && lead.name === oneLineNeed(value, 200);
+    case 'budget': case 'district': case 'timeline': return lead[key] === oneLineNeed(value, 200);
+    case 'listing_id': return lead.listing_id === oneLineNeed(value, 20).toUpperCase();
+    case 'interest': return foldNeed(lead.interest).includes(foldNeed(oneLineNeed(value, 500)));
+    case 'property_type': return foldNeed(lead.interest).includes(foldNeed(oneLineNeed(value, 100)));
+    default: return false;
+  }
+}
+
 /**
  * Build the handlers.
  * @param {{ inventory, store, db, dataDir: string, siteUrl: string, env: object,
@@ -172,14 +206,18 @@ export function toolArgs(body = {}) {
  *     is bookable;
  *   - `notes` (lib/owner-notes.mjs): create_lead's new-enquiry note as notes.leadEvent(lead, { why: 'concierge',
  *     created }), so the ledger skips a merge; without it, today's sendWhatsApp path, byte for byte;
- *   - `fetchImpl`: send_brochure's HEAD on the brochure URL (only in auto mode); `saveNeeds` is a test seam.
+ *   - `fetchImpl`: send_brochure's HEAD on the brochure URL (only in auto mode, only to Bona's site);
+ *     `saveNeeds` is a test seam.
+ *   The five WhatsApp tools answer only an in-process call (`runInProcess`, which PR-INT hands the brain as
+ *   its runTool); on the HTTP route they refuse with `not_in_process`.
  */
 export function createToolHandlers({
   inventory, units = null, store, db, dataDir, siteUrl, env = {}, sendWhatsApp, log = () => {},
   now = () => Date.now(), leadDedupeMs = LEAD_DEDUPE_MS, notifyHandoff = async () => {},
   fullUnitRowSources = FULL_UNIT_ROW_SOURCES, publishedUnits = null,
   ownerTest = null, viewing = null, notes = null, fetchImpl = (...a) => globalThis.fetch(...a), saveNeeds = saveLeadNeeds,
-  brochureHeadMs = BROCHURE_HEAD_MS, brochureCacheMs = BROCHURE_CACHE_MS, blockedBrochures = BLOCKED_BROCHURES,
+  brochureHeadMs = BROCHURE_HEAD_MS, brochureCacheMs = BROCHURE_CACHE_MS, brochureFailCacheMs = BROCHURE_FAIL_CACHE_MS,
+  blockedBrochures = BLOCKED_BROCHURES,
 }) {
   if (!db) throw new TypeError('createToolHandlers needs the store (db)');
   const blocked = new Set(blockedBrochures);
@@ -190,8 +228,12 @@ export function createToolHandlers({
 
   async function search_properties(args, ctx) {
     const listings = inventory.search({ ...normaliseSearchArgs(args), limit: 5 });
-    // A held brochure is no brochure to the model (send_brochure answers false for it).
-    const results = listings.map((l) => inventory.row(l)).map((r) => (r.has_brochure && blocked.has(r.id) ? { ...r, has_brochure: false } : r));
+    // Today's row for every caller on the HTTP route (the concierge, the legacy WhatsApp agent, the phone line);
+    // the brain's in-process route gets the brochure flag and the pin too (PR-B4). A held brochure is no brochure
+    // to the model (send_brochure answers false for it).
+    const assistant = ctx.inProcess === true;
+    const results = listings.map((l) => inventory.row(l, { assistant }))
+      .map((r) => (assistant && r.has_brochure && blocked.has(r.id) ? { ...r, has_brochure: false } : r));
     for (const l of listings.slice(0, 3)) store.addCard(ctx.conversationId, inventory.card(l));
     const onWhatsApp = (ctx.attr?.source ?? null) === WA_SOURCE;
     return {
@@ -405,6 +447,7 @@ export function createToolHandlers({
    * nothing was available.
    */
   function waLead(ctx) {
+    if (ctx.inProcess !== true) return { why: 'not_in_process' };
     const source = ctx.attr?.source ?? null;
     if (source !== WA_SOURCE) return { why: source === 'bona-email' ? 'not_on_email' : 'not_on_this_channel' };
     const id = ctx.attr?.lead_id;
@@ -447,19 +490,20 @@ export function createToolHandlers({
     return { reserved: false, reason: typeof v?.reason === 'string' ? v.reason : 'off', note: 'That slot cannot be taken: offer another slot from viewing_slots, or call request_human with kind viewing.' };
   }
 
-  /** brochureUrl → its size in bytes, or null (unknown); one HEAD per URL per 12 h, whatever it answered. */
+  /** brochureUrl → its size in bytes, or null (unknown); one HEAD per URL per 12 h (10 min after a failure). */
   const sizes = new Map();
   async function brochureSize(url) {
     const t = now();
     const hit = sizes.get(url);
-    if (hit && t - hit.at < brochureCacheMs) return hit.size;
-    for (const [k, v] of sizes) if (t - v.at >= brochureCacheMs) sizes.delete(k);
+    if (hit && t - hit.at < hit.ttl) return hit.size;
+    for (const [k, v] of sizes) if (t - v.at >= v.ttl) sizes.delete(k);
     const ac = new AbortController();
     let timer;
     let size = null;
     try {
       const res = await Promise.race([
-        Promise.resolve().then(() => fetchImpl(url, { method: 'HEAD', redirect: 'follow', signal: ac.signal })),
+        // No redirect is followed: the HEAD goes to Bona's own host and nowhere else.
+        Promise.resolve().then(() => fetchImpl(url, { method: 'HEAD', redirect: 'error', signal: ac.signal })),
         new Promise((resolve) => { timer = setTimeout(() => { ac.abort(); resolve(null); }, brochureHeadMs); }),
       ]);
       const len = res?.ok ? Number(res.headers?.get?.('content-length')) : NaN;
@@ -471,7 +515,7 @@ export function createToolHandlers({
     } finally {
       clearTimeout(timer);
     }
-    sizes.set(url, { at: t, size });
+    sizes.set(url, { at: t, size, ttl: size === null ? brochureFailCacheMs : brochureCacheMs });
     return size;
   }
   /** The assistant has not answered this chat yet (dana-wa's `introduced`): a first message carries no PDF. */
@@ -484,8 +528,10 @@ export function createToolHandlers({
     const listing = exact(args.listing_id);
     if (!listing) return { will_send: false, reason: 'not_found', note: 'That home is not in Bona inventory.' };
     if (blocked.has(listing.id)) return { will_send: false, reason: 'held', note: NO_BROCHURE_NOTE };
-    const url = typeof listing.brochureUrl === 'string' && /^https:\/\//i.test(listing.brochureUrl.trim()) ? listing.brochureUrl.trim() : null;
-    if (!url) return { will_send: false, reason: 'no_brochure', note: NO_BROCHURE_NOTE };
+    if (typeof listing.brochureUrl !== 'string' || !listing.brochureUrl.trim()) return { will_send: false, reason: 'no_brochure', note: NO_BROCHURE_NOTE };
+    // Only a brochure on Bona's own site is sent, linked or measured: never a request to another host.
+    const url = brochureUrlOn(listing.brochureUrl, siteUrl);
+    if (!url) return { will_send: false, reason: 'not_on_site', note: NO_BROCHURE_NOTE };
     const link = (reason) => ({ will_send: 'link', reason, url, note: 'Give this link on its own line; no PDF is sent.' });
     if (firstMessage(who.lead)) return link('first_message');
     const size = await brochureSize(url);
@@ -521,7 +567,25 @@ export function createToolHandlers({
     }
     if (!Object.keys(needs).length) return { saved: false, reason: 'nothing_to_save', note: 'Nothing to save: pass only what the client said.' };
     saveNeeds(db, { leadId: who.lead.lead_id, needs, now: now() });
-    return { saved: true, note: 'Saved. You may say you have noted it; this hands nothing over.' };
+    // What the lead row holds now, field by field: saved (written now or already there) or refused by
+    // lead-tasks' allow-list (a name under two letters, a listing id that is not one). Idempotent.
+    const fresh = db.getLead(who.lead.lead_id) ?? {};
+    const keys = Object.keys(needs);
+    const savedFields = keys.filter((k) => storedNeed(fresh, k, needs[k]));
+    const rejected = keys.filter((k) => !savedFields.includes(k));
+    if (!savedFields.length) {
+      const why = rejected.includes('name') ? ' (a name needs at least two letters)' : '';
+      return {
+        saved: false, reason: 'rejected', saved_fields: [], rejected,
+        note: `Nothing was saved: ${rejected.join(', ')} ${rejected.length > 1 ? 'were' : 'was'} not accepted${why}. Do not say you noted it; ask again if it matters.`,
+      };
+    }
+    return {
+      saved: true, saved_fields: savedFields, rejected,
+      note: rejected.length
+        ? `Saved: ${savedFields.join(', ')}; not saved: ${rejected.join(', ')}. Say you noted only what was saved; this hands nothing over.`
+        : 'Saved. You may say you have noted it; this hands nothing over.',
+    };
   }
 
   /** Read-only, for any source (DESIGN §4.3): published text only, so the phone line's HTTP route may serve it too. */
@@ -537,7 +601,8 @@ export function createToolHandlers({
   };
 
   /**
-   * Run a tool by name.
+   * Run a tool by name. `extra` comes from code only, never from the body: `{ inProcess: true }` (the brain,
+   * runInProcess) unlocks the five WhatsApp tools and the brain's search row; the HTTP route passes none.
    * @returns {Promise<string>} the JSON string handed back to Retell
    */
   async function run(name, body, extra = {}) {
@@ -557,5 +622,8 @@ export function createToolHandlers({
     return JSON.stringify(result);
   }
 
-  return { handlers, run };
+  /** The brain's way in (lib/brain.mjs runTool; PR-INT wires it): the same tools, marked in-process. */
+  const runInProcess = (name, body) => run(name, body, { inProcess: true });
+
+  return { handlers, run, runInProcess };
 }

@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { inspect, isDeepStrictEqual } from 'node:util';
-import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES, UNITS_NOTE, UNITS_NOT_PUBLISHED_NOTE, BLOCKED_BROCHURES, BROCHURE_HEAD_MS, BROCHURE_CACHE_MS, BROCHURE_MAX_BYTES, HANDOVER_KINDS } from '../lib/tools.mjs';
+import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES, UNITS_NOTE, UNITS_NOT_PUBLISHED_NOTE, BLOCKED_BROCHURES, BROCHURE_HEAD_MS, BROCHURE_CACHE_MS, BROCHURE_MAX_BYTES, BROCHURE_FAIL_CACHE_MS, HANDOVER_KINDS, WA_ONLY_TOOLS } from '../lib/tools.mjs';
+import { saveNeeds as realSaveNeeds } from '../lib/lead-tasks.mjs';
 import { createInventory, readInventoryFile, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { createUnits, WORKTREE_UNITS } from '../lib/units.mjs';
 import { createPublishedUnits } from '../lib/published-units.mjs';
@@ -863,8 +864,9 @@ const dump = (db) => Object.fromEntries(db.db.prepare("SELECT name FROM sqlite_m
 const head = (status, headers = {}) => new Response(null, { status, headers });
 
 /**
- * The tools as the brain runs them (lib/brain.mjs runOne: source and lead id from code, language AND locale),
- * with a fake owner test, a fake (or real) viewing module and a fake fetch for the brochure HEAD.
+ * The tools as the brain runs them (lib/brain.mjs runOne: source and lead id from code, language AND locale,
+ * in-process: `run(name, body, { inProcess: true })`, never the HTTP route), with a fake owner test, a fake (or
+ * real) viewing module and a fake fetch for the brochure HEAD.
  */
 function b4({ auto = true, viewing = null, fetchImpl = null, extra = {} } = {}) {
   const h = harness();
@@ -882,11 +884,14 @@ function b4({ auto = true, viewing = null, fetchImpl = null, extra = {} } = {}) 
     });
     return h.db.getLead(id);
   };
-  const wa = async (name, args = ARGS[name], { leadId = B4_LEAD, source = 'bona-whatsapp', language = 'en' } = {}) => JSON.parse(await tools.run(name, {
+  const body = (args, { leadId = B4_LEAD, source = 'bona-whatsapp', language = 'en' } = {}) => ({
     chat: { chat_id: `wa:${leadId}`, metadata: { ...(source === null ? {} : { source }), lead_id: leadId }, retell_llm_dynamic_variables: { language, locale: language } },
     args,
-  }));
-  return { ...h, tools, lead, wa, heads, clock };
+  });
+  const wa = async (name, args = ARGS[name], o = {}) => JSON.parse(await tools.run(name, body(args, o), { inProcess: true }));
+  /** The same envelope on the HTTP route's call (index.mjs: `tools.run(name, body)`, no in-process flag). */
+  const http = async (name, args = ARGS[name], o = {}) => JSON.parse(await tools.run(name, body(args, o)));
+  return { ...h, tools, lead, wa, http, heads, clock };
 }
 
 /** A fake viewing module: what lib/viewing.mjs answers, and every call it got. */
@@ -953,7 +958,7 @@ test('the autoMode gate (#8): a proof lead with the switches off gets bookable:f
     const t = b4({ auto: () => { throw new Error('boom'); }, viewing });
     try { t.lead(); assert.equal((await t.wa('save_needs')).saved, false); } finally { t.cleanup(); }
     const none = createToolHandlers({ ...h.deps });
-    const out = JSON.parse(await none.run('send_location', { chat: { chat_id: 'wa:x', metadata: { source: 'bona-whatsapp', lead_id: B4_LEAD } }, args: { listing_id: 'BONA-W003' } }));
+    const out = JSON.parse(await none.run('send_location', { chat: { chat_id: 'wa:x', metadata: { source: 'bona-whatsapp', lead_id: B4_LEAD } }, args: { listing_id: 'BONA-W003' } }, { inProcess: true }));
     assert.equal(out.precision, 'none');
     assert.equal(out.reason, 'not_auto');
   } finally { h.cleanup(); }
@@ -1008,7 +1013,7 @@ test('viewing_slots and book_viewing on the real viewing module: booking off →
     const ownerTest = { autoMode: (l) => Boolean(l) };
     const viewing = createViewing({ db: h.db, cfg: { siteUrl: 'https://bona.example.com', publicApi: 'https://api.example.com' }, team, ownerTest, inventory, gcal, now: () => h.clock.t });
     const tools = createToolHandlers({ ...h.deps, ownerTest, viewing, now: () => h.clock.t });
-    const run = async (name, args, leadId = B4_LEAD) => JSON.parse(await tools.run(name, { chat: { chat_id: `wa:${leadId}`, metadata: { source: 'bona-whatsapp', lead_id: leadId } }, args }));
+    const run = async (name, args, leadId = B4_LEAD) => JSON.parse(await tools.run(name, { chat: { chat_id: `wa:${leadId}`, metadata: { source: 'bona-whatsapp', lead_id: leadId } }, args }, { inProcess: true }));
     h.lead();
     h.lead('LEAD-20261201-0000b4bb', { name: '🙂' });
     // calendar_booking is '0' by default.
@@ -1058,7 +1063,7 @@ test('send_brochure: BLOCKED_BROCHURES (W011, W018, W024) and a home without one
     assert.deepEqual(pdf, { will_send: 'pdf', reason: 'ok', note: 'The PDF goes right after your message: say one short line that you are sending it.' });
     assert.deepEqual(h.heads, [[inventory.find('BONA-W003').brochureUrl, 'HEAD']]);
     // A search row says whether a home has a brochure; a held one says no.
-    const rows = JSON.parse(await h.tools.run('search_properties', { chat: { chat_id: 'c', metadata: { source: 'bona-whatsapp' } }, args: { query: 'Sadana' } })).results;
+    const rows = JSON.parse(await h.tools.run('search_properties', { chat: { chat_id: 'c', metadata: { source: 'bona-whatsapp' } }, args: { query: 'Sadana' } }, { inProcess: true })).results;
     const held = rows.find((r) => r.id === 'BONA-W011');
     if (held) assert.equal(held.has_brochure, false);
   } finally { h.cleanup(); }
@@ -1107,12 +1112,18 @@ test('send_brochure size (#18): a HEAD on brochureUrl, 5 s; 22 MB, no Content-Le
     await h.wa('send_brochure');
     assert.equal(h.heads.length, 2, 'asked again after 12 h');
   } finally { h.cleanup(); }
+  // A failed size is cached for 10 minutes only (no HEAD storm, and one timeout does not cost 12 h of links).
+  assert.equal(BROCHURE_FAIL_CACHE_MS, 10 * 60_000);
   const miss = b4({ fetchImpl: async () => head(404) });
   try {
     miss.lead();
     await miss.wa('send_brochure');
+    miss.clock.t += 10 * 60_000 - 1;
     await miss.wa('send_brochure');
-    assert.equal(miss.heads.length, 1, 'a failed size is cached too: no HEAD storm');
+    assert.equal(miss.heads.length, 1, 'cached within 10 min');
+    miss.clock.t += 2;
+    await miss.wa('send_brochure');
+    assert.equal(miss.heads.length, 2, 'asked again after 10 min');
   } finally { miss.cleanup(); }
 });
 
@@ -1141,7 +1152,7 @@ test('send_location: an exact pin → exact (the commit adds the map link); a di
 test('save_needs (#5): lead-tasks saveNeeds with name, interest, budget, district, property_type, timeline, listing_id; no hand-over, nothing sent', async () => {
   const calls = [];
   const all = { name: 'Sara Example', interest: 'a home to buy', budget: 'around 3 million', district: 'Al Shati', property_type: 'villa', timeline: 'this year', listing_id: 'BONA-W003' };
-  const spy = b4({ extra: { saveNeeds: (db, o) => { calls.push(o); return { saved: true, fields: Object.keys(o.needs) }; } } });
+  const spy = b4({ extra: { saveNeeds: (db, o) => { calls.push(o); return realSaveNeeds(db, o); } } });
   try {
     spy.lead();
     const out = await spy.wa('save_needs', { ...all, phone: '0500000099', area: 'ignored', kind: 'x' });
@@ -1269,4 +1280,99 @@ test('create_lead passes `created` to the owner notes (why concierge); with the 
     await t.tools.run('create_lead', { chat: { chat_id: 'o2' }, args: { phone: '0500000063', name: 'Sara Example' } });
     assert.equal(t.sent.length, 2, "today's concierge path, byte for byte (PR-F2b)");
   } finally { t.cleanup(); }
+});
+
+/* ---------------- PR-B4 r2 (the r1 reviews) ---------------- */
+
+test('the five WhatsApp tools run only in-process (the brain), never from a forged source on the HTTP /v1/tools route; listing_details and search_properties stay open', async () => {
+  const h = b4({ viewing: fakeViewing() });
+  try {
+    h.lead();
+    const before = dump(h.db);
+    for (const name of WA_ONLY_TOOLS) {
+      const [key, off] = OFF[name];
+      const out = await h.http(name);
+      assert.equal(out[key], off, name);
+      assert.equal(out.reason, 'not_in_process', name);
+    }
+    assert.deepEqual(dump(h.db), before, 'the HTTP calls wrote nothing');
+    assert.equal(h.heads.length, 0);
+    for (const name of WA_ONLY_TOOLS) {
+      const [key, off] = OFF[name];
+      assert.notEqual((await h.wa(name))[key], off, `${name} works in-process`);
+    }
+    assert.equal((await h.http('listing_details')).found, true);
+    assert.equal((await h.http('search_properties', { query: 'villa' })).count > 0, true);
+  } finally { h.cleanup(); }
+});
+
+test("search_properties keeps main's row shape for every caller but the brain route (in-process): the concierge, the legacy WhatsApp agent, the phone line", async () => {
+  const LEGACY_KEYS = ['id', 'slug', 'title_en', 'title_ar', 'type', 'category', 'district_en', 'district_ar', 'city', 'price_en', 'price_ar', 'beds', 'baths', 'area_sqm', 'url_en', 'url_ar'];
+  const h = b4();
+  try {
+    h.lead();
+    const args = { district: 'Jeddah' };
+    for (const metadata of [undefined, { source: 'bona-web' }, { source: 'bona-whatsapp', lead_id: B4_LEAD }, { source: 'bona-email', lead_id: B4_LEAD }]) {
+      const raw = await h.tools.run('search_properties', { chat: { chat_id: 'c', ...(metadata ? { metadata } : {}) }, args });
+      const out = JSON.parse(raw);
+      assert.ok(out.results.length > 0);
+      for (const row of out.results) {
+        assert.deepEqual(Object.keys(row), LEGACY_KEYS, JSON.stringify(metadata));
+        assert.equal(JSON.stringify(row), JSON.stringify(inventory.row(inventory.find(row.id))), 'byte for byte the row main gave');
+      }
+      assert.doesNotMatch(raw, /"(pin|lat|lng|has_brochure)"/, 'no pin, coordinates or brochure flag for a legacy caller');
+    }
+    const brain = await h.wa('search_properties', args);
+    for (const row of brain.results) {
+      assert.deepEqual(Object.keys(row).slice(0, LEGACY_KEYS.length), LEGACY_KEYS);
+      assert.ok('pin' in row && 'has_brochure' in row, 'the brain route gets the new fields');
+    }
+  } finally { h.cleanup(); }
+});
+
+test('save_needs answers what was saved and what was refused: a name "A" or "🙂" is not saved, and saved:true only when something is stored', async () => {
+  const h = b4();
+  try {
+    h.lead(B4_LEAD, { name: null, budget: null, listing_id: null });
+    for (const name of ['A', '🙂', '  b ']) {
+      const out = await h.wa('save_needs', { name });
+      assert.deepEqual(out, { saved: false, reason: 'rejected', saved_fields: [], rejected: ['name'], note: 'Nothing was saved: name was not accepted (a name needs at least two letters). Do not say you noted it; ask again if it matters.' }, name);
+      assert.equal(h.db.getLead(B4_LEAD).name, null);
+    }
+    const mixed = await h.wa('save_needs', { name: '🙂', budget: 'around 3 million', listing_id: 'not an id' });
+    assert.equal(mixed.saved, true);
+    assert.deepEqual(mixed.saved_fields, ['budget']);
+    assert.deepEqual(mixed.rejected, ['name', 'listing_id']);
+    assert.match(mixed.note, /not saved: name, listing_id/);
+    assert.equal(h.db.getLead(B4_LEAD).budget, 'around 3 million');
+    // The same budget again: already stored, so still saved (idempotent), nothing refused.
+    assert.deepEqual((await h.wa('save_needs', { budget: 'around 3 million' })).saved_fields, ['budget']);
+  } finally { h.cleanup(); }
+});
+
+test('the brochure HEAD goes only to Bona\'s site over https, with no redirect; another host or http is no brochure at all', async () => {
+  const w003 = inventory.find('BONA-W003');
+  const listing = (id, brochureUrl) => ({ ...w003, id, slug: `example-${id.toLowerCase()}`, brochureUrl });
+  const list = [
+    listing('BONA-W961', 'https://evil.example/listings/x/brochure.pdf'),
+    listing('BONA-W962', 'http://bona-real-estate.com/listings/x/brochure.pdf'),
+    listing('BONA-W963', 'https://bona-real-estate.com.evil.example/listings/x/brochure.pdf'),
+    listing('BONA-W964', 'https://user@bona-real-estate.com/listings/x/brochure.pdf'),
+    listing('BONA-W965', 'https://www.bona-real-estate.com/listings/x/brochure.pdf'),
+    listing('BONA-W966', 'https://bona.azoz.uk/listings/x/brochure.pdf'), // the configured site (cfg.siteUrl)
+  ];
+  const fake = { ...inventory, exact: (ref) => list.find((l) => l.id === String(ref).toUpperCase()) ?? null, all: () => list };
+  const inits = [];
+  const h = b4({ fetchImpl: async (url, init) => { inits.push(init); return head(200, { 'content-length': String(MB) }); }, extra: { inventory: fake } });
+  try {
+    h.lead();
+    for (const id of ['BONA-W961', 'BONA-W962', 'BONA-W963', 'BONA-W964']) {
+      assert.deepEqual(await h.wa('send_brochure', { listing_id: id }), { will_send: false, reason: 'not_on_site', note: 'There is no brochure to send for this home: offer its page.' }, id);
+    }
+    assert.equal(h.heads.length, 0, 'no request to another host');
+    assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W965' })).will_send, 'pdf');
+    assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W966' })).will_send, 'pdf');
+    assert.equal(h.heads.length, 2);
+    assert.ok(inits.every((i) => i.method === 'HEAD' && i.redirect === 'error'), 'a redirect is a failure, never followed');
+  } finally { h.cleanup(); }
 });

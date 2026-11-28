@@ -254,14 +254,14 @@ export function pinOf(listing) {
 }
 
 /**
- * Compact row handed to the LLM by `search_properties` (kept small on purpose). PR-B4: `has_brochure`
- * (listings.json has the URL only, no size: send_brochure measures it, critic round 2 #18), `pin`, and the
- * coordinates only for an exact pin.
+ * Compact row handed to the LLM by `search_properties` (kept small on purpose). With `assistant` (PR-B4: the
+ * brain's in-process route only) it also carries `has_brochure` (listings.json has the URL only, no size:
+ * send_brochure measures it, critic round 2 #18), `pin`, and the coordinates only for an exact pin. Without it,
+ * the row is exactly today's, for the concierge, the legacy WhatsApp agent and the phone line (PLAN §2 row 8).
  */
-export function toToolRow(listing, { siteUrl = 'https://bona.azoz.uk' } = {}) {
+export function toToolRow(listing, { siteUrl = 'https://bona.azoz.uk', assistant = false } = {}) {
   const card = toCard(listing, { siteUrl });
-  const pin = pinOf(listing);
-  return {
+  const row = {
     id: card.id,
     slug: card.slug,
     title_en: card.title.en,
@@ -278,6 +278,11 @@ export function toToolRow(listing, { siteUrl = 'https://bona.azoz.uk' } = {}) {
     area_sqm: card.areaSqm,
     url_en: card.url.en,
     url_ar: card.url.ar,
+  };
+  if (assistant !== true) return row;
+  const pin = pinOf(listing);
+  return {
+    ...row,
     has_brochure: typeof listing.brochureUrl === 'string' && listing.brochureUrl.trim() !== '',
     pin,
     ...(pin === 'exact' ? { lat: Number(listing.map.lat), lng: Number(listing.map.lng) } : {}),
@@ -562,7 +567,8 @@ export function createInventory({ file, siteUrl = 'https://bona.azoz.uk', reload
     search(q) { return search(maybeReload(), q); },
     find(ref) { return findOne(maybeReload(), ref); },
     card(listing) { return toCard(listing, { siteUrl }); },
-    row(listing) { return toToolRow(listing, { siteUrl }); },
+    /** `{ assistant: true }`: the brain route's row (PR-B4); otherwise today's. */
+    row(listing, { assistant = false } = {}) { return toToolRow(listing, { siteUrl, assistant }); },
     /** The listing with exactly this id or slug, or null (no loose title match). */
     exact(ref) { return exactListing(maybeReload(), ref); },
     /** listing_details (PR-B4): one published listing by its exact id or slug, in `lang`; `{ found: false }` otherwise. */

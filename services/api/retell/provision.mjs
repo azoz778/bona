@@ -73,7 +73,16 @@ export const WA_CHAT_AGENT_NAME = 'Bona Dana (WhatsApp)';
 export const WA_SESSION_MS = 86_400_000;
 
 /**
- * The WhatsApp agent's tools: the two inventory searches exactly as the site has them, and
+ * The legacy WhatsApp agent's search_units description, frozen at main 7165b3a: PR-B4 reworded the site's
+ * (toolsPayload), and the legacy agent keeps its payload unchanged until T27 deletes it (Codex r1 on PR #99).
+ * The handler gives every source only the published per-bedroom cut anyway (DESIGN §4.5).
+ */
+export const LEGACY_WA_SEARCH_UNITS_DESCRIPTION =
+  "Look inside a project at the developer's per-unit stock list, and answer WHICH units are still available and at what price. Call this instead of search_properties as soon as the visitor asks about a specific project's apartments — how many bedrooms, which floor, which view, which building, what it costs, or what payment plans exist. Returns matching units with their reference (e.g. B08-19), floor, facing, area and exact price, plus an `availability` summary of the whole project. Quote these figures exactly; never estimate a price and never invent a unit number.";
+
+/**
+ * The WhatsApp agent's tools: the two inventory searches as the site has them (search_units with its own,
+ * frozen description), and
  * `request_human`, the hand-over. No `show_property` — nothing is on a screen, links are
  * put in the text by lib/dana-wa.mjs — and no `create_lead` — the chat IS the lead.
  */
@@ -88,7 +97,7 @@ export function whatsappToolsPayload({ publicApi, toolToken }) {
   };
   return [
     quiet('search_properties'),
-    quiet('search_units'),
+    { ...quiet('search_units'), description: LEGACY_WA_SEARCH_UNITS_DESCRIPTION },
     {
       type: 'custom',
       name: 'request_human',
