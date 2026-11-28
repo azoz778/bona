@@ -480,14 +480,20 @@ const GUESS_METHODS = new Set(['keyword', 'time_window', 'ad_meta']);
  * message carried no ad evidence — a certain signal would have come first); otherwise it
  * is left as it was. A `current` that is not one of the three states reads as undecided
  * (the store's CHECK allows only those and NULL), so the answer is always a state or null.
+ *
+ * `own: true` is the own-number rule (DESIGN §3.1, PR-A1): the chat wrote to Bona's own
+ * number while that rule holds for it (lib/wa-poller.mjs decides), so an undecided or unsure
+ * chat goes `in` whatever the message says; `in` and `out` still stay where they are. Only an
+ * exact `true` counts; without it every answer is the old one.
  * @param {'in'|'unsure'|'out'|null|undefined} current
- * @param {{ signal?: 'certain'|'unsure'|null, method?: string|null }|null} [o]
+ * @param {{ signal?: 'certain'|'unsure'|null, method?: string|null, own?: boolean }|null} [o]
  * @returns {'in'|'unsure'|'out'|null}
  */
 export function nextInboxState(current, o) {
-  const { signal = null, method = null } = o ?? {};
+  const { signal = null, method = null, own = false } = o ?? {};
   const cur = INBOX_STATES.includes(current) ? current : null;
   if (cur === 'out' || cur === 'in') return cur;
+  if (own === true) return 'in';
   if (signal === 'certain') return 'in';
   if (signal === 'unsure' || GUESS_METHODS.has(method)) return 'unsure';
   return cur;

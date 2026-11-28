@@ -3,8 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES } from '../lib/tools.mjs';
-import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
+import { inspect, isDeepStrictEqual } from 'node:util';
+import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES, UNITS_NOTE, UNITS_NOT_PUBLISHED_NOTE } from '../lib/tools.mjs';
+import { createInventory, readInventoryFile, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
+import { createUnits, WORKTREE_UNITS } from '../lib/units.mjs';
+import { createPublishedUnits } from '../lib/published-units.mjs';
+import { recordFor, unitSummary } from '../lib/units-summary.mjs';
 import { createStore } from '../lib/store.mjs';
 import { normaliseLead, leadNote, appendLead, appendJsonl } from '../lib/leads.mjs';
 import { openDb } from '../lib/db.mjs';
@@ -21,6 +25,8 @@ function harness() {
     inventory, store, db, dataDir, siteUrl: 'https://bona.azoz.uk', env: {},
     // The real Evolution API is NEVER touched from tests.
     sendWhatsApp: async (text) => { sent.push(text); return { ok: true }; },
+    // Nor the live site: search_units reads the listing page through this (a test that needs a page brings its own).
+    publishedUnits: createPublishedUnits({ fetch: async () => { throw new Error('tests never touch the network'); } }),
   };
   const tools = createToolHandlers(deps);
   return { deps, dataDir, sent, store, db, tools, cleanup: () => { db.close(); fs.rmSync(dataDir, { recursive: true, force: true }); } };
@@ -409,4 +415,420 @@ test("the tool notes offer the site's WhatsApp number (src/data/site.json)", asy
   }));
   assert.ok(saved.note.includes(`WhatsApp ${site.whatsapp.display}`), saved.note);
   h.cleanup();
+});
+
+
+/* ---------------- search_units: the live page's published cut for every source (DESIGN §4.5, PR-0) ---------------- */
+
+// A W014-shaped sheet: two 1-bed units (the dearer one's cash price is NOT published), a 3-bed, a priceless
+// 2-bed, and two penthouses (the dearest cash price, units.mjs summary()'s price_to_en, is NOT published).
+// Every unit has instalment prices, none of which is published. Refs and amounts are made up: the public repo
+// must not carry a real unit's unpublished prices in a fixture (a test below checks them against the real sheet).
+// search_units no longer reads it (it quotes the live page); the owner's veto path and the leak checks do.
+const UNIT = (ref, beds, cls, areaSqm, [cash, half, year, twoYear]) => ({
+  ref, building: ref.split('-')[0], unit: ref.split('-')[1], floor: { en: '3rd', ar: 'الدور الثالث' }, floorIndex: 3,
+  facing: { en: 'South', ar: 'جنوبية' }, beds, baths: beds + 1, maidRoom: beds > 2, class: cls,
+  type: { en: 'Apartment', ar: 'شقة' }, areaSqm, roofSqm: 0, feature: { en: 'Main garden', ar: 'حديقة رئيسية' },
+  price: { cash, half, year, twoYear },
+});
+const SHEET = {
+  listingId: 'BONA-W014', project: { en: 'Darco Prime Waterfront', ar: 'داركو برايم' },
+  district: { en: 'Al-Shati District', ar: 'حي الشاطئ' }, city: { en: 'Jeddah', ar: 'جدة' },
+  delivery: '2028-06', currency: 'SAR', updated: '2026-09-02',
+  units: [
+    UNIT('B91-22', 1, 'Standard', 54.25, [701500, 716500, 771500, 806500]),
+    UNIT('B91-23', 1, 'Standard', 60.1, [745000, 761000, 819500, 856750]),
+    UNIT('B92-12', 3, 'Standard', 121.75, [1351500, 1381500, 1486500, 1554500]),
+    UNIT('B99-11', 2, 'Premium', 90, [null, null, null, null]),
+    UNIT('B07-31', 2, 'Penthouse', 210.5, [2100000, 2145000, 2310000, 2415000]),
+    UNIT('B07-32', 2, 'Penthouse', 230.25, [2450000, 2502000, 2695000, 2817500]),
+  ],
+};
+const PUBLISHED_CUT = {
+  rows: [
+    { label: { en: '1 bedroom', ar: 'غرفة نوم واحدة' }, count: 2, areaMin: 54.25, areaMax: 60.1, cashFrom: 701500 },
+    { label: { en: '3 bedrooms', ar: '3 غرف نوم' }, count: 1, areaMin: 121.75, areaMax: 121.75, cashFrom: 1351500 },
+    { label: { en: 'Penthouse, 2 bedrooms', ar: 'بنتهاوس، غرفتا نوم' }, count: 2, areaMin: 210.5, areaMax: 230.25, cashFrom: 2100000 },
+  ],
+  delivery: '2028-06', updated: '2026-09-02',
+};
+/** What the live listing page's data-units-summary carries for SHEET: the table it prints (ProjectDetails.astro). */
+const PAGE_SUMMARY = {
+  listingId: 'BONA-W014', count: 5, areaMin: 54.25, areaMax: 230.25, cashFrom: 701500,
+  delivery: PUBLISHED_CUT.delivery, updated: PUBLISHED_CUT.updated, rows: PUBLISHED_CUT.rows,
+};
+// The page as an earlier build printed it (made-up figures): the site has not deployed the newer sheet yet.
+const OLDER_PAGE_SUMMARY = {
+  ...PAGE_SUMMARY, count: 4, cashFrom: 698250, updated: '2026-08-20',
+  rows: [{ ...PAGE_SUMMARY.rows[0], count: 1, cashFrom: 698250 }, ...PAGE_SUMMARY.rows.slice(1)],
+};
+const OLDER_CUT = { rows: OLDER_PAGE_SUMMARY.rows, delivery: OLDER_PAGE_SUMMARY.delivery, updated: OLDER_PAGE_SUMMARY.updated };
+// The page after a Pages deploy changed a starting price (a made-up figure).
+const CHANGED_PAGE_SUMMARY = {
+  ...PAGE_SUMMARY, cashFrom: 689750, updated: '2026-11-20',
+  rows: [{ ...PAGE_SUMMARY.rows[0], cashFrom: 689750 }, ...PAGE_SUMMARY.rows.slice(1)],
+};
+const CHANGED_CUT = { rows: CHANGED_PAGE_SUMMARY.rows, delivery: CHANGED_PAGE_SUMMARY.delivery, updated: CHANGED_PAGE_SUMMARY.updated };
+const SITE = 'https://site.example.com';
+const W014_PAGE = `${SITE}/properties/darco-prime-waterfront-fixture/`;
+const UNITS_NOW = Date.parse('2026-11-27T09:00:00Z');
+const SOURCES = ['bona-whatsapp', 'bona-email', 'bona-web', undefined, 'someone-else'];
+// What a model asking for a unit would send: a unit ref, a plan, a bed count, a budget.
+const UNIT_ARGS = { listing_id: 'BONA-W014', beds: 1, plan: 'twoYear', query: 'B91-23', max_price: 900000, limit: 20, maid_room: false };
+
+/** Astro's attribute escaping (html-escaper): & < > ' " become entities. */
+const escapeAttr = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+/** A listing page as the site builds it; `summary` null is a page without the units table (sold, hidden, no sheet). */
+function listingPage(summary) {
+  const table = summary == null ? '' : `<section id="units" data-project-details><div class="mt-5 overflow-x-auto" data-units-summary="${
+    escapeAttr(typeof summary === 'string' ? summary : JSON.stringify(summary))}"><table></table></div></section>`;
+  return `<!doctype html><html lang="en"><body><main><h1>Darco Prime Waterfront</h1>${table}</main></body></html>`;
+}
+
+/** A one-listing inventory (W014, with the given status) built on a real listing so cards render. */
+function w014Inventory(status = 'available') {
+  const template = readInventoryFile(WORKTREE_LISTINGS)[0];
+  const w014 = { ...template, id: 'BONA-W014', slug: 'darco-prime-waterfront-fixture', status };
+  return createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk', read: () => [w014] });
+}
+
+/** A fake live site: `answer(url, callNo)` gives a page (a string: 200), a Response, or an Error (thrown). */
+function fakeSite(answer) {
+  const calls = [];
+  const fetch = async (url) => {
+    calls.push(String(url));
+    const a = await answer(String(url), calls.length);
+    if (a instanceof Error) throw a;
+    return typeof a === 'string' ? new Response(a, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }) : a;
+  };
+  return { fetch, calls };
+}
+
+/** `page`: the summary the live W014 page carries (null: none). `answer` replaces the whole fake site. */
+function unitsHarness({ sheet = SHEET, status = 'available', withUnits = true, extra = {}, page = PAGE_SUMMARY, answer = null, timeoutMs } = {}) {
+  const h = harness();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-tool-units-'));
+  const file = path.join(dir, 'units.json');
+  fs.writeFileSync(file, JSON.stringify(sheet));
+  const site = fakeSite(answer ?? ((url) => (url === W014_PAGE ? listingPage(page) : new Response('not found', { status: 404 }))));
+  const tools = createToolHandlers({
+    ...h.deps, siteUrl: SITE, inventory: w014Inventory(status), units: withUnits ? createUnits({ file }) : null, now: () => UNITS_NOW,
+    publishedUnits: createPublishedUnits({ siteUrl: SITE, fetch: site.fetch, ...(timeoutMs ? { timeoutMs } : {}) }),
+    ...extra,
+  });
+  const ask = async (source, args = UNIT_ARGS) => {
+    const raw = await tools.run('search_units', { chat: { chat_id: `units-${source}`, metadata: source === undefined ? {} : { source } }, args });
+    return { raw, result: JSON.parse(raw) };
+  };
+  return {
+    ...h, tools, ask, file, site,
+    cleanup: () => { h.cleanup(); fs.rmSync(dir, { recursive: true, force: true }); },
+  };
+}
+
+/**
+ * Nothing unpublished in the tool result: no per-unit rows, refs, plan keys or prices beyond the "from" rows.
+ * A failure prints in a public CI log, so it never shows the result or the value it found: assert.ok on a boolean
+ * (its `actual` is `false`, not the result), and a unit named by its place on the sheet, never by its ref or amount.
+ */
+function assertNoUnpublished(raw, sheet = SHEET) {
+  const absent = (re, what) => assert.ok(!re.test(raw), `${what} is in the result`);
+  absent(/price_to/, 'price_to / price_to_en (the highest cash price)');
+  absent(/price_two_year/, 'a two-year price key');
+  absent(/"(plan|plans|cash|half|year|twoYear|price_cash_en|price_en|price_ar|availability|total_matching)"\s*:/, 'a plan or per-unit price key');
+  absent(/\bB\d{2}-\d{2}\b/, 'a unit reference (B00-00 shape)');
+  absent(/\bB\d{2}-\d+\b/, 'a unit reference of any length');
+  absent(/results/, 'a per-unit results list');
+  const published = new Set(JSON.parse(raw).summary?.rows.map((r) => r.cashFrom) ?? []);
+  sheet.units.forEach((u, i) => {
+    for (const [plan, amount] of Object.entries(u.price)) {
+      if (typeof amount !== 'number' || (plan === 'cash' && published.has(amount))) continue;
+      assert.ok(!raw.includes(String(amount)) && !raw.includes(amount.toLocaleString('en-US')), `unit #${i}: its unpublished ${plan} price is in the result`);
+    }
+  });
+}
+
+test('assertNoUnpublished catches a leak without printing the leaked value or the result (public CI logs)', () => {
+  const [ref, amount] = [SHEET.units[1].ref, SHEET.units[1].price.twoYear];
+  const leaks = [
+    { summary: null, note: `ask about ${ref}` },
+    { summary: null, note: `two years: ${amount}` },
+    { summary: null, note: `two years: SAR ${amount.toLocaleString('en-US')}` },
+  ];
+  for (const leak of leaks) {
+    let err = null;
+    try { assertNoUnpublished(JSON.stringify(leak)); } catch (e) { err = e; }
+    assert.ok(err instanceof assert.AssertionError, 'the leak is caught');
+    const shown = `${err.message}\n${inspect(err)}`;
+    assert.ok(![ref, String(amount), amount.toLocaleString('en-US'), leak.note].some((v) => shown.includes(v)), 'the failure output shows no leaked value');
+  }
+});
+
+const keys = (o) => Object.keys(o).sort();
+const notPublished = (result, what) => {
+  assert.deepEqual(result, { count: 0, summary: null, note: UNITS_NOT_PUBLISHED_NOTE }, `${what}: the allow-listed shape, nothing quoted`);
+};
+
+test('search_units: every source (WhatsApp, email, website, none, unknown) gets exactly the live page\'s per-bedroom "from" rows', async () => {
+  const h = unitsHarness();
+  try {
+    for (const source of SOURCES) {
+      const { raw, result } = await h.ask(source);
+      assert.deepEqual(keys(result), ['count', 'note', 'summary'], `${source}: top-level keys`);
+      assert.deepEqual(keys(result.summary), ['delivery', 'rows', 'updated'], `${source}: summary keys`);
+      for (const row of result.summary.rows) {
+        assert.deepEqual(keys(row), ['areaMax', 'areaMin', 'cashFrom', 'count', 'label'], `${source}: row keys`);
+        assert.deepEqual(keys(row.label), ['ar', 'en'], `${source}: label keys`);
+      }
+      assert.deepEqual(result.summary, PUBLISHED_CUT, `${source}: the rows the live page shows`);
+      assert.equal(result.count, 5, `${source}: the available units the page counts`);
+      assert.equal(result.note, UNITS_NOTE, source);
+      assertNoUnpublished(raw);
+    }
+    // The project card still goes on the visitor's screen (the website chat's "mentioned properties").
+    assert.equal(h.store.getCall('units-bona-web').cards[0].id, 'BONA-W014');
+    // No arguments at all is the same published cut (W014 is the default project).
+    const bare = await h.ask('bona-whatsapp', {});
+    assert.deepEqual(bare.result.summary, PUBLISHED_CUT);
+    assertNoUnpublished(bare.raw);
+    // A blank id is no id: W014 still answers (the Retell schema: "Defaults to BONA-W014").
+    for (const blank of [{ listing_id: '' }, { listing_id: '   ' }, { listing_id: null }, { id: '' }, { listing_id: '', id: ' ' }, { listing_id: ' ', id: 'bona-w014' }]) {
+      const r = await h.ask('bona-whatsapp', blank);
+      assert.deepEqual(r.result.summary, PUBLISHED_CUT, `${JSON.stringify(blank)}: W014 is the default project`);
+      assertNoUnpublished(r.raw);
+    }
+    // The first id that is not blank decides: a blank listing_id does not hide the id given beside it.
+    notPublished((await h.ask('bona-whatsapp', { listing_id: ' ', id: 'BONA-005' })).result, 'BONA-005 beside a blank id');
+    // No cache: each of the 12 W014 answers above is a GET of the live W014 page of its own (BONA-005 is not fetched).
+    assert.equal(h.site.calls.length, SOURCES.length + 1 + 6, 'one GET per W014 call');
+    assert.ok(h.site.calls.every((url) => url === W014_PAGE), 'only the W014 page');
+  } finally { h.cleanup(); }
+});
+
+test('search_units quotes the live page, never units.json: a sheet the page does not show yet is not quoted, and no local sheet is needed', async () => {
+  // units.json on the VPS has the newer sheet (SHEET); the live page still shows the build before it.
+  const behind = unitsHarness({ page: OLDER_PAGE_SUMMARY });
+  try {
+    for (const source of SOURCES) {
+      const { raw, result } = await behind.ask(source);
+      assert.deepEqual(result.summary, OLDER_CUT, `${source}: the page's rows, not the newer sheet's`);
+      assert.equal(result.count, OLDER_PAGE_SUMMARY.count, source);
+      assertNoUnpublished(raw);
+    }
+  } finally { behind.cleanup(); }
+  // units.json has a current sheet, the page shows no table (a failed build, a hidden table): nothing.
+  const hidden = unitsHarness({ page: null });
+  try {
+    for (const source of SOURCES) notPublished((await hidden.ask(source)).result, `no table on the page, ${source}`);
+    assert.equal(hidden.store.getCall('units-bona-web'), null, 'no project card for an unpublished summary');
+  } finally { hidden.cleanup(); }
+  // No sheet loaded on this host at all: the page alone decides.
+  const noSheet = unitsHarness({ withUnits: false });
+  try {
+    for (const source of SOURCES) assert.deepEqual((await noSheet.ask(source)).result.summary, PUBLISHED_CUT, `no units.json, ${source}`);
+  } finally { noSheet.cleanup(); }
+});
+
+test('search_units: a page whose summary is malformed, not the allow-listed shape, another listing\'s or a non-bedroom label → the "not published" note, no card', async () => {
+  const row0 = PAGE_SUMMARY.rows[0];
+  const withRow = (r) => ({ ...PAGE_SUMMARY, rows: [r, ...PAGE_SUMMARY.rows.slice(1)] });
+  for (const [name, page] of [
+    ['broken JSON', '{"listingId":"BONA-W014","rows":['],
+    ['per-unit rows beside the summary', { ...PAGE_SUMMARY, units: [{ ref: 'B91-22' }] }],
+    ['a plan price in a row', withRow({ ...row0, twoYear: 806500 })],
+    ['a unit ref in a row', withRow({ ...row0, ref: 'B91-22' })],
+    ['a negative price', withRow({ ...row0, cashFrom: -1 })],
+    ['a price that is not a number', withRow({ ...row0, cashFrom: null })],
+    ['another listing\'s summary', { ...PAGE_SUMMARY, listingId: 'BONA-W999' }],
+    ['a unit ref as a row label (a malformed sheet)', withRow({ ...row0, label: { en: 'B95-17 bedrooms', ar: 'B95-17 غرف نوم' } })],
+    ['a blank bedroom count as a row label', withRow({ ...row0, label: { en: 'null bedrooms', ar: 'null غرف نوم' } })],
+  ]) {
+    const h = unitsHarness({ page });
+    try {
+      for (const source of SOURCES) {
+        const { raw, result } = await h.ask(source);
+        notPublished(result, `${name}, ${source}`);
+        assertNoUnpublished(raw);
+      }
+      assert.equal(h.store.getCall('units-bona-web'), null, `${name}: no project card`);
+    } finally { h.cleanup(); }
+  }
+  // A penthouse with a blank bedroom cell: the page prints "Penthouse, 0–2 bedrooms", a whole-count label, quoted.
+  const blank = { label: { en: 'Penthouse, 0–2 bedrooms', ar: 'بنتهاوس، من 0 إلى 2 غرف نوم' }, count: 3, areaMin: 205.75, areaMax: 230.25, cashFrom: 1950000 };
+  const h = unitsHarness({ page: { ...PAGE_SUMMARY, count: 6, rows: [...PAGE_SUMMARY.rows.slice(0, 2), blank] } });
+  try {
+    assert.deepEqual((await h.ask('bona-whatsapp')).result.summary, { ...PUBLISHED_CUT, rows: [...PUBLISHED_CUT.rows.slice(0, 2), blank] });
+  } finally { h.cleanup(); }
+});
+
+test('search_units: no cache and no fallback: every call reads the live page; a changed price is quoted as changed, a removed table or a failure on the next call → "not published"', async () => {
+  let state = 'up';
+  const pages = {
+    up: () => listingPage(PAGE_SUMMARY),
+    changed: () => listingPage(CHANGED_PAGE_SUMMARY),
+    'the table removed': () => listingPage(null),
+    'HTTP 500': () => new Response('oops', { status: 500 }),
+    'a 404': () => new Response('not found', { status: 404 }),
+    'a timeout': () => new Promise(() => {}),
+    'a network error': () => new TypeError('fetch failed'),
+  };
+  const h = unitsHarness({ answer: () => pages[state](), timeoutMs: 20 });
+  let asked = 0;
+  const ask = (source) => { asked++; return h.ask(source); };
+  try {
+    for (const source of SOURCES) assert.deepEqual((await ask(source)).result.summary, PUBLISHED_CUT, `${source}: up`);
+    // A Pages deploy changes a starting price: the very next call quotes the new price, for every source.
+    state = 'changed';
+    for (const source of SOURCES) {
+      const { raw, result } = await ask(source);
+      assert.deepEqual(result.summary, CHANGED_CUT, `${source}: the changed price, at once`);
+      assert.equal(result.note, UNITS_NOTE);
+      assertNoUnpublished(raw);
+      assert.ok(!raw.includes('701500') && !raw.includes('701,500'), `${source}: the price the page no longer shows is not quoted`);
+    }
+    // The table taken off the page, then each kind of failure, each right after a good answer: "not published".
+    for (const gone of ['the table removed', 'HTTP 500', 'a 404', 'a timeout', 'a network error']) {
+      state = 'up';
+      assert.deepEqual((await ask('bona-whatsapp')).result.summary, PUBLISHED_CUT, `${gone}: up just before`);
+      state = gone;
+      for (const source of SOURCES) {
+        const { raw, result } = await ask(source);
+        notPublished(result, `${gone}, ${source}: on the very next call, not the summary a moment ago`);
+        assertNoUnpublished(raw);
+      }
+    }
+    state = 'up';
+    assert.deepEqual((await ask('bona-email')).result.summary, PUBLISHED_CUT, 'back');
+    assert.equal(h.site.calls.length, asked, 'one GET of the live page per search_units call');
+    assert.ok(h.site.calls.every((url) => url === W014_PAGE));
+  } finally { h.cleanup(); }
+});
+
+test('search_units: calls that arrive together share one GET of the live page; the next call has a GET of its own', async () => {
+  let open;
+  const gate = new Promise((resolve) => { open = resolve; });
+  let summary = PAGE_SUMMARY;
+  const h = unitsHarness({ answer: async () => { await gate; return listingPage(summary); } });
+  try {
+    const together = [h.ask('bona-whatsapp'), h.ask('bona-web'), h.ask('bona-email')];
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(h.site.calls.length, 1, 'three calls in flight, one GET');
+    open();
+    for (const { raw, result } of await Promise.all(together)) {
+      assert.deepEqual(result.summary, PUBLISHED_CUT);
+      assertNoUnpublished(raw);
+    }
+    summary = CHANGED_PAGE_SUMMARY;
+    assert.deepEqual((await h.ask('bona-whatsapp')).result.summary, CHANGED_CUT, 'the next call reads the page as it is now');
+    assert.equal(h.site.calls.length, 2);
+  } finally { h.cleanup(); }
+});
+
+test('search_units: a listing the inventory does not list as available, an unknown project or one without a page → not published, and only a listed project\'s page is asked', async () => {
+  const sold = unitsHarness({ status: 'sold' });
+  try {
+    for (const source of SOURCES) notPublished((await sold.ask(source)).result, `a sold listing, ${source}`);
+    assert.deepEqual(sold.site.calls, [], 'a listing the inventory has as sold: the page is not asked');
+    assert.equal(sold.store.getCall('units-bona-web'), null);
+  } finally { sold.cleanup(); }
+  const h = unitsHarness();
+  try {
+    for (const listing_id of ['BONA-005', 'BONA-W999', 'darco-prime-waterfront-fixture', '../admin']) {
+      const { raw, result } = await h.ask('bona-whatsapp', { listing_id });
+      notPublished(result, listing_id);
+      assertNoUnpublished(raw);
+    }
+    assert.deepEqual(h.site.calls, [], 'an id the inventory does not list by that exact id: no request');
+  } finally { h.cleanup(); }
+  // The page is gone (404): nothing.
+  const gone = unitsHarness({ answer: () => new Response('not found', { status: 404 }) });
+  try {
+    notPublished((await gone.ask('bona-whatsapp')).result, 'a 404');
+  } finally { gone.cleanup(); }
+});
+
+test('search_units: by default it reads the live page of the site the service is configured with (siteUrl: BONA_SITE or site.json)', async () => {
+  const h = harness();
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url) => { calls.push(String(url)); return new Response(listingPage(PAGE_SUMMARY), { status: 200 }); };
+  try {
+    const { publishedUnits: _fake, ...deps } = h.deps;
+    const tools = createToolHandlers({ ...deps, siteUrl: 'https://live.example.com', inventory: w014Inventory() });
+    const result = JSON.parse(await tools.run('search_units', { chat: { chat_id: 'default', metadata: { source: 'bona-whatsapp' } }, args: {} }));
+    assert.deepEqual(result.summary, PUBLISHED_CUT);
+    assert.deepEqual(calls, ['https://live.example.com/properties/darco-prime-waterfront-fixture/']);
+  } finally { globalThis.fetch = realFetch; h.cleanup(); }
+});
+
+test('the search_units fixture is made up: no unit ref or price of it is on the real sheet (src/data/units.json)', () => {
+  const real = [JSON.parse(fs.readFileSync(WORKTREE_UNITS, 'utf8'))].flat().flatMap((r) => r?.units ?? []);
+  assert.ok(real.length > 0, 'the real sheet has units');
+  const refs = new Set(real.map((u) => u.ref));
+  const amounts = new Set(real.flatMap((u) => Object.values(u.price ?? {})).filter((n) => typeof n === 'number'));
+  // The messages name the fixture unit by its place, never by a value: a failure here prints in a public CI log.
+  SHEET.units.forEach((u, i) => {
+    assert.ok(!refs.has(u.ref), `fixture unit #${i}: its ref is on the real sheet`);
+    for (const plan of Object.keys(u.price)) assert.ok(!amounts.has(u.price[plan]), `fixture unit #${i}: its ${plan} price is on the real sheet`);
+  });
+  [OLDER_PAGE_SUMMARY.cashFrom, CHANGED_PAGE_SUMMARY.cashFrom].forEach((n, i) => assert.ok(!amounts.has(n), `made-up page figure #${i} is on the real sheet`));
+});
+
+test('search_units: the source set the full rows by default is empty (deny by default); the veto is that one set', async () => {
+  assert.deepEqual([...FULL_UNIT_ROW_SOURCES], [], 'no source gets per-unit rows unless the owner vetoes the cut');
+  assert.ok(Object.isFrozen(FULL_UNIT_ROW_SOURCES), 'nothing can add a source at run time');
+  // The owner's veto on the website-chat cut: bona-web alone gets the old per-unit rows back.
+  const h = unitsHarness({ extra: { fullUnitRowSources: ['bona-web'] } });
+  try {
+    const web = (await h.ask('bona-web', { listing_id: 'BONA-W014', beds: 1 })).result;
+    assert.deepEqual(web.results.map((r) => r.ref), ['B91-22', 'B91-23'], 'the veto path: today\'s per-unit rows');
+    assert.ok(web.availability, 'the veto path keeps the old availability block');
+    for (const source of ['bona-whatsapp', 'bona-email', undefined]) {
+      const { raw, result } = await h.ask(source);
+      assert.deepEqual(result.summary, PUBLISHED_CUT, `${source}: still the cut under the website veto`);
+      assertNoUnpublished(raw);
+    }
+  } finally { h.cleanup(); }
+});
+
+test('search_units: the note says the prices are "from" prices and no longer asks for a unit reference', async () => {
+  const h = unitsHarness();
+  try {
+    for (const source of SOURCES) {
+      const { result } = await h.ask(source);
+      assert.match(result.note, /quote them as 'from'/, result.note);
+      assert.match(result.note, /published starting cash prices per bedroom count/, result.note);
+      assert.match(result.note, /payment plans are not published: offer a person/, result.note);
+      assert.doesNotMatch(result.note, /unit reference|B\d{2}-\d+|quote them exactly/i, result.note);
+    }
+    assert.match(UNITS_NOT_PUBLISHED_NOTE, /not published/);
+    assert.doesNotMatch(UNITS_NOT_PUBLISHED_NOTE, /unit reference|B\d{2}-\d+/i);
+  } finally { h.cleanup(); }
+});
+
+test('search_units on the real W014 sheet (src/data/units.json), as the page would publish it: nothing beyond the "from" rows, for every source', async () => {
+  // The page's attribute for the real sheet, built the way ProjectDetails.astro builds it (from the summary the
+  // table prints). Every check is a boolean: these are the real sheet's figures (public CI logs).
+  const record = recordFor(JSON.parse(fs.readFileSync(WORKTREE_UNITS, 'utf8')), 'BONA-W014');
+  const s = unitSummary(record);
+  assert.ok(s !== null, 'the real W014 sheet summarises');
+  const page = {
+    listingId: 'BONA-W014', count: s.count, areaMin: s.areaMin, areaMax: s.areaMax, cashFrom: s.cashFrom, delivery: s.delivery, updated: s.updated,
+    rows: s.rows.map((r) => ({ label: r.label, count: r.count, areaMin: r.areaMin, areaMax: r.areaMax, cashFrom: r.cashFrom })),
+  };
+  const h = unitsHarness({ page });
+  try {
+    // One record today, an array once a second project has a sheet: every unit of every sheet is checked.
+    const sheet = { units: [JSON.parse(fs.readFileSync(WORKTREE_UNITS, 'utf8'))].flat().flatMap((r) => r?.units ?? []) };
+    for (const source of SOURCES) {
+      const { raw, result } = await h.ask(source);
+      assert.deepEqual(keys(result), ['count', 'note', 'summary']);
+      assert.ok(result.summary !== null, `${source}: the real sheet's page summary is quoted`);
+      assert.deepEqual(keys(result.summary), ['delivery', 'rows', 'updated']);
+      for (const row of result.summary.rows) assert.deepEqual(keys(row), ['areaMax', 'areaMin', 'cashFrom', 'count', 'label']);
+      assert.ok(isDeepStrictEqual(result.summary.rows, page.rows), `${source}: exactly the page's rows`);
+      assert.ok(result.count === s.count, `${source}: the page's count`);
+      assertNoUnpublished(raw, sheet);
+    }
+  } finally { h.cleanup(); }
 });

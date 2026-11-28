@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { openDb, tokenHash } from '../lib/db.mjs';
 import { createTeam, isExcludedLead } from '../lib/team.mjs';
-import { createAlerts, ALERT_EVERY_MS, ALERT_FRESH_MS, MAX_DEVICES_PER_USER, CHECK_PENDING_MS } from '../lib/alerts.mjs';
+import { createAlerts, ALERT_EVERY_MS, ALERT_FRESH_MS, MAX_DEVICES_PER_USER, CHECK_PENDING_MS, OWNER_ALERT_REASONS } from '../lib/alerts.mjs';
 
 const NOW = 1_790_600_000_000;
 const b64u = (b) => Buffer.from(b).toString('base64url');
@@ -422,6 +422,70 @@ test("notifyOwners 'funds' shares the device handling: 410 deletes, a failure co
   const boss2 = s.team.addUser({ name: 'Second Owner', phone: '966500000003', role: 'owner' });
   s.team.deactivateUser(s.owner.user_id);
   assert.deepEqual(await s.alerts.notifyOwners({ reason: 'funds' }), { skipped: 'no_devices' });
+});
+
+/* ---- the owner-wide reasons of the automation (PLAN T09; DESIGN §5.3, §14; DESIGN-brain §4, §10) ---- */
+
+/** The WhatsApp link down, the instance not being Bona's own number, Dana paused by the breaker, the AI service out of credit or key. */
+const AUTOMATION_REASONS = ['wa_link_down', 'identity_mismatch', 'dana_paused', 'brain'];
+
+test('the owner-wide reasons are funds plus the four of the automation, and no chat reason is one of them', () => {
+  assert.deepEqual([...OWNER_ALERT_REASONS].sort(), ['brain', 'dana_paused', 'funds', 'identity_mismatch', 'wa_link_down']);
+  assert.ok(Object.isFrozen(OWNER_ALERT_REASONS), 'a caller cannot add a reason at run time');
+  for (const chat of ['inbound', 'needs_human', 'check', 'other']) assert.equal(OWNER_ALERT_REASONS.includes(chat), false, chat);
+});
+
+for (const reason of AUTOMATION_REASONS) {
+  test(`notifyOwners '${reason}': every live device of the active owners, never staff; logged with the reason and counts only`, async () => {
+    const s = scene();
+    const boss2 = s.team.addUser({ name: 'Second Owner', phone: '966500000003', role: 'owner' });
+    const h2 = s.session(boss2);
+    s.sub('owner', 1); s.sub('sara', 2); s.sub('omar', 3);
+    s.alerts.subscribe({ userId: boss2.user_id, sessionHash: h2, endpoint: ep(4), keys: KEYS });
+    assert.deepEqual(await s.alerts.notifyOwners({ reason }), { users: 2, devices: 2, ok: 2, gone: 0, failed: 0 });
+    assert.deepEqual(s.sent.sort(), [ep(1), ep(4)], 'the owners only');
+    assert.deepEqual(s.logs.filter((l) => l.evt === 'push.sent'), [{ evt: 'push.sent', reason, users: 2, devices: 2, ok: 2, gone: 0, failed: 0 }]);
+    assert.doesNotMatch(JSON.stringify(s.logs), /fcm\.googleapis|device-|966|Owner/);
+  });
+}
+
+test('the automation reasons share the owner-wide handling: no keys → off, no owner device → no_devices, a 410 deletes, a broken db never rejects', async () => {
+  for (const reason of AUTOMATION_REASONS) {
+    const off = scene({ configured: false });
+    off.sub('owner', 1);
+    assert.deepEqual(await off.alerts.notifyOwners({ reason }), { skipped: 'off' }, reason);
+    const none = scene();
+    none.sub('sara', 1);
+    assert.deepEqual(await none.alerts.notifyOwners({ reason }), { skipped: 'no_devices' }, `${reason}: staff devices only`);
+    assert.deepEqual(none.sent, []);
+    const gone = scene({ answer: () => ({ status: 410 }) });
+    gone.sub('owner', 1);
+    assert.deepEqual(await gone.alerts.notifyOwners({ reason }), { users: 1, devices: 1, ok: 0, gone: 1, failed: 0 });
+    assert.equal(gone.alerts.countFor(gone.owner.user_id), 0);
+    const broken = scene();
+    broken.db.close();
+    assert.deepEqual(await broken.alerts.notifyOwners({ reason }), { error: 'failed' });
+  }
+});
+
+test('an owner-wide push is no chat push: it neither quiets a chat alert nor counts against the funds alert', async () => {
+  const s = scene();
+  s.sub('owner', 1); s.sub('sara', 2);
+  await s.alerts.notifyOwners({ reason: 'funds' });
+  s.tick(ALERT_EVERY_MS + 1000);
+  for (const reason of AUTOMATION_REASONS) assert.equal((await s.alerts.notifyOwners({ reason })).ok, 1, reason);
+  assert.equal(s.alerts.fundsPending(s.owner.user_id, NOW), true, 'only a chat push decides that the phone shows something else');
+  assert.deepEqual(await s.alerts.notify('LEAD-A', { ts: s.now() }), { users: 2, devices: 2, ok: 2, gone: 0, failed: 0 },
+    'nobody was marked for the chat by an owner-wide push');
+});
+
+test('notifyOwners refuses a chat reason, an unknown or a near-miss reason (never sent as something else)', async () => {
+  const s = scene();
+  s.sub('owner', 1);
+  for (const reason of ['inbound', 'needs_human', 'check', 'other', 'WA_LINK_DOWN', 'wa_link_down ', 'brain_out', 'identity', '__proto__', 'constructor', 42, null]) {
+    assert.deepEqual(await s.alerts.notifyOwners({ reason }), { skipped: 'bad_reason' }, String(reason));
+  }
+  assert.deepEqual(s.sent, []);
 });
 
 test("notifyOwners: off without keys, a reason that is not an owner-wide one is refused, and it never rejects", async () => {
