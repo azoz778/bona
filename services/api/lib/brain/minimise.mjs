@@ -47,6 +47,8 @@ const MAX_DIGITS = 15;
 /** A run of this many digits or more that is not a phone or an ID: an account or a card number. */
 const ACCOUNT_DIGITS = 12;
 /** A phone whose first digits say so: 0 then 1-9 (10 digits), 00 then a country code, or 966. Never "000" (an amount's tail). */
+/** Text right before a WhatsApp link's number: wa.me/, api.whatsapp.com/send?phone=, whatsapp://send?phone=. */
+const WA_LINK_BEFORE_RE = /(?:wa\.me\/|[?&]phone=)$/i;
 const CLEAR_PHONE_RE = /^(?:0[1-9]\d{8}|00[1-9]\d{8,12}|966\d{8,9})$/;
 /** A phone that is already whole: a Saudi number (0 + 9, 966 + 9, 00966 + 9) or a 00 international one (Claude r15). */
 const COMPLETE_PHONE_RE = /^(?:0[1-9]\d{8}|(?:00)?966\d{9}|00(?!966)[1-9]\d{8,12})$/;
@@ -248,7 +250,8 @@ function numberCuts(s) {
     const floor = Math.max(i > 0 ? groups[i - 1].end : 0, cuts.length ? cuts.at(-1).end : 0, groups[i].start - PHONE_GAP_MAX);
     let plusAt = -1;
     for (let k = groups[i].start - 1; k >= floor && PHONE_SEP_RE.test(s[k]); k -= 1) if (s[k] === '+') plusAt = k;
-    const plus = plusAt >= 0;
+    // A WhatsApp link's number is international without its "+" ("wa.me/12025550123", "...send?phone=447700900123"): read as one after a "+" (Codex r20).
+    const plus = plusAt >= 0 || WA_LINK_BEFORE_RE.test(s.slice(Math.max(0, groups[i].start - 40), groups[i].start));
     // The 3-digit tail of an amount no mask took ("2.950.000", "500 000") never starts a run across a wide gap:
     // "2.950.000  -  3.100.000" is two amounts, never "000" plus "3100000".
     const prevEnd = i > 0 ? groups[i - 1].end : -1;
@@ -353,7 +356,7 @@ function numberCuts(s) {
       if (far > best.j) best = { j: far, mask: best.mask === '[account-number]' ? best.mask : '[phone]' };
     }
     let start = groups[i].start;
-    if (plus) start = plusAt;
+    if (plusAt >= 0) start = plusAt;
     else if (s[start - 1] === '(') start -= 1;
     if (s[start - 1] === '(' && s[start] === '+') start -= 1;
     let end = groups[best.j].end;

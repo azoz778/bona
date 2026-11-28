@@ -1140,6 +1140,13 @@ test("Claude r21: a day write of unknown outcome from 23:59 settled after midnig
   assert.equal(realGet('brain_usd_day'), `2026-11-27:${MICRO}`, "the new day holds A's charge");
 });
 
+test("Codex r20: a client's wa.me link never sends its number to the provider", async () => {
+  const h = harness({ script: [reply('Sure.')] });
+  await h.brain.turn(turnArgs({ batchText: 'Please WhatsApp me at https://wa.me/12025550123', history: [{ role: 'user', content: 'or wa.me/447700900123' }] }));
+  const all = h.calls[0].body.messages.map((x) => x.content).join('\n');
+  for (const d of ['12025550123', '2025550123', '447700900123', '7700900123']) assert.equal(all.includes(d), false, d);
+});
+
 test("Claude r20: the month alert goes once even when its own marker cannot be read now and then", async () => {
   const h = harness({ env: { BONA_BRAIN_MONTH_ALERT_USD: '10' }, script: [reply('A.'), reply('B.'), reply('C.'), reply('D.')] });
   h.team.setSetting('brain_usd_month', '2026-11:8500000');

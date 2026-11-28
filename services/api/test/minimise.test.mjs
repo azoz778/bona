@@ -393,6 +393,17 @@ test('after a phone the net keeps an amount, an area or a year; a Hijri date is 
   assert.ok(performance.now() - t < 2000, 'the net is linear');
 });
 
+/* Codex r20 P0: a WhatsApp link carries an international number without its "+". */
+test('the number in a WhatsApp link is masked, whatever its country', () => {
+  for (const [input, want] of [
+    ['Please WhatsApp me at https://wa.me/12025550123', 'Please WhatsApp me at https://wa.me/[phone]'],
+    ['wa.me/447700900123 thanks', 'wa.me/[phone] thanks'],
+    ['https://api.whatsapp.com/send?phone=966501234567&text=hi', 'https://api.whatsapp.com/send?phone=[phone]&text=hi'],
+    ['whatsapp://send?phone=971501234567', 'whatsapp://send?phone=[phone]'],
+  ]) assert.equal(minimise(input), want, input);
+  assert.equal(minimise('see bona-real-estate.com/listings/BONA-W012'), 'see bona-real-estate.com/listings/BONA-W012', 'a listing link stays');
+});
+
 /** The first 7-digit run of `num` still readable in `out` (digits only), else null. */
 function sevenOf(out, num) {
   const ds = String(out).replace(/\D/g, '');

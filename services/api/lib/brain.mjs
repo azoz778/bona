@@ -473,14 +473,15 @@ export function createBrain(deps = {}) {
         // while the unsaved amount is still for the attempt's own day or month (an attempt from 23:59, Claude r21).
         const period = a.value.split(':')[0];
         if (k === 'brain_usd_day') { if (state.unsaved.day === period) state.unsaved.dayMicro = Math.max(0, state.unsaved.dayMicro - a.part); }
-        else {
-          if (state.unsaved.month === period) state.unsaved.monthMicro = Math.max(0, state.unsaved.monthMicro - a.part);
-          // A month charge confirmed here is checked against the alert as a save would be (Codex r19).
-          const [month, micro] = a.value.split(':');
-          monthAlert({ month, monthMicro: Number(micro) });
-        }
+        else if (state.unsaved.month === period) state.unsaved.monthMicro = Math.max(0, state.unsaved.monthMicro - a.part);
       }
       delete state.attempts[k];
+      // A month charge confirmed here is checked against the alert as a save would be (Codex r19); only for the
+      // current month, so a November write settled on 1 December alerts nothing (Claude r22).
+      if (back === a.value && k === 'brain_usd_month') {
+        const [month, micro] = a.value.split(':');
+        if (month === periodsOf(now()).month) monthAlert({ month, monthMicro: Number(micro) });
+      }
     }
     return true;
   }
@@ -492,9 +493,10 @@ export function createBrain(deps = {}) {
     const levelOf = (v) => { const m = /^(\d{4}-\d{2}):(80|100)$/.exec(String(v ?? '')); return m && m[1] === cur.month ? Number(m[2]) : 0; };
     const done = Math.max(team ? levelOf(setting('brain_month_alerted')) : 0, levelOf(state.spend.alerted));
     if (level > done) {
-      tell('brain_spend', { level });
+      // Recorded before it is sent, so an alert sink that reads the brain back never sends it twice (Claude r22).
       state.spend.alerted = `${cur.month}:${level}`;
       store('brain_month_alerted', `${cur.month}:${level}`);
+      tell('brain_spend', { level });
     }
   }
   /** 'day' | 'month' when a runaway stop is reached by the totals `cur` (one read), else null. No alert (health() reads it too). */
