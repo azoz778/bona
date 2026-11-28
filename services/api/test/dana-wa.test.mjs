@@ -12,7 +12,7 @@ import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import {
   createDana, languageOf, leadFacts, recentContext, batchText, withLinks, clip, answerFrom,
   HUMAN_QUIET_MS, SESSION_IDLE_MS, FRESH_MS, PER_CHAT_PER_HOUR, PER_DAY, CONTEXT_MESSAGES, MAX_LINKS, MAX_ANSWER_LEN, DISCLOSURE, HANDOVER,
-  BACKLOG_MS, LEGACY_DISCLOSURE, CLOSING, FIXED_LINES, requestKind, handoffDetails, brainInput, fixedLinesFrom, NEUTRAL, LEGACY_MAX_LINKS,
+  BACKLOG_MS, LEGACY_DISCLOSURE, CLOSING, FIXED_LINES, requestKind, handoffDetails, brainInput, fixedLinesFrom, NEUTRAL, LEGACY_MAX_LINKS, linksIn,
   LEGACY_FRESH_MS, LEGACY_PER_CHAT_PER_HOUR, LEGACY_PER_DAY,
   PER_CHAT_PER_10MIN, PER_CHAT_PER_DAY, PER_DAY_TIERS,
 } from '../lib/dana-wa.mjs';
@@ -3274,4 +3274,65 @@ test('T12 r16 G4 (Codex P1-3): a newly backfilled older message gets its own `mi
   h.tick(60_000);
   await h.dana.answer(LEAD, { ts: late });
   assert.equal(h.notes.of('handover').length, 2);
+});
+
+/* ======================================================================================
+ * PR-B3 r17 (Codex P0, P1): masking runs over every client row of the window before the history LIMIT; a bare
+ * domain or path is a link (the allowance and the host allow-list), ordinary text is not.
+ * ====================================================================================== */
+
+test('T12 r17 1 (P0): a number split at the history LIMIT is masked with both halves (masking before the 10-row cut)', async () => {
+  const { brain, bodies } = realBrain([reply200('Of course.')]);
+  const h = bh({ brain });
+  const words = 'one two three four five six seven eight nine'.split(' ');
+  // The first half is the 11th-newest history row, the second half the 10th: just inside the model's window.
+  h.client('please call me on 050', { ts: T_IN - 30 * 60_000 });
+  h.client('123 4567', { ts: T_IN - 29 * 60_000 });
+  for (let i = 0; i < 9; i += 1) h.client(`question ${words[i]}`, { ts: T_IN - 28 * 60_000 + i * 60_000 });
+  const rid = h.s.db.prepare('SELECT MAX(rowid) AS r FROM wa_messages WHERE lead_id = ?').get(LEAD).r;
+  h.danaRow({ covers: T_IN - 28 * 60_000 + 8 * 60_000, created: T_IN - 15 * 60_000, error: `cov:${rid}` });
+  const q = h.client('and the price?', { ts: T_IN - 60_000 });
+  await h.dana.answer(LEAD, { ts: q });
+  assert.equal(bodies.length, 1);
+  const raw = JSON.stringify(bodies[0].messages.filter((x) => x.role !== 'system'));
+  assert.match(raw, /question nine/, 'the history reached the model');
+  assert.doesNotMatch(raw, /050|123|4567/, 'no digit run of the number in the request');
+});
+
+test('T12 r17 2 (P1): a bare www link on a first reply (no link allowed) goes', async () => {
+  const h = bh({ turns: [brainReply('You can reach our team any time. Details: www.example.com/contact')] });
+  await ask(h, 'Hi');
+  assert.equal(h.sent().length, 1);
+  assert.doesNotMatch(h.sent()[0], /example\.com|www\./);
+  assert.match(h.sent()[0], /You can reach our team any time\./);
+});
+
+test('T12 r17 2 (P1): a later reply keeps Bona\'s own bare domain within the allowance and strips an off-site one', async () => {
+  const h = bh({ turns: [brainReply('Hello! How can I help?'), brainReply('Photos are on bona.azoz.uk/villas/1 and more at example.com/villas today.'), brainReply('Also see bona.azoz.uk/a and bona.azoz.uk/b and bona.azoz.uk/c please.')] });
+  await ask(h, 'Hi');
+  h.tick(60_000);
+  await ask(h, 'any photos?');
+  assert.match(h.sent()[1], /bona\.azoz\.uk\/villas\/1/, 'own bare domain kept');
+  assert.doesNotMatch(h.sent()[1], /example\.com/, 'off-site bare domain stripped');
+  h.tick(60_000);
+  await ask(h, 'more?');
+  assert.equal((h.sent()[2].match(/bona\.azoz\.uk\//g) ?? []).length, MAX_LINKS, 'own bare links count toward the allowance');
+});
+
+test('T12 r17 2: ordinary text ("3.5 million", "e.g.", a.m.) is never taken for a domain; bare domains and paths are', () => {
+  for (const t of ['The price is 3.5 million, e.g. with a 10% deposit.', 'Viewings start at 10 a.m. or 4 p.m., i.e. daily.',
+    'Write to info@bona.azoz.uk any time.', 'Plot 12.5 x 30.2 m, U.S. style, etc.', 'السعر 3.5 مليون']) {
+    assert.deepEqual(linksIn(t), [], t);
+  }
+  assert.deepEqual(linksIn('See www.example.com/contact now'), ['www.example.com/contact']);
+  assert.deepEqual(linksIn('More at example.com/villas today.'), ['example.com/villas']);
+  assert.deepEqual(linksIn('Visit example.com.sa or bona.azoz.uk/v/1.'), ['example.com.sa', 'bona.azoz.uk/v/1.']);
+  assert.deepEqual(linksIn('Go to https://example.com/x and www.example.org'), ['https://example.com/x', 'www.example.org']);
+});
+
+test('T12 r17 2: a first reply with ordinary text and an e-mail address goes unchanged', async () => {
+  const text = 'Viewings start in the morning, e.g. on Sunday at nine a.m. Write to info@bona.azoz.uk any time.';
+  const h = bh({ turns: [brainReply(text)] });
+  await ask(h, 'Hi');
+  assert.ok(h.sent()[0].endsWith(text), h.sent()[0]);
 });

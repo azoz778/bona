@@ -164,11 +164,23 @@ const CONTEXT_MAX = 3000;
 const FACT_MAX = 120;
 const BATCH_MAX = 4000;
 const LATENCY_RING = 500;
+/** The rows masked together for one brain turn (r17): the chat's newest, before the history's 10-row cut. */
+const MASK_ROWS = 200;
 const ARABIC_RE = /[؀-ۿ]/;
 const LATIN_RE = /[A-Za-z]/;
 const PLACEHOLDER_RE = /^\[[^\]\n]{1,40}\]$/;
 const LISTING_ID_RE = /\bBONA-W?\d{3}\b/i;
 const LINK_RE = /https?:\/\/[^\s<>"'`]+/giu;
+/**
+ * A brain chat's links (r17): a URL with a scheme, a bare `www.` host, or a bare domain with a known top-level domain
+ * (WhatsApp makes each clickable), with its path. Never inside an e-mail address or another host, never a number
+ * ("3.5 million") or an abbreviation ("e.g.", "a.m."): the last label must be one of these TLDs.
+ */
+const LINK_TLDS = 'com|net|org|info|biz|io|co|me|app|dev|ai|sa|ae|qa|kw|bh|om|eg|jo|uk|us|eu|de|fr|in|tv|ly|gl|to|cc|ws|xyz|online|site|store|tech|link|page|gov|edu|realestate|properties|homes';
+const BRAIN_LINK_RE = new RegExp(String.raw`https?:\/\/[^\s<>"'\x60]+|(?<![@\w./-])www\.[^\s<>"'\x60]+|(?<![@\w./-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+(?:${LINK_TLDS})(?![a-z0-9-])(?:\/[^\s<>"'\x60]*)?`, 'giu');
+/** Every link a brain chat's text carries, by BRAIN_LINK_RE (r17), as written (a trailing stop included). */
+export const linksIn = (text) => String(text ?? '').match(BRAIN_LINK_RE) ?? [];
+const hasLink = (text) => linksIn(text).length > 0;
 /** The code-built maps link (DESIGN §4.1, §6.5): the one off-site URL a reply may carry. */
 const MAPS_RE = /^https:\/\/maps\.google\.com\/\?q=-?\d{1,3}(?:\.\d+)?,-?\d{1,3}(?:\.\d+)?$/;
 /** Acknowledgements the loop guard never counts as a repeat (brain chats): at most 3 words, every one of them here. */
@@ -813,9 +825,11 @@ export function createDana({
   async function think(lead, batch, language, auto, pendingAll = batch) {
     // History never holds a pending message (one past the cap included); the batch is passed whole (r14 I2).
     const pendingKeys = new Set(pendingAll.map((m) => m.key_id));
-    // The history window with each row's rowid, so the masking series is in true send order (r16 G1).
+    // The MASKING window, with each row's rowid (true send order, r16 G1): the chat's newest MASK_ROWS rows (every client
+    // row of 24 h in all but a flood), never only the model's 10 history rows (r17): inboxTurn masks them all as one
+    // series with every pending message, and only then takes the 10 history rows, so the LIMIT never cuts a number.
     const rows = prep('ctxRows', 'SELECT rowid AS rid, * FROM wa_messages WHERE lead_id = ? ORDER BY ts DESC, rowid DESC LIMIT ?')
-      .all(String(lead.lead_id), Math.min(200, CONTEXT_MESSAGES + pendingAll.length)).map((r) => ({ ...r })).reverse()
+      .all(String(lead.lead_id), MASK_ROWS).map((r) => ({ ...r })).reverse()
       .filter((m) => !pendingKeys.has(m.key_id));
     const input = brainInput({ rows, batch, pending: pendingAll, hideBefore: againFloor(lead.lead_id) });
     try {
@@ -1385,7 +1399,7 @@ export function createDana({
   /** Bona's own site (cfg.siteUrl's host, and bona-real-estate.com): the only hosts a reply may link to, besides the maps link. */
   function onSite(url) {
     let host = '';
-    try { host = new URL(url).host.toLowerCase(); } catch { return false; }
+    try { host = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).host.toLowerCase(); } catch { return false; }
     const own = safely(() => new URL(siteUrl).host.toLowerCase());
     return host === own || host === 'bona-real-estate.com' || host === 'www.bona-real-estate.com';
   }
@@ -1421,7 +1435,7 @@ export function createDana({
     const lines = orig.map((line) => {
       let out = line;
       let cut = false;
-      for (const url of line.match(LINK_RE) ?? []) {
+      for (const url of linksIn(line)) {
         const clean = url.replace(/[).,;:!?»”]+$/u, '');
         const codeMaps = MAPS_RE.test(clean) && !String(modelText).includes(clean);
         if ((onSite(clean) || codeMaps) && kept < allowed) { kept += 1; continue; }
@@ -1431,7 +1445,7 @@ export function createDana({
       }
       return cut ? trimWeakTail(out.replace(/\s{2,}/g, ' ').replace(/\s+([.,;:!?])/g, '$1')) : out;
     });
-    const out = lines.filter((l, i) => l.trim() || !/https?:\/\//i.test(orig[i])).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    const out = lines.filter((l, i) => l.trim() || !hasLink(orig[i])).join('\n').replace(/\n{3,}/g, '\n\n').trim();
     return { text: out, stripped };
   }
 
@@ -1749,7 +1763,7 @@ export function createDana({
           if (!viaBrain || b.kind !== 'text' || b.bookingId) return b;
           const lim = limitLinks(b.text, maxLinks, text);
           if (lim.stripped) strippedAny = true;
-          const real = lim.text.trim() && (/https?:\/\//i.test(lim.text) || !lim.text.split('\n').filter((l) => l.trim()).every(weakLine));
+          const real = lim.text.trim() && (hasLink(lim.text) || !lim.text.split('\n').filter((l) => l.trim()).every(weakLine));
           return lim.stripped && !real ? null : { ...b, text: lim.text };
         })
         .filter((b) => b && (b.kind !== 'text' || b.text.trim()));
@@ -1805,7 +1819,7 @@ export function createDana({
             answer: bubble.kind === 'text' && !sentAny && !commitKind && !bubble.neutral, viaBrain, guarded: bubbleGuarded && !bubble.neutral,
             ...(bubble.kind === 'document' ? { document: { url: bubble.url, fileName: typeof bubble.fileName === 'string' ? bubble.fileName : 'brochure.pdf' } } : {}),
           });
-          if (r0.sent && bubble.kind === 'text') linksSent += (bubble.text.match(LINK_RE) ?? []).length;
+          if (r0.sent && bubble.kind === 'text') linksSent += (viaBrain ? linksIn(bubble.text) : (bubble.text.match(LINK_RE) ?? [])).length;
           return r0;
         } finally {
           if (reserve) backlogReserved.delete(leadId);
