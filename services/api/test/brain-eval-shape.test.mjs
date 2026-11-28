@@ -1025,6 +1025,14 @@ test('the $ cap: a request that ends with no usage (a timeout after the send) ke
   assert.equal(await reserve({ ...small, max_output_tokens: 100 }), Math.ceil(bytes({ ...small, max_output_tokens: 100 }) * 5 + 100 * 20));
   assert.equal(await reserve(small), Math.ceil(bytes(small) * 5 + 1200 * 20), 'no max_output_tokens: 1,200');
   assert.equal(await reserve({ ...small, max_completion_tokens: 100 }), Math.ceil(bytes({ ...small, max_completion_tokens: 100 }) * 5 + 1200 * 20), 'the Chat Completions name is not read');
+  // Claude r13 P3-2: the body is priced AFTER the candidate's effort is written in, and that body is what goes out.
+  const lowBody = JSON.stringify({ ...small, reasoning: { effort: 'low' }, max_output_tokens: 100 });
+  const highBody = r.withEffort(lowBody, 'medium');
+  let got = null;
+  const st = { capReached: false };
+  const seen = async (url, init) => { got = init.body; throw Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }); };
+  await assert.rejects(r.capFetch({ inner: seen, model: 'gpt-5.6-sol', maxUsd: 100, state: st, effort: 'medium' })('https://api.openai.com/v1/responses', { method: 'POST', body: lowBody }), /aborted/);
+  assert.deepEqual([got, st.spend.reservedMicro], [highBody, Math.ceil(Buffer.byteLength(highBody) * 5 + 100 * 20)], 'priced and sent with the effort in');
 });
 
 test('T25b: the eval speaks the Responses API: the provider path and effort, the recorder, and a strict offline fake', async () => {
@@ -1033,7 +1041,11 @@ test('T25b: the eval speaks the Responses API: the provider path and effort, the
   // The provider: only POST to a path ending /responses on api.openai.com; the effort as reasoning.effort, never reasoning_effort.
   for (const [url, method, ok] of [['https://api.openai.com/v1/responses', 'POST', true], ['https://api.openai.com/v1/chat/completions', 'POST', false],
     ['https://api.openai.com/v1/responses', 'GET', false], ['http://api.openai.com/v1/responses', 'POST', false], ['https://api.openai.com.evil.example/v1/responses', 'POST', false],
-    ['https://api.openai.com/v1/models', 'POST', false]]) assert.equal(r.providerUrlOk(url, { method }), ok, `${method} ${url}`);
+    ['https://api.openai.com/v1/models', 'POST', false],
+    // Claude r13 P3-1: the exact origin and path, no query, no userinfo, no other port or path ending in /responses.
+    ['https://api.openai.com/v1/responses?x=1', 'POST', false], ['https://api.openai.com:8443/v1/responses', 'POST', false],
+    ['https://user:pw@api.openai.com/v1/responses', 'POST', false], ['https://api.openai.com/other/responses', 'POST', false],
+    ['https://api.openai.com/v1/responses/', 'POST', false], ['https://api.openai.com/v1/responses#x', 'POST', false]]) assert.equal(r.providerUrlOk(url, { method }), ok, `${method} ${url}`);
   const sent = JSON.parse(r.withEffort(JSON.stringify({ model: 'm', reasoning: { effort: 'low', summary: 'auto' }, input: [] }), 'medium'));
   assert.deepEqual([sent.reasoning, 'reasoning_effort' in sent], [{ effort: 'medium', summary: 'auto' }, false]);
   assert.deepEqual(JSON.parse(r.withEffort('{"model":"m"}', 'high')).reasoning, { effort: 'high' });

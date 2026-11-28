@@ -1071,11 +1071,14 @@ export function recorder(state) {
   };
 }
 
-/** The one provider request a live run may send (T25b): POST to a path ending /responses on https://api.openai.com. */
+/**
+ * The one provider request a live run may send (T25b): POST to exactly https://api.openai.com/v1/responses (Claude r13
+ * P3-1: that origin, so no other port; that path; no query, no fragment, no userinfo).
+ */
 export function providerUrlOk(url, init = {}) {
   let u;
   try { u = new URL(String(url)); } catch { return false; }
-  return u.protocol === 'https:' && u.hostname === 'api.openai.com' && u.pathname.endsWith('/responses') && init.method === 'POST';
+  return u.origin === 'https://api.openai.com' && u.pathname === '/v1/responses' && !u.search && !u.hash && !u.username && !u.password && init.method === 'POST';
 }
 /** The request body with the candidate's effort set as `reasoning.effort` (its other reasoning fields kept), never `reasoning_effort`. */
 export function withEffort(body, effort) {
@@ -1103,17 +1106,19 @@ export function providerFetch({ realFetch, effort, state, env }) {
 /**
  * --max-usd as a true maximum (Codex r1 P2): before each request goes out, its worst case is reserved: every byte of
  * the body a fresh input token at the dearer of the input and cache-write prices (no request has more tokens than its
- * body has bytes), plus max_output_tokens of output (T25b; 1,200 when the body has none). A request that could pass the cap is not sent; the
+ * body has bytes, the candidate's effort written in), plus max_output_tokens of output (T25b; 1,200 when the body has none). A request that could pass the cap is not sent; the
  * candidate's run stops there (`max_usd`). The run keeps its own tally (`state.spend`; Claude r2 P3-1: never a month
  * marker): what each answered request cost by its usage (`knownMicro`), and the worst case of every request that went
  * out but whose cost is unknown (`reservedMicro`, Codex r2 P2): it timed out or was aborted after the send, or it
  * answered with no usage. Those stay reserved for the rest of the run. The brain's own runaway stops stay as the
  * second wall.
  */
-export function capFetch({ inner, model, maxUsd, state }) {
+export function capFetch({ inner, model, maxUsd, state, effort = null }) {
   state.spend ??= { knownMicro: 0, reservedMicro: 0 };
   const sp = state.spend;
-  return async (url, init = {}) => {
+  return async (url, init0 = {}) => {
+    // Claude r13 P3-2: the candidate's effort is written in first, so the body priced is the body that goes out.
+    const init = effort && typeof init0.body === 'string' ? { ...init0, body: withEffort(init0.body, effort) } : init0;
     const body = typeof init.body === 'string' ? init.body : '';
     let out = MAX_OUTPUT_TOKENS;
     try { out = Number(JSON.parse(body).max_output_tokens) || out; } catch { /* the default cap */ }
@@ -1449,7 +1454,7 @@ async function runCandidate({ cand, cases, mode, fake, cfg, siteFacts, siteUrl, 
   });
   const state = { responses: [], events: [], capReached: false };
   const model = mode === 'dry' ? fakeModel({ mode: fake, state }) : providerFetch({ realFetch, effort: cand.effort, state, env });
-  const fetchImpl = capFetch({ inner: model, model: cand.model, maxUsd, state });
+  const fetchImpl = capFetch({ inner: model, model: cand.model, maxUsd, state, effort: cand.effort });
   const brainCfg = {
     ...cfg, brainModel: cand.model, brainBackupModel: cand.model, brainBackupMode: 'handover',
     brainMonthAlertUsd: maxUsd, brainDayStopUsd: maxUsd, brainMonthStopUsd: maxUsd,
