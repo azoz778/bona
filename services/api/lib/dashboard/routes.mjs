@@ -688,7 +688,8 @@ export function createDashboardRoutes({
     }
     authenticator.clearCookie(res);
     authenticator.clearTryCookie(res);
-    clearNextCookie(req, res);
+    // Always: the browser never sends this cookie here (its Path is /dashboard/login), so the request cannot show it (Codex r4).
+    addSetCookie(res, `${NEXT_COOKIE_NAME}=; ${nextAttributes}; Max-Age=0`);
     return toLogin(res, '', 303);
   }
 

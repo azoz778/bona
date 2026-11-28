@@ -2472,14 +2472,17 @@ test('T08-2 a finished code (five wrong tries) takes its return-to cookie with i
   });
 });
 
-test('T08-2 logging out forgets a return-to the browser still holds', async () => {
+test('T08-2 logging out forgets a return-to the browser still holds, though the browser never sends it to logout', async () => {
   await withDash({}, async (h) => {
     const { cookie } = await h.login();
     const out = await h.postForm('/dashboard/logout', { _dash: '1' }, { cookie: `${cookie}; bona_dash_next=%2Fdashboard%2Fleads%2FLEAD-1` });
     assert.equal(out.headers.get('location'), '/dashboard/login');
     assert.equal(h.cookieValue(out, 'bona_dash_next'), null, 'cleared with the try nonce');
+    // A real browser never sends bona_dash_next to /dashboard/logout (its Path is /dashboard/login): logout clears it anyway (Codex r4).
     const plain = await h.postForm('/dashboard/logout', { _dash: '1' }, { cookie });
-    assert.equal(h.cookieValue(plain, 'bona_dash_next'), undefined, 'and untouched when there is none');
+    assert.equal(h.cookieValue(plain, 'bona_dash_next'), null, 'cleared though the request could not show it');
+    const header = [plain.headers.get('set-cookie')].flat().join('\n');
+    assert.match(header, /bona_dash_next=;[^\n]*Path=\/dashboard\/login[^\n]*Max-Age=0/, 'on the path the browser keeps it under');
   });
 });
 
