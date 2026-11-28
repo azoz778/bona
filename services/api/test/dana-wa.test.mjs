@@ -935,7 +935,7 @@ const immediate = { batchMs: () => 0, batchDelay: () => 0, typingFloorMs: () => 
 function bh({
   turns = [], auto = true, brainOn = false, configured = true, health = null, lead = {}, evo = null, pacing = immediate, commit,
   link = null, wa = null, retellAnswer = defaultAnswer, retell: withRetell = true, agentId = 'agent_wa', enabled = true, at = T_IN,
-  brain: givenBrain = null, env = ENV, notes: givenNotes = null,
+  brain: givenBrain = null, env = ENV, notes: givenNotes = null, backfill = null,
 } = {}) {
   const s = openDb(':memory:');
   let clock = at;
@@ -971,7 +971,7 @@ function bh({
   const slept = [];
   const laters = []; // side effects she schedules (the read receipt, "composing"): run by a test that wants them
   const build = (b = brain, n = notes) => createDana({
-    db: s, inbox, team, sender, retell, inventory, siteUrl: SITE, agentId, brain: b, ownerTest, notes: n, pacing, link, wa,
+    db: s, inbox, team, sender, retell, inventory, siteUrl: SITE, agentId, brain: b, ownerTest, notes: n, pacing, link, wa, backfill,
     ...(commit ? { commit } : {}),
     alerts: { notify: (id, o) => { pushed.push([id, o]); return Promise.resolve({}); }, notifyOwners: (o) => { owners.push(o); return Promise.resolve({}); } },
     isExcludedLead: (l) => isExcludedLead(team, s, l), now: () => clock, log: (o) => logs.push(o), batchMs: 0,
@@ -2936,4 +2936,58 @@ test('T12 r12 2: the stop check scans every waiting message, not the newest ten:
   assert.equal(h.lead().dana_off, 1);
   assert.ok(h.sent()[0].endsWith(CLOSING.en));
   assert.deepEqual(h.notes.of('stopped').map((c) => c[2]), ['deletion']);
+});
+
+/* ======================================================================================
+ * PR-B3 r13 (Codex P1s/P2, Claude P3-2): "stored after the covered message" is insertion order alone on a brain
+ * chat; the stop check runs again before the commit hook; the mark survives a failure in one write; the legacy
+ * stop scan stays the legacy batch.
+ * ====================================================================================== */
+
+test('T12 r13 1: a backfilled "delete my data" stamped before the question (higher rowid, older ts) is not swallowed: the answer drops, the stop flow runs', async () => {
+  let q;
+  let done = false;
+  const backfill = { refresh: async () => { if (!done && q) { done = true; h.client('delete my data', { ts: q - 1000 }); } } };
+  const h = bh({ backfill, turns: [brainReply('Sure, here are the details.'), brainReply('never')] });
+  q = h.client('what villas do you have?');
+  await h.dana.answer(LEAD, { ts: q });
+  await h.dana.flush();
+  assert.equal(h.sent().some((t) => t.includes('Sure, here are the details.')), false);
+  assert.equal(h.sent().length, 1);
+  assert.ok(h.sent()[0].endsWith(CLOSING.en));
+  assert.equal(h.lead().dana_off, 1);
+});
+
+test('T12 r13 2: a stop request stored while the brain works skips the commit hook (no booking) and runs the stop flow', async () => {
+  const commit = fakeCommit({ bubbles: [{ kind: 'text', text: 'Your viewing is booked ✅', bookingId: 'BK-1' }], booking: { bookingId: 'BK-1' } }, { afterSend: () => ({ told: true }) });
+  const h = bh({ commit, turns: [async () => { h.tick(1000); h.client('stop replying'); return brainReply('Booking it.', { tools: [{ name: 'book_viewing', args: {} }] }); }, brainReply('never')] });
+  await ask(h, 'Monday 14:00 please, I am Khalid');
+  await h.dana.flush();
+  assert.equal(commit.calls.pre.length, 0, 'no commit: no calendar event');
+  assert.equal(commit.calls.after.length, 0);
+  assert.equal(h.sent().some((t) => t.includes('booked')), false, 'no confirmation');
+  assert.ok(h.sent().at(-1).endsWith(CLOSING.en));
+  assert.equal(h.lead().dana_off, 1);
+});
+
+test('T12 r13 3: an unsure send keeps its mark and its reason in one write', async () => {
+  const h = bh({ turns: [brainReply('Of course.')], evo: () => ({ throws: timeoutErr() }) });
+  const q = h.client('hello');
+  await h.dana.answer(LEAD, { ts: q });
+  const row = h.s.db.prepare("SELECT status, error FROM wa_outbox WHERE sender_kind = 'dana'").get();
+  assert.equal(row.status, 'uncertain');
+  assert.match(row.error, /^cov:\d+\|timeout$/, row.error);
+  const o = bh({ turns: [brainError('quota')], evo: () => ({ throws: timeoutErr() }) });
+  await ask(o, 'is it free?');
+  assert.equal(o.s.db.prepare("SELECT error FROM wa_outbox WHERE sender_kind = 'dana'").get().error, 'outage_line|timeout');
+  assert.equal(o.dana.health().breaker, false);
+});
+
+test('LEGACY GUARD (r13): the legacy stop scan is the legacy batch (the newest ten): an old "bus stop?" outside it does nothing', async () => {
+  const h = bh({ auto: false, at: NOW });
+  h.client('bus stop?', { ts: NOW - 20 * 60_000 });
+  for (let i = 1; i <= 10; i += 1) h.client(`question ${i}`, { ts: NOW - 20 * 60_000 + i * 1000 });
+  await h.dana.answer(LEAD, { ts: NOW - 20 * 60_000 + 10_000 });
+  assert.equal(h.lead().dana_off, 0);
+  assert.equal(h.retell.completions.length, 1, 'answered as on main');
 });

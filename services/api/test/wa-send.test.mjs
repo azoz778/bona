@@ -10,7 +10,7 @@ import { createTeam } from '../lib/team.mjs';
 import { createInboxStore, RETENTION_MS } from '../lib/inbox/store.mjs';
 import { createIngest } from '../lib/inbox/ingest.mjs';
 import {
-  createSender, replyJidFor, SEND_PER_MIN, SEND_PER_DAY, PER_RECIPIENT_PER_MIN, PER_USER_PER_MIN, SEND_PER_DAY_TIERS, MEDIA_TIMEOUT_MS,
+  createSender, replyJidFor, SEND_PER_MIN, SEND_PER_DAY, PER_RECIPIENT_PER_MIN, PER_USER_PER_MIN, SEND_PER_DAY_TIERS, MEDIA_TIMEOUT_MS, splitMark,
 } from '../lib/wa-send.mjs';
 
 const NOW = 1_790_500_000_000;
@@ -1622,4 +1622,22 @@ test('T12 r3: markRead and presence use T00\'s Evolution 2.3.7 shapes, write no 
   assert.deepEqual(await bad.sender.presence({ jid: CLIENT_JID, delayMs: 3000 }), { ok: false, error: 'network' });
   h.s.close();
   bad.s.close();
+});
+
+test('T12 r13: a mark on a Dana row survives an unsure answer in the same write (mark|reason); a failed row keeps the plain reason the dashboard shows', async () => {
+  const t = harness({ env: T12_ENV, reply: () => ({ throws: abortError() }) });
+  const id = danaChat(t, {});
+  t.s.db.prepare("UPDATE wa_outbox SET error = 'cov:7' WHERE send_id = ?").run(id);
+  await t.sender.sendTo({ jid: CLIENT_JID, text: 'Dana here', kind: 'dana', leadId: 'LEAD-T12', sendId: id });
+  assert.deepEqual([t.inbox.getOutbox(id).status, t.inbox.getOutbox(id).error], ['uncertain', 'cov:7|timeout']);
+  assert.deepEqual(splitMark('cov:7|timeout'), { mark: 'cov:7', reason: 'timeout' });
+  assert.deepEqual(splitMark('outage_line'), { mark: 'outage_line', reason: null });
+  assert.deepEqual(splitMark('http_400'), { mark: null, reason: 'http_400' });
+  const f = harness({ env: T12_ENV, reply: () => ({ status: 400 }) });
+  const fid = danaChat(f, {});
+  f.s.db.prepare("UPDATE wa_outbox SET error = 'cov:7' WHERE send_id = ?").run(fid);
+  await f.sender.sendTo({ jid: CLIENT_JID, text: 'Dana here', kind: 'dana', leadId: 'LEAD-T12', sendId: fid });
+  assert.deepEqual([f.inbox.getOutbox(fid).status, f.inbox.getOutbox(fid).error], ['failed', 'http_400'], 'a failed row is no answer: the dashboard reads its reason');
+  t.s.close();
+  f.s.close();
 });

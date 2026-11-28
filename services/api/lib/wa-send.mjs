@@ -128,6 +128,20 @@ const PDF_NAME_RE = /^[^/\\\u0000-\u001f]{1,120}\.pdf$/i;
  */
 export const INTERRUPTED_MS = 120_000;
 
+/**
+ * A Dana row's `error` may carry lib/dana-wa.mjs's mark ('outage_line', or 'cov:<rowid>': the stored client message the
+ * row covers), alone or as `<mark>|<reason>` once the send went unsure. THE one parse of it (r13), for every reader:
+ * `{ mark, reason }`. A failed row keeps its plain reason (it answers nothing, and the dashboard shows that reason).
+ */
+export function splitMark(error) {
+  const s = typeof error === 'string' ? error : '';
+  if (!s) return { mark: null, reason: null };
+  const bar = s.indexOf('|');
+  const head = bar >= 0 ? s.slice(0, bar) : s;
+  if (head === 'outage_line' || /^cov:\d+$/.test(head)) return { mark: head, reason: bar >= 0 ? s.slice(bar + 1) || null : null };
+  return { mark: null, reason: s };
+}
+
 /** A send id of this file's own: 64 random bits, so two sends in one millisecond never share a row. */
 const newSendId = () => `SND-${Date.now().toString(36)}-${randomId(8)}`;
 
@@ -370,7 +384,9 @@ export function createSender({
           log({ level: 'warn', evt: 'wa.send.seen_sent', kind, error: out.error });
           return { ok: true, keyId: current.key_id, sendId: row.send_id };
         }
-        if (current?.status === 'pending') inbox.updateOutbox(row.send_id, { status: out.uncertain ? 'uncertain' : 'failed', error: out.error });
+        // An unsure row keeps dana-wa's mark in this same write (`<mark>|<reason>`, r13): no second write a crash could lose.
+        const keep = out.uncertain ? splitMark(current.error).mark : null;
+        if (current?.status === 'pending') inbox.updateOutbox(row.send_id, { status: out.uncertain ? 'uncertain' : 'failed', error: keep ? `${keep}|${out.error}` : out.error });
       }
     } catch (err) {
       // The call's answer stands. The row stays `pending` until the poller matches it to

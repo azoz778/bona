@@ -61,7 +61,7 @@
  */
 import { ensureHandoff, cleanNeeds } from './lead-tasks.mjs';
 import { extractActions, plainText } from './actions.mjs';
-import { replyJidFor } from './wa-send.mjs';
+import { replyJidFor, splitMark } from './wa-send.mjs';
 import { HANDOVER_TOOL } from './tools.mjs';
 import { randomId } from './store.mjs';
 import { REF_RE } from './attribution.mjs';
@@ -184,14 +184,19 @@ const COUNTED_SQL = "(status = 'uncertain' OR (status = 'failed' AND (error LIKE
 /** The outage line's own outbox row says so in `error` (read only for failed rows elsewhere): it answers nothing (r5 N6). */
 const OUTAGE_MARK = 'outage_line';
 /**
- * Every other brain row says in `error` which stored client message it covers, by insertion order: `cov:<rowid>` (r12).
- * Evolution stamps whole seconds, so (ts, rowid) orders two messages of one second; a row without it (Retell-era, or
- * written before this) covers every message of its second, the store's rule.
+ * Every other brain row says in `error` which stored client message it covers: `cov:<rowid>` (r12). On a brain chat
+ * "stored after the covered message" is insertion order (rowid) ALONE (r13): Evolution stamps whole seconds, and a
+ * backfill can store a message with an older ts after the batch was read. A row without it (Retell-era, or written
+ * before this) covers by ts, the store's rule. The ts stays the 24-h window. Accepted limit: restoring the database
+ * with VACUUM INTO may renumber rowids; the next message re-bounds it. A mark and an unsure send's reason share one
+ * `error` (`<mark>|<reason>`), parsed only by wa-send's splitMark.
  */
 const COV_PREFIX = 'cov:';
-const covRidOf = (error) => (typeof error === 'string' && error.startsWith(COV_PREFIX) && /^\d+$/.test(error.slice(COV_PREFIX.length)) ? Number(error.slice(COV_PREFIX.length)) : Infinity);
-/** (ts, rid) after (bTs, bRid)? A message without a rid is placed after every row of its second. */
-const after = (ts, rid, bTs, bRid) => Number(ts) > bTs || (Number(ts) === bTs && Number(rid ?? Infinity) > bRid);
+const covRidOf = (error) => {
+  const m = splitMark(error).mark;
+  return m && m.startsWith(COV_PREFIX) ? Number(m.slice(COV_PREFIX.length)) : null;
+};
+const isOutageRow = (error) => splitMark(error).mark === OUTAGE_MARK;
 /** Skips worth a log line; the rest are states, not events (P4-15). */
 const LOGGED_SKIPS = new Set(['human_recent', 'needs_human', 'lid_only', 'old', 'cap_chat', 'nothing', 'dropped_human', 'hold', 'backlog', 'loop', 'identity', 'rule_off', 'no_open_chat', 'stop_request', 'not_brain']);
 /** A hand-over re-check that finds one of these does nothing at all: no flag, no alert, no line. */
@@ -461,10 +466,11 @@ export function createDana({
     const r = prep('coverRid', "SELECT MAX(rowid) AS rid FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts = ?").get(String(leadId), Number(coversTs));
     return Number.isFinite(Number(r?.rid)) ? Number(r.rid) : Infinity;
   }
-  /** Every stored client message of the last 24 h after (coversTs, its rid), oldest first: never ts alone (r12). */
+  /** Every stored client message of the last 24 h stored after the covered one (rowid alone, r13), in insertion order. */
   function messagesAfter(leadId, coversTs, rid = coverRid(leadId, coversTs)) {
-    return prep('afterRows', `SELECT rowid AS rid, * FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts >= ? AND ts >= ?
-        ORDER BY ts, rowid`).all(String(leadId), Number(coversTs), now() - DAY_MS).filter((m) => after(m.ts, m.rid, Number(coversTs), rid));
+    if (!Number.isFinite(rid)) return [];
+    return prep('afterRows', `SELECT rowid AS rid, * FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND rowid > ? AND ts >= ?
+        ORDER BY rowid`).all(String(leadId), rid, now() - DAY_MS);
   }
 
   /**
@@ -478,7 +484,7 @@ export function createDana({
     const lead = db.getLead(id);
     if (!useBrain(lead)) return;
     const rid = coverRid(id, coversTs);
-    const newer = pendingFor(id, lead, { all: true }).filter((m) => after(m.ts, m.rid, Number(coversTs), rid));
+    const newer = pendingFor(id, lead, { all: true }).filter((m) => Number(m.rid) > rid);
     if (!newer.length) return;
     const ts = Number(newer[newer.length - 1].ts);
     if (inflight.has(id)) pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, ts));
@@ -531,7 +537,7 @@ export function createDana({
     const lastAnswer = Number(prep('lastGuarded', `SELECT MAX(created) AS at FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana'
         AND status = 'accepted' AND guarded = 1`).get(id)?.at ?? 0) || 0;
     return Boolean(prep('openOutage', `SELECT 1 FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana' AND status <> 'failed'
-        AND error = ? AND created >= ? AND created > ? LIMIT 1`).get(id, OUTAGE_MARK, outageWindow(t), lastAnswer));
+        AND (error = ? OR error LIKE ?) AND created >= ? AND created > ? LIMIT 1`).get(id, OUTAGE_MARK, `${OUTAGE_MARK}|%`, outageWindow(t), lastAnswer));
   }
 
   /**
@@ -547,25 +553,24 @@ export function createDana({
     if (!useBrain(lead)) return inbox.unansweredClientMessages(leadId, { limit: all ? 1000 : CONTEXT_MESSAGES });
     const id = String(leadId);
     const t = now();
-    // The boundary is a (ts, rid) pair (r12): a person's answer, a staff send, and every row that answered, each
-    // covering up to the message it names (`cov:<rowid>`), or its whole second when it names none.
-    let bTs = t - DAY_MS;
-    let bRid = Infinity;
-    const bump = (ts, rid = Infinity) => {
-      if (after(ts, rid, bTs, bRid)) { bTs = Number(ts); bRid = Number(rid); }
-    };
+    // Two bounds (r13): the rowid of the newest message a marked brain row covered (insertion order alone), and the
+    // ts a person's answer, a staff send or an unmarked row reaches (the store's rule). Waiting = after both, in 24 h.
+    let ridBound = 0;
+    let tsBound = t - DAY_MS;
     const human = prep('humanTs', `SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ? AND direction = 'out'
         AND sender_kind IN ('staff','owner_number')`).get(id)?.ts;
-    if (Number.isFinite(Number(human))) bump(Number(human));
+    if (Number.isFinite(Number(human))) tsBound = Math.max(tsBound, Number(human));
     const window = outageWindow(t);
     for (const r of prep('outRows', `SELECT sender_kind, covers_ts, created, error FROM wa_outbox WHERE lead_id = ?
         AND sender_kind IN ('staff','dana') AND status <> 'failed' AND created >= ?`).all(id, t - DAY_MS)) {
-      if (r.sender_kind === 'dana' && r.error === OUTAGE_MARK && Number(r.created) >= window) continue;
-      if (r.sender_kind === 'staff') { bump(Number(r.created)); continue; }
-      bump(Number(r.covers_ts ?? r.created), covRidOf(r.error));
+      if (r.sender_kind === 'dana' && isOutageRow(r.error) && Number(r.created) >= window) continue;
+      if (r.sender_kind === 'staff') { tsBound = Math.max(tsBound, Number(r.created)); continue; }
+      const rid = covRidOf(r.error);
+      if (rid !== null) ridBound = Math.max(ridBound, rid);
+      else tsBound = Math.max(tsBound, Number(r.covers_ts ?? r.created));
     }
-    const rows = prep('pendRows', `SELECT rowid AS rid, * FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts >= ?
-        ORDER BY ts, rowid`).all(id, bTs).filter((m) => after(m.ts, m.rid, bTs, bRid));
+    const rows = prep('pendRows', `SELECT rowid AS rid, * FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND rowid > ? AND ts > ?
+        ORDER BY rowid`).all(id, ridBound, tsBound);
     return all ? rows : rows.slice(-CONTEXT_MESSAGES);
   }
 
@@ -766,19 +771,21 @@ export function createDana({
     const body = (introduced ? text : `${prefix}\n\n${text}`).replace(/\r\n?/g, '\n').trim();
     const jid = replyJidFor(lead);
     const sendId = `SND-${now().toString(36)}-${randomId(8)}`;
-    const ins = inbox.insertOutbox({
-      send_id: sendId, lead_id: lead.lead_id, jid, text: body, user_id: null, sender_kind: 'dana', status: 'pending', covers_ts: coversTs,
-      media_kind: document ? 'document' : null,
+    // The outage line's mark, or (any other brain row) the covered message by insertion order (r12), written with the
+    // row in one transaction; an unsure answer keeps it in wa-send's own write (`<mark>|<reason>`, r13).
+    const cov = viaBrain ? coverRid(lead.lead_id, coversTs) : Infinity;
+    const markVal = mark ?? (viaBrain && Number.isFinite(cov) ? `${COV_PREFIX}${cov}` : null);
+    const ins = db.transaction(() => {
+      const r0 = inbox.insertOutbox({
+        send_id: sendId, lead_id: lead.lead_id, jid, text: body, user_id: null, sender_kind: 'dana', status: 'pending', covers_ts: coversTs,
+        media_kind: document ? 'document' : null,
+      });
+      if (r0.inserted && guarded) prep('guard', 'UPDATE wa_outbox SET guarded = 1 WHERE send_id = ?').run(sendId);
+      if (r0.inserted && markVal) prep('mark', 'UPDATE wa_outbox SET error = ? WHERE send_id = ?').run(markVal, sendId);
+      return r0;
     });
     if (!ins.inserted) return { sent: false, error: 'bad_send_id', failure: 'local' };
-    if (guarded) prep('guard', 'UPDATE wa_outbox SET guarded = 1 WHERE send_id = ?').run(sendId);
-    // The outage line's mark, or (any other brain row) the covered message by insertion order (r12).
-    const markVal = mark ?? (viaBrain ? `${COV_PREFIX}${coverRid(lead.lead_id, coversTs)}` : null);
-    const markRow = () => { if (markVal && !markVal.endsWith('Infinity')) prep('mark', "UPDATE wa_outbox SET error = ? WHERE send_id = ? AND status <> 'failed'").run(markVal, sendId); };
-    markRow();
     const out = await sender.sendTo({ jid, text: body, kind: 'dana', leadId: lead.lead_id, sendId, ...(document ? { document } : {}) });
-    // The sender wrote its own error on an unsure row; the outage line's mark goes back on (failures count by status).
-    if (out.ok || out.uncertain) markRow();
     const t = now();
     const ownChat = viaBrain ? {} : { dana_chat_ts: t };
     if (out.ok) {
@@ -1416,7 +1423,8 @@ export function createDana({
     }
     // The code stop-word check, before any model call (DESIGN §4.1; both paths), on EVERY waiting message, not only
     // the batch's newest ten (r12).
-    const stopHit = pendingFor(leadId, lead, { all: true }).map((m) => (typeof m.text === 'string' ? matchStopWords(m.text) : null)).find(Boolean);
+    // A legacy chat scans its batch (the store's newest ten), as before r12 (r13): an old false positive can't stop it.
+    const stopHit = (viaBrain ? pendingFor(leadId, lead, { all: true }) : batch).map((m) => (typeof m.text === 'string' ? matchStopWords(m.text) : null)).find(Boolean);
     if (stopHit) return stopChat(lead, language, stopHit.kind, coversTs, { viaBrain });
     // The loop guard of a brain chat (sticky): held until a person writes; the owner hears "looks automated".
     if (viaBrain && looping(leadId, started)) {
@@ -1509,6 +1517,15 @@ export function createDana({
       // A cap reached meanwhile: the client is waiting (P4-6).
       if (pre.reason === 'cap_chat' || CAP_HANDOVERS.has(pre.reason)) return capped(leadId, language, pre, coversTs, viaBrain, { checked: true });
       return skip(leadId, pre.reason);
+    }
+    // A stop, privacy or deletion request stored while she worked (preSend's refresh included) wins before the commit
+    // hook runs (r13): no booking, no bubble; the chat is woken so the stop flow runs.
+    if (viaBrain) {
+      const late = messagesAfter(leadId, coversTs);
+      if (late.some((m) => typeof m.text === 'string' && matchStopWords(m.text))) {
+        pendingAgain.set(String(leadId), Math.max(pendingAgain.get(String(leadId)) ?? 0, Number(late[late.length - 1].ts)));
+        return skip(leadId, 'stop_request');
+      }
     }
     // The commit hook (DESIGN §8.3; lib/dana-commit.mjs): only after preSend passed. It answers the bubbles
     // in the order they go (text, brochure, confirmation), maybe the booking it made, maybe a hand-over.
