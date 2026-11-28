@@ -287,6 +287,44 @@ test('a line break starts the next number; a range\'s second amount is read from
   assert.equal(minimise('budget 500.000 - 600.000\n0500000000'), 'budget 500.000 - 600.000\n[phone]');
 });
 
+/* Claude r13 F1: a number wrapped across a line break (a plain-text email wraps at 72-76 characters) is one number. */
+test('a number a line break splits is still one number, unless a number ended before the break or the next line starts its own', () => {
+  for (const [input, want] of [
+    ['Please call me on 055 123\n4567', 'Please call me on [phone]'],
+    ['+966 55 123 \r\n4567', '[phone]'],
+    ['رقمي ٠٥٥ ١٢٣\n٤٥٦٧', 'رقمي [phone]'],
+    ['101 234\n5678', '[id-number]'],
+    ['account 6080 1016\n7519 2233', 'account [account-number]'],
+    // A number ended before the break, or the next line starts one: two numbers (Codex r7, Claude r12 F2).
+    ['+966 50 000 0000\n+44 7700 900000', '[phone]\n[phone]'],
+    ['ميزانيتي 500.000\n055 123 4567', 'ميزانيتي 500.000\n[phone]'],
+    // A phone written in 3-digit groups and wrapped looks like two thousands amounts: masked whole. The cost: two bare
+    // thousands budgets on consecutive lines read as one number (errs toward masking).
+    ['966 551\n234 567', '[phone]'],
+  ]) assert.equal(minimise(input), want, input);
+});
+
+/* Codex r8 P0: a "+" phone's longest match took the first group of the number after it. */
+test('two phones on one line never leave the second half in clear, whatever joins them', () => {
+  for (const [input, num] of [
+    ['+966 50 000 0000 / 55 000 0000', '550000000'], ['+966 50 000 0000 - 0500000000', '0500000000'],
+    ['+44 20 7946 0958 / 966 55 123 4567', '966551234567'], ['+966 55 123 4567 - 101 234 5678', '1012345678'],
+  ]) {
+    assert.equal(sevenOf(minimise(input), num), null, input);
+    assert.equal(sevenOf(minimise(input), input.replace(/\D/g, '').slice(0, 12)), null, `${input}: the first one too`);
+  }
+});
+
+/* Claude r13 F2 + F5: a long run of short digit groups, or of letters with no "@", is read in linear time. */
+test('a 64 KB message of short digit groups or of letters is minimised quickly', () => {
+  for (const big of ['0 5 '.repeat(16_384), '0-5-'.repeat(16_384), 'a'.repeat(65_536), `${'a'.repeat(200)}@example.com`]) {
+    const t = performance.now();
+    minimise(big);
+    assert.ok(performance.now() - t < 2000, `${big.slice(0, 8)}…: ${Math.round(performance.now() - t)} ms`);
+  }
+  assert.equal(minimise('mail sara.example+bona@example.com now'), 'mail [email] now');
+});
+
 /** The first 7-digit run of `num` still readable in `out` (digits only), else null. */
 function sevenOf(out, num) {
   const ds = String(out).replace(/\D/g, '');

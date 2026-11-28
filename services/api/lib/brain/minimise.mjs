@@ -33,7 +33,8 @@
  */
 import { toAsciiDigits } from '../inventory.mjs';
 
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
+// The part before "@" is at most 64 characters (RFC 5321): a long run of letters with no "@" is read in linear time (Claude r13 F5).
+const EMAIL_RE = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
 const IBAN_RE = /(?<![A-Za-z0-9])SA(?:[\s._/-]{0,3}\d){22}(?!\d)/gi;
 /** What may sit between two digit groups of one number (in the probe): 1-3 of these. `/` and `_` only ever join into a phone. */
 const GAP_RE = /^[\s\-.()/_]{1,3}$/;
@@ -179,6 +180,24 @@ function thousandsRange(run, gaps) {
   return bEnd < 0 ? null : [aEnd + 1, bEnd];
 }
 
+/**
+ * Whether the groups from `j` on, within one line, start a phone or ID of their own (maskFor): a line break before
+ * such a group starts the next number (Claude r13 F1).
+ */
+function lineStartsNumber(s, groups, j) {
+  let d = '';
+  for (let m = j; m < groups.length; m += 1) {
+    if (m > j) {
+      const gap = s.slice(groups[m - 1].end, groups[m].start);
+      if (groups[m].date || !PHONE_GAP_RE.test(gap) || /[\r\n\u2028\u2029]/.test(gap)) break;
+    }
+    d += groups[m].digits;
+    if (d.length > MAX_DIGITS) break;
+    if (maskFor(d, false)) return true;
+  }
+  return false;
+}
+
 /** Where the phone, ID and account numbers of `s` (a probe text) are: [{ start, end, mask }], in order. */
 function numberCuts(s) {
   const dates = [...s.matchAll(DATE_RE)].map((m) => [m.index, m.index + m[0].length]);
@@ -212,9 +231,10 @@ function numberCuts(s) {
       if (j > i) {
         const gap = s.slice(groups[j - 1].end, groups[j].start);
         if (groups[j].date || !PHONE_GAP_RE.test(gap)) break;
-        // A line break starts the next number (one message per line once a batch is joined): "+966 50 000 0000\n+44
-        // 7700 900000" is two phones, never one that took "44" (Codex r7).
-        if (/[\r\n\u2028\u2029]/.test(gap)) break;
+        // A line break starts the next number when a number ended before it ("+966 50 000 0000\n+44 7700 900000",
+        // Codex r7) or the next line starts its own ("ميزانيتي 500.000\n055 123 4567"); otherwise it is a number a
+        // line break split, as a plain-text email wraps one ("055 123\n4567", Claude r13 F1).
+        if (/[\r\n\u2028\u2029]/.test(gap) && (best || lineStartsNumber(s, groups, j))) break;
         if (!GAP_RE.test(gap)) { if (tail) break; wide = true; }
         gaps.push(gap);
         if (wide || SOFT_GAP_RE.test(gap)) soft = true;
@@ -253,14 +273,19 @@ function numberCuts(s) {
       // A number that starts inside this cut and runs past its end is one the cut would split: "500.000 055 123 4567"
       // is 500000055 then "123 4567", "+966 50 000 0000 +44 7700 900000" took "44". From a group inside the cut, read
       // on over the groups joined to it (as a phone is, never across a line break or a date): a phone with a clear
-      // prefix (CLEAR_PHONE_RE), or, after a `+` or after an amount the cut took whole (groups i..k-1 are one budget),
-      // any phone or ID shape. The cut goes on to that number's end; it only grows, so it never unmasks anything
+      // prefix (CLEAR_PHONE_RE), or, after a `+`, after an amount the cut took whole (groups i..k-1 are one budget) or
+      // after a complete number (groups i..k-1 are a phone or ID themselves), any phone or ID shape. The cut goes on to that number's end; it only grows, so it never unmasks anything
       // (Claude r12 F2, Codex r7). "551 234 567 - 1 000" is a phone and an amount: the amount stays.
       // Read again from every group the cut took on, so a number that starts there is not split either.
       let far = best.j;
       for (let k = i + 1; k <= far; k += 1) {
         const lead = s.slice(groups[k - 1].end, groups[k].start);
-        const weak = lead.includes('+') || isAmount(groups.slice(i, k), gaps.slice(0, k - 1 - i));
+        // An amount has at most 9 digits and a phone 15, so only that many groups are ever looked at: linear time
+        // on a long run of short groups (Claude r13 F2). A complete number before group k counts too: a `+` phone's
+        // longest match may take the first group of the next number (Codex r8).
+        const before = k - i <= MAX_DIGITS ? groups.slice(i, k) : null;
+        const weak = lead.includes('+') || (before !== null && ((k - i <= 9 && isAmount(before, gaps.slice(0, k - 1 - i)))
+          || maskFor(before.map((g) => g.digits).join(''), plus) !== null));
         let d = '';
         for (let m = k; m < groups.length; m += 1) {
           if (m > k) {
