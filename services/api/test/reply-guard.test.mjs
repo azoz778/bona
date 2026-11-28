@@ -548,4 +548,11 @@ test('"2 million and 500 thousand" is one amount of 2,500,000: allowed only when
   }
   assert.deepEqual(findAmounts('٢ مليون و٥٠٠ ألف ريال').map((a) => a.raw), [2_500_000]);
   assert.deepEqual(findAmounts('2 million or 500 thousand SAR').map((a) => a.raw).sort((x, y) => x - y), [500_000, 2_000_000], 'two amounts on "or" stay two');
+  // A comma list is two prices, each published (Claude r26).
+  const list = { toolResults: ['{"a":"SAR 1,500,000"}', '{"b":"SAR 900,000"}', '{"c":"SAR 2,000,000"}', '{"d":"SAR 500,000"}'] };
+  for (const reply of ['Prices: 1.5 million, 900 thousand SAR', 'الأسعار: ١٫٥ مليون، ٩٠٠ ألف ريال', 'The villa is 2 million, 500 thousand down payment']) {
+    assert.equal(checkReply(reply, list).ok, true, reply);
+  }
+  // The word-first form with a published total passes (Claude r26 F1).
+  assert.equal(checkReply('السعر مليون و٢٠٠ ألف ريال', { toolResults: ['{"price":"SAR 1,200,000"}'] }).ok, true);
 });

@@ -315,12 +315,14 @@ export function findAmounts(text) {
   }
   out.sort((a, b) => a.at - b.at);
   // A compound amount is ONE amount: "٢ مليون و٥٠٠ ألف ريال", "مليونين و٥٠٠ ألف", "2 million 500 thousand" is 2,500,000,
-  // never 2,000,000 and 500,000 checked apart (both may be published while the total is not, Codex r26, r27).
+  // never 2,000,000 and 500,000 checked apart (both may be published while the total is not, Codex r26, r27). Joined
+  // only by nothing, "و", "and" or "&".
   for (let k = out.length - 2; k >= 0; k -= 1) {
     const a = out[k];
     const b = out[k + 1];
     if (a.raw == null || b.raw == null || !(a.scale >= 1e6 && b.scale === 1e3 && b.raw < a.scale)) continue;
-    if (!/^[\s,،]*(?:و|and|&)?[\s,،]*$/iu.test(s.slice(a.end, b.at))) continue;
+    // Never across a comma: "1.5 million, 900 thousand SAR" is a list of two prices (Claude r26).
+    if (!/^\s*(?:و|and|&)?\s*$/iu.test(s.slice(a.end, b.at))) continue;
     if (a.currency && b.currency && a.currency !== b.currency) continue;
     const currency = a.currency ?? b.currency;
     const raw = a.raw + b.raw;
