@@ -285,7 +285,19 @@ export function findAmounts(text) {
     const raw = Math.round(value * scale);
     if (!(cur || scale > 1 || raw >= 100_000)) continue;
     use();
-    out.push({ raw, sar: Math.round(raw * SAR_RATE[cur ?? 'SAR']), currency: cur, at: numStart });
+    out.push({ raw, sar: Math.round(raw * SAR_RATE[cur ?? 'SAR']), currency: cur, at: numStart, scale, end: amountEnd });
+  }
+  // A compound amount is ONE amount: "٢ مليون و٥٠٠ ألف ريال" / "2 million 500 thousand" is 2,500,000, never 2,000,000 and
+  // 500,000 checked apart (both may be published while the total is not, Codex r26).
+  for (let k = out.length - 2; k >= 0; k -= 1) {
+    const a = out[k];
+    const b = out[k + 1];
+    if (!(a.scale >= 1e6 && b.scale === 1e3 && b.raw < a.scale)) continue;
+    if (!/^[\s,،]*(?:و|and|&)?[\s,،]*$/iu.test(s.slice(a.end, b.at))) continue;
+    if (a.currency && b.currency && a.currency !== b.currency) continue;
+    const currency = a.currency ?? b.currency;
+    const raw = a.raw + b.raw;
+    out.splice(k, 2, { raw, sar: Math.round(raw * SAR_RATE[currency ?? 'SAR']), currency, at: a.at, scale: a.scale, end: b.end });
   }
   for (const m of s.matchAll(MILLION_WORD_RE)) {
     const [at, end] = m.indices.groups.word;

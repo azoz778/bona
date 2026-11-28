@@ -537,3 +537,14 @@ test('a "+" amount with a currency or thousands commas is checked like any amoun
   assert.deepEqual(checkReply('Parking: +15,000 SAR', { toolResults: ['{"parking":"SAR 15,000"}'] }).ok, true, 'a published surcharge passes');
   for (const reply of ['Call us on +966 12 345 6789', 'اتصل على +966126543210']) assert.equal(checkReply(reply, { toolResults: [] }).ok, true, reply);
 });
+
+/* Codex r26 P2: a compound amount is one amount, checked as its total. */
+test('"2 million and 500 thousand" is one amount of 2,500,000: allowed only when that total was published', () => {
+  const parts = { toolResults: ['{"price":"SAR 2,000,000"}', '{"price":"SAR 500,000"}'] };
+  for (const reply of ['سعر الفيلا ٢ مليون و٥٠٠ ألف ريال', 'سعر الفيلا 2 مليون و 500 ألف ريال', 'The villa is 2 million 500 thousand SAR', 'SAR 2 million and 500 thousand']) {
+    assert.deepEqual(checkReply(reply, parts).hits.map((h) => h.kind), ['amount'], reply);
+    assert.equal(checkReply(reply, { toolResults: ['{"price":"SAR 2,500,000"}'] }).ok, true, `${reply}: the total was published`);
+  }
+  assert.deepEqual(findAmounts('٢ مليون و٥٠٠ ألف ريال').map((a) => a.raw), [2_500_000]);
+  assert.deepEqual(findAmounts('2 million or 500 thousand SAR').map((a) => a.raw).sort((x, y) => x - y), [500_000, 2_000_000], 'two amounts on "or" stay two');
+});
