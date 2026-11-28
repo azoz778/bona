@@ -992,10 +992,10 @@ function bh({
     return ts;
   };
   const staff = (text, ts = clock) => { k += 1; inbox.upsertMessage({ key_id: `S${k}`, lead_id: LEAD, jid: CLIENT_JID, direction: 'out', sender_kind: 'staff', text, ts }); };
-  const danaRow = ({ covers, created = clock, text = 'ok', status = 'accepted', guarded = 0, id = LEAD, error = null }) => {
+  const danaRow = ({ covers, created = clock, text = 'ok', status = 'accepted', guarded = 0, id = LEAD, error = null, media = null }) => {
     k += 1;
-    s.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts, guarded)
-                  VALUES (?,?,?,?,NULL,'dana',?,NULL,?,?,?,?,?)`).run(`SND-R-${String(k).padStart(8, '0')}`, id, CLIENT_JID, text, status, created, created, error, covers, guarded);
+    s.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts, guarded, media_kind)
+                  VALUES (?,?,?,?,NULL,'dana',?,NULL,?,?,?,?,?,?)`).run(`SND-R-${String(k).padStart(8, '0')}`, id, CLIENT_JID, text, status, created, created, error, covers, guarded, media);
   };
   const sent = () => calls.filter((c) => /\/message\//.test(c.url)).map((c) => c.body.text ?? c.body.caption);
   return {
@@ -2105,10 +2105,12 @@ const sweepFor = async (h, fromMs, toMs) => {
 
 test('T12 r3 N4: a cap_day chat whose message passes 2 h is handed over `missed` exactly once', async () => {
   const h = bh({ pacing: strictTier(), turns: [], link: { identityOk: () => true, linkStable: () => true } });
-  fillDay(h, 60, T_IN - DAY + 2 * HOUR + 5 * 60_000); // the day frees its first turn 2 h 05 min from now
+  fillDay(h, 60, T_IN - DAY + 20 * HOUR); // the day frees its first turn only 20 h from now
   h.client('hello');
   assert.equal((await h.dana.answer(LEAD, { ts: h.now() })).handover, 'cap_day');
-  await sweepFor(h, T_IN + 60_000, T_IN + 2 * HOUR + 30 * 60_000);
+  await sweepFor(h, T_IN + 60_000, T_IN + 2 * HOUR + 60_000);
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['cap_day', 'missed'], 'missed at the 2-h mark, not when the day frees a turn (r4 B)');
+  await sweepFor(h, T_IN + 2 * HOUR + 2 * 60_000, T_IN + 2 * HOUR + 30 * 60_000);
   assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['cap_day', 'missed'], 'one missed, never one a minute');
   assert.ok(h.pushed.length <= 2, `${h.pushed.length} pushes`);
   assert.equal(h.lead().dana_hold_reason, null);
@@ -2226,4 +2228,134 @@ test('T12 r3: during an outage the batch reaches back no further than 24 h', asy
   h.dana.sweep();
   await h.dana.flush();
   assert.deepEqual(h.brain.calls[1].batchParts, ['is it free?']);
+});
+
+/* ======================================================================================
+ * PR-B3 r4 (Codex P1s): one waiting-message source, one deadline per hold, one send gate, the breaker
+ * under an owner-off switch, and the documents and links of a turn counted where they go.
+ * ====================================================================================== */
+
+test('T12 r4 A: an outage-covered message survives a cap that replaces brain_out with cap_day, and is answered when the day frees a turn', async () => {
+  const h = bh({ pacing: strictTier(), turns: [brainError('quota'), brainReply('Yes, it is still free.')] });
+  await ask(h, 'is it free?');
+  // 59 turns of other chats plus the holding line fill the day; the oldest ages out at 20 min (the message still fresh).
+  const base = T_IN + 20 * 60_000 - DAY;
+  fillDay(h, 59, base);
+  h.set(T_IN + 10 * 60_000);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.equal(h.lead().dana_hold_reason, 'cap_day');
+  h.set(base + DAY + 1);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.equal(h.sent().at(-1), 'Yes, it is still free.', 'the question the holding line covered was never lost');
+});
+
+test('T12 r4 A: a recovery deferred as backlog keeps its hold and its message until the reply is accepted', async () => {
+  let stable = false;
+  const h = bh({ turns: [brainError('down'), async () => { h.tick(2 * 60_000); return brainReply('one'); }, brainReply('Here is your answer.')], link: { identityOk: () => true, linkStable: () => stable } });
+  await ask(h, 'is it free?');
+  h.set(T_IN + 29 * 60_000); // the brain is back at 29 min; the reply reaches the queue past 30 min, the link unstable
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.equal(h.sent().length, 1, 'deferred: only the holding line so far');
+  assert.equal(h.lead().dana_hold_reason, 'brain_out', 'the hold stays until a reply is accepted');
+  stable = true;
+  h.tick(60_000);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.equal(h.sent().length, 2, 'answered once the link held');
+  assert.equal(h.lead().dana_hold_reason, null);
+});
+
+test('T12 r4 B: under a day-long timed hold, `missed` is recorded at the 2-h mark', async () => {
+  const h = bh({ turns: [] });
+  h.client('hello', { ts: T_IN });
+  h.s.updateLead(LEAD, { dana_hold_reason: 'cap_chat', dana_hold_until: T_IN + DAY });
+  await sweepFor(h, T_IN + 60_000, T_IN + 2 * HOUR - 60_000);
+  assert.equal(h.notes.of('handover').length, 0, 'before 2 h nothing');
+  await sweepFor(h, T_IN + 2 * HOUR, T_IN + 2 * HOUR + 60_000);
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['missed']);
+  assert.equal(h.lead().dana_hold_reason, null);
+});
+
+test('T12 r4 C: a fixed line that reaches the queue after 2 h is `missed` with no client line', async () => {
+  const h = bh({ turns: [async () => { h.tick(15_000); return brainError('quota'); }], link: { identityOk: () => true, linkStable: () => true } });
+  h.client('hello', { ts: T_IN - 2 * HOUR + 10_000 });
+  await h.dana.answer(LEAD, { ts: T_IN - 2 * HOUR + 10_000 });
+  assert.equal(h.sent().length, 0, 'no outage line after the 2-h cutoff');
+  assert.ok(h.notes.of('handover').some((c) => c[2].kind === 'missed'));
+  assert.equal(h.lead().dana_hold_reason, null);
+});
+
+test('T12 r4 C: overlapping turns never pass the global document cap; a document over it goes as its link', async () => {
+  const doc = (n) => ({ kind: 'document', url: `https://bona.azoz.uk/b/w0${n}.pdf`, fileName: `BONA-W0${n}.pdf`, caption: `BONA-W0${n} brochure` });
+  let chain = Promise.resolve();
+  const serial = (fn) => { const run = chain.then(fn); chain = run.then(() => {}, () => {}); return run; };
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const n = { v: 10 };
+  const commit = fakeCommit((o) => ({ bubbles: [{ kind: 'text', text: o.text }, doc(n.v += 1)] }));
+  const h = bh({ commit, pacing: { ...strictTier(), fifo: serial }, turns: [async () => { await gate; return brainReply('A.'); }, async () => { await gate; return brainReply('B.'); }] });
+  for (let i = 0; i < 14; i += 1) h.danaRow({ covers: T_IN - HOUR + i, created: T_IN - HOUR + i, id: LEAD, media: 'document' });
+  h.s.insertLead({ lead_id: 'LEAD-D2', created: T_IN - DAY, updated: T_IN - DAY, phone_e164: '966500000902', wa_jid: '966500000902@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  h.s.insertLead({ lead_id: 'LEAD-D3', created: T_IN - DAY, updated: T_IN - DAY, phone_e164: '966500000903', wa_jid: '966500000903@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  for (const id of ['LEAD-D2', 'LEAD-D3']) {
+    h.ownerTest.setAuto(id, true);
+    h.client('hi', { id, ts: T_IN - HOUR });
+    h.danaRow({ covers: T_IN - HOUR, created: T_IN - HOUR + 500, id });
+  }
+  const a = h.client('brochure please', { id: 'LEAD-D2' });
+  const b = h.client('brochure please', { id: 'LEAD-D3' });
+  const both = Promise.all([h.dana.answer('LEAD-D2', { ts: a }), h.dana.answer('LEAD-D3', { ts: b })]);
+  await new Promise((resolve) => setImmediate(resolve));
+  release();
+  await both;
+  assert.equal(h.calls.filter((c) => c.url.includes('/sendMedia/')).length, 1, 'the 15th goes as a document, the 16th does not');
+  assert.ok(h.sent().some((t) => /BONA-W0\d+ brochure — https:\/\/bona\.azoz\.uk\/b\//.test(t)), 'the other as its link');
+});
+
+test('T12 r4 D: three real Evolution failures across test chats trip the breaker though the global switch is owner-off; test chats are then blocked', async () => {
+  const h = bh({ enabled: false, turns: Array.from({ length: 4 }, () => brainReply('hello')), evo: () => ({ status: 500 }) });
+  h.team.setSetting('dana_enabled', '0', { by: 'USR-owner' });
+  const chat = (i) => {
+    const id = `LEAD-T${i}`;
+    h.s.insertLead({ lead_id: id, created: T_IN - DAY, updated: T_IN - DAY, phone_e164: `96650000091${i}`, wa_jid: `96650000091${i}@s.whatsapp.net`, channel: 'whatsapp', stage: 'new', inbox_state: 'in', dana_test: 1 });
+    h.ownerTest.setAuto(id, true);
+    return id;
+  };
+  for (let i = 1; i <= 3; i += 1) {
+    await ask(h, 'hi', { id: chat(i) });
+    h.tick(60_000);
+  }
+  assert.equal(h.dana.health().breaker, true, 'tripped by the failures themselves');
+  assert.deepEqual(h.owners, [{ reason: 'dana_paused' }]);
+  const id = chat(4);
+  h.client('hi', { id });
+  assert.deepEqual(h.dana.eligible(id), { ok: false, reason: 'off' }, 'a test chat is blocked once it tripped');
+});
+
+test('T12 r4 E: a brochure turned into its link obeys the link limit, and the logged link count is taken after it', async () => {
+  const homes = inventory.all().slice(0, 2);
+  const urls = homes.map((l) => inventory.card(l).url.en);
+  const found = { name: 'search_properties', result: { results: homes.map((l, i) => ({ id: l.id, slug: l.slug, url_en: urls[i] })) } };
+  const doc = { kind: 'document', url: 'https://bona.azoz.uk/b/w012.pdf', fileName: 'BONA-W012.pdf', caption: 'BONA-W012 brochure' };
+  const commit = fakeCommit((o) => ({ bubbles: [{ kind: 'text', text: o.text }, doc] }));
+  const h = bh({ commit, turns: [brainReply(`Two homes:\n${urls[0]}\n${urls[1]}`, { tools: [found] })] });
+  h.client('hi', { ts: T_IN - HOUR });
+  h.danaRow({ covers: T_IN - HOUR, created: T_IN - HOUR + 500 }); // introduced
+  h.danaRow({ covers: T_IN - HOUR, created: T_IN - HOUR + 600, media: 'document' }); // today's one document
+  await ask(h, 'and the brochure?');
+  assert.equal(h.calls.filter((c) => c.url.includes('/sendMedia/')).length, 0);
+  assert.equal(h.sent().join('\n').match(/https:\/\//g).length, 2, 'MAX_LINKS: the brochure link has no room left');
+  assert.equal(h.logs.find((l) => l.evt === 'dana.answered').links, 2);
+});
+
+test('T12 r4 E: one sweep runs a chat once — a cap_day chat also in the backlog map gives exactly one `missed`', async () => {
+  const h = bh({ pacing: strictTier(), turns: [brainReply('x')], link: { identityOk: () => true, linkStable: () => false } });
+  h.client('hello', { ts: T_IN - 45 * 60_000 });
+  assert.deepEqual(await h.dana.answer(LEAD, { ts: T_IN - 45 * 60_000 }), { skipped: 'backlog' });
+  h.s.updateLead(LEAD, { dana_hold_reason: 'cap_day', dana_hold_until: T_IN + DAY });
+  await sweepFor(h, T_IN + HOUR + 15 * 60_000, T_IN + HOUR + 20 * 60_000);
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['missed']);
 });

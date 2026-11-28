@@ -422,12 +422,6 @@ export function createDana({
     return Boolean(prep('open', "SELECT 1 FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts = ? LIMIT 1").get(String(leadId), ts));
   }
 
-  const activeHold = (lead, t) => {
-    const reason = lead?.dana_hold_reason;
-    if (typeof reason !== 'string' || !reason) return null;
-    const until = lead.dana_hold_until;
-    return until === null || until === undefined || t < Number(until) ? { reason, until: until ?? null } : null;
-  };
   const setHold = (leadId, reason, until) => db.updateLead(leadId, { dana_hold_reason: reason, dana_hold_until: until });
   const clearHold = (leadId) => db.updateLead(leadId, { dana_hold_reason: null, dana_hold_until: null });
   /** A timed hold never replaces one that waits for a person (send_failed, loop, booking_unconfirmed; r3). */
@@ -437,11 +431,10 @@ export function createDana({
     setHold(leadId, reason, until);
     return true;
   }
-  /** An ended timed hold, whatever its reason, is cleared (a hold with no time is never touched here; r3 N4). */
+  /** An ended timed hold (its deadline, holdDeadline), whatever its reason, is cleared; a hold with no time never is (r3 N4). */
   function clearEnded(leadId, t = now()) {
-    const l = db.getLead(leadId);
-    const until = l?.dana_hold_until;
-    if (l?.dana_hold_reason && until !== null && until !== undefined && Number(until) <= t) clearHold(leadId);
+    const d = holdDeadline(db.getLead(leadId), t);
+    if (d !== null && d !== Infinity && d <= t) clearHold(leadId);
   }
   /** The breaker is open: the system's own switch-off (DESIGN §4.2). It binds a per-chat test too (r3). */
   const breakerOpen = () => {
@@ -455,29 +448,51 @@ export function createDana({
   const outageLineSince = (leadId, sinceTs) => prep('outRowsSince', `SELECT text FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana'
       AND status <> 'failed' AND created >= ?`).all(String(leadId), sinceTs).some((r) => isOutageText(r.text));
 
+  /** A fixed line (FIXED_LINES, alone or after a disclosure): never an answer, for the stats and for the waiting messages. */
+  const isFixedText = (t) => typeof t === 'string' && FIXED_LINES.some((l) => t === l || t.endsWith(`\n\n${l}`));
+
   /**
-   * The messages she has not answered (the store's rule). During a brain outage (a brain_out hold) the
-   * holding line is no answer (DESIGN-brain §4.2 step 4): the boundary leaves out this outage's line rows,
-   * so the recovery answers what it covered, unless a person answered meanwhile. From the database: a
-   * restart loses no message (r2 N1). A hand-over line of the same text inside the window reads as the
-   * outage's own: its messages are answered by the recovery too.
+   * THE waiting messages of a chat (r4 A): every reader takes them from here (the run's batch, refusedRun, the
+   * sweep, a hold's deadline). A legacy chat: the store's rule, as on main. A brain chat: its client messages of
+   * the last 24 h (an older one can never be answered: never first) newer than a person's answer and than every
+   * row that answered them; a fixed line (hand-over, closing, outage, neutral) is never an answer, so what it
+   * covered still waits, whatever hold the chat moves to. Read from the database: a restart loses no message.
    */
-  function waitingFor(leadId, lead = db.getLead(leadId)) {
-    if (lead?.dana_hold_reason !== 'brain_out') return inbox.unansweredClientMessages(leadId, { limit: CONTEXT_MESSAGES });
+  function pendingFor(leadId, lead = db.getLead(leadId)) {
+    if (!useBrain(lead)) return inbox.unansweredClientMessages(leadId, { limit: CONTEXT_MESSAGES });
     const id = String(leadId);
     const t = now();
-    const since = outageWindow(t);
-    // Bounded to the last 24 h (r3): an older message can never be answered (never first), so no older row matters.
     let bound = Math.max(t - DAY_MS, Number(prep('humanTs', `SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ? AND direction = 'out'
         AND sender_kind IN ('staff','owner_number')`).get(id)?.ts ?? 0) || 0);
     for (const r of prep('outRows', `SELECT sender_kind, covers_ts, created, text FROM wa_outbox WHERE lead_id = ?
         AND sender_kind IN ('staff','dana') AND status <> 'failed' AND created >= ?`).all(id, t - DAY_MS)) {
-      if (r.sender_kind === 'dana' && Number(r.created) >= since && isOutageText(r.text)) continue;
+      if (r.sender_kind === 'dana' && isFixedText(r.text)) continue;
       bound = Math.max(bound, Number(r.covers_ts ?? r.created));
     }
     return prep('since', `SELECT * FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts > ?
         ORDER BY ts DESC, rowid DESC LIMIT ?`).all(id, bound, CONTEXT_MESSAGES).reverse();
   }
+
+  /**
+   * THE deadline of a chat's hold (r4 B): null with no hold, Infinity for one that waits for a person, else its
+   * time; on a brain chat no later than the waiting message's 2-h mark, so `missed` is recorded at 2 h however long
+   * the hold (a day-long cap_day included). The sweep selects on it; eligible's hold gate reads it.
+   */
+  function holdDeadline(lead, t = now()) {
+    if (!lead?.dana_hold_reason) return null;
+    const until = lead.dana_hold_until;
+    if (until === null || until === undefined) return Infinity;
+    let d = Number(until);
+    if (useBrain(lead) && d > t) {
+      const w = pendingFor(lead.lead_id, lead);
+      if (w.length) d = Math.min(d, Number(w[w.length - 1].ts) + FRESH_MS);
+    }
+    return d;
+  }
+  const activeHold = (lead, t) => {
+    const d = holdDeadline(lead, t);
+    return d !== null && t < d;
+  };
 
   /** This chat's turns of the last 24 h: when each began (its first row), oldest first. */
   const turnTimes = (leadId, t) => prep('turns', `SELECT MIN(created) AS at FROM wa_outbox
@@ -724,7 +739,9 @@ export function createDana({
         if (autoOf(lead)) noteHandover(lead, { kind: 'send_failed' });
       }
     }
-    if (brainFailuresSince(t - 30 * MINUTE_MS) >= SEND_FAILS_BREAKER && team.danaEnabled()) {
+    // It trips whatever the global switch says (r4 D): with it owner-off, test chats still send, and the
+    // breaker then blocks them too (breakerOpen).
+    if (brainFailuresSince(t - 30 * MINUTE_MS) >= SEND_FAILS_BREAKER && !breakerOpen()) {
       team.setSetting('dana_enabled', '0', { by: 'system' });
       say({ level: 'error', evt: 'dana.breaker' });
       safely(() => alerts?.notifyOwners?.({ reason: 'dana_paused' }));
@@ -766,21 +783,68 @@ export function createDana({
     const wait = safely(() => pace.typingFloorMs({ chars: text.length, newestTs: coversTs })) ?? 0;
     if (wait > 0) await sleep(wait);
     const r = await pace.fifo(() => {
-      // Re-checked in the queue (r2): a person who wrote meanwhile, Dana or Sending switched off, the chat
-      // stopped (the closing line itself excepted), out of the inbox or lid-only: the line does not go.
-      const l = db.getLead(lead.lead_id);
-      if (!l || l.inbox_state !== 'in' || isExcludedLead(l)) return { sent: false, stopped: 'not_in_inbox' };
-      if (identityBlocked()) return { sent: false, stopped: 'identity' };
-      if (ruleOff(l)) return { sent: false, stopped: 'rule_off' };
-      if (breakerOpen() || !(team.danaEnabled() || Number(l.dana_test) === 1)) return { sent: false, stopped: 'off' };
-      if (!team.sendingEnabled()) return { sent: false, stopped: 'sending_off' };
-      if (!closing && Number(l.dana_off) === 1) return { sent: false, stopped: 'chat_off' };
-      if (inbox.humanOutboundAfter(lead.lead_id, coversTs)) return { sent: false, stopped: 'dropped_human' };
-      if (!replyJidFor(l)) return { sent: false, stopped: 'lid_only' };
-      return send(l, text, language, coversTs, { viaBrain: true });
+      const g = sendGate(lead.lead_id, coversTs, { fixed: true, closing });
+      if (!g.ok) return { sent: false, stopped: g.stopped };
+      return send(db.getLead(lead.lead_id), text, language, coversTs, { viaBrain: true });
     });
     if (r.uncertain || (!r.sent && r.failure === 'evolution')) afterFailure(lead, { alert: true });
     return r;
+  }
+
+  /**
+   * THE send-time gate of a brain chat (r4 C), run inside the FIFO right before each send: model bubbles, fixed
+   * lines (hand-over, closing, outage) and documents alike. It re-checks, at that moment:
+   *   - the chat: in the inbox and nobody's colleague, the instance identity, the own-number/test rules, the
+   *     breaker and the switches (Dana, Sending), the chat's own stop (a closing line excepted), a person who
+   *     wrote since the batch, a phone jid, never first;
+   *   - the message's age: past 2 h `missed` (a first bubble or any fixed line: no client line then); past 30 min
+   *     the backlog allowance for a first bubble (stable link, ten an hour, a place held while it goes);
+   *   - a model bubble only (a fixed line goes as part of the action that set its own hold or stop): an active
+   *     hold, an open hand-over on a non-auto chat, a person active in 24 h, and for a first bubble the caps
+   *     (a continuation of a turn already counted passes them);
+   *   - a document: the per-chat and the global day caps, from the outbox (the FIFO serialises the sends, so the
+   *     count is exact); over either it goes as its link (`asLink`).
+   * @returns {{ ok: true, reserve?: true, asLink?: true } | { ok: false, stopped: string, cap?: object }}
+   */
+  function sendGate(leadId, coversTs, { fixed = false, closing = false, first = false, backlog: isBacklogTurn = false, document = false } = {}) {
+    const t = now();
+    const no = (stopped, extra = {}) => ({ ok: false, stopped, ...extra });
+    const l = db.getLead(leadId);
+    if (!l || l.inbox_state !== 'in' || isExcludedLead(l)) return no('not_in_inbox');
+    if (identityBlocked()) return no('identity');
+    if (ruleOff(l)) return no('rule_off');
+    if (breakerOpen() || !(team.danaEnabled() || Number(l.dana_test) === 1)) return no('off');
+    if (!team.sendingEnabled()) return no('sending_off');
+    if (!closing && Number(l.dana_off) === 1) return no('chat_off');
+    if (inbox.humanOutboundAfter(leadId, coversTs)) return no('dropped_human');
+    if (!replyJidFor(l)) return no('lid_only');
+    if (!openChat(leadId, coversTs, t)) return no('no_open_chat');
+    const age = t - Number(coversTs);
+    if ((first || fixed) && age > FRESH_MS) return no('missed');
+    let reserve = false;
+    if (!fixed) {
+      if (activeHold(l, t)) return no('hold');
+      if (!autoOf(l) && Number(l.needs_human) === 1) return no('needs_human');
+      if (Number.isFinite(l.last_human_out_ts) && t - l.last_human_out_ts < HUMAN_QUIET_MS) return no('human_recent');
+      if (first) {
+        const cap = capFor(l, t, true);
+        if (cap) return no(cap.reason, { cap });
+        if (isBacklogTurn || age > BACKLOG_MS) {
+          if (!backlogAllowed(t, { except: leadId })) return no('backlog');
+          reserve = true;
+        }
+      }
+    }
+    if (document) {
+      const caps = tierAt(t);
+      const since = t - DAY_MS;
+      const chatDocs = prep('docsChat', `SELECT COUNT(*) AS n FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana' AND media_kind = 'document'
+          AND status <> 'failed' AND created >= ?`).get(String(leadId), since).n;
+      const allDocs = prep('docsAll', `SELECT COUNT(*) AS n FROM wa_outbox WHERE sender_kind = 'dana' AND media_kind = 'document'
+          AND status <> 'failed' AND created >= ?`).get(since).n;
+      if (chatDocs >= caps.DOCS_PER_CHAT_PER_DAY || (caps.DOCS_PER_DAY !== null && allDocs >= caps.DOCS_PER_DAY)) return { ok: true, reserve, asLink: true };
+    }
+    return { ok: true, reserve };
   }
 
   /** In auto mode inside office hours the hand-over line is HANDOVER variant 0 (PLAN T12 test 8); outside, the out-of-hours text. */
@@ -867,6 +931,11 @@ export function createDana({
     let sent = false;
     if (replyJidFor(fresh)) {
       const r = await sendFixed(fresh, outageLine({ language, at: t }), language, coversTs, true);
+      // Past 2 h by the time it reached the queue: `missed`, and no client line (r4 C).
+      if (r.stopped === 'missed') {
+        clearHold(leadId);
+        return handover(leadId, language, 'missed', coversTs, { checked: true, line: 'none', note: { kind: 'missed' }, viaBrain: true });
+      }
       sent = Boolean(r.sent);
     }
     // A line owed (refused here, or no phone jid for now): a short hold, so the sweep tries the line again soon.
@@ -1021,7 +1090,7 @@ export function createDana({
       const lead = db.getLead(leadId);
       const viaBrain = useBrain(lead);
       // A brain chat's waiting messages include those an outage line covered (r3), like the run's batch.
-      const waiting = viaBrain ? waitingFor(leadId, lead) : inbox.unansweredClientMessages(leadId, { limit: CONTEXT_MESSAGES });
+      const waiting = pendingFor(leadId, lead);
       // A cap acts only for a client who is waiting: with nothing unanswered (a wake for a
       // batch another run answered) there is nobody to hand over — no flag, alert or line.
       if (!waiting.length) {
@@ -1055,7 +1124,7 @@ export function createDana({
       return refusedRun(leadId, e);
     }
     const viaBrain = e.brain;
-    const batch = viaBrain ? waitingFor(leadId, e.lead) : inbox.unansweredClientMessages(leadId, { limit: CONTEXT_MESSAGES });
+    const batch = pendingFor(leadId, e.lead);
     if (!batch.length) {
       backlog.delete(leadId);
       if (viaBrain && e.lead.dana_hold_reason) clearHold(leadId);
@@ -1081,6 +1150,7 @@ export function createDana({
       if (age > BACKLOG_MS) {
         if (!backlogAllowed(started)) {
           backlog.set(leadId, coversTs);
+          if (lead.dana_hold_reason !== 'brain_out') clearEnded(leadId, started);
           return skip(leadId, 'backlog');
         }
         isBacklog = true;
@@ -1125,8 +1195,7 @@ export function createDana({
         // A legacy chat on the brain (dana_brain '1'): today's hand-over.
         return handover(leadId, language, turn.code, coversTs, { viaBrain });
       }
-      // The brain answered: an outage hold of this chat is over.
-      if (db.getLead(leadId)?.dana_hold_reason === 'brain_out') clearHold(leadId);
+      // (An outage hold ends only once a reply of this turn was accepted: the post-send clear below, r4 A.)
     } else {
       const c = await complete(lead, batch, language);
       if (c.error) return handover(leadId, language, c.error, coversTs);
@@ -1211,24 +1280,7 @@ export function createDana({
       return handover(leadId, language, 'commit_failed', coversTs, { checked: true, viaBrain });
     }
     if (!bubbles.length) return handover(leadId, language, 'empty', coversTs, { checked: true, viaBrain });
-    const links = viaBrain ? bubbles.reduce((n, b) => n + (b.kind === 'text' ? (b.text.match(LINK_RE) ?? []).length : 0), 0) : cardLinks;
-    // Documents (DESIGN §6.3): DOCS_PER_CHAT_PER_DAY per chat and DOCS_PER_DAY overall (days 0-21) in the rolling
-    // day, from the outbox; a document over either goes as its link instead (a belt for PR-B4's own cap; r3).
-    {
-      const caps = tierAt(now());
-      const since = now() - DAY_MS;
-      let chatDocs = prep('docsChat', `SELECT COUNT(*) AS n FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana' AND media_kind = 'document'
-          AND status <> 'failed' AND created >= ?`).get(String(leadId), since).n;
-      let allDocs = prep('docsAll', `SELECT COUNT(*) AS n FROM wa_outbox WHERE sender_kind = 'dana' AND media_kind = 'document'
-          AND status <> 'failed' AND created >= ?`).get(since).n;
-      bubbles = bubbles.map((b) => {
-        if (b.kind !== 'document') return b;
-        const over = chatDocs >= caps.DOCS_PER_CHAT_PER_DAY || (caps.DOCS_PER_DAY !== null && allDocs >= caps.DOCS_PER_DAY);
-        if (!over) { chatDocs += 1; allDocs += 1; return b; }
-        say({ evt: 'dana.document_as_link', leadId });
-        return { kind: 'text', text: `${String(b.caption).trim()} — ${b.url}` };
-      });
-    }
+    let linksSent = 0; // a brain chat's links, counted as they go (a brochure turned into its link included; r4 E)
     // A commit hand-over (booking_failed) means its text is a fixed line, not a reply the guard passed.
     const commitKind = typeof committed?.handover?.kind === 'string' ? committed.handover.kind : null;
     const bubbleGuarded = guarded && !commitKind;
@@ -1240,40 +1292,48 @@ export function createDana({
     for (let i = 0; i < bubbles.length; i += 1) {
       const b = bubbles[i];
       const go = async () => {
-        // In the queue a person may have written: preSend ran before the wait, so the cheap re-check goes here.
-        if ((viaBrain || i > 0) && inbox.humanOutboundAfter(leadId, coversTs)) return { stopped: 'dropped_human' };
-        const fresh = db.getLead(leadId);
-        if (i > 0 || viaBrain) {
+        let bubble = b;
+        let reserve = false;
+        if (viaBrain) {
+          // THE send-time gate (r4 C): every check of this moment, for this bubble.
+          const g = sendGate(leadId, coversTs, { first: !sentAny, backlog: isBacklog, document: b.kind === 'document' });
+          if (!g.ok) return { stopped: g.stopped, cap: g.cap ?? null };
+          reserve = Boolean(g.reserve);
+          if (g.asLink) {
+            // Over a document cap: the brochure goes as its link, within this message's link allowance (r4 E).
+            const lim = limitLinks(`${String(b.caption).trim()} — ${b.url}`, Math.max(0, maxLinks - linksSent), '');
+            if (lim.stripped || !lim.text.trim()) return { dropped: 'document_cap' };
+            say({ evt: 'dana.document_as_link', leadId });
+            bubble = { kind: 'text', text: lim.text };
+          }
+        } else if (i > 0) {
+          // A legacy chat, as before: only a later bubble is re-checked.
+          if (inbox.humanOutboundAfter(leadId, coversTs)) return { stopped: 'dropped_human' };
           const again = eligible(leadId, { coversTs });
-          // Only a continuation of a turn already counted (a bubble of it went) may pass a cap; a first bubble
-          // that a cap now stops (another chat's turn filled it in the queue) does not go (Codex T12 r1).
           const cap = again.reason === 'cap_chat' || CAP_HANDOVERS.has(again.reason);
-          if (!again.ok && !(cap && sentAny)) return { stopped: again.reason, cap: cap ? again : null };
+          if (!again.ok && !cap) return { stopped: again.reason, cap: null };
         }
-        // The first bubble of a brain turn re-reads the message's age at send time (DESIGN §6.4; r3): past 2 h it
-        // is missed; past 30 min it is backlog even when it was not before the model call. A backlog turn's first
-        // bubble re-checks the ten-an-hour allowance and holds a place while it goes, so two turns that both
-        // passed before the model call cannot both go (r2).
-        const age = now() - Number(coversTs);
-        if (viaBrain && !sentAny && age > FRESH_MS) return { stopped: 'missed' };
-        const reserve = viaBrain && !sentAny && (isBacklog || age > BACKLOG_MS);
-        if (reserve) {
-          if (!backlogAllowed(now(), { except: leadId })) return { stopped: 'backlog' };
-          backlogReserved.add(leadId);
-        }
+        if (reserve) backlogReserved.add(leadId);
         try {
-          return await send(fresh ?? pre.lead, b.kind === 'text' ? b.text : b.caption, language, coversTs, {
-            answer: b.kind === 'text' && !sentAny && !commitKind && !b.neutral, viaBrain, guarded: bubbleGuarded && !b.neutral,
-            ...(b.kind === 'document' ? { document: { url: b.url, fileName: typeof b.fileName === 'string' ? b.fileName : 'brochure.pdf' } } : {}),
+          const r0 = await send(db.getLead(leadId) ?? pre.lead, bubble.kind === 'text' ? bubble.text : bubble.caption, language, coversTs, {
+            answer: bubble.kind === 'text' && !sentAny && !commitKind && !bubble.neutral, viaBrain, guarded: bubbleGuarded && !bubble.neutral,
+            ...(bubble.kind === 'document' ? { document: { url: bubble.url, fileName: typeof bubble.fileName === 'string' ? bubble.fileName : 'brochure.pdf' } } : {}),
           });
+          if (r0.sent && bubble.kind === 'text') linksSent += (bubble.text.match(LINK_RE) ?? []).length;
+          return r0;
         } finally {
           if (reserve) backlogReserved.delete(leadId);
         }
       };
       const r = viaBrain ? await pace.fifo(go) : await go();
       if (b.bookingId) told = r.accepted === true;
+      if (r.dropped) continue;
       if (r.stopped) {
-        if (r.stopped === 'backlog' && !sentAny) backlog.set(leadId, coversTs);
+        if (r.stopped === 'backlog' && !sentAny) {
+          backlog.set(leadId, coversTs);
+          // An outage hold stays until a reply is accepted (r4 A); any other ended hold ends here.
+          if (db.getLead(leadId)?.dana_hold_reason !== 'brain_out') clearEnded(leadId);
+        }
         if (r.stopped === 'missed' && !sentAny) {
           backlog.delete(leadId);
           clearEnded(leadId);
@@ -1343,6 +1403,7 @@ export function createDana({
     const stages = {
       poll: Math.max(0, woke - coversTs), batch: Math.max(0, started - woke), brain: brainMs, guard: guardMs, hold: Math.max(0, doneAt - holdAt),
     };
+    const links = viaBrain ? linksSent : cardLinks;
     say({ evt: 'dana.answered', leadId, batch: batch.length, chars, links, newChat, latencyMs, stages });
     return { answered: true, chars, links, newChat };
   }
@@ -1418,29 +1479,41 @@ export function createDana({
     if (!configured || stopped) return { woken: 0 };
     const t = now();
     let woken = 0;
+    const seen = new Set(); // one sweep runs a chat at most once (r4 E)
+    const wakeOnce = (id, ts) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      answer(id, { ts });
+      woken += 1;
+    };
     try {
-      const ended = prep('ended', `SELECT lead_id, dana_hold_reason FROM leads WHERE inbox_state = 'in' AND dana_hold_reason IS NOT NULL
-          AND dana_hold_until IS NOT NULL AND dana_hold_until <= ? ORDER BY dana_hold_until`).all(t);
+      // Every timed hold, selected on ITS deadline (holdDeadline: its time, or the waiting message's 2-h mark).
+      const held = prep('held', `SELECT lead_id, dana_hold_reason FROM leads WHERE inbox_state = 'in'
+          AND dana_hold_reason IS NOT NULL AND dana_hold_until IS NOT NULL ORDER BY dana_hold_until`).all();
       const capDay = [];
-      for (const r of ended) {
-        const waiting = waitingFor(r.lead_id);
+      for (const r of held) {
+        const lead = db.getLead(r.lead_id);
+        const waiting = pendingFor(r.lead_id, lead);
         // Nothing waits, or what waits is past 24 h (never answered: never first): the hold ends, no wake (r3 N4).
         if (!waiting.length || Number(waiting[waiting.length - 1].ts) < t - DAY_MS) { clearHold(r.lead_id); continue; }
-        // The day cap: each freed turn wakes one waiting chat, the oldest first (below); its hold reason stays
-        // so a chat still capped only waits again, with no repeat hand-over (r2).
-        if (r.dana_hold_reason === 'cap_day') { capDay.push({ id: r.lead_id, oldest: Number(waiting[0].ts), ts: waiting[waiting.length - 1].ts }); continue; }
-        if (r.dana_hold_reason !== 'brain_out') clearHold(r.lead_id);
-        answer(r.lead_id, { ts: waiting[waiting.length - 1].ts });
-        woken += 1;
+        if (t < holdDeadline(lead, t)) continue;
+        const newest = waiting[waiting.length - 1];
+        const pastMark = t - Number(newest.ts) > FRESH_MS;
+        // The day cap: each freed turn wakes one waiting chat, the oldest first (below); its reason stays so a
+        // chat still capped only waits again, with no repeat hand-over (r2). Past the 2-h mark it goes now (missed).
+        if (r.dana_hold_reason === 'cap_day' && !pastMark) { capDay.push({ id: r.lead_id, oldest: Number(waiting[0].ts), ts: newest.ts }); continue; }
+        // A brain_out reason stays until a reply is accepted (r4 A); the run clears what ends.
+        if (r.dana_hold_reason !== 'brain_out' && r.dana_hold_reason !== 'cap_day') clearHold(r.lead_id);
+        wakeOnce(r.lead_id, newest.ts);
       }
       if (capDay.length) {
         const caps = tierAt(t);
         let free = Math.max(0, caps.PER_DAY - inbox.countDanaTurns({ sinceTs: t - DAY_MS }));
         for (const c of capDay.sort((a, b) => a.oldest - b.oldest)) {
+          if (seen.has(c.id)) continue;
           if (free > 0) {
             free -= 1;
-            answer(c.id, { ts: c.ts });
-            woken += 1;
+            wakeOnce(c.id, c.ts);
           } else {
             setTimedHold(c.id, 'cap_day', dayFreesAt(t, caps.PER_DAY));
           }
@@ -1448,8 +1521,7 @@ export function createDana({
       }
       for (const [id, ts] of [...backlog].sort((a, b) => a[1] - b[1])) {
         backlog.delete(id);
-        answer(id, { ts });
-        woken += 1;
+        wakeOnce(id, ts);
       }
     } catch (err) {
       say({ level: 'error', evt: 'dana.sweep_failed', name: errName(err) });
