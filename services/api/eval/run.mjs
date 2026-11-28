@@ -28,11 +28,11 @@
  * ~/bona-data/eval/<UTC stamp>.jsonl (directory 0700 when created, file 0600) for Claude's review, and beside it
  * <UTC stamp>.report.txt (0600): the flagged replies to read and every guard refusal, true or false hit.
  *
- * Network, live run: the brain's fetch reaches only https://api.openai.com/v1/chat/completions (and only with
+ * Network, live run: the brain's fetch reaches only https://api.openai.com/v1/responses (T25b; and only with
  * BONA_BRAIN_EVAL=1, checked again on every request); the tools' GET/HEAD reach only Bona's own site (the
  * published units table, a brochure's size), as in production; the Retell baseline reaches only
  * api.retellai.com (its tools then call bona-api over HTTP, read-only, as today's WhatsApp agent does). The
- * global fetch is replaced for the run by one that refuses, so nothing else can leave. `reasoning_effort` is
+ * global fetch is replaced for the run by one that refuses, so nothing else can leave. `reasoning.effort` is
  * set per candidate on the request (lib/brain/openai.mjs always sends 'low': a winning 'medium' needs a code
  * change, and the decision says so).
  *
@@ -94,7 +94,7 @@ import { freeSlots, dateLabel, timeLabel } from '../lib/slots.mjs';
 import { TIERS } from '../lib/pacing.mjs';
 import { createSiteFacts } from '../lib/site-facts.mjs';
 import { loadPrompts } from '../lib/brain/prompt.mjs';
-import { REASONING_EFFORT, MAX_COMPLETION_TOKENS, usageOf } from '../lib/brain/openai.mjs';
+import { REASONING_EFFORT, MAX_OUTPUT_TOKENS, usageOf } from '../lib/brain/openai.mjs';
 import { costMicroUsd } from '../lib/brain/prices.mjs';
 import { identity as personaIdentity } from '../lib/persona.mjs';
 import { createRetellClient } from '../lib/retell.mjs';
@@ -1033,52 +1033,67 @@ function openAnswers(dir, runId) {
   return { file, write: (obj) => fs.writeSync(fd, `${JSON.stringify(obj)}\n`), close: () => fs.closeSync(fd) };
 }
 
+/** A Responses message's text: a string, or the text of its parts (input_text / output_text). */
+const itemText = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('') : '');
+
 /**
  * The model requests of a turn as the answers file keeps them (`state.responses`): one entry a request, made as it
- * goes out, so a request that never answers (a timeout) is there too. `repair` marks the guard's repair request (its
- * last message is REPAIR_NOTE), with the tool results it carried (the guard metric); then the response's text, the
- * tools it asked for and why it stopped.
+ * goes out, so a request that never answers (a timeout) is there too. On the Responses API (T25b, lib/brain/openai.mjs):
+ * `repair` marks the guard's repair request (its LAST input item is a developer message with REPAIR_NOTE), with the
+ * tool results it carried (its function_call_output items' `output`: the guard metric); then the response's text (the
+ * LAST message item's output_text, #104's last-message rule), the tools it asked for (its function_call items) and why
+ * it stopped ('tool_calls' or 'stop' when completed, else incomplete_details.reason or the status).
  */
-function recorder(state) {
+export function recorder(state) {
   return {
     request(body) {
       let j = null;
       try { j = typeof body === 'string' ? JSON.parse(body) : null; } catch { j = null; }
-      const msgs = Array.isArray(j?.messages) ? j.messages : [];
-      const repair = msgs.at(-1)?.role === 'system' && msgs.at(-1)?.content === REPAIR_NOTE;
+      const input = Array.isArray(j?.input) ? j.input : [];
+      const last = input.at(-1);
+      const repair = last?.role === 'developer' && itemText(last.content) === REPAIR_NOTE;
       const entry = { repair, content: null, tools: [], finish: 'no_response', usage: null };
-      if (repair) entry.results = msgs.filter((m) => m?.role === 'tool').map((m) => String(m.content ?? ''));
+      if (repair) entry.results = input.filter((it) => it?.type === 'function_call_output').map((it) => String(it.output ?? ''));
       state.responses.push(entry);
       return entry;
     },
     response(entry, text) {
       let j = null;
       try { j = JSON.parse(text); } catch { j = null; }
-      const choice = j?.choices?.[0];
-      const m = choice?.message ?? {};
-      entry.content = typeof m.content === 'string' ? m.content : null;
-      entry.tools = (Array.isArray(m.tool_calls) ? m.tool_calls : []).map((c) => c?.function?.name).filter((n) => typeof n === 'string');
-      entry.finish = choice?.finish_reason ?? (j ? null : 'unparsed');
+      const output = Array.isArray(j?.output) ? j.output : [];
+      const message = output.filter((it) => it?.type === 'message').at(-1);
+      entry.content = message ? (Array.isArray(message.content) ? message.content : []).filter((p) => p?.type === 'output_text' && typeof p.text === 'string').map((p) => p.text).join('') : null;
+      entry.tools = output.filter((it) => it?.type === 'function_call' && typeof it.name === 'string').map((it) => it.name);
+      entry.finish = !j ? 'unparsed' : j.status === 'completed' ? (entry.tools.length ? 'tool_calls' : 'stop')
+        : j.status === 'incomplete' ? (j.incomplete_details?.reason ?? 'incomplete') : (j.status ?? null);
       entry.usage = j?.usage ?? null;
     },
   };
 }
 
-/** The live brain's fetch: Chat Completions on api.openai.com only, with the flag, the candidate's effort set. */
+/** The one provider request a live run may send (T25b): POST to a path ending /responses on https://api.openai.com. */
+export function providerUrlOk(url, init = {}) {
+  let u;
+  try { u = new URL(String(url)); } catch { return false; }
+  return u.protocol === 'https:' && u.hostname === 'api.openai.com' && u.pathname.endsWith('/responses') && init.method === 'POST';
+}
+/** The request body with the candidate's effort set as `reasoning.effort` (its other reasoning fields kept), never `reasoning_effort`. */
+export function withEffort(body, effort) {
+  const j = JSON.parse(body);
+  j.reasoning = { ...(j.reasoning && typeof j.reasoning === 'object' ? j.reasoning : {}), effort };
+  return JSON.stringify(j);
+}
+
+/** The live brain's fetch: the Responses API on api.openai.com only, with the flag, the candidate's effort set. */
 export function providerFetch({ realFetch, effort, state, env }) {
   const record = recorder(state);
   return async (url, init = {}) => {
     if (env[EVAL_FLAG] !== '1') throw new Error('eval: the provider needs BONA_BRAIN_EVAL=1');
-    const u = new URL(String(url));
-    if (u.protocol !== 'https:' || u.hostname !== 'api.openai.com' || !u.pathname.endsWith('/chat/completions') || init.method !== 'POST') throw new Error('eval: refused request');
-    let body = init.body;
-    if (typeof body === 'string') {
-      const j = JSON.parse(body);
-      j.reasoning_effort = effort;
-      body = JSON.stringify(j);
-    }
+    if (!providerUrlOk(url, init)) throw new Error('eval: refused request');
+    const href = new URL(String(url)).href;
+    const body = typeof init.body === 'string' ? withEffort(init.body, effort) : init.body;
     const entry = record.request(body);
-    const res = await realFetch(u.href, { ...init, body });
+    const res = await realFetch(href, { ...init, body });
     const text = await res.text();
     record.response(entry, text);
     return { ok: res.ok, status: res.status, headers: res.headers, text: async () => text };
@@ -1088,7 +1103,7 @@ export function providerFetch({ realFetch, effort, state, env }) {
 /**
  * --max-usd as a true maximum (Codex r1 P2): before each request goes out, its worst case is reserved: every byte of
  * the body a fresh input token at the dearer of the input and cache-write prices (no request has more tokens than its
- * body has bytes), plus max_completion_tokens of output. A request that could pass the cap is not sent; the
+ * body has bytes), plus max_output_tokens of output (T25b; 1,200 when the body has none). A request that could pass the cap is not sent; the
  * candidate's run stops there (`max_usd`). The run keeps its own tally (`state.spend`; Claude r2 P3-1: never a month
  * marker): what each answered request cost by its usage (`knownMicro`), and the worst case of every request that went
  * out but whose cost is unknown (`reservedMicro`, Codex r2 P2): it timed out or was aborted after the send, or it
@@ -1100,8 +1115,8 @@ export function capFetch({ inner, model, maxUsd, state }) {
   const sp = state.spend;
   return async (url, init = {}) => {
     const body = typeof init.body === 'string' ? init.body : '';
-    let out = MAX_COMPLETION_TOKENS;
-    try { out = Number(JSON.parse(body).max_completion_tokens) || out; } catch { /* the default cap */ }
+    let out = MAX_OUTPUT_TOKENS;
+    try { out = Number(JSON.parse(body).max_output_tokens) || out; } catch { /* the default cap */ }
     const worst = costMicroUsd(model, { in: Buffer.byteLength(body, 'utf8'), cached: 0, out });
     if (sp.knownMicro + sp.reservedMicro + worst > maxUsd * 1e6) {
       state.capReached = true;
@@ -1179,7 +1194,8 @@ const FAKE_REPLY = {
   default: { ar: 'تمام، وصلني طلبك وأقدر أساعدك فيه.', en: 'Sure, happy to help with that.' },
 };
 /**
- * The scripted model of a dry run. 'good' answers every case as its expectations say. The failure paths: 'probes'
+ * The scripted model of a dry run, a fake POST /v1/responses (T25b) that keeps the Responses rules (responsesRuleBroken:
+ * a broken one is a 400, as the API answers). 'good' answers every case as its expectations say. The failure paths: 'probes'
  * answers with each case's first failing (or claim) probe; 'quota' runs out of credit on the fifth request; and the degenerate
  * brains every one of which must fail the bar (r1): 'handover' (always hands over), 'refuse' (always refuses), 'echo'
  * (repeats the client), 'echo-tools' (the right tools, then their raw text), 'claim-pick' (never books a picked slot,
@@ -1188,8 +1204,10 @@ const FAKE_REPLY = {
  * price on the units and guard-edge cases, Claude r10 P1) and 'wrong-listing' (books the picked slot on another home,
  * Codex r10 P1-1).
  */
-function fakeModel({ mode = 'good', state }) {
+export function fakeModel({ mode = 'good', state }) {
   const record = recorder(state);
+  /** call_id → the reasoning item it came with: a function_call goes back only after that item (T25b, store:false). */
+  const issued = new Map();
   let n = 0;
   let requests = 0;
   return async (url, init = {}) => {
@@ -1200,11 +1218,15 @@ function fakeModel({ mode = 'good', state }) {
       record.response(entry, text);
       return { ok: status === 200, status, headers: new Headers(), text: async () => text };
     };
+    const no = (param, message) => answer(400, { error: { type: 'invalid_request_error', code: null, param, message } });
     if (mode === 'quota' && requests >= 5) return answer(429, { error: { code: 'insufficient_quota', type: 'insufficient_quota' } });
-    const body = JSON.parse(init.body);
+    let body;
+    try { body = JSON.parse(init.body); } catch { return no('body', 'not JSON'); }
+    const refused = responsesRuleBroken(body, issued);
+    if (refused) return no(refused.param, refused.message);
     const { kase, spec, language } = state;
     const en = language === 'en';
-    const msgs = Array.isArray(body.messages) ? body.messages : [];
+    const msgs = chatView(body);
     const after = msgs.slice(msgs.map((m) => m.role).lastIndexOf('user') + 1);
     const asked = new Map(after.filter((m) => m.role === 'assistant').flatMap((m) => (m.tool_calls ?? []).map((c) => [c.id, c.function.name])));
     const done = new Set(asked.values());
@@ -1244,12 +1266,80 @@ function fakeModel({ mode = 'good', state }) {
       message = reply(en ? 'Great, Sunday at 10 it is! Is there anything else I can help with?' : 'أبشر يا خالد، الأحد الساعة 10 إن شاء الله. تحتاج شي ثاني؟');
     } else message = good();
     n += 1;
+    // The Responses shape (T25b): a reasoning item first, then one function_call per tool (each with its call_id), or
+    // the answer as a message item.
+    const reasoning = { id: `rs_${n}`, type: 'reasoning', summary: [], encrypted_content: `ENC-${n}-opaque` };
+    const output = [reasoning];
+    if (message.tool_calls) {
+      for (const c of message.tool_calls) {
+        issued.set(c.id, reasoning);
+        output.push({ id: `fc_${c.id}`, type: 'function_call', status: 'completed', call_id: c.id, name: c.function.name, arguments: c.function.arguments });
+      }
+    } else {
+      output.push({ id: `msg_${n}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: String(message.content ?? ''), annotations: [] }] });
+    }
     return answer(200, {
-      id: `fake-${n}`, object: 'chat.completion',
-      choices: [{ index: 0, message, finish_reason: message.tool_calls ? 'tool_calls' : 'stop' }],
-      usage: { prompt_tokens: 2400, prompt_tokens_details: { cached_tokens: 2000 }, completion_tokens: 80, completion_tokens_details: { reasoning_tokens: 30 } },
+      id: `resp_${n}`, object: 'response', status: 'completed', error: null, incomplete_details: null, model: body.model, output,
+      usage: { input_tokens: 2400, input_tokens_details: { cached_tokens: 2000 }, output_tokens: 80, output_tokens_details: { reasoning_tokens: 30 } },
     });
   };
+}
+
+/** Fields of the Chat Completions API (and sampling ones) that the Responses API refuses (the T00 step 7 probe). */
+const CHAT_ONLY_FIELDS = ['messages', 'reasoning_effort', 'max_completion_tokens', 'response_format', 'temperature', 'top_p'];
+/**
+ * The rules the offline fake keeps, as #104's strict fake (test/brain.test.mjs fakeResponses): Responses fields only;
+ * store false with the encrypted reasoning included and an effort; flat strict function tools; every function_call
+ * one this fake issued, sent back after the reasoning item that came with it (unchanged); every function_call_output
+ * answering a call; no call left unanswered. `{ param, message }` for the first rule broken, else null.
+ */
+function responsesRuleBroken(b, issued) {
+  if (!b || typeof b !== 'object') return { param: 'body', message: 'not an object' };
+  for (const k of CHAT_ONLY_FIELDS) if (k in b) return { param: k, message: `Unsupported parameter: '${k}'` };
+  if (b.store !== false || !(Array.isArray(b.include) && b.include.includes('reasoning.encrypted_content'))) return { param: 'include', message: 'encrypted reasoning needed with store false' };
+  if (!['none', 'minimal', 'low', 'medium', 'high'].includes(b.reasoning?.effort)) return { param: 'reasoning.effort', message: 'bad effort' };
+  if (typeof b.model !== 'string' || !Array.isArray(b.input) || !Number.isInteger(b.max_output_tokens)) return { param: 'input', message: 'missing field' };
+  for (const t of b.tools ?? []) if (t?.type !== 'function' || typeof t.name !== 'string' || t.strict !== true || 'function' in t) return { param: 'tools', message: 'not a Responses function tool' };
+  const open = new Set();
+  for (const [i, it] of b.input.entries()) {
+    if (it?.type === 'reasoning') {
+      if (typeof it.encrypted_content !== 'string') return { param: 'input', message: 'Items are not persisted when `store` is set to false.' };
+    } else if (it?.type === 'function_call') {
+      const r = issued.get(it.call_id);
+      if (!r) return { param: 'input', message: 'unknown function call' };
+      if (!b.input.slice(0, i).some((x) => x?.type === 'reasoning' && x.id === r.id && x.encrypted_content === r.encrypted_content)) return { param: 'input', message: 'a function_call without its reasoning item' };
+      open.add(it.call_id);
+    } else if (it?.type === 'function_call_output') {
+      if (!open.has(it.call_id) || typeof it.output !== 'string') return { param: 'input', message: 'No tool call found for function call output.' };
+      open.delete(it.call_id);
+    } else if (!['user', 'assistant', 'developer', 'system'].includes(it?.role) || (typeof it.content !== 'string' && !Array.isArray(it.content))) {
+      return { param: 'input', message: 'bad message' };
+    }
+  }
+  if (open.size) return { param: 'input', message: 'No tool output found for function call.' };
+  return null;
+}
+
+/**
+ * A Responses request read back as the chat turns the brain built (as test/brain.test.mjs chatView): `instructions` the
+ * first system message; a developer message a system one; a round's function_call items one assistant turn with
+ * tool_calls; a function_call_output a tool message. Reasoning items are left out.
+ */
+function chatView(body) {
+  const out = typeof body?.instructions === 'string' ? [{ role: 'system', content: body.instructions }] : [];
+  for (const it of Array.isArray(body?.input) ? body.input : []) {
+    if (it?.type === 'reasoning') continue;
+    if (it?.type === 'function_call') {
+      const call = { id: it.call_id, type: 'function', function: { name: it.name, arguments: it.arguments } };
+      if (out.at(-1)?.role === 'assistant' && out.at(-1).tool_calls) out.at(-1).tool_calls.push(call);
+      else out.push({ role: 'assistant', content: null, tool_calls: [call] });
+    } else if (it?.type === 'function_call_output') {
+      out.push({ role: 'tool', tool_call_id: it.call_id, content: it.output });
+    } else {
+      out.push({ role: it?.role === 'developer' ? 'system' : it?.role, content: itemText(it?.content) });
+    }
+  }
+  return out;
 }
 /** The tools a right answer calls, one round at a time (book_viewing after viewing_slots answered). */
 function fakePlan({ kase, spec, done, slots, wrongHome = false }) {

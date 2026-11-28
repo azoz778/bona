@@ -991,33 +991,98 @@ test('--max-usd is a true maximum (Codex r1 P2): the next request\'s worst case 
 
 test('the $ cap: a request that ends with no usage (a timeout after the send) keeps its worst case reserved; the run counts its own spend', async () => {
   const r = await runner();
-  const body = JSON.stringify({ model: 'gpt-5.6-sol', messages: [{ role: 'user', content: 'x'.repeat(10_000) }], max_completion_tokens: 1200 });
+  const body = JSON.stringify({ model: 'gpt-5.6-sol', input: [{ role: 'user', content: 'x'.repeat(10_000) }], max_output_tokens: 1200 });
   // The worst case of that body for sol: 10,0xx bytes at $5 a 1M input tokens, plus 1,200 output tokens at $20.
   const worst = (Buffer.byteLength(body) * 5 + 1200 * 20) / 1e6;
-  const answer = (usage) => async () => ({ ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify({ choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }], ...(usage ? { usage } : {}) }) });
+  const answer = (usage) => async () => ({ ok: true, status: 200, headers: new Headers(), text: async () => JSON.stringify({ status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }], ...(usage ? { usage } : {}) }) });
   const timeout = async () => { throw Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }); };
   // Room for one worst case, not two: the first request times out after it went, so its charge is unknown.
   let sent = 0;
   const count = (fn) => async (...a) => { sent += 1; return fn(...a); };
   let state = { capReached: false };
   let cap = r.capFetch({ inner: count(timeout), model: 'gpt-5.6-sol', maxUsd: worst * 1.5, state });
-  await assert.rejects(cap('https://api.openai.com/v1/chat/completions', { method: 'POST', body }), /aborted/);
+  await assert.rejects(cap('https://api.openai.com/v1/responses', { method: 'POST', body }), /aborted/);
   assert.deepEqual([sent, state.capReached, state.spend.reservedMicro > 0], [1, false, true]);
-  await assert.rejects(cap('https://api.openai.com/v1/chat/completions', { method: 'POST', body }), /max-usd/);
+  await assert.rejects(cap('https://api.openai.com/v1/responses', { method: 'POST', body }), /max-usd/);
   assert.deepEqual([sent, state.capReached], [1, true], 'the second request was never sent: the first one\'s charge is still reserved');
   // A response with no usage is reserved the same way; one with usage is charged what it cost, and the next goes out.
   sent = 0;
   state = { capReached: false };
   cap = r.capFetch({ inner: count(answer(null)), model: 'gpt-5.6-sol', maxUsd: worst * 1.5, state });
-  await cap('https://api.openai.com/v1/chat/completions', { method: 'POST', body });
-  await assert.rejects(cap('https://api.openai.com/v1/chat/completions', { method: 'POST', body }), /max-usd/);
+  await cap('https://api.openai.com/v1/responses', { method: 'POST', body });
+  await assert.rejects(cap('https://api.openai.com/v1/responses', { method: 'POST', body }), /max-usd/);
   assert.equal(sent, 1);
   sent = 0;
   state = { capReached: false };
-  cap = r.capFetch({ inner: count(answer({ prompt_tokens: 100, completion_tokens: 10 })), model: 'gpt-5.6-sol', maxUsd: worst * 1.5, state });
-  await cap('https://api.openai.com/v1/chat/completions', { method: 'POST', body });
-  await cap('https://api.openai.com/v1/chat/completions', { method: 'POST', body });
+  cap = r.capFetch({ inner: count(answer({ input_tokens: 100, output_tokens: 10 })), model: 'gpt-5.6-sol', maxUsd: worst * 1.5, state });
+  await cap('https://api.openai.com/v1/responses', { method: 'POST', body });
+  await cap('https://api.openai.com/v1/responses', { method: 'POST', body });
   assert.deepEqual([sent, state.capReached, state.spend.knownMicro], [2, false, 2 * Math.ceil((100 * 5 + 10 * 20))]);
+  // T25b: the worst case reads the Responses cap, max_output_tokens (1,200 when the body has none).
+  const reserve = async (b) => { const st = { capReached: false }; await assert.rejects(r.capFetch({ inner: timeout, model: 'gpt-5.6-sol', maxUsd: 100, state: st })('https://api.openai.com/v1/responses', { method: 'POST', body: JSON.stringify(b) }), /aborted/); return st.spend.reservedMicro; };
+  const small = { model: 'gpt-5.6-sol', input: [] };
+  const bytes = (b) => Buffer.byteLength(JSON.stringify(b));
+  assert.equal(await reserve({ ...small, max_output_tokens: 100 }), Math.ceil(bytes({ ...small, max_output_tokens: 100 }) * 5 + 100 * 20));
+  assert.equal(await reserve(small), Math.ceil(bytes(small) * 5 + 1200 * 20), 'no max_output_tokens: 1,200');
+  assert.equal(await reserve({ ...small, max_completion_tokens: 100 }), Math.ceil(bytes({ ...small, max_completion_tokens: 100 }) * 5 + 1200 * 20), 'the Chat Completions name is not read');
+});
+
+test('T25b: the eval speaks the Responses API: the provider path and effort, the recorder, and a strict offline fake', async () => {
+  const r = await runner();
+  const { REPAIR_NOTE } = await import('../lib/reply-guard.mjs');
+  // The provider: only POST to a path ending /responses on api.openai.com; the effort as reasoning.effort, never reasoning_effort.
+  for (const [url, method, ok] of [['https://api.openai.com/v1/responses', 'POST', true], ['https://api.openai.com/v1/chat/completions', 'POST', false],
+    ['https://api.openai.com/v1/responses', 'GET', false], ['http://api.openai.com/v1/responses', 'POST', false], ['https://api.openai.com.evil.example/v1/responses', 'POST', false],
+    ['https://api.openai.com/v1/models', 'POST', false]]) assert.equal(r.providerUrlOk(url, { method }), ok, `${method} ${url}`);
+  const sent = JSON.parse(r.withEffort(JSON.stringify({ model: 'm', reasoning: { effort: 'low', summary: 'auto' }, input: [] }), 'medium'));
+  assert.deepEqual([sent.reasoning, 'reasoning_effort' in sent], [{ effort: 'medium', summary: 'auto' }, false]);
+  assert.deepEqual(JSON.parse(r.withEffort('{"model":"m"}', 'high')).reasoning, { effort: 'high' });
+  // The recorder, request side: the repair is the last input item, a developer message with REPAIR_NOTE; its tool results
+  // are the function_call_output items' output.
+  const state = { responses: [] };
+  const rec = r.recorder(state);
+  const input = [{ role: 'user', content: 'hi' }, { type: 'reasoning', id: 'rs_1', encrypted_content: 'E' }, { type: 'function_call', call_id: 'c1', name: 'search_properties', arguments: '{}' },
+    { type: 'function_call_output', call_id: 'c1', output: '{"count":1}' }];
+  let e = rec.request(JSON.stringify({ input: [...input, { role: 'developer', content: REPAIR_NOTE }] }));
+  assert.deepEqual([e.repair, e.results], [true, ['{"count":1}']]);
+  e = rec.request(JSON.stringify({ input: [...input, { role: 'developer', content: [{ type: 'input_text', text: REPAIR_NOTE }] }] }));
+  assert.equal(e.repair, true, 'a content parts list');
+  e = rec.request(JSON.stringify({ input: [{ role: 'developer', content: REPAIR_NOTE }, ...input] }));
+  assert.deepEqual([e.repair, e.results], [false, undefined], 'not the last item');
+  // The response side: the LAST message item's output_text, the function_call names, the stop from status.
+  rec.response(e, JSON.stringify({ status: 'completed', output: [{ type: 'reasoning' }, { type: 'message', content: [{ type: 'output_text', text: 'Let me check.' }] },
+    { type: 'function_call', call_id: 'c2', name: 'viewing_slots', arguments: '{}' }, { type: 'message', content: [{ type: 'output_text', text: 'Here ' }, { type: 'output_text', text: 'it is.' }] }] }));
+  assert.deepEqual([e.content, e.tools, e.finish], ['Here it is.', ['viewing_slots'], 'tool_calls']);
+  rec.response(e, JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'Done.' }] }], usage: { input_tokens: 5 } }));
+  assert.deepEqual([e.content, e.tools, e.finish, e.usage], ['Done.', [], 'stop', { input_tokens: 5 }]);
+  rec.response(e, JSON.stringify({ status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, output: [] }));
+  assert.deepEqual([e.content, e.finish], [null, 'max_output_tokens']);
+  rec.response(e, 'not json');
+  assert.equal(e.finish, 'unparsed');
+  // The offline fake keeps the Responses rules (as #104's strict fake): Responses fields only, every function_call with its
+  // call_id sent back after its own reasoning item, every function_call_output answering a call, no call left unanswered.
+  const fakeState = { responses: [], kase: { category: 'search', probes: [], history: [] }, spec: { client: ['hi'], expect: { tools: ['search_properties'] } }, language: 'en' };
+  const fake = r.fakeModel({ mode: 'good', state: fakeState });
+  const call = async (body) => { const res = await fake('https://api.openai.com/v1/responses', { method: 'POST', body: JSON.stringify(body) }); return { status: res.status, json: JSON.parse(await res.text()) }; };
+  const base = { model: 'gpt-5.6-sol', instructions: 'p', reasoning: { effort: 'low' }, store: false, include: ['reasoning.encrypted_content'], max_output_tokens: 1200,
+    tools: [{ type: 'function', name: 'search_properties', strict: true, parameters: { type: 'object' } }], tool_choice: 'auto', parallel_tool_calls: true };
+  let res = await call({ ...base, input: [{ role: 'user', content: 'hi' }] });
+  assert.equal(res.status, 200);
+  const [reasoning, fc] = res.json.output;
+  assert.deepEqual([reasoning.type, fc.type, typeof fc.call_id, fc.name, res.json.status], ['reasoning', 'function_call', 'string', 'search_properties', 'completed']);
+  assert.ok(res.json.usage.input_tokens > 0 && res.json.usage.output_tokens > 0, 'Responses usage');
+  const out = { type: 'function_call_output', call_id: fc.call_id, output: '{"count":0,"results":[]}' };
+  for (const [label, body] of [
+    ['a Chat Completions field', { ...base, messages: [], input: [] }], ['reasoning_effort', { ...base, reasoning_effort: 'low', input: [] }],
+    ['max_completion_tokens', { ...base, max_completion_tokens: 1200, input: [] }], ['store not false', { ...base, store: true, input: [] }],
+    ['no encrypted reasoning', { ...base, include: [], input: [] }], ['a nested chat tool', { ...base, tools: [{ type: 'function', function: { name: 'x' } }], input: [] }],
+    ['a call without its reasoning item', { ...base, input: [{ role: 'user', content: 'hi' }, fc, out] }],
+    ['a call it never issued', { ...base, input: [{ role: 'user', content: 'hi' }, reasoning, { ...fc, call_id: 'call_other' }, { ...out, call_id: 'call_other' }] }],
+    ['an output with no call', { ...base, input: [{ role: 'user', content: 'hi' }, out] }],
+    ['a call left unanswered', { ...base, input: [{ role: 'user', content: 'hi' }, reasoning, fc] }],
+  ]) assert.equal((await call(body)).status, 400, label);
+  res = await call({ ...base, input: [{ role: 'user', content: 'hi' }, reasoning, fc, out] });
+  assert.deepEqual([res.status, res.json.output.at(-1).type], [200, 'message'], 'the round answered in order');
 });
 
 test('a subset run is diagnostic (Codex r1 P2): no decision, "subset, no decision" in the report', async () => {
@@ -1084,7 +1149,7 @@ test('the live fetches refuse: the provider without BONA_BRAIN_EVAL=1, the tools
   let called = 0;
   const spy = async () => { called += 1; return new Response('{}', { status: 200 }); };
   const provider = r.providerFetch({ realFetch: spy, effort: 'medium', state: { responses: [] }, env: {} });
-  await assert.rejects(provider('https://api.openai.com/v1/chat/completions', { method: 'POST', body: '{}' }), /BONA_BRAIN_EVAL=1/);
+  await assert.rejects(provider('https://api.openai.com/v1/responses', { method: 'POST', body: '{}' }), /BONA_BRAIN_EVAL=1/);
   const site = r.siteFetch({ realFetch: spy, siteUrl: 'https://bona-real-estate.com' });
   for (const [url, init] of [['https://api.openai.com/v1/models', {}], ['https://bona-real-estate.com/x', { method: 'POST', body: 'x' }], ['http://bona-real-estate.com/x', {}], ['https://bona-real-estate.com.evil.example/x', {}]]) {
     await assert.rejects(site(url, init), /refused/, url);
