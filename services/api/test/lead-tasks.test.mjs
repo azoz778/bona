@@ -74,3 +74,91 @@ test('owner task UI distinguishes unconfirmed notification from provider accepta
  const html=leadTasksPanel('lead',[],true,[{created:1,notify_status:'uncertain'},{created:2,notify_status:'sent'}]);
  assert.match(html,/check WhatsApp before resending/);assert.match(html,/not proof of delivery/);
 });
+
+/* ---------------- PR-B1 (PLAN T10 test 4; DESIGN §4.3, §8.3, §8.4) ---------------- */
+const DAY_MS=86400000;
+
+test('saveNeeds has its own allow-list onto the lead row (not cleanNeeds): each field lands, unknown keys are dropped, no hand-over', async () => {
+ const {saveNeeds}=await import('../lib/lead-tasks.mjs');const {db,id}=fixture();try{
+  const before=db.getLead(id);
+  const out=saveNeeds(db,{leadId:id,now:5000,needs:{name:'Sara Example',interest:'Buy a family home',budget:'SAR 3-4m',district:'Al Shati',
+   property_type:'villa',timeline:'within 3 months',listing_id:'bona-w012',phone:'+966500000099',stage:'won',notes:'private',viewing_requested:true,handler_user_id:'u-1'}});
+  assert.equal(out.saved,true);
+  const lead=db.getLead(id);
+  assert.equal(lead.name,'Sara Example');
+  assert.equal(lead.interest,'Buy a family home · villa','property_type lands on interest: the lead row has no column of its own');
+  assert.equal(lead.budget,'SAR 3-4m');
+  assert.equal(lead.district,'Al Shati');
+  assert.equal(lead.timeline,'within 3 months');
+  assert.equal(lead.listing_id,'BONA-W012');
+  assert.equal(lead.phone_e164,before.phone_e164,'unknown keys are dropped');
+  assert.equal(lead.stage,'new');assert.equal(lead.notes,null);assert.equal(lead.handler_user_id,null);
+  assert.equal(tasksForLead(db,id).length,0,'saving needs is not a hand-over: no task');
+  assert.deepEqual(out.fields.sort(),['budget','district','interest','listing_id','name','timeline']);
+  // property_type alone: it lands on interest once, and again is a no-op.
+  const {db:db2,id:id2}=fixture();try{
+   saveNeeds(db2,{leadId:id2,needs:{property_type:'apartment'}});assert.equal(db2.getLead(id2).interest,'apartment');
+   assert.equal(saveNeeds(db2,{leadId:id2,needs:{property_type:'Apartment'}}).saved,false,'already there');
+   assert.equal(db2.getLead(id2).interest,'apartment');
+  }finally{db2.close();}
+ }finally{db.close();}
+});
+test('saveNeeds writes no name that is blank, emoji or one letter; a bad listing id or an unknown lead saves nothing',async()=>{
+ const {saveNeeds,plausibleName}=await import('../lib/lead-tasks.mjs');const {db,id}=fixture();try{
+  for(const bad of ['','   ','😀','😀😀','A','a.','1234567','Ahmed 0500000000',null,undefined,42,{},'x'.repeat(81)]){
+   assert.equal(plausibleName(bad),false,String(bad));
+   assert.deepEqual(saveNeeds(db,{leadId:id,needs:{name:bad}}),{saved:false,fields:[]},String(bad));
+   assert.equal(db.getLead(id).name,null,String(bad));
+  }
+  for(const good of ['Mo','محمد','Sara Example','عبدالله بن محمد',"O'Neil"])assert.equal(plausibleName(good),true,good);
+  assert.equal(saveNeeds(db,{leadId:id,needs:{listing_id:'W012; DROP'}}).saved,false);assert.equal(db.getLead(id).listing_id,null);
+  assert.deepEqual(saveNeeds(db,{leadId:'LEAD-NOPE',needs:{name:'Sara'}}),{saved:false,fields:[]});
+  assert.equal(saveNeeds(db,{leadId:id,needs:{budget:'  '}}).saved,false,'a blank value is not a value');
+ }finally{db.close();}
+});
+test('bookViewing writes details {booking_id, listing_id, slot_start} directly and confirms the viewing task with its time',async()=>{
+ const {bookViewing}=await import('../lib/lead-tasks.mjs');const {db,id}=fixture();try{
+  ensureHandoff(db,{leadId:id,details:{viewing_requested:true,budget:'5m'}});
+  const requested=tasksForLead(db,id).find(t=>t.kind==='viewing');assert.equal(requested.status,'requested');
+  const due=Date.UTC(2026,11,6,7);
+  const task=bookViewing(db,{leadId:id,bookingId:'bk-1',listingId:'BONA-W012',slotStart:'2026-12-06T10:00+03:00',dueTs:due,now:7000});
+  assert.equal(task.task_id,requested.task_id,'the requested viewing becomes the booked one');
+  assert.equal(task.status,'confirmed');assert.equal(task.due_ts,due);
+  assert.equal(task.details.booking_id,'bk-1');assert.equal(task.details.listing_id,'BONA-W012');assert.equal(task.details.slot_start,'2026-12-06T10:00+03:00');
+  assert.equal(task.details.budget,'5m','what was asked before stays');
+  assert.equal(tasksForLead(db,id).filter(t=>t.kind==='viewing').length,1);
+  // No requested task: a new confirmed one, nameless.
+  const {db:db2,id:id2}=fixture();try{
+   const t2=bookViewing(db2,{leadId:id2,bookingId:'bk-2',listingId:'BONA-001',slotStart:'2026-12-07T12:00+03:00',dueTs:due+DAY_MS,now:7000});
+   assert.equal(t2.status,'confirmed');assert.equal(t2.source,'dana');assert.deepEqual(t2.details,{booking_id:'bk-2',listing_id:'BONA-001',slot_start:'2026-12-07T12:00+03:00'});
+   assert.doesNotMatch(t2.reason,/Dana/);
+  }finally{db2.close();}
+ }finally{db.close();}
+});
+test("updateTask refuses a due_ts change on a calendar-booked task ('calendar_booked'); the same time, a status change and other tasks are fine",async()=>{
+ const {bookViewing,CALENDAR_BOOKED}=await import('../lib/lead-tasks.mjs');const {db,id}=fixture();try{
+  const due=Date.UTC(2026,11,6,7);
+  const t=bookViewing(db,{leadId:id,bookingId:'bk-1',listingId:'BONA-W012',slotStart:'2026-12-06T10:00+03:00',dueTs:due,now:1});
+  assert.equal(CALENDAR_BOOKED,'calendar_booked');
+  assert.throws(()=>updateTask(db,{leadId:id,taskId:t.task_id,status:'confirmed',dueTs:due+3600000,actor:'Owner'}),e=>e instanceof RangeError&&e.code==='calendar_booked');
+  assert.equal(tasksForLead(db,id)[0].due_ts,due,'unchanged');
+  assert.equal(updateTask(db,{leadId:id,taskId:t.task_id,status:'confirmed',dueTs:due,actor:'Owner'}).status,'confirmed','the same time is no move');
+  assert.equal(updateTask(db,{leadId:id,taskId:t.task_id,status:'confirmed',actor:'Owner'}).due_ts,due,'no time given is no move');
+  const cancelled=updateTask(db,{leadId:id,taskId:t.task_id,status:'cancelled',actor:'Owner'});
+  assert.equal(cancelled.status,'cancelled');assert.equal(cancelled.details.booking_id,'bk-1','the hook gets the booking id');
+  const other=addTask(db,{leadId:id,kind:'viewing',dueTs:due});
+  assert.equal(updateTask(db,{leadId:id,taskId:other.task_id,status:'confirmed',dueTs:due+3600000,actor:'Owner'}).due_ts,due+3600000);
+ }finally{db.close();}
+});
+test('the calendar moves and cancels a booked task itself (moveBookedViewing / cancelBookedViewing), past the guard',async()=>{
+ const {bookViewing,moveBookedViewing,cancelBookedViewing}=await import('../lib/lead-tasks.mjs');const {db,id}=fixture();try{
+  const due=Date.UTC(2026,11,6,7);
+  const t=bookViewing(db,{leadId:id,bookingId:'bk-1',listingId:'BONA-W012',slotStart:'2026-12-06T10:00+03:00',dueTs:due,now:1});
+  assert.equal(moveBookedViewing(db,{taskId:t.task_id,bookingId:'bk-1',dueTs:due+DAY_MS,now:2}),true);
+  assert.equal(tasksForLead(db,id)[0].due_ts,due+DAY_MS);
+  assert.equal(moveBookedViewing(db,{taskId:t.task_id,bookingId:'bk-other',dueTs:due,now:3}),false,'only the task of that booking');
+  assert.equal(cancelBookedViewing(db,{taskId:t.task_id,bookingId:'bk-1',now:4}),true);
+  assert.equal(tasksForLead(db,id)[0].status,'cancelled');
+  assert.equal(cancelBookedViewing(db,{taskId:t.task_id,bookingId:'bk-1',now:5}),false,'already cancelled');
+ }finally{db.close();}
+});
