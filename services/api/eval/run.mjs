@@ -78,13 +78,13 @@ import { createPublishedUnits } from '../lib/published-units.mjs';
 import { createBrain } from '../lib/brain.mjs';
 import { BRAIN_DEFAULTS, loadConfig } from '../lib/config.mjs';
 import { brainInput, languageOf, leadFacts as legacyFacts, recentContext, batchText as legacyBatch } from '../lib/dana-wa.mjs';
-import { checkReply, findAmounts, unitRefs, REPAIR_NOTE } from '../lib/reply-guard.mjs';
+import { checkReply, findAmounts, unitRefs, allowedFrom, REPAIR_NOTE } from '../lib/reply-guard.mjs';
 import { createDanaCommit, BOOKING_FAILED_LINE } from '../lib/dana-commit.mjs';
 import { freeSlots, dateLabel, timeLabel } from '../lib/slots.mjs';
 import { TIERS } from '../lib/pacing.mjs';
 import { createSiteFacts } from '../lib/site-facts.mjs';
 import { loadPrompts } from '../lib/brain/prompt.mjs';
-import { REASONING_EFFORT, MAX_COMPLETION_TOKENS } from '../lib/brain/openai.mjs';
+import { REASONING_EFFORT, MAX_COMPLETION_TOKENS, usageOf } from '../lib/brain/openai.mjs';
 import { costMicroUsd } from '../lib/brain/prices.mjs';
 import { identity as personaIdentity } from '../lib/persona.mjs';
 import { createRetellClient } from '../lib/retell.mjs';
@@ -127,6 +127,9 @@ export class EvalError extends Error {
 
 /* ---------------- cases ---------------- */
 
+/** Each loaded case's file line, so a message can name the line and never the case's text (Claude r2 P3-4). */
+const CASE_LINES = new WeakMap();
+
 export function loadCases(file = CASES_FILE) {
   const lines = fs.readFileSync(file, 'utf8').split('\n');
   const out = [];
@@ -138,6 +141,7 @@ export function loadCases(file = CASES_FILE) {
     if (typeof c?.id !== 'string' || !['ar', 'en'].includes(c.lang) || !CATEGORIES.includes(c.category) || !Array.isArray(c.turns) || !c.turns.length) {
       throw new EvalError(`${path.basename(file)} line ${i + 1}: not a case`);
     }
+    CASE_LINES.set(c, i + 1);
     out.push(c);
   });
   return out;
@@ -148,26 +152,28 @@ const wallHour = (ts) => new Date(ts + 3 * 3_600_000).getUTCHours();
 
 /** The case with its time (`start`), its slot grid (`slots`) and every placeholder filled. */
 export function fillCase(kase) {
+  // Where a message points: the file line when the case came from loadCases, else its id; never its text.
+  const where = CASE_LINES.has(kase) ? `line ${CASE_LINES.get(kase)}` : String(kase.id);
   const start = Date.parse(kase.at ?? T0);
-  if (!Number.isFinite(start)) throw new EvalError(`${kase.id}: bad time`);
+  if (!Number.isFinite(start)) throw new EvalError(`${where}: bad time`);
   const slots = freeSlots({ now: start });
   const lang = kase.lang === 'en' ? 'en' : 'ar';
   const at = (i) => {
     const s = slots[Number(i)];
-    if (!s) throw new EvalError(`${kase.id}: no slot ${i} for a placeholder`);
+    if (!s) throw new EvalError(`${where}: no slot ${Number(i)} for a placeholder`);
     return Date.parse(s.slot_id);
   };
   const fill = (text) => {
     const out = String(text).replace(/\{\{([a-z_]+)(?::(\d+))?\}\}/g, (m, name, i) => {
       if (name === 'slots' && i === undefined) return slots.map((s) => (lang === 'en' ? s.label_en : s.label_ar)).join(lang === 'en' ? '; ' : '، ');
-      if (i === undefined) throw new EvalError(`${kase.id}: unknown placeholder ${m}`);
+      if (i === undefined) throw new EvalError(`${where}: unknown placeholder {{${name}}}`);
       if (name === 'day') return dateLabel(at(i), lang).split(' ')[0];
       if (name === 'time') return timeLabel(at(i), lang);
       if (name === 'hour') return String(wallHour(at(i)));
       if (name === 'hour_ind') return toIndic(wallHour(at(i)));
-      throw new EvalError(`${kase.id}: unknown placeholder ${m}`);
+      throw new EvalError(`${where}: unknown placeholder {{${name}}}`);
     });
-    if (/\{\{|\}\}/.test(out)) throw new EvalError(`${kase.id}: unknown placeholder in ${out.slice(0, 40)}`);
+    if (/\{\{|\}\}/.test(out)) throw new EvalError(`${where}: an unbalanced placeholder`);
     return out;
   };
   return {
@@ -298,16 +304,20 @@ const SELF_NAME_RE = /\bmy name(?:'s|’s| is)\b|\b(?:you can )?call me\s+[A-Z]|
 const AFFIRM_DANA_RE = /\b(?:I am|I'm|I’m|it's|it’s|this is|here is)\s+Dana\b|\bDana(?:['’]s|\s+is)?\s+here\b|^\s*(?:yes|yeah|yep|sure)\b|(?:أنا|انا|معك|معاك)\s+(?:دانة|دانه)|^\s*(?:نعم|إيه|ايه|ايوه|أيوه|أيوة|ايوة|اكيد|أكيد)(?![\p{L}])/iu;
 /** Capitalised words that may follow "I'm" / "this is" and are no name. */
 const NOT_A_NAME_EN = new Set(['Bona', 'AI', 'The', 'Al', 'Jeddah', 'Riyadh', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sorry', 'Happy', 'Glad', 'Here', 'Not']);
-/** "I'm Sarah", "I am Sarah"; "this is Sarah," / "this is Sarah from Bona"; "Sarah here". */
+/** "I'm Sarah", "I am Sarah"; "this is Sarah," / "this is Sarah from Bona"; "it's Sarah here"; "Sarah here". */
 const EN_INTRO_RES = [
   /\b(?:I am|I'm|I’m)\s+([A-Z][a-z]{1,15})\b(?!['’])/g,
-  /\b(?:[Tt]his is|[Ii]t's|[Ii]t’s)\s+([A-Z][a-z]{1,15})(?=\s*(?:,|\.|!|$|from\s+Bona\b|here\b|at\s+Bona\b))/g,
+  /\b[Tt]his is\s+([A-Z][a-z]{1,15})(?=\s*(?:,|\.|!|$|from\s+Bona\b|here\b|at\s+Bona\b))/g,
+  // "It's X" is a self-introduction only with here / from Bona / at Bona ("It's Obhur, …" is a place: Claude r2 P2-2).
+  /\b[Ii]t['’]s\s+([A-Z][a-z]{1,15})(?=\s*(?:from\s+Bona\b|here\b|at\s+Bona\b))/g,
   /(?:^|[.!?,]\s*|\b(?:Hi|Hello|Hey)[,!]?\s+)([A-Z][a-z]{1,15})\s+here\b(?=\s*(?:[,.!]|$|from\b|at\b))/g,
 ];
 /** Words after «أنا» / «معك» that are no name: the assistant label, the team, how she is, where she is. */
 const NOT_A_NAME_AR = new Set(['مساعدة', 'مساعد', 'مساعدتك', 'مساعدتكم', 'متأكدة', 'متاكدة', 'آسفة', 'اسفة', 'آسف', 'هنا', 'موجودة', 'جاهزة', 'حاضرة',
   'سعيدة', 'مبسوطة', 'فاهمة', 'معك', 'معاك', 'بخدمتك', 'بالخدمة', 'تحت', 'أمرك', 'امرك', 'فريق', 'بونا', 'من', 'في', 'كمان', 'برضو', 'بعد', 'الحين',
-  'دحين', 'مو', 'ما', 'مش', 'لست', 'ذكاء', 'نفسي', 'كذلك', 'أيضاً', 'أيضا']);
+  'دحين', 'مو', 'ما', 'مش', 'لست', 'ذكاء', 'نفسي', 'كذلك', 'أيضاً', 'أيضا',
+  // What she is, not who (Claude r2 P2-2: the answer to «انتي إنسانة ولا روبوت؟»).
+  'روبوت', 'بوت', 'برنامج', 'آلة', 'الة', 'نظام', 'تطبيق', 'إنسانة', 'انسانة', 'بشر', 'ذكية', 'رقمية', 'رقمي', 'افتراضية', 'افتراضي']);
 /** «أنا نورة» / «معك سارة من بونا» / «أهلاً، أنا نورة، مساعدة بونا»: at a sentence start or after a greeting, then a separator or the label. */
 const AR_INTRO_RE = /(?:^|[.!؟?،,\n]\s*|(?:أهلاً|أهلا|اهلا|مرحباً|مرحبا|هلا|السلام عليكم)[،,!]?\s+)(?:معك|معاك|أنا|انا)\s+(\p{L}+)(?=\s*(?:[،,.!؟?\n]|$|من\s+(?:بونا|فريق)|مساعدة|مساعدتك))/gu;
 /**
@@ -360,16 +370,35 @@ export function evalClaim(text) {
 const STOCK_ONLY_RE = /التسليم|تسليم|الوحدات|متوفر|متاح/u;
 
 const AR_DAY_FORMS = Object.freeze({ 'الأحد': 'أحد|احد', 'الاثنين': 'اثنين|إثنين', 'الثلاثاء': 'ثلاثاء', 'الأربعاء': 'أربعاء|اربعاء', 'الخميس': 'خميس', 'الجمعة': 'جمعة|جمعه', 'السبت': 'سبت' });
+/** A pending form: the booking (or the check) is still to come ("let me check", "the team will arrange", «بتأكد», «بيأكد»). */
+const EN_PENDING_RE = new RegExp(String.raw`${EN_HEDGE_RE.source}|\b(?:let me|I['’]ll|I will|I['’]m going to|I am going to|we['’]ll|we will)\s+(?:check|see|try|look|find out|ask|confirm|arrange)\b|\bchecking\b|(?:\b(?:will|shall)|['’]ll)\s+(?:arrange|set up|organi[sz]e|coordinate|get back|reach out|contact)\b`, 'gi');
+const AR_PENDING_RE = new RegExp(String.raw`${AR_HEDGE_RE.source}|بتأكد|أتأكد|اتأكد|بشيك|أشيك|اشيك|بشوف لك|خليني|لحظة|بيرتب|يرتب|بينسق|ينسق|بيتواصل|يتواصل`, 'gu');
+/** A sentence that says the slot is NOT set: a refusal or an apology ("Sunday at 10 was just taken", «للأسف … مو متاح»). */
+const EN_NEGATIVE_RE = /\b(?:not|no longer|isn['’]t|wasn['’]t|aren['’]t|can['’]t|cannot|couldn['’]t|could not|unable|unavailable|taken|fully booked|sorry|unfortunately|gone)\b/i;
+const AR_NEGATIVE_RE = /ما قدرت|ما أقدر|ما اقدر|مو متاح|غير متاح|مب متاح|مش متاح|مو فاضي|مب فاضي|للأسف|للاسف|انحجز لغيرك|محجوز|مو متوفر|غير متوفر/u;
+/** What a pending form is about when it is the place, not the booking («بيأكد معك العنوان», "confirm the meeting point"). */
+const ABOUT_PLACE_RE = /^\s*(?:\S+\s+){0,3}?(?:ال)?(?:عنوان|موقع|لوكيشن|نقطة|مكان)|^\s*(?:\S+\s+){0,4}?(?:the\s+)?(?:exact\s+)?(?:address|location|meeting point|directions|pin|place)\b/iu;
+const ANY_DAY_EN = String.raw`(?:sun|mon|tues|wednes|thurs|fri|satur)day`;
+const ANY_DAY_AR = String.raw`ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس|جمعة|جمعه|سبت)`;
+/** Office hours, never a slot: a day range ("Sunday to Thursday", «من الأحد إلى الخميس») and a time range ("10:00 to 19:00"). */
+const RANGE_RES = [
+  new RegExp(String.raw`(?:from\s+)?\b${ANY_DAY_EN}\s*(?:to|through|till|until|-|–|—)\s*${ANY_DAY_EN}\b|(?:من\s+)?(?:يوم\s+)?${ANY_DAY_AR}\s*(?:إلى|الى|لين|لغاية|حتى|-|–|—)\s*(?:يوم\s+)?${ANY_DAY_AR}`, 'giu'),
+  /\d{1,2}(?::\d{2})?\s*(?:am|pm|صباحاً|صباحا|مساءً|مساء)?\s*(?:-|–|—|to|till|until|إلى|الى|لين|حتى)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm|صباحاً|صباحا|مساءً|مساء)?/giu,
+];
+/** A pending form in the sentence that is about the booking (not one about the address only). */
+const pendingAboutBooking = (sent) => [EN_PENDING_RE, AR_PENDING_RE].some((re) => [...sent.matchAll(re)].some((m) => !ABOUT_PLACE_RE.test(sent.slice(m.index + m[0].length))));
 /**
- * Claude r1 P1: on a turn where the client picks a slot offered earlier, a reply that names that slot's day or hour
- * ("Great, Sunday at 10 it is!", «أبشر، الأحد الساعة 10 إن شاء الله.») tells the client the time is set. The caller
- * applies it only when no book_viewing reserved and no request_human ran; a question, a pending form («التأكيد يوصلك»,
- * "the confirmation follows") or dana-commit's BOOKING_FAILED_LINE is no claim.
+ * Claude r1 P1, r2 P1-1 and Codex r2 P1: on a turn where the client picks a slot offered earlier, a reply that names
+ * that slot's day or hour ("Great, Sunday at 10 it is!", «أبشر، الأحد الساعة 10 إن شاء الله.») tells the client the
+ * time is set. Judged SENTENCE BY SENTENCE, so a trailing question or another sentence's hedge hides nothing ("We'll
+ * expect you on Sunday at 10. Would you like directions?"): a sentence naming the slot is a claim unless that same
+ * sentence is a question, says the slot is not set ("Sorry, Sunday at 10 was just taken", «للأسف … مو متاح»), carries a
+ * pending form about the booking ("let me check", "the team will arrange", «بتأكد», «التأكيد يوصلك»; not «بيأكد معك
+ * العنوان», which is about the place), or is dana-commit's BOOKING_FAILED_LINE. Office-hour ranges name no slot. The
+ * caller applies it when the last book_viewing did not reserve, whether or not request_human ran.
  */
 export function pickClaim(text, slot) {
   if (!slot?.slot_id) return false;
-  const s = toAsciiDigits(String(text ?? ''));
-  if (/[?؟]/.test(s) || AR_HEDGE_RE.test(s) || EN_HEDGE_RE.test(s) || Object.values(BOOKING_FAILED_LINE).some((l) => s.includes(l))) return false;
   const ts = Date.parse(slot.slot_id);
   const h = wallHour(ts);
   const hours = [...new Set([h, h % 12 || 12])].join('|');
@@ -378,7 +407,17 @@ export function pickClaim(text, slot) {
   const ar = AR_DAY_FORMS[dayAr] ?? dayAr.replace(/^ال/u, '');
   const day = new RegExp(String.raw`\b${dayEn}\b|(?<![\p{L}])(?:ال|يوم\s+(?:ال)?)(?:${ar})(?![\p{L}])`, 'iu');
   const time = new RegExp(String.raw`(?:\bat\s+|الساعة\s*)(?:${hours})(?![\d.,])|(?<![\d.,:])(?:${hours})(?::00)?\s*(?:am|pm|a\.m\.|p\.m\.|صباح|مساء|ظهر|عصر|الصبح|الظهر|العصر)|(?<![\d.,:])(?:${hours}):00(?!\d)`, 'iu');
-  return day.test(s) || time.test(s);
+  const fixedLines = Object.values(BOOKING_FAILED_LINE);
+  return toAsciiDigits(String(text ?? '')).split(/(?<=[.!?؟])\s+|\n+/u).some((sentence) => {
+    const sent = sentence.trim();
+    if (!sent) return false;
+    const named = RANGE_RES.reduce((t, re) => t.replace(re, ' '), sent);
+    if (!(day.test(named) || time.test(named))) return false;
+    if (/[?؟][\s"'»)]*$/u.test(sent)) return false;
+    if (fixedLines.some((l) => l.includes(sent) || sent.includes(l))) return false;
+    if (EN_NEGATIVE_RE.test(sent) || AR_NEGATIVE_RE.test(sent)) return false;
+    return !pendingAboutBooking(sent);
+  });
 }
 
 const MASC_RE = /(?<![\p{L}])(?:أنا|انا)\s+(?:(?:جداً?|كثير|مره|مرة)\s+)?(?:متأكد|متاكد|سعيد|جاهز|موجود|مستعد|فاهم|متحمس|مبسوط|آسف|اسف|مسرور|ممتن|شاكر|مساعد|حاضر)(?![\p{L}])|(?<![\p{L}])كمساعد(?![\p{L}])/u;
@@ -441,15 +480,18 @@ export function gradeContext({ siteUrl = SITE, inventoryFile = WORKTREE_LISTINGS
 
 const replyOf = (res) => (Array.isArray(res?.messages) ? res.messages.filter((m) => m?.role === 'agent' && typeof m.content === 'string').map((m) => m.content).join('\n\n') : '');
 
-/** Every value a reply may quote from these texts: each number as written, and each amount the guard reads (raw and SAR). */
-function allowedValues(texts) {
-  const out = new Set();
-  for (const t of texts) {
-    for (const n of numbersIn(t)) out.add(n);
-    for (const a of findAmounts(String(t ?? ''))) { if (a.raw !== null) out.add(a.raw); if (a.sar !== null) out.add(a.sar); }
-  }
-  return out;
+/**
+ * The values a reply may quote, by the production guard's own reading (reply-guard allowedFrom; Codex r2 P1): an amount
+ * in a tool result's text, a JSON number only in a price field (never an area, a count, beds or baths), and the
+ * amounts of earlier guarded replies. A looser set (every number in the JSON) would allow "SAR 1,250" against
+ * area_sqm 1250.
+ */
+function guardAllowed({ toolResults = [], earlierReplies = [] } = {}) {
+  return allowedFrom({ toolResults, earlierReplies });
 }
+const allowedValues = (allowed) => new Set([...allowed.amounts].map((k) => Number(k.slice(k.indexOf(':') + 1))).filter(Number.isFinite));
+/** checkReply's own test of one amount against the allowed set. */
+const amountAllowed = (allowed, a) => a.raw !== null && (allowed.amounts.has(`sar:${a.sar}`) || allowed.amounts.has(a.currency ? `${a.currency}:${a.raw}` : `raw:${a.raw}`));
 
 /**
  * The guard metric of one turn (Codex r1 P1), from the model's requests and responses as the eval recorded them
@@ -472,9 +514,9 @@ export function guardStats({ responses = [], code = null, earlierReplies = [] } 
     const amounts = findAmounts(text);
     const units = unitRefs(text);
     if ((!amounts.length && !units.length) || amounts.some((a) => a.raw === null)) return false;
-    const allowed = allowedValues([...results, ...earlierReplies]);
-    const resultText = results.join('\n').toUpperCase();
-    return amounts.every((a) => allowed.has(a.raw) || allowed.has(a.sar)) && units.every((u) => resultText.includes(u));
+    // By the guard's own allow-list, read on the draft as written: every amount and unit ref in it was allowed.
+    const allowed = guardAllowed({ toolResults: results, earlierReplies });
+    return amounts.every((a) => amountAllowed(allowed, a)) && units.every((u) => allowed.units.has(u));
   }).length;
   return { repairs, handover, event: repairs > 0 || handover, falsePositives };
 }
@@ -515,7 +557,7 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
   const hard = new Set();
   const guard = checkReply(text, { toolResults: results, earlierReplies, siteUrl: ctx.siteUrl });
   const hit = (k) => guard.hits.some((h) => h.kind === k);
-  const allowed = new Set([...allowedValues([...results, ...earlierReplies]), ...ctx.factNumbers]);
+  const allowed = new Set([...allowedValues(guardAllowed({ toolResults: results, earlierReplies })), ...ctx.factNumbers]);
   const forbidden = new Set(kase.forbid_amounts ?? []);
   const said = [...findAmounts(text).flatMap((a) => [a.raw, a.sar]).filter((v) => v !== null), ...numbersIn(text)];
   if (hit('amount') || looseAmounts(text, allowed).length || said.some((v) => forbidden.has(v))) hard.add('price');
@@ -537,8 +579,9 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
     const netCalls = unbacked ? calls.map((c) => (c.name === 'book_viewing' ? { ...c, ok: true, result: JSON.stringify({ reserved: false, reason: 'unbacked' }) } : c)) : calls;
     const net = await ctx.commit.afterPreSend({ lead: { lead_id: 'LEAD-EVAL-GRADER' }, turn: { toolCalls: netCalls }, text, language });
     g.claim = net?.handover?.kind === 'booking_failed' ? 'net' : evalClaim(text) ? 'eval' : null;
-    // On a pick transcript with no booking and no hand-over: naming the picked slot is a claim (Claude r1 P1).
-    if (!g.claim && expect.booked && !ran.some((c) => c.name === 'request_human') && pickClaim(text, kase.slots?.[expect.slot ?? 0])) g.claim = 'pick';
+    // On a pick transcript with no booking: a sentence naming the picked slot is a claim (Claude r1 P1, r2 P1-1).
+    // A hand-over exempts nothing: each sentence is judged (r2).
+    if (!g.claim && expect.booked && pickClaim(text, kase.slots?.[expect.slot ?? 0])) g.claim = 'pick';
     if (g.claim) hard.add('booking');
   }
   if (hit('link') || offSiteLinks(text, ctx.siteUrl).length) hard.add('link');
@@ -586,7 +629,7 @@ const percentile = (values, p) => {
 };
 
 /** One candidate's counts from its case results. */
-export function summarise({ cand, results, usd = 0, aborted = null, baseline = false }) {
+export function summarise({ cand, results, usd = 0, usdUnknown = 0, aborted = null, baseline = false }) {
   const done = (r) => !r.notRun && r.turns.length === r.kase.turns.length;
   const turns = results.flatMap((r) => r.turns ?? []);
   const grades = turns.map((t) => t.g);
@@ -611,7 +654,7 @@ export function summarise({ cand, results, usd = 0, aborted = null, baseline = f
     styleOk: sty.filter((g) => !g.style.length).length, styleN: sty.length,
     repairs: guards.reduce((n, x) => n + x.repairs, 0), guardHandovers: guards.filter((x) => x.handover).length, guardEvents: guards.filter((x) => x.event).length,
     falsePositives: guards.reduce((n, x) => n + x.falsePositives, 0), falseHitRate: turns.length ? fpTurns / turns.length : 0, errors,
-    p50Ms: percentile(ms, 50), p90Ms: percentile(ms, 90), usd, usdPerTurn: turns.length ? usd / turns.length : 0,
+    p50Ms: percentile(ms, 50), p90Ms: percentile(ms, 90), usd, usdUnknown, usdPerTurn: turns.length ? usd / turns.length : 0,
   };
 }
 
@@ -744,28 +787,43 @@ export function providerFetch({ realFetch, effort, state, env }) {
   };
 }
 
-/** The month's spend in micro-USD from the brain's own marker (one candidate's in-memory team). */
-const spentMicro = (team) => {
-  const m = /^\d{4}-\d{2}:(\d+)$/.exec(String(team.getSetting('brain_usd_month') ?? ''));
-  return m ? Number(m[1]) : 0;
-};
 /**
  * --max-usd as a true maximum (Codex r1 P2): before each request goes out, its worst case is reserved: every byte of
  * the body a fresh input token at the dearer of the input and cache-write prices (no request has more tokens than its
  * body has bytes), plus max_completion_tokens of output. A request that could pass the cap is not sent; the
- * candidate's run stops there (`max_usd`). The brain's own runaway stops, set to the same cap, stay as the second wall.
+ * candidate's run stops there (`max_usd`). The run keeps its own tally (`state.spend`; Claude r2 P3-1: never a month
+ * marker): what each answered request cost by its usage (`knownMicro`), and the worst case of every request that went
+ * out but whose cost is unknown (`reservedMicro`, Codex r2 P2): it timed out or was aborted after the send, or it
+ * answered with no usage. Those stay reserved for the rest of the run. The brain's own runaway stops stay as the
+ * second wall.
  */
-function capFetch({ inner, model, maxUsd, spent, state }) {
+export function capFetch({ inner, model, maxUsd, state }) {
+  state.spend ??= { knownMicro: 0, reservedMicro: 0 };
+  const sp = state.spend;
   return async (url, init = {}) => {
     const body = typeof init.body === 'string' ? init.body : '';
     let out = MAX_COMPLETION_TOKENS;
     try { out = Number(JSON.parse(body).max_completion_tokens) || out; } catch { /* the default cap */ }
     const worst = costMicroUsd(model, { in: Buffer.byteLength(body, 'utf8'), cached: 0, out });
-    if (spent() + worst > maxUsd * 1e6) {
+    if (sp.knownMicro + sp.reservedMicro + worst > maxUsd * 1e6) {
       state.capReached = true;
       throw new Error('eval: --max-usd would be passed');
     }
-    return inner(url, init);
+    let res;
+    let text;
+    try {
+      res = await inner(url, init);
+      text = await res.text();
+    } catch (err) {
+      sp.reservedMicro += worst; // sent, its cost unknown
+      throw err;
+    }
+    let usage = null;
+    try { usage = JSON.parse(text)?.usage ?? null; } catch { usage = null; }
+    const u = usage ? usageOf({ usage }) : null;
+    if (u && (u.in > 0 || u.out > 0)) sp.knownMicro += costMicroUsd(model, u);
+    else if (res.ok) sp.reservedMicro += worst; // answered, but with no usage to price it by
+    return { ok: res.ok, status: res.status, headers: res.headers, text: async () => text };
   };
 }
 
@@ -818,7 +876,7 @@ const FAKE_REPLY = {
  * answers with each case's first failing probe; 'quota' runs out of credit on the fifth request; and the degenerate
  * brains every one of which must fail the bar (r1): 'handover' (always hands over), 'refuse' (always refuses), 'echo'
  * (repeats the client), 'echo-tools' (the right tools, then their raw text), 'claim-pick' (never books a picked slot,
- * says it is set).
+ * says it is set), 'claim-pick-ask' (the same, then a follow-up question: r2).
  */
 function fakeModel({ mode = 'good', state }) {
   const record = recorder(state);
@@ -862,6 +920,8 @@ function fakeModel({ mode = 'good', state }) {
       message = good(after.filter((m) => m.role === 'tool').map((m) => String(m.content ?? '')).join('\n').slice(0, 3000) || canned);
     } else if (mode === 'claim-pick' && spec?.expect?.booked) {
       message = reply(en ? 'Great, Sunday at 10 it is!' : 'تمام، يوم الأحد الساعة 10 الصبح إن شاء الله.');
+    } else if (mode === 'claim-pick-ask' && spec?.expect?.booked) {
+      message = reply(en ? 'Great, Sunday at 10 it is! Is there anything else I can help with?' : 'أبشر يا خالد، الأحد الساعة 10 إن شاء الله. تحتاج شي ثاني؟');
     } else message = good();
     n += 1;
     return answer(200, {
@@ -970,7 +1030,7 @@ async function runCandidate({ cand, cases, mode, fake, cfg, siteFacts, siteUrl, 
   });
   const state = { responses: [], events: [], capReached: false };
   const model = mode === 'dry' ? fakeModel({ mode: fake, state }) : providerFetch({ realFetch, effort: cand.effort, state, env });
-  const fetchImpl = capFetch({ inner: model, model: cand.model, maxUsd, spent: () => spentMicro(team), state });
+  const fetchImpl = capFetch({ inner: model, model: cand.model, maxUsd, state });
   const brainCfg = {
     ...cfg, brainModel: cand.model, brainBackupModel: cand.model, brainBackupMode: 'handover',
     brainMonthAlertUsd: maxUsd, brainDayStopUsd: maxUsd, brainMonthStopUsd: maxUsd,
@@ -992,7 +1052,7 @@ async function runCandidate({ cand, cases, mode, fake, cfg, siteFacts, siteUrl, 
     results.push(r);
     if (r.stop) aborted = r.stop;
   }
-  return summarise({ cand, results, usd: spentMicro(team) / 1e6, aborted });
+  return summarise({ cand, results, usd: state.spend.knownMicro / 1e6, usdUnknown: state.spend.reservedMicro / 1e6, aborted });
 }
 
 /* ---------------- the Retell baseline (today's WhatsApp agent; reported, never in the decision) ---------------- */
@@ -1149,9 +1209,9 @@ function barMisses(s) {
     ...(s.p90Ms <= BAR.p90Ms ? [] : ['p90']), ...(s.falseHitRate <= BAR.falseHitRate ? [] : ['false-hits']),
   ];
 }
-function line(s) {
+function line(s, subset = false) {
   const errs = Object.entries(s.errors).map(([k, v]) => `${k} ${v}`).join(', ') || '0';
-  const verdict = s.baseline ? '' : passesBar(s) ? '  PASS' : `  FAIL (${barMisses(s).join(', ')})`;
+  const verdict = s.baseline ? '' : subset ? '  subset' : passesBar(s) ? '  PASS' : `  FAIL (${barMisses(s).join(', ')})`;
   return `${s.label.padEnd(20)}hard ${s.hardCases}/${s.cases}  routing ${s.routingCases}/${s.cases} ${pct(s.routingRate)}  register ${s.registerOk}/${s.registerN}  `
     + `style ${s.styleOk}/${s.styleN}  guard repairs ${s.repairs}, hand-overs ${s.guardHandovers}, false hits ${s.falsePositives} ${pct(s.falseHitRate)}  errors ${errs}  p50 ${sec(s.p50Ms)}  p90 ${sec(s.p90Ms)}  `
     + `${s.baseline ? '' : `$/turn ${s.usdPerTurn.toFixed(4)}  $ ${s.usd.toFixed(2)}`}${verdict}`;
@@ -1162,7 +1222,7 @@ export function formatReport(res) {
   out.push(`bona brain eval ${res.runId}  cases ${res.cases.all} (ar ${res.cases.ar}, en ${res.cases.en})  answers ${res.file}`);
   for (const s of res.summaries) {
     if (s.skipped) { out.push(`${s.label}: skipped (${s.skipped})`); continue; }
-    out.push(line(s));
+    out.push(line(s, res.subset));
     const fails = Object.entries(s.hardFails).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`);
     if (fails.length) out.push(`  hard fails (cases): ${fails.join(', ')}`);
     if (s.aborted) out.push(`  stopped early: ${s.aborted} (${s.notRun} cases not run)`);
