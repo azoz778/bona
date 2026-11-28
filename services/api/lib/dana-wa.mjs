@@ -184,7 +184,7 @@ const COUNTED_SQL = "(status = 'uncertain' OR (status = 'failed' AND (error LIKE
 /** The outage line's own outbox row says so in `error` (read only for failed rows elsewhere): it answers nothing (r5 N6). */
 const OUTAGE_MARK = 'outage_line';
 /** Skips worth a log line; the rest are states, not events (P4-15). */
-const LOGGED_SKIPS = new Set(['human_recent', 'needs_human', 'lid_only', 'old', 'cap_chat', 'nothing', 'dropped_human', 'hold', 'backlog', 'loop', 'identity', 'rule_off', 'no_open_chat']);
+const LOGGED_SKIPS = new Set(['human_recent', 'needs_human', 'lid_only', 'old', 'cap_chat', 'nothing', 'dropped_human', 'hold', 'backlog', 'loop', 'identity', 'rule_off', 'no_open_chat', 'stop_request', 'not_brain']);
 /** A hand-over re-check that finds one of these does nothing at all: no flag, no alert, no line. */
 // `human_recent`: a person active in the chat within 24 h owns it — no hand-over over their head.
 // `sending_off`: the owner's Sending switch stops every send, the hand-over line included.
@@ -439,6 +439,31 @@ export function createDana({
    */
   function endOwnHold(leadId, reason) {
     if (db.getLead(leadId)?.dana_hold_reason === reason) clearHold(leadId);
+  }
+  /**
+   * Client messages newer than `coversTs` still waiting in a brain chat get their own run (r11): when a hold ends, or
+   * a bubble is dropped for a stop request, nothing newer is stranded; each reaches an answer, or its own `missed`
+   * at its own 2-h mark. Inside a run the wake is queued behind it (pendingAgain), else armed now.
+   */
+  function rewakeNewer(leadId, coversTs) {
+    if (coversTs === null || coversTs === undefined) return;
+    const id = String(leadId);
+    const lead = db.getLead(id);
+    if (!useBrain(lead)) return;
+    const newer = pendingFor(id, lead).filter((m) => Number(m.ts) > Number(coversTs));
+    if (!newer.length) return;
+    const ts = Number(newer[newer.length - 1].ts);
+    if (inflight.has(id)) pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, ts));
+    else wake(id, ts);
+  }
+  /**
+   * THE one way an owed or timed hold ends after the step that owned it (r11): its own reason only (endOwnHold's rule:
+   * a person-wait hold that replaced it stays), the owed message forgotten, and newer waiting messages re-woken.
+   */
+  function endHold(leadId, { own, coversTs = null } = {}) {
+    endOwnHold(leadId, own);
+    owedFor.delete(String(leadId));
+    rewakeNewer(leadId, coversTs);
   }
   /** A timed hold never replaces one that waits for a person (send_failed, loop, booking_unconfirmed; r3). */
   function setTimedHold(leadId, reason, until) {
@@ -856,6 +881,20 @@ export function createDana({
     const no = (stopped, extra = {}) => ({ ok: false, stopped, ...extra });
     const l = db.getLead(leadId);
     if (!l || l.inbox_state !== 'in' || isExcludedLead(l)) return no('not_in_inbox');
+    // The chat left the brain path while the bubble was queued (dana_brain off, out of auto mode): nothing goes (r11).
+    if (!useBrain(l)) return no('not_brain');
+    // A stop, privacy or deletion request stored after what this bubble covers wins (r11): the bubble does not go
+    // (the closing line itself excepted), and the chat is woken so the stop flow runs.
+    if (!closing) {
+      const later = prep('laterIn', `SELECT ts, text FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts > ?
+          ORDER BY ts DESC LIMIT 20`).all(String(leadId), Number(coversTs));
+      const hit = later.find((m) => typeof m.text === 'string' && matchStopWords(m.text));
+      if (hit) {
+        const id = String(leadId);
+        pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, Number(later[0].ts)));
+        return no('stop_request');
+      }
+    }
     // An owed retry goes only while its own hold is still on the row and due: a send_failed set meanwhile, or a
     // back-off extended by another retry, stops a stale queued one (r8).
     // Due = its deadline (holdDeadline: its time or the 2-h mark, whichever first), the same clock the sweep wakes on (r9).
@@ -1000,7 +1039,7 @@ export function createDana({
     if (!lead || lead.inbox_state !== 'in') return skip(leadId, 'not_in_inbox');
     // A stale retry (its hold replaced meanwhile) does nothing.
     if (lead.dana_hold_reason !== reason) return skip(leadId, 'hold');
-    const forget = () => { endOwnHold(leadId, reason); owedFor.delete(leadId); };
+    const forget = (coversTs = null) => endHold(leadId, { own: reason, coversTs });
     // The chat left the brain path meanwhile (dana_brain off, out of auto mode): the owed line ends unsent (r10).
     if (!useBrain(lead)) { forget(); return skip(leadId, 'not_brain'); }
     const waiting = pendingFor(leadId, lead);
@@ -1019,12 +1058,11 @@ export function createDana({
     const owedTs = owedFor.get(leadId);
     const target = waiting.find((m) => Number(m.ts) === owedTs) ?? waiting[0];
     const coversTs = target.ts;
-    const newer = waiting.filter((m) => Number(m.ts) > Number(coversTs));
     const language = languageOf({ lead, texts: waiting.filter((m) => Number(m.ts) <= Number(coversTs)).map((m) => m.text) });
     const auto = autoOf(lead);
     // Past the 2-h mark: straight to `missed` (the hold ends, the task used reads missed, the note), no line (r9).
     if (t - Number(coversTs) > FRESH_MS) {
-      forget();
+      forget(coversTs); // newer messages get their own run (r11)
       taskMissed(openTaskId(leadId));
       if (auto) noteHandover(lead, { kind: 'missed', coversTs });
       say({ evt: 'dana.owed_line', leadId, sent: false, missed: true });
@@ -1035,18 +1073,17 @@ export function createDana({
     const taskId = openTaskId(leadId);
     const r = await sendFixed(lead, text, language, coversTs, true, { closing, owed: reason });
     if (r.sent) {
-      // Only its own owed hold ends: a send_failed hold afterFailure just set (an unsure send) stays (r7).
-      forget();
+      // Only its own owed hold ends: a send_failed hold afterFailure just set (an unsure send) stays (r7). What came
+      // after the owed message still waits: answered as usual, by the next run (r10, r11).
+      forget(coversTs);
       owedStreak.delete(leadId);
       rateStreak.delete(leadId);
-      // What came after the owed message still waits: answered as usual, by the next run (r10).
-      if (newer.length) pendingAgain.set(leadId, Math.max(pendingAgain.get(leadId) ?? 0, Number(newer[newer.length - 1].ts)));
       say({ evt: 'dana.owed_line', leadId, sent: true });
       return { handover: 'owed', sent: true };
     }
     // Deferred again (the backlog gate, a cap, the sender's rate limit): still owed, the hold kept (r7).
     if (oweLine(leadId, reason, r)) return skip(leadId, r.stopped ?? r.error);
-    forget();
+    forget(coversTs);
     if (r.stopped === 'missed') {
       taskMissed(taskId);
       if (auto) noteHandover(lead, { kind: 'missed', coversTs });

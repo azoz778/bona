@@ -2836,3 +2836,65 @@ test('T12 r10 2: an owed line of a chat that left the brain path (auto off, dana
   assert.equal(h.sent().length, 0, 'never sent through the brain path');
   assert.equal(h.lead().dana_hold_reason, null);
 });
+
+/* ======================================================================================
+ * PR-B3 r11 (Codex P1-1, P1-2 = Claude P3-1): every brain bubble re-checks, at send time, for a stop/data request
+ * stored after what it covers and for the chat leaving the brain path; ending a hold re-wakes newer messages.
+ * ====================================================================================== */
+
+test('T12 r11 1: "delete my data" stored while an owed hand-over waits for its slot: no hand-over line; the stop flow runs', async () => {
+  let stable = false;
+  let stored = false;
+  const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
+    pacing: { ...immediate, fifo: async (fn) => { if (stable && !stored) { stored = true; h.client('delete my data'); } return fn(); } },
+    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }, brainReply('never')] });
+  h.client('a person please', { ts: T_IN - 30 * 60_000 + 1000 });
+  await h.dana.answer(LEAD, { ts: T_IN - 30 * 60_000 + 1000 });
+  assert.equal(h.lead().dana_hold_reason, 'owed_handover');
+  stable = true;
+  h.set(h.lead().dana_hold_until + 1000);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.equal(h.sent().some((t) => t.endsWith(HANDOVER.en)), false, 'no hand-over line');
+  assert.equal(h.sent().length, 1);
+  assert.ok(h.sent()[0].endsWith(CLOSING.en));
+  assert.equal(h.lead().dana_off, 1);
+  assert.deepEqual(h.notes.of('stopped').map((c) => c[2]), ['deletion']);
+});
+
+test('T12 r11 1: a model answer waiting in the FIFO is dropped when a stop request comes in; the stop flow runs', async () => {
+  let stored = false;
+  const h = bh({ pacing: { ...immediate, fifo: async (fn) => { if (!stored) { stored = true; h.tick(1000); h.client('stop replying please'); } return fn(); } },
+    turns: [brainReply('Villas start from the published prices on our site.'), brainReply('never')] });
+  await ask(h, 'what villas do you have?');
+  await h.dana.flush();
+  assert.equal(h.sent().length, 1, 'the answer never went');
+  assert.ok(h.sent()[0].endsWith(CLOSING.en));
+  assert.equal(h.lead().dana_off, 1);
+  assert.equal(h.brain.calls.length, 1, 'the stop flow makes no model call');
+});
+
+test('T12 r11 1: a chat that leaves auto mode while its bubble is queued gets nothing sent', async () => {
+  const h = bh({ pacing: { ...immediate, fifo: async (fn) => { h.ownerTest.setAuto(LEAD, false); return fn(); } }, turns: [brainReply('Of course.')] });
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.equal(h.sent().length, 0);
+  assert.equal(h.retell.completions.length, 0, 'not re-run on the legacy path either');
+});
+
+test('T12 r11 2: when an owed line ends as missed, a newer waiting question is re-woken and answered at its own pace', async () => {
+  let stable = true;
+  const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
+    turns: [async () => { stable = false; return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }, brainReply('Yes, two covered spaces.')] });
+  const a = h.client('a person please', { ts: T_IN - 2 * HOUR + 30_000 });
+  await h.dana.answer(LEAD, { ts: a });
+  assert.equal(h.lead().dana_hold_reason, 'owed_handover');
+  h.tick(10_000);
+  await ask(h, 'and is there parking?');
+  assert.equal(h.brain.calls.length, 1, 'the owed line is not due yet: the question waits');
+  h.set(h.lead().dana_hold_until);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.ok(h.notes.of('handover').some((c) => c[2].kind === 'missed'), 'missed for the original');
+  assert.ok(h.sent().at(-1).endsWith('Yes, two covered spaces.'), 'the parking question answered after the missed');
+});
