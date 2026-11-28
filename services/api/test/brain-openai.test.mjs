@@ -1,6 +1,6 @@
 /**
  * PR-BR (PLAN T25; brain/DESIGN-brain.md §2-§4, §6.2): the pure parts of the brain — the OpenAI
- * Chat Completions request and response shapes, the one error enum, the pinned provider list,
+ * Responses API request and response shapes (T25b, PLAN T00 step 7), the one error enum, the pinned provider list,
  * the prices, the in-code tool schemas and the prompt builder. No network here.
  */
 import test from 'node:test';
@@ -9,7 +9,11 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { requestBody, parseCompletion, safetyIdentifier, cacheKey, retryAfterMs, assistantMessage, MAX_COMPLETION_TOKENS } from '../lib/brain/openai.mjs';
+import * as openai from '../lib/brain/openai.mjs';
+import {
+  requestBody, parseCompletion, safetyIdentifier, cacheKey, retryAfterMs, assistantMessage, usageOf, MAX_COMPLETION_TOKENS, MAX_OUTPUT_TOKENS, REASONING_EFFORT,
+  RESPONSES_PATH, MODELS_PATH,
+} from '../lib/brain/openai.mjs';
 import { CODES, codeFromHttp, codeFromThrown, BACKUP_CODES, OUT_CODES } from '../lib/brain/errors.mjs';
 import { PROVIDERS, PROVIDER_HOSTS, DEFAULT_BASE_URL, providerFor } from '../lib/brain/providers.mjs';
 import { PRICES, costMicroUsd } from '../lib/brain/prices.mjs';
@@ -29,44 +33,154 @@ test('safety_identifier is the first 32 hex of sha256("bona:" + lead id): stable
   assert.equal(cacheKey('wa', 'ar'), 'bona-wa-ar-v1');
 });
 
-test('the request: store:false, no temperature or top_p, effort low, 1,200 completion tokens, strict tools, the cache key and the safety id', () => {
+/* ---------------- the Responses API (PLAN T00 step 7, T25b) ---------------- */
+
+// Responses shapes as the T00 step 7 probe saw them (28 Nov): reasoning and function_call output items, usage with
+// input_tokens_details.cached_tokens and output_tokens_details.reasoning_tokens. Example values only.
+const R_USAGE = { input_tokens: 9000, input_tokens_details: { cached_tokens: 8000 }, output_tokens: 300, output_tokens_details: { reasoning_tokens: 120 }, total_tokens: 9300 };
+const ZERO = { in: 0, cached: 0, out: 0, reasoning: 0 };
+const BAD = { ok: false, code: 'bad_response' };
+const REASONING = { id: 'rs_1', type: 'reasoning', summary: [], encrypted_content: 'ENC-ONE-opaque' };
+const FC = { id: 'fc_1', type: 'function_call', status: 'completed', call_id: 'call_1', name: 'search_properties', arguments: '{"query":"villa"}' };
+const said = (text, id = 'msg_1') => ({ id, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] });
+const response = (output, over = {}) => ({ id: 'resp_1', object: 'response', status: 'completed', error: null, incomplete_details: null, output, usage: R_USAGE, ...over });
+
+test('T25b: the brain posts to /responses (no Chat Completions path left); the models probe path, the effort and the output cap keep their exports', () => {
+  assert.equal(RESPONSES_PATH, '/responses');
+  assert.equal(MODELS_PATH, '/models');
+  assert.equal(Object.hasOwn(openai, 'CHAT_PATH'), false, 'nothing may post to /chat/completions any more');
+  assert.equal(REASONING_EFFORT, 'low');
+  assert.equal(MAX_OUTPUT_TOKENS, 1200);
+  assert.equal(MAX_COMPLETION_TOKENS, MAX_OUTPUT_TOKENS, 'the name the T26 eval imports: the same per-request output cap');
+});
+
+test('the request (Responses API): store:false with the encrypted reasoning, effort low, 1,200 output tokens, flat strict function tools, the cache key and the safety id; never temperature or a Chat Completions field', () => {
   const tools = toolsFor('wa');
-  const body = requestBody({ model: 'gpt-5.6-sol', messages: [{ role: 'system', content: 'S' }], tools, toolChoice: 'auto', cacheKey: 'bona-wa-en-v1', safetyId: 'abc' });
-  assert.equal(MAX_COMPLETION_TOKENS, 1200);
-  assert.deepEqual(Object.keys(body), ['model', 'messages', 'tools', 'tool_choice', 'parallel_tool_calls', 'reasoning_effort', 'store', 'prompt_cache_key', 'max_completion_tokens', 'safety_identifier']);
+  const body = requestBody({ model: 'gpt-5.6-sol', messages: [{ role: 'system', content: 'S' }, { role: 'user', content: 'Hi' }], tools, toolChoice: 'auto', cacheKey: 'bona-wa-en-v1', safetyId: 'abc' });
+  assert.deepEqual(Object.keys(body), ['model', 'instructions', 'input', 'tools', 'tool_choice', 'parallel_tool_calls', 'reasoning', 'store', 'include', 'prompt_cache_key', 'max_output_tokens', 'safety_identifier']);
+  assert.equal(body.model, 'gpt-5.6-sol');
+  assert.equal(body.instructions, 'S');
+  assert.deepEqual(body.input, [{ role: 'user', content: 'Hi' }]);
+  assert.deepEqual(body.reasoning, { effort: 'low' });
   assert.equal(body.store, false);
-  assert.equal(body.reasoning_effort, 'low');
-  assert.equal(body.max_completion_tokens, 1200);
+  assert.deepEqual(body.include, ['reasoning.encrypted_content']);
+  assert.equal(body.max_output_tokens, 1200);
   assert.equal(body.parallel_tool_calls, true);
   assert.equal(body.tool_choice, 'auto');
   assert.equal(body.prompt_cache_key, 'bona-wa-en-v1');
   assert.equal(body.safety_identifier, 'abc');
-  for (const k of ['temperature', 'top_p', 'max_tokens', 'user']) assert.equal(k in body, false, k);
-  const none = requestBody({ model: 'm', messages: [], tools: [], cacheKey: 'k', responseFormat: { type: 'json_schema' } });
-  assert.equal('tools' in none || 'tool_choice' in none || 'parallel_tool_calls' in none, false, 'no tools: no tool fields at all');
-  assert.deepEqual(none.response_format, { type: 'json_schema' });
-  assert.equal('safety_identifier' in none, false);
+  assert.equal(body.tools.length, tools.length);
+  body.tools.forEach((t, i) => {
+    const f = tools[i].function;
+    assert.deepEqual(t, { type: 'function', name: f.name, description: f.description, strict: true, parameters: f.parameters }, f.name);
+  });
+  assert.equal(JSON.stringify(requestBody({ model: 'm', messages: [], tools, cacheKey: 'k' }).tools), JSON.stringify(body.tools), 'the same tools, the same bytes (the cached prefix)');
+  for (const k of ['messages', 'reasoning_effort', 'max_completion_tokens', 'response_format', 'temperature', 'top_p', 'max_tokens', 'user', 'previous_response_id', 'text']) assert.equal(k in body, false, k);
+  assert.deepEqual(requestBody({ model: 'm', messages: [], tools, cacheKey: 'k', effort: 'medium' }).reasoning, { effort: 'medium' }, 'the effort argument reaches reasoning.effort');
+  assert.equal(requestBody({ model: 'm', messages: [], cacheKey: 'k', maxTokens: 50 }).max_output_tokens, 50);
+  assert.equal(requestBody({ model: 'm', messages: [], tools, toolChoice: 'none', cacheKey: 'k' }).tool_choice, 'none');
 });
 
-test('parseCompletion: text, function calls, refusals and usage; anything else (a cut-off answer, finish_reason length, too) is bad_response', () => {
-  const usage = { prompt_tokens: 9000, prompt_tokens_details: { cached_tokens: 8000 }, completion_tokens: 300, completion_tokens_details: { reasoning_tokens: 120 } };
-  const text = parseCompletion({ choices: [{ message: { role: 'assistant', content: ' Hello ' }, finish_reason: 'stop' }], usage });
-  assert.deepEqual(text, { ok: true, text: 'Hello', toolCalls: [], refusal: false, finish: 'stop', usage: { in: 9000, cached: 8000, out: 300, reasoning: 120 }, raw: { role: 'assistant', content: ' Hello ' } });
-  const call = parseCompletion({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'search_properties', arguments: '{"query":"villa"}' } }] }, finish_reason: 'tool_calls' }] });
+test('the input: system[0] is the instructions (the cached prefix), a later system note a developer message, history user/assistant messages, a tool round the response\'s own items then function_call_output by call_id', () => {
+  const parsed = parseCompletion(response([REASONING, FC]));
+  const body = requestBody({
+    model: 'm', tools: toolsFor('wa'), cacheKey: 'k',
+    messages: [
+      { role: 'system', content: 'PROMPT' },
+      { role: 'user', content: 'earlier' },
+      { role: 'assistant', content: 'an earlier reply' },
+      { role: 'user', content: 'Do you have villas?' },
+      { role: 'system', content: 'Context note' },
+      assistantMessage(parsed),
+      { role: 'tool', tool_call_id: 'call_1', content: '{"count":0}' },
+      { role: 'system', content: 'REPAIR' },
+    ],
+  });
+  assert.equal(body.instructions, 'PROMPT');
+  assert.deepEqual(body.input, [
+    { role: 'user', content: 'earlier' },
+    { role: 'assistant', content: 'an earlier reply' },
+    { role: 'user', content: 'Do you have villas?' },
+    { role: 'developer', content: 'Context note' },
+    REASONING,
+    FC,
+    { type: 'function_call_output', call_id: 'call_1', output: '{"count":0}' },
+    { role: 'developer', content: 'REPAIR' },
+  ]);
+  assert.equal('instructions' in requestBody({ model: 'm', messages: [{ role: 'user', content: 'x' }], cacheKey: 'k' }), false, 'no leading system message: no instructions');
+  assert.deepEqual(requestBody({ model: 'm', messages: [{ role: 'system', content: 'A' }, { role: 'system', content: 'B' }], cacheKey: 'k' }).input, [{ role: 'developer', content: 'B' }], 'only system[0] is the instructions');
+});
+
+test('assistantMessage carries the response\'s output items as returned (the reasoning item with its encrypted content before its function calls), and nothing else', () => {
+  const two = { ...FC, id: 'fc_2', call_id: 'call_2', name: 'search_units', arguments: '{"listing_id":"BONA-W014"}' };
+  const parsed = parseCompletion(response([REASONING, said('Let me check.', 'msg_0'), FC, two]));
+  assert.equal(parsed.ok, true);
+  const m = assistantMessage(parsed);
+  assert.deepEqual(Object.keys(m).sort(), ['items', 'role']);
+  assert.equal(m.role, 'assistant');
+  assert.deepEqual(m.items, [REASONING, said('Let me check.', 'msg_0'), FC, two]);
+  assert.notEqual(m.items, parsed.output, 'a copy of the list');
+  assert.deepEqual(requestBody({ model: 'm', messages: [m], cacheKey: 'k' }).input, [REASONING, said('Let me check.', 'msg_0'), FC, two], 'sent back in the order returned');
+});
+
+test('a json_schema responseFormat (the classifier) becomes text.format; no tools means no tool fields; no safety id means none', () => {
+  const schema = { type: 'object', additionalProperties: false, required: ['class', 'wants'], properties: { class: { type: 'string', enum: ['client', 'not_client', 'unsure'] }, wants: { type: 'string' } } };
+  const rf = { type: 'json_schema', json_schema: { name: 'mail_class', strict: true, schema } };
+  const body = requestBody({ model: 'gpt-6.1-terra', messages: [{ role: 'system', content: 'C' }, { role: 'user', content: 'mail' }], tools: [], cacheKey: 'bona-classify-v1', responseFormat: rf });
+  assert.deepEqual(body.text, { format: { type: 'json_schema', name: 'mail_class', strict: true, schema } });
+  for (const k of ['tools', 'tool_choice', 'parallel_tool_calls', 'safety_identifier', 'response_format']) assert.equal(k in body, false, k);
+  assert.equal(body.store, false);
+  assert.deepEqual(body.reasoning, { effort: 'low' });
+  assert.deepEqual(requestBody({ model: 'm', messages: [], cacheKey: 'k', responseFormat: { type: 'json_object' } }).text, { format: { type: 'json_object' } });
+});
+
+test('parseCompletion (a Responses body): the text, the function calls (call_id, parsed arguments), the output for the next round, refusals, the usage', () => {
+  const text = parseCompletion(response([REASONING, said(' Hello ')]));
+  assert.deepEqual(text, { ok: true, text: 'Hello', toolCalls: [], refusal: false, finish: 'stop', usage: { in: 9000, cached: 8000, out: 300, reasoning: 120 }, output: [REASONING, said(' Hello ')] });
+  const call = parseCompletion(response([REASONING, FC], { usage: undefined }));
   assert.equal(call.ok, true);
-  assert.deepEqual(call.toolCalls, [{ id: 'call_1', name: 'search_properties', arguments: '{"query":"villa"}', args: { query: 'villa' } }]);
-  assert.deepEqual(call.usage, { in: 0, cached: 0, out: 0, reasoning: 0 });
-  assert.equal(parseCompletion({ choices: [{ message: { content: null, refusal: 'I cannot help with that.' } }] }).refusal, true);
-  assert.equal(parseCompletion({ choices: [{ message: { content: '' }, finish_reason: 'content_filter' }] }).refusal, true);
-  for (const bad of [null, {}, { choices: [] }, { choices: [{}] }, 'text',
-    { choices: [{ message: { role: 'assistant', content: 'The villa is in Obhur and it has' }, finish_reason: 'length' }], usage },
-    { choices: [{ message: { role: 'assistant', content: '' }, finish_reason: 'length' }], usage },
-    { choices: [{ message: { tool_calls: [{ id: 'c', type: 'function', function: { name: 'x', arguments: '{not json' } }] } }] },
-    { choices: [{ message: { tool_calls: [{ id: 'c', type: 'function', function: { name: 'x', arguments: '[1]' } }] } }] },
-    { choices: [{ message: { tool_calls: [{ type: 'function', function: { name: 'x', arguments: '{}' } }] } }] }]) {
-    assert.deepEqual(parseCompletion(bad), { ok: false, code: 'bad_response' }, JSON.stringify(bad));
+  assert.deepEqual(call.toolCalls, [{ id: 'call_1', name: 'search_properties', arguments: '{"query":"villa"}', args: { query: 'villa' } }], 'the id is the call_id the output answers');
+  assert.equal(call.finish, 'tool_calls');
+  assert.deepEqual(call.usage, ZERO);
+  assert.deepEqual(parseCompletion(response([{ ...FC, arguments: '' }])).toolCalls[0].args, {}, 'no arguments: {}');
+  const parts = { ...said('x'), content: [{ type: 'output_text', text: 'One ', annotations: [] }, { type: 'output_text', text: 'two.', annotations: [] }] };
+  assert.equal(parseCompletion(response([parts])).text, 'One two.');
+  assert.equal(parseCompletion(response([said('First.', 'msg_a'), said('Second.', 'msg_b')])).text, 'First.\n\nSecond.');
+  const refused = parseCompletion(response([{ id: 'msg_r', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'refusal', refusal: 'I cannot help with that.' }] }]));
+  assert.equal(refused.ok, true);
+  assert.equal(refused.refusal, true);
+  const filtered = parseCompletion(response([said('The villa'), FC], { status: 'incomplete', incomplete_details: { reason: 'content_filter' } }));
+  assert.equal(filtered.ok, true);
+  assert.equal(filtered.refusal, true, 'a content filter stop is a refusal (never retried on another model)');
+  assert.deepEqual([filtered.text, filtered.toolCalls, filtered.finish], ['', [], 'content_filter']);
+  for (const bad of [null, {}, 'text', { output: 'x' }, response(null),
+    response([said('The villa is in Obhur and it has')], { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } }),
+    response([REASONING], { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } }),
+    response([FC], { status: 'incomplete', incomplete_details: null }),
+    response([], { status: 'failed', error: { code: 'server_error', message: 'The server had an error.' } }),
+    response([said('ok')], { error: { code: 'server_error', message: 'x' } }),
+    response([said('ok')], { status: 'in_progress' }),
+    response([said('ok')], { status: 'queued' }),
+    response([said('ok')], { status: undefined }),
+    response([null]),
+    response([{ ...FC, arguments: '{not json' }]),
+    response([{ ...FC, arguments: '[1]' }]),
+    response([{ ...FC, arguments: 'null' }]),
+    response([{ ...FC, call_id: undefined }]),
+    response([{ ...FC, call_id: '' }]),
+    response([{ ...FC, name: '' }])]) {
+    assert.deepEqual(parseCompletion(bad), BAD, JSON.stringify(bad));
   }
-  assert.deepEqual(assistantMessage(call), { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'search_properties', arguments: '{"query":"villa"}' } }] });
+});
+
+test('usageOf (Responses names): input_tokens incl. the cached ones, cached_tokens, output_tokens incl. the reasoning ones; the cost math reads it with the same meaning', () => {
+  assert.deepEqual(usageOf({ usage: R_USAGE }), { in: 9000, cached: 8000, out: 300, reasoning: 120 });
+  assert.deepEqual(usageOf({ usage: { prompt_tokens: 9000, prompt_tokens_details: { cached_tokens: 8000 }, completion_tokens: 300 } }), ZERO, 'Chat Completions names are not read');
+  for (const v of [null, undefined, {}, { usage: null }, { usage: { input_tokens: -5, output_tokens: 'x' } }]) assert.deepEqual(usageOf(v), ZERO, JSON.stringify(v));
+  assert.deepEqual(usageOf({ usage: { input_tokens: 10.7, output_tokens: 3 } }), { in: 10, cached: 0, out: 3, reasoning: 0 });
+  // 1,000 new × $5 (cache write) + 8,000 cached × $0.40 + 300 out (reasoning included) × $20 per 1M = 14,200 micro-USD.
+  assert.equal(costMicroUsd('gpt-5.6-sol', usageOf(response([said('x')]))), 14_200);
+  assert.equal(costMicroUsd('gpt-6.1-terra', usageOf({ usage: { input_tokens: 1809, input_tokens_details: { cached_tokens: 1806 }, output_tokens: 20, output_tokens_details: { reasoning_tokens: 0 } } })), 195, 'the probe\'s 2nd call: 3 new × $1.25 + 1,806 cached × $0.05 + 20 out × $5, rounded up');
 });
 
 test('the one error enum (DESIGN-brain §4.1): HTTP status and thrown errors map to a code, never upstream text', () => {

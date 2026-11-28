@@ -4,7 +4,7 @@
  * month alert and the runaway stops are computed from these, so the estimate leans high:
  *   - uncached input is priced at the higher of "input" and "cache write" (a prefix written to
  *     the cache may bill at the write price; the response does not say which it was);
- *   - output includes the reasoning tokens (Chat Completions counts them in completion_tokens);
+ *   - output includes the reasoning tokens (the Responses API counts them in output_tokens);
  *   - a model not listed here is priced as the dearest one listed.
  * $ per 1M tokens is the same number as micro-$ per token.
  */

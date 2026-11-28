@@ -32,7 +32,8 @@ const LEAD2 = 'LEAD-20261127-0000bbbb';
 const T0 = Date.parse('2026-11-26T12:00:00+03:00');
 const MIN = 60_000;
 const SITE = 'https://bona-real-estate.com';
-const USAGE = { prompt_tokens: 10_000, prompt_tokens_details: { cached_tokens: 8_000 }, completion_tokens: 300, completion_tokens_details: { reasoning_tokens: 100 } };
+// The Responses API's usage names (T25b; PLAN T00 step 7): input_tokens includes the cached ones, output_tokens the reasoning ones.
+const USAGE = { input_tokens: 10_000, input_tokens_details: { cached_tokens: 8_000 }, output_tokens: 300, output_tokens_details: { reasoning_tokens: 100 }, total_tokens: 10_300 };
 const MICRO = 19_200; // one USAGE on gpt-5.6-sol (prices.mjs)
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: SITE });
 const FIRST = inventory.all()[0];
@@ -47,14 +48,46 @@ function writeKeyFile(content = `${KEY_NAME}=${KEY}\n`) {
 }
 
 let callN = 0;
-const reply = (content, usage = USAGE) => ({ status: 200, json: { choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }], usage } });
-const toolCalls = (...calls) => ({
+/** A POST /v1/responses body (T25b): `output` items, `status`, `usage`. */
+const responseJson = (output, over = {}) => ({ id: `resp_${callN += 1}`, object: 'response', status: 'completed', error: null, incomplete_details: null, output, usage: USAGE, ...over });
+const textItem = (text) => ({ id: `msg_${callN += 1}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] });
+/** A reasoning item as store:false + include ['reasoning.encrypted_content'] returns it (the content is opaque; no digits). */
+const reasoningItem = (enc = 'gAAAA-opaque-reasoning') => ({ id: `rs_${callN += 1}`, type: 'reasoning', summary: [], encrypted_content: enc });
+const reply = (content, usage = USAGE) => ({ status: 200, json: responseJson([textItem(content)], { usage }) });
+/** A response that asks for tools: its reasoning item first, then one function_call item per call (as the API returns them). */
+const toolCallsWith = (enc, ...calls) => ({
   status: 200,
-  json: {
-    choices: [{ message: { role: 'assistant', content: null, tool_calls: calls.map(([name, args]) => ({ id: `call_${callN += 1}`, type: 'function', function: { name, arguments: JSON.stringify(args) } })) }, finish_reason: 'tool_calls' }],
-    usage: USAGE,
-  },
+  json: responseJson([reasoningItem(enc), ...calls.map(([name, args]) => ({ id: `fc_${callN += 1}`, type: 'function_call', status: 'completed', call_id: `call_${callN += 1}`, name, arguments: JSON.stringify(args) }))]),
 });
+const toolCalls = (...calls) => toolCallsWith(undefined, ...calls);
+const refused = (text) => ({ status: 200, json: responseJson([{ id: `msg_${callN += 1}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'refusal', refusal: text }] }]) });
+/** Cut off at max_output_tokens (the Chat Completions `finish_reason: 'length'`). */
+const cutOff = (text) => ({ status: 200, json: responseJson([textItem(text)], { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } }) });
+
+/**
+ * The wire body read back as the chat turns the brain built (the request tests below read these; the wire itself is
+ * pinned in brain-openai.test.mjs and the T25b tests): `instructions` → system[0]; a developer message → system; the
+ * function_call items of a round → one assistant turn with tool_calls; function_call_output → a tool message.
+ * Reasoning items are left out here (the T25b tests check them on the wire).
+ */
+function chatView(body) {
+  if (!body || !Array.isArray(body.input)) return null;
+  const out = typeof body.instructions === 'string' ? [{ role: 'system', content: body.instructions }] : [];
+  const textOf = (c) => (typeof c === 'string' ? c : (Array.isArray(c) ? c : []).map((p) => p?.text ?? '').join(''));
+  for (const it of body.input) {
+    if (it?.type === 'reasoning') continue;
+    if (it?.type === 'function_call') {
+      const call = { id: it.call_id, type: 'function', function: { name: it.name, arguments: it.arguments } };
+      if (out.at(-1)?.role === 'assistant' && out.at(-1).tool_calls) out.at(-1).tool_calls.push(call);
+      else out.push({ role: 'assistant', content: null, tool_calls: [call] });
+    } else if (it?.type === 'function_call_output') {
+      out.push({ role: 'tool', tool_call_id: it.call_id, content: it.output });
+    } else {
+      out.push({ role: it.role === 'developer' ? 'system' : it.role, content: textOf(it.content) });
+    }
+  }
+  return out;
+}
 const http = (status, json = {}, headers = {}) => ({ status, json, headers });
 const QUOTA = http(429, { error: { type: 'insufficient_quota', code: 'insufficient_quota', message: 'You exceeded your current quota' } });
 
@@ -64,7 +97,8 @@ function harness({ script = [], key = true, keyFile, env = {}, runTool, limits, 
   const calls = [];
   const queue = [...script];
   const fetchImpl = async (url, init = {}) => {
-    const req = { url: String(url), method: init.method ?? 'GET', headers: { ...(init.headers ?? {}) }, body: init.body ? JSON.parse(init.body) : null, raw: init.body ?? '' };
+    const body = init.body ? JSON.parse(init.body) : null;
+    const req = { url: String(url), method: init.method ?? 'GET', headers: { ...(init.headers ?? {}) }, body, messages: chatView(body), raw: init.body ?? '' };
     calls.push(req);
     const next = queue.length ? queue.shift() : reply('Default answer.');
     const r = typeof next === 'function' ? await next(req) : next;
@@ -141,7 +175,7 @@ test('the limits are the design numbers (DESIGN-brain §2.4, §3.4, §4.1)', () 
 test('the key is read from bona-brain.env only, sent only to api.openai.com, and never logged', async () => {
   const h = harness({ script: [reply('Hello.')] });
   await h.brain.turn(turnArgs());
-  assert.equal(h.calls[0].url, 'https://api.openai.com/v1/chat/completions');
+  assert.equal(h.calls[0].url, 'https://api.openai.com/v1/responses');
   assert.equal(h.calls[0].headers.Authorization, `Bearer ${KEY}`);
   assert.deepEqual(Object.keys(h.calls[0].headers).sort(), ['Authorization', 'Content-Type']);
   const seen = JSON.stringify([h.logs, h.alerts, h.brain.health(), h.brain.ops()]);
@@ -244,14 +278,18 @@ test('the request: store:false, no temperature, strict tools, the client record 
   const body = h.calls[0].body;
   assert.equal(body.store, false);
   for (const k of ['temperature', 'top_p']) assert.equal(k in body, false);
-  assert.equal(body.reasoning_effort, 'low');
-  assert.equal(body.max_completion_tokens, 1200);
+  assert.deepEqual(body.reasoning, { effort: 'low' });
+  assert.equal(body.max_output_tokens, 1200);
+  assert.deepEqual(body.include, ['reasoning.encrypted_content']);
+  for (const k of ['messages', 'reasoning_effort', 'max_completion_tokens', 'response_format']) assert.equal(k in body, false, k);
   assert.equal(body.parallel_tool_calls, true);
   assert.equal(body.tool_choice, 'auto');
   assert.equal(body.prompt_cache_key, 'bona-wa-ar-v1');
   assert.equal(body.model, 'gpt-5.6-sol');
-  assert.ok(body.tools.every((t) => t.function.strict === true && t.function.parameters.additionalProperties === false));
-  const m = body.messages;
+  assert.ok(body.tools.every((t) => t.type === 'function' && t.strict === true && t.parameters.additionalProperties === false && !('function' in t)));
+  assert.ok(body.instructions.startsWith("You are Bona's AI assistant"), 'system[0] is the instructions');
+  assert.equal(body.input.at(-1).role, 'developer', 'the code-made note is a developer message');
+  const m = h.calls[0].messages;
   assert.equal(m[0].role, 'system');
   assert.ok(m[0].content.startsWith("You are Bona's AI assistant"));
   assert.ok(m[0].content.trimEnd().endsWith('SITE-FACTS-ar'), 'the site facts of the language close the cached prefix');
@@ -276,7 +314,7 @@ test('two leads share the same prefix bytes (tools + system[0]); the safety id i
   await h.brain.turn(turnArgs({ leadId: LEAD, batchText: 'first lead again' }));
   const [a, b, c] = h.calls.map((x) => x.body);
   assert.equal(JSON.stringify(a.tools), JSON.stringify(b.tools));
-  assert.equal(JSON.stringify(a.messages[0]), JSON.stringify(b.messages[0]));
+  assert.equal(JSON.stringify(a.instructions), JSON.stringify(b.instructions));
   assert.equal(a.prompt_cache_key, b.prompt_cache_key);
   assert.notEqual(a.safety_identifier, b.safety_identifier);
   assert.equal(a.safety_identifier, c.safety_identifier);
@@ -310,7 +348,7 @@ test('a tool round then text: every tool result is kept, Retell-shaped messages 
     { role: 'tool_call_result', tool_call_id: id, content: result },
     { role: 'agent', content: 'We have one villa.' },
   ]);
-  const second = h.calls[1].body.messages;
+  const second = h.calls[1].messages;
   assert.equal(second.at(-2).role, 'assistant');
   assert.deepEqual(second.at(-2).tool_calls.map((c) => c.id), [id]);
   assert.deepEqual(second.at(-1), { role: 'tool', tool_call_id: id, content: result });
@@ -341,7 +379,7 @@ test('at most 6 tools a turn: the rest get tool_limit, and the next round must a
   assert.equal(r.toolCalls.length, 8);
   assert.deepEqual(r.toolCalls.slice(6).map((c) => [c.ok, JSON.parse(c.result).error]), [[false, 'tool_limit'], [false, 'tool_limit']]);
   assert.equal(h.calls[1].body.tool_choice, 'none');
-  assert.equal(h.calls[1].body.messages.filter((m) => m.role === 'tool').length, 8, 'every tool_call gets its answer');
+  assert.equal(h.calls[1].messages.filter((m) => m.role === 'tool').length, 8, 'every tool_call gets its answer');
 });
 
 test('a tool that throws or passes 10 s gives the WhatsApp tool_failed note, and the turn goes on', async () => {
@@ -362,7 +400,7 @@ test('the dispatcher refuses a tool the route does not offer (create_lead, show_
   const r = await h.brain.turn(turnArgs());
   assert.equal(r.ok, true);
   assert.equal(h.ran.length, 0, 'no handler ran');
-  assert.deepEqual(h.calls[1].body.messages.filter((m) => m.role === 'tool').map((m) => m.content), ['{"error":"tool_not_offered"}', '{"error":"tool_not_offered"}']);
+  assert.deepEqual(h.calls[1].messages.filter((m) => m.role === 'tool').map((m) => m.content), ['{"error":"tool_not_offered"}', '{"error":"tool_not_offered"}']);
   assert.deepEqual(h.logs.filter((e) => e.evt === 'brain.bad_tool'), [{ evt: 'brain.bad_tool', name: 'create_lead' }, { evt: 'brain.bad_tool', name: 'show_property' }]);
   assert.deepEqual(r.toolCalls.map((c) => [c.name, c.ok]), [['create_lead', false], ['show_property', false]]);
   assert.deepEqual(r.messages, [{ role: 'agent', content: 'How can I help?' }], 'a refused call is not a Retell invocation (extractActions would read create_lead as a lead)');
@@ -371,9 +409,9 @@ test('the dispatcher refuses a tool the route does not offer (create_lead, show_
   assert.deepEqual(made.logs.filter((e) => e.evt === 'brain.bad_tool'), [{ evt: 'brain.bad_tool', name: 'unknown' }], 'a made-up name with digits never reaches the journal');
   const narrowed = harness({ script: [toolCalls(['request_human', { reason: 'person' }]), reply('Okay.')] });
   await narrowed.brain.turn(turnArgs({ toolNames: ['search_properties'] }));
-  assert.deepEqual(narrowed.calls[0].body.tools.map((t) => t.function.name), ['search_properties'], 'toolNames narrows the offer');
+  assert.deepEqual(narrowed.calls[0].body.tools.map((t) => t.name), ['search_properties'], 'toolNames narrows the offer');
   assert.equal(narrowed.ran.length, 0);
-  assert.equal(narrowed.calls[1].body.messages.at(-1).content, '{"error":"tool_not_offered"}');
+  assert.equal(narrowed.calls[1].messages.at(-1).content, '{"error":"tool_not_offered"}');
 });
 
 test('a tool result is clipped to 4,000 characters', async () => {
@@ -381,13 +419,145 @@ test('a tool result is clipped to 4,000 characters', async () => {
   const h = harness({ script: [toolCalls(['search_properties', {}]), reply('Ok.')], runTool: async () => big });
   const r = await h.brain.turn(turnArgs());
   assert.equal(r.toolCalls[0].result.length, 4000);
-  assert.equal(h.calls[1].body.messages.at(-1).content.length, 4000);
+  assert.equal(h.calls[1].messages.at(-1).content.length, 4000);
 });
 
 test('a route with no prompt section or no tools is off (mail before T22, web before T28)', async () => {
   const h = harness();
   for (const route of ['mail', 'web', 'sms']) assert.deepEqual(await h.brain.turn(turnArgs({ route })), { ok: false, code: 'off' }, route);
   assert.equal(h.calls.length, 0);
+});
+
+/* ---------------- the Responses API transport (T25b; PLAN T00 step 7) ---------------- */
+
+/**
+ * A fake POST /v1/responses that keeps the rules the T00 step 7 probe and OpenAI's function-calling guide state:
+ * only Responses fields (a Chat Completions field or temperature is a 400 naming it); store false with the encrypted
+ * reasoning included and an effort; flat strict function tools; every function_call it issued sent back after the
+ * reasoning item that came with it, that item's encrypted content unchanged (with store:false nothing is kept on the
+ * server); every function_call answered by a function_call_output with its call_id, and no output without its call.
+ * `turns` script the answers: each a list of { tool: [name, args] } or { text }. `seen` keeps every request.
+ */
+function fakeResponses(turns) {
+  const issued = new Map(); // call_id → the reasoning item it came with
+  const seen = [];
+  let n = 0;
+  const no = (param, message) => ({ status: 400, json: { error: { type: 'invalid_request_error', code: null, param, message } } });
+  const server = (req) => {
+    seen.push(req);
+    if (req.url !== 'https://api.openai.com/v1/responses' || req.method !== 'POST') return { status: 404, json: { error: { type: 'invalid_request_error', message: 'Unknown path' } } };
+    const b = req.body ?? {};
+    for (const k of ['messages', 'reasoning_effort', 'max_completion_tokens', 'response_format', 'temperature', 'top_p']) if (k in b) return no(k, `Unsupported parameter: '${k}'`);
+    if (b.store !== false || !(Array.isArray(b.include) && b.include.includes('reasoning.encrypted_content'))) return no('include', 'encrypted reasoning needed with store false');
+    if (!['none', 'minimal', 'low', 'medium', 'high'].includes(b.reasoning?.effort)) return no('reasoning.effort', 'bad effort');
+    if (typeof b.model !== 'string' || !Array.isArray(b.input) || !Number.isInteger(b.max_output_tokens)) return no('input', 'missing field');
+    for (const t of b.tools ?? []) if (t.type !== 'function' || typeof t.name !== 'string' || t.strict !== true || 'function' in t) return no('tools', 'not a Responses function tool');
+    const calls = new Set();
+    for (const [i, it] of b.input.entries()) {
+      if (it.type === 'reasoning') {
+        if (typeof it.encrypted_content !== 'string') return no('input', 'Items are not persisted when `store` is set to false.');
+      } else if (it.type === 'function_call') {
+        const r = issued.get(it.call_id);
+        if (!r) return no('input', 'unknown function call');
+        if (!b.input.slice(0, i).some((x) => x.type === 'reasoning' && x.id === r.id && x.encrypted_content === r.encrypted_content)) {
+          return no('input', `Item '${it.id}' of type 'function_call' was provided without its required 'reasoning' item.`);
+        }
+        calls.add(it.call_id);
+      } else if (it.type === 'function_call_output') {
+        if (!calls.has(it.call_id) || typeof it.output !== 'string') return no('input', 'No tool call found for function call output.');
+        calls.delete(it.call_id);
+      } else if (!['user', 'assistant', 'developer', 'system'].includes(it.role) || (typeof it.content !== 'string' && !Array.isArray(it.content))) {
+        return no('input', 'bad message');
+      }
+    }
+    if (calls.size) return no('input', 'No tool output found for function call.');
+    n += 1;
+    const reasoning = { id: `rs_${n}`, type: 'reasoning', summary: [], encrypted_content: `ENC-${'abcdefgh'[n]}-opaque` };
+    const output = [reasoning];
+    for (const o of turns.shift() ?? [{ text: 'Default answer.' }]) {
+      if (o.tool) {
+        const callId = `call_${'abcdefgh'[n]}${output.length}`;
+        issued.set(callId, reasoning);
+        output.push({ id: `fc_${callId}`, type: 'function_call', status: 'completed', call_id: callId, name: o.tool[0], arguments: JSON.stringify(o.tool[1]) });
+      } else {
+        output.push({ id: `msg_${n}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: o.text, annotations: [] }] });
+      }
+    }
+    return { status: 200, json: { id: `resp_${n}`, object: 'response', status: 'completed', error: null, incomplete_details: null, model: b.model, output, usage: USAGE } };
+  };
+  return { server, seen };
+}
+
+test('T25b end to end on a fake Responses server: a 2-round tool turn answers; the function call goes back after its reasoning item, its result as function_call_output', async () => {
+  const fake = fakeResponses([[{ tool: ['search_properties', { query: 'villa', district: null }] }], [{ text: 'We have one villa in Obhur.' }]]);
+  const result = JSON.stringify({ count: 1, results: [inventory.row(FIRST)] });
+  const h = harness({ script: [fake.server, fake.server], runTool: async () => result });
+  const r = await h.brain.turn(turnArgs());
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.rounds, 2);
+  assert.equal(h.calls.length, 2);
+  assert.ok(h.calls.every((c) => c.url === 'https://api.openai.com/v1/responses' && c.method === 'POST'));
+  const [first, second] = h.calls.map((c) => c.body);
+  assert.equal(second.instructions, first.instructions, 'the same instructions both rounds (the cached prefix)');
+  assert.deepEqual(second.tools, first.tools);
+  assert.deepEqual(second.input.slice(0, first.input.length), first.input, 'round 2 is round 1 plus the tool round');
+  const added = second.input.slice(first.input.length);
+  assert.deepEqual(added.map((i) => i.type), ['reasoning', 'function_call', 'function_call_output']);
+  assert.deepEqual(added[0], { id: 'rs_1', type: 'reasoning', summary: [], encrypted_content: 'ENC-b-opaque' }, 'the reasoning item as it came back');
+  assert.equal(added[1].name, 'search_properties');
+  assert.equal(added[2].call_id, added[1].call_id);
+  assert.equal(added[2].output, result);
+  assert.deepEqual(r.toolCalls, [{ id: added[1].call_id, name: 'search_properties', args: { query: 'villa' }, result, ok: true }]);
+  assert.deepEqual(r.messages, [
+    { role: 'tool_call_invocation', tool_call_id: added[1].call_id, name: 'search_properties', arguments: '{"query":"villa"}' },
+    { role: 'tool_call_result', tool_call_id: added[1].call_id, content: result },
+    { role: 'agent', content: 'We have one villa in Obhur.' },
+  ]);
+  assert.deepEqual(r.usage, { in: 20_000, cached: 16_000, out: 600, reasoning: 200 });
+  assert.equal(r.usd, (2 * MICRO) / 1e6);
+  assert.deepEqual(h.logs.filter((e) => e.evt === 'brain.call').map((e) => [e.code, e.inTok, e.cachedTok, e.outTok, e.reasoningTok]), [[null, 10_000, 8_000, 300, 100], [null, 10_000, 8_000, 300, 100]]);
+  // The fake has teeth: the same round without the reasoning item, or without the tool output, is refused.
+  const withoutReasoning = fake.server({ url: h.calls[1].url, method: 'POST', body: { ...second, input: second.input.filter((i) => i.type !== 'reasoning') } });
+  assert.equal(withoutReasoning.status, 400);
+  assert.match(withoutReasoning.json.error.message, /without its required 'reasoning' item/);
+  assert.equal(fake.server({ url: h.calls[1].url, method: 'POST', body: { ...second, input: second.input.slice(0, -1) } }).status, 400);
+  assert.equal(fake.server({ url: h.calls[1].url, method: 'POST', body: { ...second, temperature: 0.2 } }).json.error.param, 'temperature');
+});
+
+test('T25b reasoning items stay inside the turn: sent back on the next tool round and the repair call of the same model, never to the backup restart, the next turn, the result, the journal or an alert', async () => {
+  const result = JSON.stringify({ count: 1, results: [{ id: 'BONA-901', price_en: 'SAR 6,700,000' }] });
+  const h = harness({
+    script: [toolCallsWith('ENC-KEEP-IN-TURN', ['search_properties', { query: 'villa' }]), reply('It is SAR 7,000,000.'), reply('It is SAR 6,700,000.'), reply('A second turn.')],
+    runTool: async () => result,
+  });
+  const r1 = await h.brain.turn(turnArgs());
+  assert.equal(r1.ok, true);
+  assert.equal(r1.guard.repaired, true);
+  assert.equal(h.calls.length, 3);
+  assert.equal(h.calls[0].raw.includes('ENC-KEEP-IN-TURN'), false);
+  for (const i of [1, 2]) {
+    const input = h.calls[i].body.input;
+    const at = input.findIndex((x) => x.type === 'reasoning');
+    assert.ok(at >= 0, `request ${i} carries the reasoning item`);
+    assert.equal(input[at].encrypted_content, 'ENC-KEEP-IN-TURN');
+    assert.equal(input[at + 1].type, 'function_call', 'just before its function call');
+  }
+  const r2 = await h.brain.turn(turnArgs({ batchText: 'And in Al Shati?' }));
+  assert.equal(r2.ok, true);
+  assert.equal(h.calls[3].raw.includes('ENC-KEEP-IN-TURN'), false, 'the next turn starts without it');
+  assert.equal(h.calls[3].body.input.some((x) => x.type === 'reasoning' || x.type === 'function_call'), false);
+  const kept = JSON.stringify([r1, r2, h.logs, h.alerts, h.brain.ops(), h.brain.health()]);
+  assert.equal(kept.includes('ENC-KEEP-IN-TURN'), false, 'never in a turn result, the journal, an alert, ops or health');
+  assert.equal(kept.includes('rs_'), false);
+
+  const b = harness({ script: [toolCallsWith('ENC-MAIN-MODEL', ['search_properties', { query: 'villa' }]), http(503, {}), reply('From the backup.')] });
+  const rb = await b.brain.turn(turnArgs());
+  assert.equal(rb.ok, true);
+  assert.equal(rb.backup, true);
+  assert.equal(b.calls[1].raw.includes('ENC-MAIN-MODEL'), true, 'the main model\'s own round 2 carried it');
+  assert.equal(b.calls[2].body.model, 'gpt-6.1-terra');
+  assert.equal(b.calls[2].raw.includes('ENC-MAIN-MODEL'), false, 'the backup restart starts from the client turn, without the main model\'s reasoning');
+  assert.equal(b.calls[2].body.input.some((x) => x.type === 'reasoning'), false);
 });
 
 /* ---------------- the error table and the circuit (PLAN T25 test 1) ---------------- */
@@ -477,7 +647,7 @@ test('after the 10 out minutes exactly one turn is the trial: turns meanwhile ge
 
 test('an auth trial is one turn too; a trial that ends without a quota/auth answer (a refusal, a throw of ours) frees it, so the next turn is the trial again', { timeout: 5_000 }, async () => {
   const auth = held(http(401, {}));
-  const h = harness({ script: [http(401, {}), auth.step, { status: 200, json: { choices: [{ message: { content: null, refusal: 'No.' } }] } }, reply('Draft.'), reply('Fine.')] });
+  const h = harness({ script: [http(401, {}), auth.step, refused('No.'), reply('Draft.'), reply('Fine.')] });
   let throwing = false;
   const brain = createBrain({ ...h.deps, guard: { checkReply: () => { if (throwing) throw new Error('guard bug'); return { ok: true, hits: [] }; } } });
   assert.equal((await brain.turn(turnArgs())).code, 'auth');
@@ -635,7 +805,7 @@ test('a failure mid-turn restarts the whole turn on the backup model (tools agai
   assert.equal(r.backup, true);
   assert.equal(h.ran.length, 2, 'the backup ran the tool again (tools only read, validate or save needs)');
   assert.equal(r.toolCalls.length, 1, 'only the turn that answered is reported');
-  assert.equal(h.calls[2].body.messages.some((m) => m.role === 'tool'), false, 'the backup starts from the client turn');
+  assert.equal(h.calls[2].messages.some((m) => m.role === 'tool'), false, 'the backup starts from the client turn');
 });
 
 test('the caps are per turn (DESIGN-brain §2.4): the backup gets only what the main model left of the 4 + 1 calls and 6 tools', async () => {
@@ -694,7 +864,7 @@ test('request_human is never dropped and counts toward the 6 tools: in a batch i
   assert.deepEqual(h.ran.map((x) => x.name), ['request_human', ...Array(5).fill('search_properties')], 'the hand-over first, then 5 searches: 6 in all');
   assert.deepEqual(r.toolCalls.map((c) => [c.name, c.ok]), [...Array(5).fill(['search_properties', true]), ['search_properties', false], ['request_human', true]], 'reported in the order the model asked');
   assert.equal(JSON.parse(r.toolCalls[5].result).error, 'tool_limit');
-  assert.equal(h.calls[1].body.messages.filter((m) => m.role === 'tool').length, 7, 'every tool_call gets its answer');
+  assert.equal(h.calls[1].messages.filter((m) => m.role === 'tool').length, 7, 'every tool_call gets its answer');
   assert.equal(answerFrom(r, { inventory, siteUrl: SITE, language: 'en' }).handover, true, 'dana-wa sees the hand-over');
   // One tool left after earlier rounds: the hand-over takes it, the search in the same batch gets tool_limit.
   const late = harness({
@@ -714,8 +884,8 @@ test('request_human is never dropped and counts toward the 6 tools: in a batch i
   assert.equal(late.calls[3].body.tool_choice, 'none');
 });
 
-test('a cut-off answer (finish_reason length) is bad_response: it goes to the backup and is never sent as an answer', async () => {
-  const cut = { status: 200, json: { choices: [{ message: { role: 'assistant', content: 'The villa in Obhur is' }, finish_reason: 'length' }], usage: USAGE } };
+test('a cut-off answer (incomplete at max_output_tokens) is bad_response: it goes to the backup and is never sent as an answer', async () => {
+  const cut = cutOff('The villa in Obhur is');
   const h = harness({ script: [cut, reply('From the backup.')] });
   const r = await h.brain.turn(turnArgs());
   assert.equal(r.ok, true);
@@ -723,7 +893,7 @@ test('a cut-off answer (finish_reason length) is bad_response: it goes to the ba
   assert.equal(r.messages.at(-1).content, 'From the backup.');
   const quiet = harness({ backupMode: 'handover', script: [cut] });
   assert.deepEqual(await quiet.brain.turn(turnArgs()), { ok: false, code: 'bad_response' });
-  const repair = harness({ backupMode: 'handover', script: [reply('It is SAR 7,000,000.'), { ...cut, json: { ...cut.json, choices: [{ message: { content: 'A team member will' }, finish_reason: 'length' }] } }] });
+  const repair = harness({ backupMode: 'handover', script: [reply('It is SAR 7,000,000.'), cutOff('A team member will')] });
   assert.deepEqual(await repair.brain.turn(turnArgs()), { ok: false, code: 'bad_response' }, 'a cut-off repair is not an answer either');
 });
 
@@ -741,7 +911,7 @@ test('no answer in 15 s is timeout (backup if time remains); the turn never pass
 });
 
 test('a refusal is never retried on another model; unparsable or empty answers go to the backup (bad_response)', async () => {
-  const h = harness({ script: [{ status: 200, json: { choices: [{ message: { content: null, refusal: 'I cannot help with that.' } }] } }, reply('never')] });
+  const h = harness({ script: [refused('I cannot help with that.'), reply('never')] });
   assert.deepEqual(await h.brain.turn(turnArgs()), { ok: false, code: 'refusal' });
   assert.equal(h.calls.length, 1);
   const bad = harness({ script: [{ status: 200, json: '<html>oops' }, reply('Backup.')] });
@@ -1143,7 +1313,7 @@ test("Claude r21: a day write of unknown outcome from 23:59 settled after midnig
 test("Codex r20: a client's wa.me link never sends its number to the provider", async () => {
   const h = harness({ script: [reply('Sure.')] });
   await h.brain.turn(turnArgs({ batchText: 'Please WhatsApp me at https://wa.me/12025550123 or https://api.whatsapp.com/send?phone=%2B13105550199 or https://api.whatsapp.com/send?phone=%2B1%20(415)%20555-0147', history: [{ role: 'user', content: 'or wa.me/447700900123' }] }));
-  const all = h.calls[0].body.messages.map((x) => x.content).join('\n');
+  const all = h.calls[0].messages.map((x) => x.content).join('\n');
   for (const d of ['12025550123', '2025550123', '447700900123', '7700900123', '13105550199', '3105550199', '4155550147', '555-0147']) assert.equal(all.includes(d), false, d);
 });
 
@@ -1224,10 +1394,12 @@ test('a draft with an amount no tool returned: one repair call placed after the 
   assert.equal(r.messages.at(-1).content, 'It is SAR 6,700,000.');
   assert.equal(h.calls.length, 3);
   const repair = h.calls[2].body;
-  assert.deepEqual(repair.messages.at(-1), { role: 'system', content: REPAIR_NOTE });
-  assert.deepEqual(repair.messages.at(-2), h.calls[1].body.messages.at(-1), 'the note follows the last tool message itself, never a plain assistant text turn');
-  assert.equal(repair.messages.at(-2).role, 'tool');
-  assert.deepEqual(repair.messages.slice(0, -1), h.calls[1].body.messages, 'the same request, then the note');
+  assert.deepEqual(h.calls[2].messages.at(-1), { role: 'system', content: REPAIR_NOTE });
+  assert.deepEqual(h.calls[2].messages.at(-2), h.calls[1].messages.at(-1), 'the note follows the last tool message itself, never a plain assistant text turn');
+  assert.equal(h.calls[2].messages.at(-2).role, 'tool');
+  assert.deepEqual(h.calls[2].messages.slice(0, -1), h.calls[1].messages, 'the same request, then the note');
+  assert.deepEqual(repair.input.slice(0, -1), h.calls[1].body.input, 'on the wire too (the reasoning item of the tool round included)');
+  assert.deepEqual(repair.input.at(-1), { role: 'developer', content: REPAIR_NOTE });
   assert.equal(repair.tool_choice, 'none');
   assert.equal(h.calls[2].raw.includes('7,000,000'), false, 'the rejected draft is never sent back');
   assert.deepEqual(h.logs.filter((e) => e.evt === 'brain.guard'), [{ evt: 'brain.guard', leadId: LEAD, kind: 'amount' }]);
@@ -1237,8 +1409,8 @@ test('without tools the repair note follows the client turn itself (the code-mad
   const h = harness({ script: [reply('It is SAR 7,000,000.'), reply('A team member will confirm the price.')] });
   const r = await h.brain.turn(turnArgs());
   assert.equal(r.ok, true);
-  const first = h.calls[0].body.messages;
-  const repair = h.calls[1].body.messages;
+  const first = h.calls[0].messages;
+  const repair = h.calls[1].messages;
   assert.deepEqual(repair.at(-1), { role: 'system', content: REPAIR_NOTE });
   assert.deepEqual(repair.at(-2), first.at(-2), 'the exact predecessor is the last user message (the client turn)');
   assert.equal(repair.at(-2).role, 'user');
@@ -1302,7 +1474,7 @@ test('the guard allows only this turn\'s tool results and the earlierReplies han
   }));
   assert.deepEqual(r, { ok: false, code: 'guard' }, 'a negotiated team price and a pre-guard Dana price are both hits');
   assert.equal(h.calls.length, 2, 'one repair call, then guard');
-  assert.deepEqual(h.calls[1].body.messages.at(-1), { role: 'system', content: REPAIR_NOTE });
+  assert.deepEqual(h.calls[1].messages.at(-1), { role: 'system', content: REPAIR_NOTE });
 });
 
 /* ---------------- the classifier (DESIGN-brain §7) ---------------- */
@@ -1321,16 +1493,18 @@ test('classify: no tools, no site facts, strict json_schema on the classifier mo
   const body = h.calls[0].body;
   assert.equal(body.model, 'gpt-6.1-terra');
   for (const k of ['tools', 'tool_choice', 'parallel_tool_calls']) assert.equal(k in body, false, k);
-  assert.equal(body.response_format.type, 'json_schema');
-  assert.equal(body.response_format.json_schema.strict, true);
-  assert.deepEqual(body.response_format.json_schema.schema, {
+  assert.equal('response_format' in body, false);
+  assert.equal(body.text.format.type, 'json_schema');
+  assert.equal(body.text.format.name, 'mail_class');
+  assert.equal(body.text.format.strict, true);
+  assert.deepEqual(body.text.format.schema, {
     type: 'object', additionalProperties: false, required: ['class', 'wants'],
     properties: { class: { type: 'string', enum: ['client', 'not_client', 'unsure'] }, wants: { type: 'string' } },
   });
   assert.equal(body.store, false);
   assert.equal(body.prompt_cache_key, 'bona-classify-v1');
-  assert.deepEqual(body.messages.map((m) => m.role), ['system', 'user']);
-  assert.equal(body.messages[0].content, 'Classify the mail. Answer JSON only.');
+  assert.equal(body.instructions, 'Classify the mail. Answer JSON only.');
+  assert.deepEqual(body.input.map((m) => m.role), ['user']);
   assert.equal(h.calls[0].raw.includes('SITE-FACTS'), false, 'no site facts');
   assert.equal(h.calls[0].raw.includes('0500000000'), false, 'minimised');
   assert.equal(h.calls[0].raw.includes('sara@example.com'), false, 'the sender key is only hashed');
@@ -1342,7 +1516,7 @@ test('classify fails closed: garbage, a class outside the enum, a refusal, an er
   const cases = [
     [reply('not json'), { error: 'bad_response' }],
     [reply('{"class":"maybe","wants":""}'), { error: 'bad_response' }],
-    [{ status: 200, json: { choices: [{ message: { content: null, refusal: 'no' } }] } }, { error: 'refusal' }],
+    [refused('no'), { error: 'refusal' }],
     [http(500, {}), { error: 'down' }],
     [QUOTA, { error: 'quota' }],
   ];
@@ -1412,30 +1586,30 @@ test('masking comes before every clip: a phone across the 300-character row cut,
   assert.equal(/\d/.test(history[0].content), false, 'historyFromInbox masks, then clips');
   const h = harness({ script: [reply('Hello.')] });
   await h.brain.turn(turnArgs({ history: [{ role: 'user', content: row }], batchText: `${'y'.repeat(3995)} 0500000001 thanks` }));
-  const m = h.calls[0].body.messages;
+  const m = h.calls[0].messages;
   assert.equal(m[1].role, 'user');
   assert.equal(/\d/.test(m[2].content), false, `no digit of the batch phone: …${m[2].content.slice(-12)}`);
   const mail = harness({ promptDir: promptDirWithClassifier(), script: [reply('{"class":"client","wants":"x"}')] });
   await mail.brain.classify({ ...MAIL, fromName: `${'n'.repeat(75)} 0500000002`, subject: `${'s'.repeat(195)} 0500000003`, text: `${'z'.repeat(595)} 0500000004` });
-  const user = mail.calls[0].body.messages[1].content;
+  const user = mail.calls[0].messages[1].content;
   for (const d of ['05000', '00000', '0500000002', '0500000003', '0500000004']) assert.equal(user.includes(d), false, d);
 });
 
 test("Codex r9: a number the client split across two messages never reaches the provider whole: across history rows, or between the last row and this batch, a reply of ours between them or not", async () => {
   const h = harness({ script: [reply('Hello.')] });
   await h.brain.turn(turnArgs({ history: [{ role: 'user', content: 'My number is 050' }, { role: 'assistant', content: 'Thanks, the rest please?' }, { role: 'user', content: '000 0000' }] }));
-  const all = h.calls[0].body.messages.map((x) => x.content).join('\n').replace(/\D/g, '');
+  const all = h.calls[0].messages.map((x) => x.content).join('\n').replace(/\D/g, '');
   assert.equal(all.includes('0500000000'), false, 'not across two history rows');
   assert.equal(all.includes('0000000'), false, 'no 7-digit tail either');
   const k = harness({ script: [reply('Hello.')] });
   await k.brain.turn(turnArgs({ history: [{ role: 'user', content: 'call me on 055 123' }], batchText: '4567 please' }));
-  const sent = k.calls[0].body.messages.map((x) => x.content).join('\n');
+  const sent = k.calls[0].messages.map((x) => x.content).join('\n');
   assert.equal(/0551234567|1234567|055123/.test(sent.replace(/\D/g, '')), false, 'not between the last row and this batch');
   assert.equal(sent.includes('please'), true);
   // Our own reply never joins the client's number: an amount in it stays.
   const j = harness({ script: [reply('Hello.')] });
   await j.brain.turn(turnArgs({ history: [{ role: 'assistant', content: 'from SAR 2 950 000' }, { role: 'user', content: '500 000 is my budget' }] }));
-  assert.equal(j.calls[0].body.messages.some((x) => x.content.includes('2 950 000')), true);
+  assert.equal(j.calls[0].messages.some((x) => x.content.includes('2 950 000')), true);
 });
 
 test("Codex r12: two budget messages in one batch reach the model as written (inboxTurn's batchParts keep the message boundaries through every masking pass); a CRM field is masked before it is clipped", async () => {
@@ -1448,22 +1622,22 @@ test("Codex r12: two budget messages in one batch reach the model as written (in
   assert.equal(t.batchText, 'ميزانيتي 500.000\n600.000');
   const h = harness({ script: [reply('Noted.')] });
   await h.brain.turn(turnArgs({ language: 'ar', history: t.history, batchText: t.batchText, batchParts: t.batchParts }));
-  const user = h.calls[0].body.messages.find((x) => x.role === 'user').content;
+  const user = h.calls[0].messages.find((x) => x.role === 'user').content;
   assert.equal(user.includes('500.000') && user.includes('600.000'), true, user);
   // A CRM field longer than its 120-character clip: masked first, so a phone the clip cuts leaves no digit run.
   const k = harness({ script: [reply('Hello.')] });
   await k.brain.turn(turnArgs({ leadFacts: { interest: `${'x'.repeat(100)} callback +44 7700 900123 please` } }));
-  const sent = k.calls[0].body.messages.find((x) => x.role === 'user').content;
+  const sent = k.calls[0].messages.find((x) => x.role === 'user').content;
   assert.equal(/\d{3}/.test(sent.replace(/[^\d]/g, '')), false, sent.slice(-60));
   const j = harness({ script: [reply('Hello.')] });
   await j.brain.turn(turnArgs({ leadFacts: 'Interest: call 0500000000\nBudget: 3 million' }));
-  assert.equal(j.calls[0].body.messages.find((x) => x.role === 'user').content.includes('0500000000'), false, 'a string record is masked too');
+  assert.equal(j.calls[0].messages.find((x) => x.role === 'user').content.includes('0500000000'), false, 'a string record is masked too');
 });
 
 test("Claude r15 F2: two budget answers on either side of our question both reach the model as written", async () => {
   const h = harness({ script: [reply('Noted.')] });
   await h.brain.turn(turnArgs({ language: 'ar', history: [{ role: 'user', content: 'ميزانيتي 500.000' }, { role: 'assistant', content: 'والحد الأعلى؟' }], batchText: '600.000' }));
-  const all = h.calls[0].body.messages.map((x) => x.content).join('\n');
+  const all = h.calls[0].messages.map((x) => x.content).join('\n');
   assert.equal(all.includes('500.000'), true, all);
   assert.equal(all.includes('600.000'), true, all);
 });
@@ -1493,13 +1667,13 @@ test("Codex r10: historyFromInbox masks the client's rows as one series before i
   // The batch on its own: what a split leaves never stays as 7 digits starting with 0.
   const h = harness({ script: [reply('Hello.')] });
   await h.brain.turn(turnArgs({ history: [{ role: 'user', content: `${'x'.repeat(295)}…` }], batchText: '000 0000 is the rest' }));
-  assert.equal(h.calls[0].body.messages.map((x) => x.content).join('\n').replace(/\D/g, '').includes('0000000'), false);
+  assert.equal(h.calls[0].messages.map((x) => x.content).join('\n').replace(/\D/g, '').includes('0000000'), false);
 });
 
 test('every history row is clipped to 300 characters after masking, also when the caller did not build the history with historyFromInbox', async () => {
   const h = harness({ script: [reply('Hello.')] });
   await h.brain.turn(turnArgs({ history: [{ role: 'user', content: `${'x'.repeat(295)} 0500000000 ${'x'.repeat(4000)}` }, { role: 'team', content: 'y'.repeat(400) }] }));
-  const m = h.calls[0].body.messages;
+  const m = h.calls[0].messages;
   assert.deepEqual([m[1].role, m[1].content.length, /\d/.test(m[1].content)], ['user', 300, false], 'masked, then clipped');
   assert.deepEqual([m[2].role, m[2].content], ['assistant', `[Bona team member] ${'y'.repeat(300)}`]);
   assert.equal(m[3].content.includes('Do you have villas?'), true, 'then the client turn');
