@@ -18,6 +18,8 @@ import { DEFAULT_ORIGINS } from '../lib/cors.mjs';
 import { createInboxStore, RETENTION_MS } from '../lib/inbox/store.mjs';
 import { JOIN_HISTORY_MS } from '../lib/inbox/backfill.mjs';
 import { generateVapidKeys } from '../lib/push.mjs';
+import { isExcludedLead } from '../lib/team.mjs';
+import { createFakeBrain, brainReply, brainError } from '../lib/brain/fake.mjs';
 
 const NOW = 1_790_500_000_000;
 const DAY = 86_400_000;
@@ -1027,5 +1029,780 @@ test('a BONA_WA_INSTANCE_JID that is not a phone jid is said out loud at start-u
     } finally {
       await h.close();
     }
+  }
+});
+
+/* ================================================================================================
+ * PR-INT (PLAN T14): the real modules wired together. Every case below goes through createApp as
+ * the server builds it; only the outside world is fake (Evolution, OpenAI, Google, Retell, the
+ * push service). Numbers are examples (+966 50 000 00xx).
+ * ============================================================================================== */
+
+const T14 = Date.parse('2026-12-03T12:00:00+03:00'); // a Thursday, noon in Riyadh
+const OWNER14 = '966500000009';
+const BONA14 = '966500000010';
+const ENV14 = {
+  EVOLUTION_API_URL: 'http://evo.test/', EVOLUTION_API_KEY: 'k', BONA_WA_INSTANCE: 'bona-test',
+  BONA_OWNER_JID: `${OWNER14}@s.whatsapp.net`, BONA_WA_INSTANCE_JID: `${BONA14}@s.whatsapp.net`,
+};
+const BRAIN_KEY = 'sk-test-not-a-real-key-000000000000';
+const QUICK_PACING = { batchDelay: () => 0, typingFloorMs: () => 0, fifo: (fn) => fn() };
+const jidOf = (digits) => `${digits}@s.whatsapp.net`;
+const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+/** The identity guard as an answered probe would leave it (lib/wa-link.mjs): Bona's own number, proven. */
+function provenLink({ identity = true } = {}) {
+  return {
+    started: 0, stopped: 0,
+    identityOk: () => identity, linkOk: () => true, linkStable: () => true,
+    start() { this.started += 1; return true; }, stop() { this.stopped += 1; },
+    health: () => ({ identityOk: identity, linkOk: true }),
+  };
+}
+
+/** A Retell double for the legacy WhatsApp agent: one canned answer. */
+function legacyRetell() {
+  const calls = [];
+  return {
+    calls,
+    async createChat(body) { calls.push(['createChat', body]); return { chat_id: `chat_${calls.length}` }; },
+    async createChatCompletion(body) { calls.push(['createChatCompletion', body]); return { messages: [{ role: 'agent', content: 'Retell here: which district?' }] }; },
+    async endChat() { return null; },
+    async createWebCall() { return { call_id: 'call_1', access_token: 'tok' }; },
+  };
+}
+
+/** A key file in a temp HOME, read by the real brain (lib/brain.mjs) and nowhere else. */
+function brainHome(root) {
+  const home = path.join(root, 'home');
+  fs.mkdirSync(path.join(home, '.secrets'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.secrets', 'bona-brain.env'), `BONA_OPENAI_API_KEY=${BRAIN_KEY}\n`, { mode: 0o600 });
+  return home;
+}
+
+/**
+ * createApp with the real modules, a moving clock, and one fake fetch for everything outside:
+ * Evolution (sends recorded; the poller's window reads served from `evo.windows`), OpenAI (served from
+ * `openai`, a queue of responses or functions), Google (a small calendar double) and the rest (200 {}).
+ */
+function rig14({ env = {}, config = {}, openai = [], google = null, realBrain = false, ...options } = {}) {
+  let t = options.startAt ?? T14;
+  const db = options.db ?? openDb(':memory:');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-t14-'));
+  const logs = [];
+  const evo = { sends: [], windows: [], other: [] };
+  const ai = { calls: [], queue: [...openai] };
+  const gq = { calls: [], events: new Map() };
+  const seen = [];
+  const fetchImpl = async (url, init = {}) => {
+    const u = String(url);
+    seen.push({ method: init.method ?? 'GET', url: u });
+    if (u.startsWith('https://api.openai.com/')) {
+      ai.calls.push({ url: u, body: init.body ? JSON.parse(init.body) : null });
+      const next = ai.queue.length ? ai.queue.shift() : { status: 200, json: { choices: [{ message: { role: 'assistant', content: 'Default answer.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } } };
+      const r = typeof next === 'function' ? await next(init) : next;
+      return reply(r.status, r.json);
+    }
+    if (u.startsWith('https://oauth2.googleapis.com/') || u.startsWith('https://www.googleapis.com/')) {
+      gq.calls.push({ method: init.method ?? 'GET', url: u, body: init.body ?? null });
+      if (u.startsWith('https://oauth2.googleapis.com/token')) return reply(200, { access_token: 'gtok', expires_in: 3600, token_type: 'Bearer' });
+      if (google) {
+        const got = await google({ method: init.method ?? 'GET', url: new URL(u), body: init.body ? JSON.parse(init.body) : null, events: gq.events });
+        if (got) return reply(got.status, got.json);
+      }
+      return reply(404, { error: { code: 404 } });
+    }
+    if (u.startsWith('http://evo.test/')) {
+      if (u.includes('/message/sendText/') || u.includes('/message/sendMedia/')) {
+        evo.sends.push({ url: u, body: JSON.parse(init.body), at: t });
+        return reply(201, { key: { id: `KEY-${evo.sends.length}` } });
+      }
+      if (u.includes('/chat/findMessages/')) {
+        const body = JSON.parse(init.body);
+        const records = body.where?.messageTimestamp && evo.windows.length ? evo.windows.shift() : [];
+        return reply(200, { messages: { total: records.length, pages: 1, currentPage: 1, records } });
+      }
+      evo.other.push(u);
+      return reply(200, {});
+    }
+    throw new Error(`no network in tests: ${u.slice(0, 40)}`);
+  };
+  const cfgEnv = { ...ENV14, ...env, ...(realBrain ? { HOME: brainHome(root) } : {}) };
+  const retell = options.retell ?? legacyRetell();
+  const app = createApp({
+    config: {
+      port: 0, host: '127.0.0.1', siteUrl: 'https://bona.azoz.uk', publicApi: 'https://bona-api.azoz.uk',
+      dataDir: root, inventoryFile: WORKTREE_LISTINGS, origins: DEFAULT_ORIGINS, toolToken: 'a'.repeat(32),
+      retellApiKey: 'test', retellMock: false, chatAgentId: 'agent_chat', voiceAgentId: 'agent_voice', waChatAgentId: 'agent_wa',
+      maxBodyBytes: 16 * 1024, chatRatePerMin: 30, tokenRatePerMin: 6, toolRatePerMin: 600, toolAuthFailRatePerMin: 10,
+      allowQueryToken: false, maxChatsPerDay: 300, maxCallsPerDay: 60, maxTurnsPerSession: 40, dashCookieDays: 30,
+      ids: {}, version: '1.0.0', trustedProxies: [], waPoll: true, waPollMs: 20_000,
+      ...config, env: cfgEnv,
+    },
+    db, inventory, probeRetell: async () => 'ok', retell, fetchImpl, now: () => t, log: (e) => logs.push(e),
+    pacing: QUICK_PACING, danaBatchMs: 0,
+    ...(realBrain ? {} : { brain: options.brain ?? createFakeBrain({ turns: options.turns ?? [] }) }),
+    ...(options.waLink === null ? {} : { waLink: options.waLink ?? provenLink() }),
+    ...Object.fromEntries(Object.entries(options).filter(([k]) => !['startAt', 'db', 'retell', 'brain', 'turns', 'waLink'].includes(k))),
+  });
+  const rec = (digits, id, text, { fromMe = false, at = t - 5_000 } = {}) => ({
+    key: { id, fromMe, remoteJid: jidOf(digits) }, pushName: fromMe ? null : 'Example', messageType: 'conversation',
+    message: { conversation: text }, messageTimestamp: Math.floor(at / 1000),
+  });
+  const h = {
+    app, db, logs, evo, ai, gq, retell, root, seen,
+    get now() { return t; },
+    advance(ms) { t += ms; },
+    set(ms) { t = ms; },
+    /** One poller read that serves these records, then Dana's runs and the pushes, landed. */
+    async poll(...records) {
+      evo.windows.push(records);
+      const tally = await app.poller.tick();
+      await app.dana.flush();
+      await app.alerts.flush();
+      return tally;
+    },
+    rec,
+    sendsTo: (digits) => evo.sends.filter((s) => s.body.number === digits),
+    notes: (where = '1 = 1') => db.db.prepare(`SELECT kind, dedupe_key, status, lead_id, meta FROM owner_notes WHERE ${where} ORDER BY created, rowid`).all()
+      .map((r) => ({ ...r, meta: JSON.parse(r.meta ?? '{}') })),
+    seedLead(id, digits, over = {}) {
+      db.insertLead({
+        lead_id: id, created: t - DAY, updated: t - DAY, phone_e164: digits, wa_jid: jidOf(digits), channel: 'whatsapp',
+        match_method: 'ref', stage: 'new', stage_ts: t - DAY, inbox_state: 'in', inbox_since: t - DAY, ...over,
+      });
+      return db.getLead(id);
+    },
+    async close() {
+      app.stopTimers?.();
+      app.notes.stop?.();
+      await app.dana.stop();
+      await app.alerts.flush();
+      await app.dashboard.auth.flush();
+      if (!options.db) db.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    },
+  };
+  return h;
+}
+
+test('T14 wiring: the team gets the owner test, so his own number is a client\'s chat only while his test is on', async () => {
+  const h = rig14();
+  try {
+    const { app, db } = h;
+    const lead = h.seedLead('LEAD-20261203-own00001', OWNER14, { inbox_via: 'owner_test', match_method: 'owner_test' });
+    assert.equal(app.ownerTest.active(), false);
+    assert.equal(app.team.isExcludedPhone(OWNER14), true, 'test off: the owner is a colleague, as today');
+    assert.equal(isExcludedLead(app.team, db, lead), true);
+    app.team.setSetting('owner_as_client', '1');
+    assert.equal(app.ownerTest.active(), true);
+    assert.equal(app.team.isExcludedPhone(OWNER14), false, 'test on: his number is the test client (DESIGN §3.2)');
+    assert.equal(isExcludedLead(app.team, db, lead), false);
+    app.team.addUser({ name: 'Sara', phone: '0500000001', role: 'staff' });
+    assert.equal(app.team.isExcludedPhone('966500000001'), true, 'every other colleague stays excluded');
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 wiring: the brain\'s own alerts reach the owner notes unchanged (brain_out, brain_spend 80/100/stop, brain_bug), and quota/auth push the owners with reason brain', async () => {
+  const QUOTA = { status: 429, json: { error: { type: 'insufficient_quota', code: 'insufficient_quota' } } };
+  const AUTH = { status: 401, json: { error: { type: 'invalid_request_error', code: 'invalid_api_key' } } };
+  const BAD = { status: 200, json: { choices: [] } };
+  const USAGE = { prompt_tokens: 10_000, prompt_tokens_details: { cached_tokens: 8_000 }, completion_tokens: 300, completion_tokens_details: { reasoning_tokens: 100 } };
+  const OK = { status: 200, json: { choices: [{ message: { role: 'assistant', content: 'Which district do you like?' }, finish_reason: 'stop' }], usage: USAGE } };
+  const turnArgs = (leadId) => ({
+    route: 'wa', leadId, language: 'en', autoMode: true, history: [], batchText: 'Hi', leadFacts: {}, turnContext: { firstReply: true },
+    toolNames: ['search_properties', 'request_human'], earlierReplies: [],
+  });
+  const pushed = [];
+  const spy = (app) => { const orig = app.alerts.notifyOwners; app.alerts.notifyOwners = (o) => { pushed.push(o?.reason ?? null); return orig(o); }; };
+
+  // brain_out quota, then brain_out auth (a fresh app: one outage each).
+  for (const [res, code] of [[QUOTA, 'quota'], [AUTH, 'auth']]) {
+    pushed.length = 0;
+    const h = rig14({ realBrain: true, openai: [res, res, res] });
+    try {
+      spy(h.app);
+      assert.equal(h.app.brain.configured, true, 'the real brain, on the temp key');
+      const out = await h.app.brain.turn(turnArgs('LEAD-20261203-brain001'));
+      assert.deepEqual(out, { ok: false, code });
+      const rows = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_out');
+      assert.equal(rows.length, 1, `${code}: one brain_out alert row`);
+      assert.equal(rows[0].meta.code, code, 'the brain\'s code, unchanged');
+      assert.match(rows[0].dedupe_key, /^al:brain_out:\d+$/);
+      await h.app.alerts.flush();
+      assert.deepEqual(pushed, ['brain'], `${code}: the owners' phones hear of it as reason brain`);
+    } finally {
+      await h.close();
+    }
+  }
+
+  // brain_spend at 100% of the month alert, then the day stop.
+  {
+    pushed.length = 0;
+    const h = rig14({ realBrain: true, openai: [OK, OK], config: { brainMonthAlertUsd: 0.01, brainDayStopUsd: 1000, brainMonthStopUsd: 1000 } });
+    try {
+      spy(h.app);
+      assert.equal((await h.app.brain.turn(turnArgs('LEAD-20261203-brain002'))).ok, true);
+      const spend = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_spend');
+      assert.ok(spend.length >= 1, 'a spend alert row');
+      assert.ok(spend.every((r) => ['80', '100'].includes(r.meta.level)), JSON.stringify(spend));
+      assert.ok(spend.some((r) => r.meta.level === '100'));
+      assert.deepEqual(pushed, [], 'a spend alert is a note, not a push');
+    } finally {
+      await h.close();
+    }
+  }
+  {
+    const h = rig14({ realBrain: true, openai: [OK], config: { brainMonthAlertUsd: 1000, brainDayStopUsd: 0.001, brainMonthStopUsd: 1000 } });
+    try {
+      assert.deepEqual(await h.app.brain.turn(turnArgs('LEAD-20261203-brain003')), { ok: false, code: 'budget' });
+      const stop = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_spend');
+      assert.deepEqual(stop.map((r) => r.meta.level), ['stop'], 'the day stop, as the brain sent it');
+      assert.match(stop[0].dedupe_key, /^al:brain_spend:stop:\d+$/);
+    } finally {
+      await h.close();
+    }
+  }
+  // brain_bug: bad responses (an unparsable body), three in the hour.
+  {
+    const h = rig14({ realBrain: true, openai: Array(12).fill(BAD), config: { brainBackupMode: 'off' } });
+    try {
+      for (let i = 0; i < 4; i += 1) {
+        assert.equal((await h.app.brain.turn(turnArgs(`LEAD-20261203-brainb0${i}`))).code, 'bad_response');
+        h.advance(1_000);
+      }
+      const bug = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_bug');
+      assert.equal(bug.length, 1, 'one brain_bug alert');
+    } finally {
+      await h.close();
+    }
+  }
+});
+
+test('T14 wiring: the brain runs its tools in-process (runTool → tools.runInProcess), the tools get the wired viewing, and the viewing the shared inventory', async () => {
+  const listing = inventory.all().find((l) => l.slug && l.status === 'available' && l.location?.city?.en === 'Jeddah');
+  assert.ok(listing, 'a bookable Jeddah home in listings.json');
+  const toolCall = (name, args) => ({
+    status: 200,
+    json: { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5 } },
+  });
+  const done = { status: 200, json: { choices: [{ message: { role: 'assistant', content: 'Let me check that for you.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } } };
+  const h = rig14({
+    realBrain: true,
+    openai: [toolCall('book_viewing', { listing_id: listing.id, slot_id: 'not-a-slot', name: 'Example Client' }), done],
+    config: { gcalSaFile: '/nonexistent/example-sa.json', gcalCalendarId: 'test-calendar@example.com' },
+  });
+  try {
+    const { app } = h;
+    app.team.setSetting('calendar_booking', '1');
+    const lead = h.seedLead('LEAD-20261203-tool0001', '966500000031', { inbox_via: 'own_number', match_method: 'own_number' });
+    assert.equal(app.ownerTest.autoMode(lead), true, 'an own-number chat on a proven instance is in auto mode');
+    const out = await app.brain.turn({
+      route: 'wa', leadId: lead.lead_id, language: 'en', autoMode: true, history: [], batchText: 'Can I see it tomorrow?', leadFacts: {},
+      turnContext: { firstReply: false }, toolNames: ['book_viewing', 'request_human'], earlierReplies: [],
+    });
+    assert.equal(out.ok, true, JSON.stringify(out));
+    const call = out.toolCalls.find((c) => c.name === 'book_viewing');
+    assert.ok(call, 'the model\'s book_viewing ran');
+    const result = JSON.parse(call.result);
+    assert.notEqual(result.reason, 'not_in_process', 'in-process, not the HTTP route\'s refusal');
+    assert.notEqual(result.reason, 'off', 'the tools reached the wired viewing module (booking on, a calendar set)');
+    assert.notEqual(result.reason, 'listing', 'the viewing module reads the shared inventory');
+    assert.equal(result.reason, 'slot', 'it went as far as the slot id: viewing.validate, which writes nothing');
+    assert.equal(h.db.db.prepare('SELECT COUNT(*) AS n FROM viewing_bookings').get().n, 0);
+    // The HTTP route still refuses the WhatsApp tools.
+    const http = JSON.parse(await app.tools.run('book_viewing', { args: { listing_id: listing.id, slot_id: 'x' }, chat: { metadata: { source: 'bona-whatsapp', lead_id: lead.lead_id } } }));
+    assert.equal(http.reason, 'not_in_process');
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 wiring: the tools get the notes and the fetch, Dana gets the link and the wa config, the push policy the owner test', async () => {
+  const h = rig14({ waLink: provenLink({ identity: false }) });
+  try {
+    const { app } = h;
+    app.team.setSetting('dana_enabled', '1');
+    // The identity guard (DESIGN §5.3): Bona's own number, not proven → Dana answers nobody, the legacy chat included.
+    const lead = h.seedLead('LEAD-20261203-dana0001', '966500000032');
+    assert.deepEqual(app.dana.eligible(lead.lead_id, { ts: h.now - 5_000 }).reason, 'identity');
+    // create_lead's note goes through the notes ledger (a concierge lead: due at once), so a merge sends none.
+    const before = h.notes().length;
+    await app.tools.run('create_lead', { args: { name: 'Example Buyer', phone: '0500000033' }, chat: { chat_id: 'c1', metadata: { source: 'bona-web' } } });
+    await app.tools.run('create_lead', { args: { name: 'Example Buyer', phone: '0500000033', budget: '2 million' }, chat: { chat_id: 'c2', metadata: { source: 'bona-web' } } });
+    const rows = h.notes("kind = 'new_client'").slice(before);
+    assert.equal(rows.length, 1, 'one new-client note row for the created lead, none for the merge');
+    // The push policy reads the owner test: a chat in auto mode the assistant will answer pushes nobody's phone.
+    assert.equal(typeof app.pushPolicy.onClientMessage, 'function');
+  } finally {
+    await h.close();
+  }
+  const h2 = rig14();
+  try {
+    // The tools' fetch is the app's: send_brochure's HEAD (auto mode, Bona's own site only) goes through it.
+    const withBrochure = inventory.all().find((l) => typeof l.brochureUrl === 'string' && l.brochureUrl.trim() && !['BONA-W011', 'BONA-W018', 'BONA-W024'].includes(l.id));
+    assert.ok(withBrochure, 'a listing with a brochure');
+    {
+      const auto = h2.seedLead('LEAD-20261203-broc0001', '966500000035', { inbox_via: 'own_number', match_method: 'own_number', dana_introduced: 1 });
+      const r = JSON.parse(await h2.app.tools.runInProcess('send_brochure', { args: { listing_id: withBrochure.id }, chat: { chat_id: 'w1', metadata: { source: 'bona-whatsapp', lead_id: auto.lead_id } } }));
+      if (r.reason !== 'not_on_site') assert.ok(h2.seen.some((c) => c.method === 'HEAD'), `the HEAD went through the app's fetch: ${JSON.stringify(r)}`);
+    }
+  } finally {
+    await h2.close();
+  }
+});
+
+test('T14 timers: startTimers puts every worker on its clock (notes 5 s, summary 1 min, sweep 1 min, viewing 5 min, brain probe 15 min, link probe, daily upkeep) and stopTimers takes them off', async () => {
+  const link = provenLink();
+  const h = rig14({ waLink: link });
+  try {
+    const { app } = h;
+    const timers = [];
+    const started = app.startTimers({ every: (ms, fn) => { const id = { ms, fn, cleared: false }; timers.push(id); return id; }, clear: (id) => { id.cleared = true; } });
+    const by = Object.fromEntries(started.map((s) => [s.name, s.ms]));
+    assert.deepEqual(by, { notes: 5_000, summary: 60_000, sweep: 60_000, viewing: 300_000, brainProbe: 900_000, upkeep: 86_400_000 });
+    assert.equal(link.started, 1, 'the link probe starts (its own 10-min loop)');
+    for (const tm of timers) await tm.fn(); // each tick never throws
+    assert.equal(app.startTimers({ every: () => ({}), clear: () => {} }).length, 0, 'a second start starts nothing');
+    app.stopTimers();
+    assert.ok(timers.every((tm) => tm.cleared), 'every interval cleared');
+    assert.equal(link.stopped, 1);
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 timers: the 1-minute sweep re-wakes a chat whose hold ended', async () => {
+  const h = rig14({ turns: [brainReply('Thanks for waiting. Which district do you like?')] });
+  try {
+    const { app, db } = h;
+    app.team.setSetting('dana_enabled', '1');
+    const lead = h.seedLead('LEAD-20261203-swp00001', '966500000034', { inbox_via: 'own_number', match_method: 'own_number' });
+    await app.ingest.ingest(lead, { id: 'SW-1', jid: jidOf('966500000034'), jidAlt: null, fromMe: false, ts: h.now - 15 * 60_000, text: 'Hello?', pushName: null, contextInfo: null, messageType: 'conversation', media: null, fileName: null, noise: false });
+    db.updateLead(lead.lead_id, { dana_hold_reason: 'cap_chat', dana_hold_until: h.now - 1 });
+    const timers = [];
+    const started = app.startTimers({ every: (ms, fn) => { const id = { ms, fn }; timers.push(id); return id; }, clear: () => {} });
+    const sweep = timers[started.findIndex((s) => s.name === 'sweep')];
+    assert.equal(h.sendsTo('966500000034').length, 0);
+    await sweep.fn();
+    await app.dana.flush();
+    assert.equal(h.sendsTo('966500000034').length, 1, 'woken by the sweep, answered once');
+  } finally {
+    await h.close();
+  }
+});
+
+/* ---------------- PLAN T14 test 3: the in-process end to end ---------------- */
+
+const danaOnly = (sends) => sends.filter((s) => !String(s.body.text ?? '').startsWith('*Bona'));
+const noteSends = (sends) => sends.filter((s) => String(s.body.text ?? '').startsWith('*Bona'));
+
+test('T14 e2e: the owner\'s test lead is answered by the brain; a legacy lead (dana_brain 0) by the Retell agent, as today', async () => {
+  const h = rig14({ turns: [brainReply('Hello! Which area of Jeddah do you like?')] });
+  try {
+    const { app } = h;
+    app.team.setSetting('dana_enabled', '1');
+    app.team.setSetting('owner_as_client', '1');
+    await h.poll(h.rec(OWNER14, 'O-1', 'Hi, I am looking for a villa'));
+    const ownerLead = h.db.listLeads({ limit: 10 }).find((l) => l.phone_e164 === OWNER14);
+    assert.ok(ownerLead, 'his test chat joined');
+    assert.equal(ownerLead.inbox_via, 'owner_test');
+    const toOwner = danaOnly(h.sendsTo(OWNER14));
+    assert.equal(toOwner.length, 1, 'one answer to his test chat');
+    assert.match(toOwner[0].body.text, /Which area of Jeddah/);
+    assert.equal(app.brain.calls.length, 1, 'the brain answered');
+    assert.equal(h.retell.calls.filter(([n]) => n === 'createChatCompletion').length, 0, 'Retell never saw the test chat');
+
+    const legacy = h.seedLead('LEAD-20261203-lgcy0001', '966500000041');
+    await h.poll(h.rec('966500000041', 'C-1', 'is it still available?'));
+    const toClient = h.sendsTo('966500000041');
+    assert.equal(toClient.length, 1);
+    assert.match(toClient[0].body.text, /Retell here: which district\?/, 'the legacy chat on today\'s Retell agent');
+    assert.match(toClient[0].body.text, /^Dana — /, 'with today\'s legacy wording');
+    assert.equal(app.brain.calls.length, 1, 'a legacy chat never reaches the brain');
+    assert.equal(h.db.getLead(legacy.lead_id).dana_introduced, 1);
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 e2e: the outage case: 429 then quota → one holding line, a brain_out note, no second line in the chat; recovery answers the next message', async () => {
+  const h = rig14({ turns: [brainError('rate'), brainError('quota'), brainReply('We are back: which district do you like?')] });
+  try {
+    const { app } = h;
+    app.team.setSetting('dana_enabled', '1');
+    const lead = h.seedLead('LEAD-20261203-out00001', '966500000042', { inbox_via: 'own_number', match_method: 'own_number' });
+    await h.poll(h.rec('966500000042', 'C-1', 'Hello, is the villa available?'));
+    assert.equal(app.brain.calls.length, 1, 'the 429 (rate) turn');
+    assert.equal(danaOnly(h.sendsTo('966500000042')).length, 1, 'one holding line');
+    assert.equal(h.db.getLead(lead.lead_id).dana_hold_reason, 'brain_out');
+    // The 1-minute sweep: nothing before the 10-minute hold ends; then the retry meets the quota: the hold extends, no line.
+    h.advance(61_000);
+    await app.ticks.sweep();
+    await app.dana.flush();
+    assert.equal(app.brain.calls.length, 1, 'no retry inside the hold');
+    h.advance(10 * 60_000);
+    await app.ticks.sweep();
+    await app.dana.flush();
+    assert.equal(app.brain.calls.length, 2, 'the sweep retried once the hold ended (quota)');
+    const held = danaOnly(h.sendsTo('966500000042'));
+    assert.equal(held.length, 1, `still one holding line: ${JSON.stringify(held.map((s) => s.body.text))}`);
+    assert.doesNotMatch(held[0].body.text, /We are back/);
+    const out = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_out');
+    assert.equal(out.length, 1, 'one brain_out note');
+    // The fake brain raises no alert of its own: the outage's first failure names it here (rate reads as down). The real
+    // brain's own quota alert through the same sink is the wiring test above.
+    assert.ok(['down', 'quota'].includes(out[0].meta.code), out[0].meta.code);
+
+    h.advance(30_000);
+    await h.poll(h.rec('966500000042', 'C-2', 'Hello??', { at: h.now - 1_000 }));
+    assert.equal(danaOnly(h.sendsTo('966500000042')).length, 1, 'no second line in the same chat');
+
+    h.advance(11 * 60_000);
+    await app.ticks.sweep();
+    await app.dana.flush();
+    const after = danaOnly(h.sendsTo('966500000042'));
+    assert.equal(after.length, 2, 'recovery: the waiting message is answered');
+    assert.match(after[1].body.text, /We are back/);
+    assert.equal(h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_out').length, 1, 'still one outage note');
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 e2e: with own_inbox on, a stranger\'s "Hi" joins, is answered, and a new_client note is queued, then goes through the one sender as kind note', async () => {
+  const h = rig14({ turns: [brainReply('Hello! How can I help you find a home?')] });
+  try {
+    const { app } = h;
+    app.team.setSetting('dana_enabled', '1');
+    app.team.setSetting('own_inbox', '1');
+    await h.poll(h.rec('966500000043', 'C-1', 'Hi'));
+    const lead = h.db.listLeads({ limit: 10 }).find((l) => l.phone_e164 === '966500000043');
+    assert.ok(lead, 'the stranger joined');
+    assert.equal(lead.inbox_via, 'own_number');
+    assert.equal(danaOnly(h.sendsTo('966500000043')).length, 1, 'answered');
+    const queued = h.notes("kind = 'new_client'");
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].lead_id, lead.lead_id);
+    h.advance(25_000);
+    await app.notes.tick();
+    const notes = noteSends(h.sendsTo(OWNER14));
+    assert.equal(notes.length, 1, 'the note went to the owner');
+    assert.match(notes[0].body.text, /^\*Bona — new enquiry\*/);
+    assert.equal(h.notes("kind = 'new_client'")[0].status, 'sent');
+    const row = h.db.db.prepare("SELECT * FROM wa_outbox WHERE sender_kind = 'note'").get();
+    assert.ok(row, 'an outbox row of kind note');
+    assert.equal(row.text, null, 'without its text');
+    assert.equal(row.lead_id, null);
+    assert.equal(row.jid, jidOf(OWNER14));
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 e2e: a booking → a calendar event, the confirmation to the client and a booking note', async () => {
+  const listing = inventory.all().find((l) => l.slug && l.status === 'available' && l.location?.city?.en === 'Jeddah');
+  const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
+  const saDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-t14-sa-'));
+  const saFile = path.join(saDir, 'sa.json');
+  fs.writeFileSync(saFile, JSON.stringify({ type: 'service_account', client_email: 'robot@example.iam.gserviceaccount.com', private_key: privateKey }), { mode: 0o600 });
+  const google = ({ method, url, body, events }) => {
+    const p = url.pathname;
+    if (p.endsWith('/freeBusy')) return { status: 200, json: { calendars: Object.fromEntries(body.items.map((i) => [i.id, { busy: [] }])) } };
+    if (method === 'GET' && p.endsWith('/events') && url.searchParams.get('fields') === 'accessRole') return { status: 200, json: { accessRole: 'writer' } };
+    if (method === 'GET' && p.endsWith('/events')) return { status: 200, json: { items: [] } };
+    if (method === 'POST' && p.endsWith('/events')) { const ev = { ...body, status: 'confirmed' }; events.set(body.id, ev); return { status: 200, json: ev }; }
+    const m = /\/events\/([^/]+)$/.exec(p);
+    if (m && method === 'GET') { const ev = events.get(m[1]); return ev ? { status: 200, json: ev } : { status: 404, json: {} }; }
+    return null;
+  };
+  let slot = null;
+  const h = rig14({
+    google,
+    config: { gcalSaFile: saFile, gcalCalendarId: 'test-calendar@example.com' },
+    turns: [() => brainReply('Booked for you.', { tools: [{ name: 'book_viewing', args: { listing_id: listing.id, slot_id: slot, name: 'Example Client' }, result: { reserved: true, slot_id: slot, listing_id: listing.id } }] })],
+  });
+  try {
+    const { app, db } = h;
+    app.team.setSetting('dana_enabled', '1');
+    app.team.setSetting('calendar_booking', '1');
+    const lead = h.seedLead('LEAD-20261203-book0001', '966500000044', { inbox_via: 'own_number', match_method: 'own_number', name: 'Example Client' });
+    const offered = await app.viewing.slots({ leadId: lead.lead_id, listingId: listing.id });
+    assert.equal(offered.bookable, true, JSON.stringify(offered));
+    slot = offered.slots[0].slot_id;
+    await h.poll(h.rec('966500000044', 'C-1', `Can I see ${listing.id} on the first slot?`));
+    const inserted = h.gq.calls.filter((c) => c.method === 'POST' && /\/calendars\/[^/]+\/events/.test(c.url));
+    assert.equal(inserted.length, 1, 'one event in the calendar');
+    const booking = db.db.prepare('SELECT * FROM viewing_bookings').get();
+    assert.equal(booking.status, 'booked');
+    assert.equal(booking.client_told, 1, 'the confirmation reached the client');
+    const toClient = danaOnly(h.sendsTo('966500000044'));
+    assert.ok(toClient.length >= 1);
+    assert.doesNotMatch(toClient.map((s) => s.body.text).join('\n'), /Booked for you\./, 'the code-built confirmation, not the model\'s words');
+    assert.equal(h.notes("kind = 'booking'").length, 1, 'a booking note');
+  } finally {
+    await h.close();
+    fs.rmSync(saDir, { recursive: true, force: true });
+  }
+});
+
+test('T14 e2e: a hand-over → the chat flagged and a hand-over note queued', async () => {
+  const h = rig14({ turns: [brainReply('A colleague will take this over shortly.', { tools: [{ name: 'request_human', args: { kind: 'offer' }, result: { ok: true, kind: 'offer' } }] })] });
+  try {
+    const { app } = h;
+    app.team.setSetting('dana_enabled', '1');
+    const lead = h.seedLead('LEAD-20261203-hand0001', '966500000045', { inbox_via: 'own_number', match_method: 'own_number' });
+    await h.poll(h.rec('966500000045', 'C-1', 'I want to make an offer on the villa'));
+    assert.equal(h.db.getLead(lead.lead_id).needs_human, 1, 'the chat waits for a person');
+    const ho = h.notes("kind = 'handover'");
+    assert.equal(ho.length, 1, 'one hand-over note');
+    assert.equal(ho[0].lead_id, lead.lead_id);
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 e2e: a staff reply from Bona\'s phone → the assistant stays out (human_recent)', async () => {
+  const h = rig14({ turns: [brainReply('Should never be sent.')] });
+  try {
+    const { app } = h;
+    app.team.setSetting('dana_enabled', '1');
+    const lead = h.seedLead('LEAD-20261203-staf0001', '966500000046', { inbox_via: 'own_number', match_method: 'own_number' });
+    await h.poll(h.rec('966500000046', 'S-1', 'Hello, this is Sara from Bona', { fromMe: true, at: h.now - 60_000 }));
+    h.advance(10_000);
+    await h.poll(h.rec('966500000046', 'C-1', 'Thanks Sara', { at: h.now - 1_000 }));
+    assert.equal(danaOnly(h.sendsTo('966500000046')).length, 0);
+    assert.equal(app.brain.calls.length, 0);
+    assert.ok(h.logs.some((l) => l.evt === 'dana.skipped' && l.leadId === lead.lead_id && l.reason === 'human_recent'), 'skipped: human_recent');
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 e2e: `#dana test on` / `#dana test off` from the owner → the switch and its lifecycle, each with a reply note', async () => {
+  const h = rig14({ turns: [brainReply('Hello! What are you looking for?')] });
+  try {
+    const { app, db } = h;
+    app.team.setSetting('dana_enabled', '1');
+    await h.poll(h.rec(OWNER14, 'CMD-1', '#dana test on'));
+    assert.equal(app.team.getSetting('owner_as_client'), '1', 'applied');
+    assert.equal(h.notes("kind = 'command'").length, 1, 'a reply note');
+    h.advance(30_000);
+    await h.poll(h.rec(OWNER14, 'O-1', 'Hi, a test question', { at: h.now - 1_000 }));
+    const ownerLead = db.listLeads({ limit: 10 }).find((l) => l.phone_e164 === OWNER14);
+    assert.equal(ownerLead?.inbox_state, 'in', 'his test chat is in');
+    assert.equal(danaOnly(h.sendsTo(OWNER14)).length, 1, 'and answered');
+    // His reply note goes to his own chat through the one sender; its echo, read back, is refused by key (never a message).
+    h.advance(30_000);
+    await app.notes.tick();
+    const note = noteSends(h.sendsTo(OWNER14)).at(-1);
+    assert.ok(note, 'the command reply note went');
+    const keyId = `KEY-${h.evo.sends.indexOf(note) + 1}`;
+    await h.poll({ key: { id: keyId, fromMe: true, remoteJid: jidOf(OWNER14) }, pushName: null, messageType: 'conversation', message: { conversation: note.body.text }, messageTimestamp: Math.floor((h.now - 1_000) / 1000) });
+    assert.ok(!app.inboxStore.messagesFor(ownerLead.lead_id).some((m) => m.key_id === keyId), 'the note\'s echo is never stored in his test chat');
+    h.advance(30_000);
+    await h.poll(h.rec(OWNER14, 'CMD-2', '#dana test off', { at: h.now - 1_000 }));
+    assert.equal(app.team.getSetting('owner_as_client'), '0');
+    assert.notEqual(db.getLead(ownerLead.lead_id)?.inbox_state ?? 'gone', 'in', 'the lifecycle took his test chat out');
+    assert.equal(h.notes("kind = 'command'").length, 2);
+    assert.ok(!app.inboxStore.messagesFor(ownerLead.lead_id).some((m) => /#dana/.test(m.text ?? '')), 'a command is never stored as a message');
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 e2e: a restart in the middle of the queue → the note goes once, never twice', async () => {
+  const db = openDb(':memory:');
+  try {
+    const a = rig14({ db });
+    a.app.team.setSetting('sending_enabled', '0');
+    await a.app.tools.run('create_lead', { args: { name: 'Example Buyer', phone: '0500000047' }, chat: { chat_id: 'c1', metadata: { source: 'bona-web' } } });
+    await a.app.notes.tick();
+    assert.equal(a.notes("kind = 'new_client'")[0].status, 'queued', 'Sending off: held, not lost');
+    assert.equal(noteSends(a.evo.sends).length, 0);
+    await a.close();
+
+    const b = rig14({ db, startAt: T14 + 60_000 });
+    b.app.team.setSetting('sending_enabled', '1');
+    await b.app.notes.tick();
+    assert.equal(noteSends(b.evo.sends).length, 1, 'sent after the restart, once Sending is back on');
+    await b.close();
+
+    const c = rig14({ db, startAt: T14 + 5 * 60_000 });
+    await c.app.notes.tick();
+    assert.equal(noteSends(c.evo.sends).length, 0, 'and never again after another restart');
+    assert.equal(c.notes("kind = 'new_client'")[0].status, 'sent');
+    await c.close();
+  } finally {
+    db.close();
+  }
+});
+
+/* ---------------- INERT at the next restart (PLAN §0) ---------------- */
+
+test('T14 inert: the wired app with default settings starts its timers and sends nothing to anyone, changes no switch, and a legacy chat is answered as on main', async () => {
+  for (const env of [{}, { BONA_WA_INSTANCE_JID: '' }]) {
+    const h = rig14({ env, turns: [brainReply('never')] });
+    try {
+      const { app, db } = h;
+      const settings = () => db.db.prepare('SELECT key, value FROM settings ORDER BY key').all().map((r) => `${r.key}=${r.value}`);
+      const before = settings();
+      const timers = [];
+      app.startTimers({ every: (ms, fn) => { timers.push(fn); return {}; }, clear: () => {} });
+      for (let i = 0; i < 2; i += 1) {
+        for (const fn of timers) await fn();
+        h.advance(5 * 60_000);
+      }
+      await app.notes.tick();
+      assert.deepEqual(h.evo.sends, [], 'nothing sent by any timer');
+      assert.deepEqual(settings(), before, 'no switch, no marker written');
+      assert.deepEqual(h.notes(), [], 'no owner note queued');
+
+      // A legacy chat, exactly as main: Dana off answers nobody; on, today's Retell agent with the Dana disclosure.
+      h.seedLead('LEAD-20261203-inrt0001', '966500000048');
+      await h.poll(h.rec('966500000048', 'C-1', 'hello, is anyone there?'));
+      assert.equal(h.evo.sends.length, 0, 'dana_enabled 0 (the default): nobody answers');
+      app.team.setSetting('dana_enabled', '1');
+      h.advance(1_000);
+      await h.poll(h.rec('966500000048', 'C-2', 'still there?', { at: h.now - 500 }));
+      const sends = h.sendsTo('966500000048');
+      assert.equal(sends.length, 1);
+      assert.match(sends[0].body.text, /^Dana — Bona's AI assistant\n\nRetell here: which district\?/);
+      assert.equal(app.brain.calls.length, 0, 'dana_brain 0: the brain is never asked');
+      assert.deepEqual(noteSends(h.evo.sends), [], 'and no owner note for a legacy chat\'s answer');
+    } finally {
+      await h.close();
+    }
+  }
+});
+
+/* ---------------- the daily backup prune (PLAN T14, "Added 27 Nov") ---------------- */
+
+test('T14 upkeep: the daily run deletes release-backup copies past 29 days by their UTC stamp and killed runs\' partials past a day, and nothing else', async () => {
+  const h = rig14();
+  try {
+    const dir = path.join(h.root, 'release-backups');
+    fs.mkdirSync(dir, { mode: 0o700 });
+    const stampOf = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '');
+    const D = 86_400_000;
+    const files = {
+      old: `bona-deploy-${stampOf(h.now - 40 * D)}.db`,
+      justOver: `bona-pre-v8-${stampOf(h.now - 29 * D - 60_000)}.db`,
+      young: `bona-deploy-${stampOf(h.now - 28 * D)}.db`,
+      foreign: 'notes.txt',
+      lookalike: `bona-deploy-${stampOf(h.now - 40 * D)}.db.bak`,
+      oldPartial: `.bona-deploy-${stampOf(h.now - 3 * D)}.db.4242.0123456789ab.partial`,
+      freshPartial: `.bona-deploy-${stampOf(h.now)}.db.4243.0123456789ab.partial`,
+    };
+    for (const f of Object.values(files)) fs.writeFileSync(path.join(dir, f), 'x');
+    const sub = path.join(dir, `bona-deploy-${stampOf(h.now - 90 * D)}.db`.replace('.db', '-dir.db'));
+    fs.mkdirSync(sub);
+    const oldDir = path.join(dir, `bona-deploy-${stampOf(h.now - 90 * D)}.db`);
+    fs.mkdirSync(oldDir);
+    fs.utimesSync(path.join(dir, files.oldPartial), new Date(h.now - 2 * D), new Date(h.now - 2 * D));
+    fs.utimesSync(path.join(dir, files.freshPartial), new Date(h.now - 3_600_000), new Date(h.now - 3_600_000));
+    // The partials' age is their file time against the app's clock: pin the wall clock near it for this run.
+    await h.app.inboxMaintenance();
+    const left = fs.readdirSync(dir).sort();
+    assert.ok(!left.includes(files.old), 'a 40-day copy goes');
+    assert.ok(!left.includes(files.justOver), 'a copy just past 29 days goes (any label)');
+    assert.ok(left.includes(files.young), 'a 28-day copy stays');
+    assert.ok(left.includes(files.foreign) && left.includes(files.lookalike), 'a name the snapshot never makes stays');
+    assert.ok(!left.includes(files.oldPartial), 'a killed run\'s partial over a day old goes');
+    assert.ok(left.includes(files.freshPartial), 'a fresh partial (a run still writing) stays');
+    assert.ok(fs.statSync(oldDir).isDirectory() && fs.statSync(sub).isDirectory(), 'a sub-folder is never touched');
+    const line = h.logs.find((l) => l.evt === 'backups.pruned');
+    assert.deepEqual(line, { evt: 'backups.pruned', expired: 2, abandoned: 1 }, 'counts only, never a file name');
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 upkeep: no release-backups folder is no error and no log line', async () => {
+  const h = rig14();
+  try {
+    await h.app.inboxMaintenance();
+    assert.ok(!h.logs.some((l) => l.evt === 'backups.pruned' || (l.evt === 'inbox.maintenance_failed' && l.step === 'backups')));
+  } finally {
+    await h.close();
+  }
+});
+
+/* ---------------- PLAN T14 test 2: the Ops panel ---------------- */
+
+test('T14-2 the Ops panel is the owner\'s only and shows the latency, answers and skips, send failures (marks are not failures), and the AI rows', async () => {
+  const brain = createFakeBrain({ turns: [brainReply('Which district do you like?')] });
+  brain.ops = () => ({
+    turnsByModel: { 'gpt-test': 3 }, backupTurns: 1, errors: { quota: 1, timeout: 2 }, guardRepairs: 2, guardHandovers: 1, cachedRatio: 0.8,
+    usdToday: 0.12, usdMonth: 3.4, p50Ms: 900, p90Ms: 2_100, out: false, breaker: false, cooldown: false,
+  });
+  const h = rig14({ brain });
+  try {
+    const { app, db } = h;
+    app.team.setSetting('dana_enabled', '1');
+    h.seedLead('LEAD-20261203-ops00001', '966500000052', { inbox_via: 'own_number', match_method: 'own_number' });
+    await h.poll(h.rec('966500000052', 'C-1', 'Hello, a villa please'));
+    const staffed = h.seedLead('LEAD-20261203-ops00002', '966500000053', { inbox_via: 'own_number', match_method: 'own_number' });
+    db.updateLead(staffed.lead_id, { last_human_out_ts: h.now - 60_000 });
+    await h.poll(h.rec('966500000053', 'C-2', 'ok'));
+    // Outbox marks (wa-send splitMark): an accepted row that names what it covers, an unsure one with its reason, a real failure.
+    const put = (id, status, error) => {
+      app.inboxStore.insertOutbox({ send_id: id, lead_id: staffed.lead_id, jid: jidOf('966500000053'), text: 'x', user_id: null, sender_kind: 'staff' });
+      app.inboxStore.updateOutbox(id, { status, error });
+    };
+    put('SND-mark-accepted', 'accepted', 'cov:12');
+    put('SND-mark-unsure', 'uncertain', 'outage_line|timeout');
+    put('SND-real-failure', 'failed', 'network');
+
+    const ops = app.ops();
+    assert.equal(ops['Answers (24 h)'], 1);
+    assert.deepEqual(ops['Skips (24 h)'], { human_recent: 1 });
+    assert.match(String(ops['Latency p50 / p90 (24 h)']), /^\d+ s \/ \d+ s$/);
+    assert.deepEqual(ops['Send failures (24 h)'], { network: 1 }, 'a failed row by its reason; marks are not failures');
+    assert.deepEqual(ops['Sends unsure (24 h)'], { timeout: 1 }, 'an unsure row by the reason after its mark');
+    assert.deepEqual(ops['AI turns by model (24 h)'], { 'gpt-test': 3 });
+    assert.deepEqual(ops['AI errors by code (24 h)'], { quota: 1, timeout: 2 });
+    assert.equal(ops['AI guard repairs / hand-overs (24 h)'], '2 / 1');
+    assert.equal(ops['AI cached-token ratio'], '80%');
+    assert.equal(ops['AI $ today / month'], '$0.12 / $3.40');
+    assert.doesNotMatch(JSON.stringify(ops), /966500000052|966500000053|villa|Hello/, 'never a number or a client\'s words');
+
+    await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${app.server.address().port}`;
+    const form = (p, fields, cookie) => fetch(base + p, {
+      method: 'POST', redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(cookie ? { Cookie: cookie } : {}) },
+      body: new URLSearchParams({ _dash: '1', ...fields }).toString(),
+    });
+    const cookieOf = (res, name) => (res.headers.getSetCookie() ?? []).map((c) => c.split(';')[0]).find((c) => c.startsWith(`${name}=`) && c.length > name.length + 1);
+    const login = async (phone, digits) => {
+      const before = h.sendsTo(digits).length;
+      const asked = await form('/dashboard/login/code', { phone });
+      await app.dashboard.auth.flush();
+      const code = /(\d{6})/.exec(h.sendsTo(digits).slice(before).at(-1)?.body.text ?? '')?.[1];
+      assert.ok(code, 'a login code went out');
+      const verified = await form('/dashboard/login/verify', { code }, cookieOf(asked, 'bona_dash_try'));
+      return cookieOf(verified, 'bona_dash');
+    };
+    try {
+      const owner = await login('0500000009', OWNER14);
+      const page = await (await fetch(`${base}/dashboard/team`, { headers: { Cookie: owner } })).text();
+      for (const row of ['Latency p50 / p90 (24 h)', 'Answers (24 h)', 'Skips (24 h)', 'AI turns by model (24 h)', 'AI errors by code (24 h)', 'AI guard repairs / hand-overs (24 h)', 'AI cached-token ratio', 'AI $ today / month']) {
+        assert.ok(page.includes(`<td>${row.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</td>`), row);
+      }
+      assert.match(page, /<td>Skips \(24 h\)<\/td><td>human_recent 1<\/td>/);
+      app.team.addUser({ name: 'Sara', phone: '0500000001', role: 'staff' });
+      const staff = await login('0500000001', '966500000001');
+      const res = await fetch(`${base}/dashboard/team`, { headers: { Cookie: staff }, redirect: 'manual' });
+      const body = await res.text();
+      assert.notEqual(res.status, 200, 'staff never see the Team page');
+      assert.doesNotMatch(body, /Answers \(24 h\)|AI turns by model/);
+    } finally {
+      await new Promise((resolve) => app.server.close(resolve));
+    }
+  } finally {
+    await h.close();
   }
 });
