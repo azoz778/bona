@@ -431,6 +431,37 @@ test('getOutbox, outboxByKey and updateOutbox: a key is recorded, an error is ca
   s.close();
 });
 
+test('a second "accepted" never moves the first acceptance time: updated stays, whichever of the two comes first (PLAN T07, PR-B2 #94)', () => {
+  const { s, inbox, tick } = harness();
+  chat(s, 'L-1');
+  inbox.insertOutbox(out({ send_id: 'SND-1', sender_kind: 'dana' }));
+  const rev = inbox.revision('L-1');
+  // The first acceptance (the poller's match of WhatsApp's copy, or the HTTP 2xx) is the answer time.
+  tick(3000);
+  assert.equal(inbox.updateOutbox('SND-1', { status: 'accepted', key_id: 'K-1' }), true);
+  assert.equal(inbox.revision('L-1'), rev + 1, 'leaving pending moves the chat on once');
+  // The other one comes back nine seconds later with the same key: nothing changes, and the row is there.
+  tick(9000);
+  assert.equal(inbox.updateOutbox('SND-1', { status: 'accepted', key_id: 'K-1' }), true);
+  const fields = (r) => ({ status: r.status, key_id: r.key_id, updated: r.updated, error: r.error });
+  assert.deepEqual(fields(inbox.getOutbox('SND-1')), { status: 'accepted', key_id: 'K-1', updated: NOW + 3000, error: null });
+  // A 2xx names its send exactly (wa-send.mjs), so its key is still recorded, but not as a new time.
+  tick(1000);
+  inbox.updateOutbox('SND-1', { status: 'accepted', key_id: 'K-exact' });
+  assert.deepEqual(fields(inbox.getOutbox('SND-1')), { status: 'accepted', key_id: 'K-exact', updated: NOW + 3000, error: null });
+  assert.equal(inbox.revision('L-1'), rev + 1, 'a send accepted again is no news');
+  // Any other move still stamps its own time: uncertain → accepted, accepted → failed.
+  inbox.insertOutbox(out({ send_id: 'SND-2' }));
+  inbox.updateOutbox('SND-2', { status: 'uncertain' });
+  tick(2000);
+  inbox.updateOutbox('SND-2', { status: 'accepted', key_id: 'K-2' });
+  assert.equal(inbox.getOutbox('SND-2').updated, NOW + 15_000);
+  tick(2000);
+  inbox.updateOutbox('SND-2', { status: 'failed' });
+  assert.equal(inbox.getOutbox('SND-2').updated, NOW + 17_000);
+  s.close();
+});
+
 test('resolveUncertain finds the oldest unresolved send of the same lead with the same text; accepted and keyed rows never match', () => {
   const { s, inbox, at } = harness();
   const text = 'see you at 5';
@@ -468,6 +499,30 @@ test('resolveUncertain matches within two minutes of the send either way, edges 
   assert.equal(find(NOW - 120_001), null);
   assert.equal(find(NOW + 1000, { windowMs: 1000 }), 'SND-edge');
   assert.equal(find(NOW + 1001, { windowMs: 1000 }), null);
+  s.close();
+});
+
+test('resolveUncertain keeps a caption to brochure rows and a text to text rows (document: true → a Dana row with media_kind document only)', () => {
+  const { s, inbox, at } = harness();
+  const text = 'Here is the brochure';
+  // The oldest of each kind first, so "the oldest wins" alone would pick the wrong one every time.
+  at(NOW - 2000);
+  inbox.insertOutbox(out({ send_id: 'SND-staff', text, status: 'uncertain' }));
+  at(NOW - 1000);
+  inbox.insertOutbox(out({ send_id: 'SND-dana-text', text, sender_kind: 'dana', user_id: null, status: 'uncertain' }));
+  at(NOW);
+  inbox.insertOutbox(out({ send_id: 'SND-doc', text, sender_kind: 'dana', user_id: null, status: 'uncertain', media_kind: 'document' }));
+  // A staff row can never carry a document (only Dana sends brochures), so a hand-made one is no match either.
+  inbox.insertOutbox(out({ send_id: 'SND-staff-doc', text, status: 'uncertain', media_kind: 'document' }));
+  const find = (o) => inbox.resolveUncertain({ leadId: 'L-1', text, ts: NOW + 5000, ...o })?.send_id ?? null;
+  assert.equal(find({ document: true }), 'SND-doc');
+  assert.equal(find({}), 'SND-staff', 'a text record: the oldest text row');
+  inbox.updateOutbox('SND-staff', { status: 'accepted', key_id: 'K-staff' });
+  inbox.updateOutbox('SND-dana-text', { status: 'accepted', key_id: 'K-dana' });
+  assert.equal(find({}), null, 'a text record never takes a brochure row');
+  assert.equal(find({ document: true }), 'SND-doc');
+  inbox.updateOutbox('SND-doc', { status: 'accepted', key_id: 'K-doc' });
+  assert.equal(find({ document: true }), null, "a document record never takes a text row, nor a staff row's document");
   s.close();
 });
 
@@ -1563,5 +1618,302 @@ test('createInboxStore without onPurge purges exactly as before (the default is 
   chat(s, 'L-1');
   inbox.upsertMessage(msg());
   assert.deepEqual(inbox.purgeLead('L-1'), { messages: 1, outbox: 0, gaps: 0, reads: 0 });
+  s.close();
+});
+
+/* ---------------- PR-A2 (PLAN T07 tests 7, 11, 12, 15, 16; DESIGN §3.1-3.2) ---------------- */
+
+const T_OWNER = '966500000010';
+const T_OWNER_JID = `${T_OWNER}@s.whatsapp.net`;
+
+test("reopenOwnerTest resets the owner's lead for a new test, and refuses any lead whose phone is not his", () => {
+  const { s, inbox } = harness();
+  const held = {
+    phone_e164: T_OWNER, wa_jid: T_OWNER_JID, inbox_state: 'out', inbox_via: 'owner_test', history_from: NOW - DAY,
+    needs_human: 1, dana_off: 1, dana_hold_until: NOW + DAY, dana_hold_reason: 'loop', last_human_out_ts: NOW - 60_000,
+    dana_chat_id: 'chat_old', dana_chat_ts: NOW - 60_000,
+  };
+  lead(s, 'L-owner', held);
+  lead(s, 'L-client', { ...held, phone_e164: '966500000001', wa_jid: JID });
+  lead(s, 'L-nophone', { ...held, phone_e164: null, wa_jid: T_OWNER_JID });
+  assert.equal(inbox.reopenOwnerTest('L-client', { ownerPhone: T_OWNER }), false, "a client's lead is never touched");
+  assert.equal(inbox.reopenOwnerTest('L-nophone', { ownerPhone: T_OWNER }), false, 'the guard is the phone, not the jid');
+  assert.equal(inbox.reopenOwnerTest('L-owner', { ownerPhone: null }), false, 'no owner number: nothing');
+  assert.equal(inbox.reopenOwnerTest('L-owner', {}), false);
+  assert.equal(inbox.reopenOwnerTest('L-nope', { ownerPhone: T_OWNER }), false);
+  for (const id of ['L-client', 'L-nophone']) assert.equal(s.getLead(id).dana_off, 1, id);
+  assert.equal(inbox.reopenOwnerTest('L-owner', { ownerPhone: T_OWNER }), true);
+  const l = s.getLead('L-owner');
+  assert.deepEqual(
+    [l.inbox_state, l.inbox_since, l.history_from, l.needs_human, l.dana_off, l.dana_hold_until, l.dana_hold_reason, l.last_human_out_ts, l.dana_chat_id, l.dana_chat_ts],
+    [null, null, null, 0, 0, null, null, null, null, null],
+  );
+  assert.equal(l.inbox_via, 'owner_test', 'stamped at the join, never rewritten');
+  assert.equal(s.getLead('L-owner').updated, NOW);
+  s.close();
+});
+
+test('clearHumanHold clears only a hold that waits for a person; a timed hold and other leads stay', () => {
+  const { s, inbox } = harness();
+  chat(s, 'L-1', { dana_hold_reason: 'loop', dana_hold_until: null });
+  chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net', dana_hold_reason: 'cap_chat', dana_hold_until: NOW + 60_000 });
+  chat(s, 'L-3', { wa_jid: '966500000003@s.whatsapp.net', dana_hold_reason: 'send_failed', dana_hold_until: null });
+  assert.equal(inbox.clearHumanHold('L-1'), true);
+  assert.equal(inbox.clearHumanHold('L-1'), false, 'nothing left to clear');
+  assert.equal(inbox.clearHumanHold('L-2'), false);
+  assert.deepEqual([s.getLead('L-1').dana_hold_reason, s.getLead('L-2').dana_hold_reason, s.getLead('L-3').dana_hold_reason], [null, 'cap_chat', 'send_failed']);
+  assert.equal(inbox.clearHumanHold(null), false);
+  s.close();
+});
+
+test("clearHumanHold with the answer's time ends the hold only when the answer is newer than every assistant send of the chat; client messages never keep it (Codex T07 r2, r3)", () => {
+  const { s, inbox, at } = harness();
+  const held = () => s.getLead('L-1').dana_hold_reason;
+  const hold = () => s.updateLead('L-1', { dana_hold_reason: 'send_failed', dana_hold_until: null });
+  chat(s, 'L-1');
+  chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net' });
+  // The client at NOW - 3 min; the assistant's send written at NOW - 2 min, failed at NOW - 1 min; then the hold.
+  inbox.upsertMessage(msg({ key_id: 'C-1', ts: NOW - 180_000 }));
+  at(NOW - 120_000);
+  inbox.insertOutbox(out({ send_id: 'SND-d', sender_kind: 'dana', user_id: null }));
+  at(NOW - 60_000);
+  inbox.updateOutbox('SND-d', { status: 'failed' });
+  hold();
+  at(NOW);
+  // The answer's own stored row and another chat's messages count for nothing.
+  inbox.upsertMessage(msg({ key_id: 'H-old', direction: 'out', sender_kind: 'owner_number', ts: NOW - 240_000 }));
+  inbox.upsertMessage(msg({ key_id: 'X-1', lead_id: 'L-2', ts: NOW + 60_000 }));
+  for (const [label, ts] of [['before the client message and the send', NOW - 240_000], ['before the send was written', NOW - 150_000],
+    ['before the send failed', NOW - 90_000], ['the same moment it failed', NOW - 60_000], ['no number', NaN], ['null', null]]) {
+    assert.equal(inbox.clearHumanHold('L-1', { ts }), false, label);
+    assert.equal(held(), 'send_failed', label);
+  }
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 30_000 }), true, 'after everything');
+  assert.equal(held(), null);
+  // A client message newer than the answer, stored before the answer was found (Codex T07 r3),
+  // does not keep the hold: what set it is the assistant's send, and the answer is newer than that.
+  hold();
+  inbox.upsertMessage(msg({ key_id: 'C-2', ts: NOW - 10_000 }));
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 20_000 }), true, 'a newer client message blocks nothing');
+  assert.equal(held(), null);
+  // Nor does another person's message stored after it: only the assistant's sends bound the hold.
+  hold();
+  inbox.upsertMessage(msg({ key_id: 'H-4', direction: 'out', sender_kind: 'owner_number', ts: NOW - 2_000 }));
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 20_000 }), true, 'a newer human message blocks nothing');
+  // Another chat's assistant send counts for nothing.
+  hold();
+  at(NOW - 1_000);
+  inbox.insertOutbox(out({ send_id: 'SND-x', lead_id: 'L-2', jid: '966500000002@s.whatsapp.net', sender_kind: 'dana', user_id: null }));
+  at(NOW);
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 20_000 }), true, "another chat's send");
+  // An assistant send of the chat newer than the answer keeps it: by when it failed, or when it was written.
+  for (const [label, written, failed, before, after] of [
+    ['failed after the answer', NOW - 25_000, NOW - 15_000, NOW - 20_000, NOW - 10_000],
+    ['written after the answer', NOW - 5_000, null, NOW - 7_000, NOW - 3_000]]) {
+    hold();
+    at(written);
+    inbox.insertOutbox(out({ send_id: `SND-${written}`, sender_kind: 'dana', user_id: null }));
+    if (failed !== null) {
+      at(failed);
+      inbox.updateOutbox(`SND-${written}`, { status: 'failed' });
+    }
+    at(NOW);
+    assert.equal(inbox.clearHumanHold('L-1', { ts: before }), false, label);
+    assert.equal(held(), 'send_failed', label);
+    assert.equal(inbox.clearHumanHold('L-1', { ts: after }), true, `${label}: a newer answer ends it`);
+  }
+  // A staff send is a person's, not the assistant's: it never bounds the hold.
+  hold();
+  at(NOW + 30_000);
+  inbox.insertOutbox(out({ send_id: 'SND-s' }));
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW }), true);
+  // Without a time, as before.
+  hold();
+  assert.equal(inbox.clearHumanHold('L-1'), true);
+  s.close();
+});
+
+test("clearHumanHold bounds an accepted assistant send by when it was written: accepting it later (its copy read in a catch-up) moves no bound; an unsure or failed one still counts by when that happened (Claude T07 r6)", () => {
+  const { s, inbox, at } = harness();
+  const held = () => s.getLead('L-1').dana_hold_reason;
+  const hold = () => s.updateLead('L-1', { dana_hold_reason: 'send_failed', dana_hold_until: null });
+  chat(s, 'L-1');
+  // The assistant's send written at NOW - 60 s, unsure at NOW - 45 s; then the hold.
+  at(NOW - 60_000);
+  inbox.insertOutbox(out({ send_id: 'SND-u', sender_kind: 'dana', user_id: null }));
+  at(NOW - 45_000);
+  inbox.updateOutbox('SND-u', { status: 'uncertain', error: 'timeout' });
+  hold();
+  at(NOW);
+  // While it is unsure, an answer from before it went unsure leaves the hold.
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW - 50_000 }), false, 'unsure: before it went unsure');
+  assert.equal(held(), 'send_failed');
+  // A catch-up at NOW + 5 min reads its copy and accepts it: its `updated` is now the read time.
+  at(NOW + 300_000);
+  assert.equal(inbox.updateOutbox('SND-u', { status: 'accepted', key_id: 'WA-D-1' }), true);
+  assert.equal(inbox.getOutbox('SND-u').updated, NOW + 300_000);
+  // An answer from before the send was written, or of the same moment, still leaves the hold ...
+  for (const [label, ts] of [['before the send was written', NOW - 70_000], ['the same moment it was written', NOW - 60_000]]) {
+    assert.equal(inbox.clearHumanHold('L-1', { ts }), false, `accepted: ${label}`);
+    assert.equal(held(), 'send_failed', label);
+  }
+  // ... and one written after it ends it, though it is older than the read that accepted the send.
+  assert.equal(inbox.clearHumanHold('L-1', { ts: NOW }), true, 'accepted: after the send, before the read');
+  assert.equal(held(), null);
+  // A later send that went unsure, or failed, after the answer keeps the hold by that time.
+  for (const [label, status] of [['unsure', 'uncertain'], ['failed', 'failed']]) {
+    hold();
+    at(NOW + 400_000);
+    inbox.insertOutbox(out({ send_id: `SND-${status}`, sender_kind: 'dana', user_id: null }));
+    at(NOW + 420_000);
+    inbox.updateOutbox(`SND-${status}`, { status, error: 'timeout' });
+    at(NOW + 500_000);
+    assert.equal(inbox.clearHumanHold('L-1', { ts: NOW + 410_000 }), false, `${label}: after it was written, before it went ${label}`);
+    assert.equal(held(), 'send_failed', label);
+    assert.equal(inbox.clearHumanHold('L-1', { ts: NOW + 430_000 }), true, `${label}: a newer answer ends it`);
+  }
+  s.close();
+});
+
+test("recheckHumanHold asks clearHumanHold again with the newest stored human reply stamped while an accepted send was unsure: after it was written, no later than it went unsure (Codex T07 r4)", () => {
+  /**
+   * The assistant's send written at NOW - 60 s, unsure at NOW - 45 s, then the hold (timed
+   * with `until`); `stored` are the chat's stored messages; `other` adds a second send, written
+   * at NOW - 55 s and unsure at NOW - 40 s, that stays unsure. A catch-up at NOW + 5 min accepts
+   * the first one, then asks again with the span it had.
+   */
+  const run = ({ stored = [], other = false, until = null, accept = true } = {}) => {
+    const { s, inbox, at } = harness();
+    chat(s, 'L-1');
+    at(NOW - 60_000);
+    inbox.insertOutbox(out({ send_id: 'SND-u', sender_kind: 'dana', user_id: null }));
+    if (other) {
+      at(NOW - 55_000);
+      inbox.insertOutbox(out({ send_id: 'SND-v', sender_kind: 'dana', user_id: null, text: 'and more' }));
+    }
+    at(NOW - 45_000);
+    inbox.updateOutbox('SND-u', { status: 'uncertain', error: 'timeout' });
+    if (other) {
+      at(NOW - 40_000);
+      inbox.updateOutbox('SND-v', { status: 'uncertain', error: 'timeout' });
+    }
+    s.updateLead('L-1', { dana_hold_reason: 'send_failed', dana_hold_until: until });
+    stored.forEach(([kind, ts], i) => inbox.upsertMessage(msg({
+      key_id: `M-${i}`, direction: kind === 'client' ? 'in' : 'out', sender_kind: kind, ts,
+    })));
+    const before = inbox.getOutbox('SND-u');
+    at(NOW + 300_000);
+    if (accept) inbox.updateOutbox('SND-u', { status: 'accepted', key_id: 'WA-D-1' });
+    const cleared = inbox.recheckHumanHold('L-1', { after: before.created, upTo: before.updated });
+    const left = s.getLead('L-1').dana_hold_reason;
+    s.close();
+    return { cleared, left };
+  };
+  const ends = { cleared: true, left: null };
+  const stays = { cleared: false, left: 'send_failed' };
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 50_000]] }), ends, "the owner's phone, in the span");
+  assert.deepEqual(run({ stored: [['staff', NOW - 50_000]] }), ends, 'a staff reply, in the span');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 45_000]] }), ends, 'the moment it went unsure');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 60_000]] }), stays, 'the moment it was written: no newer than the send');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 70_000]] }), stays, 'before it was written');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 10_000]] }), stays, 'after the span (it was asked when it was read; no time of its own, stored at its read time): not asked here');
+  assert.deepEqual(run({ stored: [['client', NOW - 50_000], ['dana', NOW - 50_000]] }), stays, "a client's message or the assistant's own is no person answering");
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 70_000], ['owner_number', NOW - 50_000], ['client', NOW - 48_000]] }), ends, 'the newest human reply in the span decides');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 50_000]], other: true }), stays, 'another send still unsure since after the reply');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 50_000]], accept: false }), stays, 'not accepted: the same rule, the unsure send still holds');
+  assert.deepEqual(run({ stored: [['owner_number', NOW - 50_000]], until: NOW + 3_600_000 }), { cleared: false, left: 'send_failed' }, 'a timed hold runs to its end');
+  // A span that is no span asks nothing.
+  const { s, inbox } = harness();
+  chat(s, 'L-1');
+  s.updateLead('L-1', { dana_hold_reason: 'send_failed', dana_hold_until: null });
+  inbox.upsertMessage(msg({ key_id: 'M-1', direction: 'out', sender_kind: 'owner_number', ts: NOW }));
+  for (const span of [{}, { after: NOW - 60_000 }, { upTo: NOW }, { after: 'x', upTo: NOW }, { after: NOW, upTo: NOW }, { after: NOW + 1, upTo: NOW }]) {
+    assert.equal(inbox.recheckHumanHold('L-1', span), false, JSON.stringify(span));
+  }
+  assert.equal(inbox.recheckHumanHold('L-1'), false);
+  assert.equal(s.getLead('L-1').dana_hold_reason, 'send_failed');
+  s.close();
+});
+
+test('pruneCandidates({ phones: true }) also deletes every OPEN row with a number; dismissed and lid-only rows stay; without it, as before', () => {
+  const { s, inbox, at } = harness();
+  const withPhone = inbox.noteCandidate({ phone: '966500000001', jid: JID, ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  const jidOnly = inbox.noteCandidate({ jid: '966500000002@s.whatsapp.net', ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  const lidOnly = inbox.noteCandidate({ lid: '100000000000001@lid', name: 'Sara', ts: NOW - DAY, words: ['lid-only'], dir: 'in' });
+  const phoneAndLid = inbox.noteCandidate({ phone: '966500000004', lid: '100000000000004@lid', ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  const dismissed = inbox.noteCandidate({ phone: '966500000005', ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  at(NOW - 1000);
+  inbox.dismissCandidate(dismissed.cand_id);
+  at(NOW);
+  // Without the option: the cutoffs alone, exactly the old results.
+  assert.deepEqual(inbox.pruneCandidates({ openBefore: NOW - 30 * DAY, dismissedBefore: NOW - 365 * DAY }), { open: 0, dismissed: 0 });
+  assert.equal(inbox.countCandidates(), 4);
+  assert.deepEqual(inbox.pruneCandidates({ phones: true }), { open: 0, dismissed: 0, phones: 3 });
+  assert.equal(inbox.getCandidate(withPhone.cand_id), null);
+  assert.equal(inbox.getCandidate(jidOnly.cand_id), null, 'a phone jid is a number too');
+  assert.equal(inbox.getCandidate(phoneAndLid.cand_id), null);
+  assert.ok(inbox.getCandidate(lidOnly.cand_id), 'a hidden-number row stays');
+  assert.equal(inbox.getCandidate(dismissed.cand_id).state, 'dismissed', "the owner's Not a client stays");
+  assert.deepEqual(inbox.pruneCandidates({ phones: true }), { open: 0, dismissed: 0, phones: 0 }, 'once is enough');
+  // `phones` must be exactly true: anything else is the old call.
+  inbox.noteCandidate({ phone: '966500000006', ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  assert.deepEqual(inbox.pruneCandidates({ phones: 'yes' }), { open: 0, dismissed: 0 });
+  assert.equal(inbox.countCandidates(), 2);
+  s.close();
+});
+
+test('dismissedCandidateFor: the dismissed row that holds any of the ids, by phone, jid or lid; an open row or no id → null', () => {
+  const { s, inbox } = harness();
+  const byPhone = inbox.noteCandidate({ phone: '966500000001', jid: JID, ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  const byLid = inbox.noteCandidate({ lid: '100000000000002@lid', ts: NOW - DAY, words: ['lid-only'], dir: 'in' });
+  const open = inbox.noteCandidate({ phone: '966500000003', lid: '100000000000003@lid', ts: NOW - DAY, words: ['villa'], dir: 'in' });
+  inbox.dismissCandidate(byPhone.cand_id);
+  inbox.dismissCandidate(byLid.cand_id);
+  assert.equal(inbox.dismissedCandidateFor({ phone: '966500000001' })?.cand_id, byPhone.cand_id);
+  assert.equal(inbox.dismissedCandidateFor({ jid: JID })?.cand_id, byPhone.cand_id);
+  assert.equal(inbox.dismissedCandidateFor({ phone: '966500000099', jid: null, lid: '100000000000002@lid' })?.cand_id, byLid.cand_id, 'any of them');
+  assert.equal(inbox.dismissedCandidateFor({ phone: '966500000001', lid: '100000000000002@lid' })?.cand_id, byPhone.cand_id, 'the number first');
+  const row = inbox.dismissedCandidateFor({ lid: '100000000000002@lid' });
+  assert.deepEqual([row.state, row.name, row.hits], ['dismissed', null, 0], 'a dismissed row keeps its ids only');
+  assert.equal(inbox.dismissedCandidateFor({ phone: '966500000003' }), null, 'an open row is not a dismissal');
+  assert.equal(inbox.dismissedCandidateFor({ lid: '100000000000003@lid' }), null);
+  assert.equal(inbox.dismissedCandidateFor({ phone: '', jid: '  ', lid: null }), null, 'no id');
+  assert.equal(inbox.dismissedCandidateFor(), null);
+  assert.equal(open.state, 'open');
+  // One prepared statement per id, cached like findCandidate's: a second call prepares nothing.
+  let prepares = 0;
+  const real = s.db.prepare.bind(s.db);
+  s.db.prepare = (sql) => { prepares += 1; return real(sql); };
+  inbox.dismissedCandidateFor({ phone: '966500000088', jid: '966500000088@s.whatsapp.net', lid: '100000000000088@lid' });
+  assert.equal(prepares, 0, 'the three statements were prepared by the calls above');
+  s.db.prepare = real;
+  s.close();
+});
+
+test("an outbox row keeps its media kind ('document' or none); resolveUncertainDocument finds a lead's oldest open document send near a time", () => {
+  const { s, inbox, at } = harness();
+  chat(s, 'L-1');
+  chat(s, 'L-2', { wa_jid: '966500000002@s.whatsapp.net' });
+  assert.equal(inbox.insertOutbox(out({ send_id: 'SND-t', sender_kind: 'dana', user_id: null })).row.media_kind, null);
+  assert.equal(inbox.insertOutbox(out({ send_id: 'SND-d1', sender_kind: 'dana', user_id: null, media_kind: 'document', status: 'uncertain', text: 'BONA-W003 brochure' })).row.media_kind, 'document');
+  at(NOW + 10_000);
+  inbox.insertOutbox(out({ send_id: 'SND-d2', sender_kind: 'dana', user_id: null, media_kind: 'document', status: 'pending', text: 'BONA-W004 brochure' }));
+  inbox.insertOutbox(out({ send_id: 'SND-d3', lead_id: 'L-2', sender_kind: 'dana', user_id: null, media_kind: 'document', status: 'uncertain' }));
+  assert.throws(() => inbox.insertOutbox(out({ send_id: 'SND-bad', sender_kind: 'dana', media_kind: 'location' })), RangeError);
+  assert.equal(inbox.getOutbox('SND-bad'), null);
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-1', ts: NOW + 60_000 })?.send_id, 'SND-d1', 'the oldest');
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-1', ts: NOW + 125_000 })?.send_id, 'SND-d2', 'the first is out of the window by then');
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-1', ts: NOW + 131_000 }), null);
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-2', ts: NOW + 10_000 })?.send_id, 'SND-d3');
+  inbox.updateOutbox('SND-d1', { status: 'accepted', key_id: 'K-D1' });
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-1', ts: NOW + 60_000 })?.send_id, 'SND-d2', 'a resolved row is not open');
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-1', ts: 'x' }), null);
+  assert.equal(inbox.resolveUncertainDocument({ leadId: null, ts: NOW }), null);
+  // A staff row is never one (a brochure is the assistant's).
+  inbox.insertOutbox(out({ send_id: 'SND-s', lead_id: 'L-2', media_kind: 'document', status: 'uncertain' }));
+  inbox.updateOutbox('SND-d3', { status: 'accepted', key_id: 'K-D3' });
+  assert.equal(inbox.resolveUncertainDocument({ leadId: 'L-2', ts: NOW + 10_000 }), null);
+  // A note or a code keeps no media kind, as it keeps no text.
+  assert.equal(inbox.insertOutbox({ send_id: 'SND-n', jid: OWNER_JID, sender_kind: 'note', media_kind: 'document' }).row.media_kind, null);
   s.close();
 });

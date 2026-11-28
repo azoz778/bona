@@ -574,6 +574,38 @@ test('owner_summary_day takes \'\' or a YYYY-MM-DD day only', () => {
   s.close();
 });
 
+test("owner_command_ts (PR-A2) takes '' or comma-separated <switch>:<ms> pairs only, and is no switch", () => {
+  const { s, team } = teamHarness();
+  assert.equal(SETTINGS_DEFAULTS.owner_command_ts, '');
+  for (const ok of ['', `owner_as_client:${NOW}`, `owner_as_client:${NOW},dana_enabled:${NOW + 1}`]) {
+    assert.equal(team.setSetting('owner_command_ts', ok), ok);
+  }
+  for (const bad of ['owner_as_client', `owner_as_client:${NOW},`, `,owner_as_client:${NOW}`, `Owner:${NOW}`, 'own_inbox:-1', 'own_inbox:1.5',
+    'own_inbox:12345678901234567', `own_inbox:${NOW} `, `own_inbox:${NOW};dana_enabled:1`]) {
+    assert.equal(codeOf(() => team.setSetting('owner_command_ts', bad)), 'bad_setting_value', bad);
+  }
+  assert.equal(team.isOn('owner_command_ts'), false, 'a marker is never a switch');
+  s.close();
+});
+
+test("greeting_seen (PR-A2, Codex T07 r5) takes '' or up to 500 comma-separated <text hash>.<chat hash>.<ms> marks only, and is no switch", () => {
+  const { s, team } = teamHarness();
+  assert.equal(SETTINGS_DEFAULTS.greeting_seen, '');
+  const mark = (i = 0) => `${'aB3-_'.repeat(3)}${i % 10}.${'Zz9_-'.repeat(2)}x.${NOW + i}`;
+  for (const ok of ['', mark(), `${mark(0)},${mark(1)}`, Array.from({ length: 500 }, (_, i) => mark(i)).join(',')]) {
+    assert.equal(team.setSetting('greeting_seen', ok), ok);
+  }
+  const bad = [
+    Array.from({ length: 501 }, (_, i) => mark(i)).join(','), `${mark()},`, `,${mark()}`, mark().replace('.', ':'),
+    `${'a'.repeat(15)}.${'b'.repeat(11)}.${NOW}`, `${'a'.repeat(16)}.${'b'.repeat(12)}.${NOW}`, `${'a'.repeat(16)}.${'b'.repeat(11)}.`,
+    `${'a'.repeat(16)}.${'b'.repeat(11)}.12345678901234567`, `${'a'.repeat(16)}.${'b'.repeat(11)}.-1`, `${'a+/='.repeat(4)}.${'b'.repeat(11)}.${NOW}`,
+    'Back tomorrow', '966500000000', `${mark()} `,
+  ];
+  for (const v of bad) assert.equal(codeOf(() => team.setSetting('greeting_seen', v)), 'bad_setting_value', v.slice(0, 60));
+  assert.equal(team.isOn('greeting_seen'), false, 'a marker is never a switch');
+  s.close();
+});
+
 test('brain_usd_day / brain_usd_month take only YYYY-MM-DD:<int> / YYYY-MM:<int> micro-USD counters (or \'\')', () => {
   const { s, team } = teamHarness();
   assert.equal(SETTINGS_DEFAULTS.brain_usd_day, '');
@@ -621,4 +653,72 @@ test('every setting key has an allowed list or pattern: none accepts any string'
     const dflt = SETTINGS_DEFAULTS[key];
     assert.ok(Array.isArray(allowed) ? allowed.includes(dflt) : allowed.test(dflt), `${key}'s default is itself allowed`);
   }
+});
+
+/* ---------------- PR-A2 (PLAN T07 test 3; DESIGN §3.2): the owner's test override ---------------- */
+
+/**
+ * A fake test switch the way lib/owner-test.mjs answers it: `active()` and BONA_OWNER_JID's
+ * digits (`ownerDigits()`), and the owner's users-row lid while active (`ownerLid()`).
+ */
+function fakeOwnerTest(s, { ownerDigits = '966500000010', on = true } = {}) {
+  const t = {
+    on,
+    active() { return this.on; },
+    ownerDigits: () => ownerDigits,
+    ownerLid() { return this.on ? (s.db.prepare('SELECT wa_lid FROM users WHERE phone_e164 = ?').get(ownerDigits)?.wa_lid ?? null) : null; },
+  };
+  return t;
+}
+
+test("the test override: while the test is active, only BONA_OWNER_JID's digits and his users-row lid stop being excluded", () => {
+  const s = openDb(':memory:');
+  let t = null;
+  // Handed in as a function: index.mjs builds the test switch after the team (it reads the team).
+  const team = createTeam(s, { now: () => NOW, ownerTest: () => t });
+  team.ensureOwner({ phone: '966500000010', name: 'Owner' });
+  team.addUser({ name: 'Second Owner', phone: '966500000011', role: 'owner' });
+  team.addUser({ name: 'Colleague', phone: '966500000012', role: 'staff' });
+  learnTeamLid(s, '966500000010', '100000000000010@lid');
+  learnTeamLid(s, '966500000011', '100000000000011@lid');
+  learnTeamLid(s, '966500000012', '100000000000012@lid');
+  const lead = (over) => ({ lead_id: 'L-1', phone_e164: null, wa_jid: null, wa_lid: null, ...over });
+
+  const before = () => {
+    for (const phone of ['966500000010', '966500000011', '966500000012']) assert.equal(team.isExcludedPhone(phone), true, phone);
+    for (const lid of ['100000000000010@lid', '100000000000011@lid', '100000000000012@lid']) {
+      assert.equal(isExcludedLead(team, s, lead({ wa_lid: lid })), true, lid);
+    }
+  };
+  before();
+  t = fakeOwnerTest(s);
+  // Active: the owner's number, phone jid and lid are a client's chat; nobody else's.
+  assert.equal(team.isExcludedPhone('966500000010'), false);
+  assert.equal(team.isExcludedPhone('+966 50 000 0010'), false, 'normalised like every other number');
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000010', wa_jid: '966500000010@s.whatsapp.net', wa_lid: '100000000000010@lid' })), false);
+  assert.equal(isExcludedLead(team, s, lead({ wa_lid: '100000000000010@lid' })), false, 'his lid alone');
+  assert.equal(team.isExcludedPhone('966500000011'), true, 'another owner-role account stays excluded: never role-based');
+  assert.equal(team.isExcludedPhone('966500000012'), true, 'the colleague stays excluded');
+  assert.equal(isExcludedLead(team, s, lead({ wa_lid: '100000000000011@lid' })), true);
+  assert.equal(isExcludedLead(team, s, lead({ wa_lid: '100000000000012@lid' })), true, "the colleague's lid stays excluded");
+  // His lid with a colleague's number is still the colleague's chat.
+  assert.equal(isExcludedLead(team, s, lead({ phone_e164: '966500000012', wa_lid: '100000000000010@lid' })), true);
+  // The never list still wins over the override.
+  team.addNever({ phone: '966500000010', note: 'test' });
+  assert.equal(team.isExcludedPhone('966500000010'), true, 'a never-list number is never a client, the owner\'s included');
+  team.removeNever('966500000010');
+  // Off again, and a switch that throws: excluded (fail closed).
+  t.on = false;
+  before();
+  t = { active() { throw new Error('state lost'); }, ownerDigits: () => '966500000010', ownerLid: () => '100000000000010@lid' };
+  before();
+  // Handed in as the module itself, too.
+  const direct = createTeam(s, { now: () => NOW, ownerTest: fakeOwnerTest(s) });
+  assert.equal(direct.isExcludedPhone('966500000010'), false);
+  assert.equal(direct.isExcludedPhone('966500000011'), true);
+  // No test switch handed in: exactly as before.
+  const plain = createTeam(s, { now: () => NOW });
+  assert.equal(plain.isExcludedPhone('966500000010'), true);
+  assert.equal(isExcludedLead(plain, s, lead({ wa_lid: '100000000000010@lid' })), true);
+  s.close();
 });
