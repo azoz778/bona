@@ -2552,7 +2552,7 @@ test('a booked task set to cancelled on the dashboard reaches onTaskChange and c
     // Moving a booked task's time is refused (the calendar is the source of truth).
     const booked = tasksForLead(db, b.lead_id).find((t) => t.details.booking_id);
     const moved = await post(`/v1/admin/leads/${b.lead_id}/task`, { task_id: booked.task_id, status: 'confirmed', due_at: '2026-12-08T14:00' });
-    assert.match(moved.headers.get('location') ?? '', /error=bad_task/);
+    assert.match(moved.headers.get('location') ?? '', /error=calendar_booked/);
     assert.equal(tasksForLead(db, b.lead_id).find((t) => t.task_id === booked.task_id).due_ts, R(2026, 12, 7, 10));
   });
 });

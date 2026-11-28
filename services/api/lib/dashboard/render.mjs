@@ -756,6 +756,8 @@ export const MESSAGES = {
   no_request: 'Ask for a new code, then type it into this same browser — a code only works where it was requested.',
   forbidden: 'That request did not come from this page. Open api.bona-real-estate.com/dashboard directly, with translation off.',
   bad_task: 'Task not saved. Check its status and a valid Riyadh date/time; a confirmed viewing needs a time.',
+  calendar_booked: 'This viewing was booked on the calendar, so its time is not changed here: move it in Google Calendar; Bona follows the calendar.',
+  number_unchecked: 'That chat joined on Bona’s own number, so it cannot be brought into the inbox until Bona’s WhatsApp number is checked.',
   bad_stage: 'That is not one of the stages.',
   bad_value: 'A deal value has to be a number.',
   empty_note: 'A note cannot be empty.',
@@ -812,8 +814,15 @@ const loginMessage = (code) => (typeof code === 'string' && LOGIN_ERRORS.has(cod
  * Two steps in one page: ask for a code, then type it in. Nothing here says whether
  * the owner exists, whether a code is outstanding, or how many attempts are left —
  * the login page is the one surface a stranger can reach.
+ *
+ * `next` is the return-to (DESIGN §3.3), already checked by the route (routes.mjs
+ * `loginNext`): both forms carry it as a hidden field and "Send another code" keeps it.
+ * Anything that is not a non-empty string is no return-to.
  */
-export function loginPage({ step = 'request', error = null, sent = false } = {}) {
+export function loginPage({ step = 'request', error = null, sent = false, next = null } = {}) {
+  const returnTo = typeof next === 'string' && next ? next : null;
+  const nextField = returnTo ? `\n  <input type="hidden" name="next" value="${esc(returnTo)}">` : '';
+  const again = returnTo ? `/dashboard/login?next=${encodeURIComponent(returnTo)}` : '/dashboard/login';
   const text = loginMessage(error);
   const message = text ? `<div class="err">${esc(text)}</div>` : '';
   const notice = sent && !error
@@ -821,14 +830,14 @@ export function loginPage({ step = 'request', error = null, sent = false } = {})
     : '';
   const body = step === 'code'
     ? `<form method="post" action="/dashboard/login/verify">
-  <input type="hidden" name="_dash" value="1">
+  <input type="hidden" name="_dash" value="1">${nextField}
   <div><label for="code">6-digit code</label>
   <input class="code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9٠-٩۰-۹]{6}" maxlength="6" required autofocus></div>
   <button type="submit">Sign in</button>
 </form>
-<p class="muted" style="margin-top:1rem"><a href="/dashboard/login">Send another code</a></p>`
+<p class="muted" style="margin-top:1rem"><a href="${esc(again)}">Send another code</a></p>`
     : `<form method="post" action="/dashboard/login/code">
-  <input type="hidden" name="_dash" value="1">
+  <input type="hidden" name="_dash" value="1">${nextField}
   <div><label for="phone">Your WhatsApp number</label>
   <input id="phone" name="phone" inputmode="tel" autocomplete="tel" dir="ltr" placeholder="05XXXXXXXX" maxlength="20" required autofocus></div>
   <button type="submit">Send me a code</button>
@@ -1417,14 +1426,19 @@ const JOURNEY_LABEL = {
  * only the owner sees the word (D9); to a team member, anything not in the inbox is
  * simply not in it.
  */
-function inboxLabel(lead, owner) {
+function inboxLabel(lead, owner, chatHidden = false) {
+  if (lead.inbox_state === 'in' && chatHidden) return 'Joined on Bona’s own number — hidden from the inbox until Bona’s WhatsApp number is checked';
   if (lead.inbox_state === 'in') return lead.wa_jid || lead.wa_lid ? 'In the Bona inbox' : 'In the Bona inbox — no WhatsApp chat yet';
   if (owner && lead.inbox_state === 'unsure') return 'Unsure — waiting for your decision';
   if (owner && lead.inbox_state === 'out') return 'Not a client';
   return 'Not in the Bona inbox';
 }
 
-export function leadDetailPage({ lead, journey, tasks = [], notifications = [], saved = null, error = null, now = Date.now(), me = null }) {
+/**
+ * `chatHidden`: the rollback guard holds this lead's chat out of the inbox (routes.mjs `viaHidden`,
+ * DESIGN §13.2), so there is no "Open chat" and the inbox line says why.
+ */
+export function leadDetailPage({ lead, journey, tasks = [], notifications = [], saved = null, error = null, now = Date.now(), me = null, chatHidden = false }) {
   const field = (k, v) => `<dt>${esc(k)}</dt><dd dir="auto">${esc(v ?? '—')}</dd>`;
   const owner = me?.role === 'owner';
   const state = lead.inbox_state ?? null;
@@ -1432,7 +1446,7 @@ export function leadDetailPage({ lead, journey, tasks = [], notifications = [], 
   // Only a chat can be opened; only an owner moves a lead in or out (D9). "Not a
   // client" is offered while there is something to take out: in, or waiting on him.
   const inboxActions = [
-    state === 'in' && (lead.wa_jid || lead.wa_lid) ? `<a class="btn pri" href="${esc(`/dashboard/inbox/${leadPath}`)}">Open chat</a>` : '',
+    state === 'in' && (lead.wa_jid || lead.wa_lid) && !chatHidden ? `<a class="btn pri" href="${esc(`/dashboard/inbox/${leadPath}`)}">Open chat</a>` : '',
     owner && state !== 'in' ? postButton(`/v1/admin/inbox/${leadPath}/move`, 'Move to Bona inbox') : '',
     owner && (state === 'in' || state === 'unsure') ? postButton(`/v1/admin/inbox/${leadPath}/out`, 'Not a client') : '',
   ].join('');
@@ -1459,7 +1473,7 @@ ${banner}
     ${field('WhatsApp', lead.wa_jid ?? lead.wa_lid)}
     ${field('Language', lead.language)}
     ${field('Channel', lead.channel)}
-    ${field('Inbox', inboxLabel(lead, owner))}
+    ${field('Inbox', inboxLabel(lead, owner, chatHidden === true))}
     ${field('First reply', responded)}
   </dl></div>
   <div class="card"><h3>Attribution</h3><dl class="fields">
@@ -1484,7 +1498,7 @@ ${banner}
 </div>
 
 <h2>Bona inbox</h2>
-<p class="sub">${esc(inboxLabel(lead, owner))}</p>
+<p class="sub">${esc(inboxLabel(lead, owner, chatHidden === true))}</p>
 ${inboxActions ? `<div class="acts" style="flex-wrap:wrap">${inboxActions}</div>` : ''}
 
 ${leadTasksPanel(lead.lead_id, tasks, owner, notifications)}
