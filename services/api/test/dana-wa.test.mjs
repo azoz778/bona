@@ -3468,3 +3468,23 @@ test('T12 r20 (Codex P1): a bare lender.co on a first reply is stripped', async 
   assert.doesNotMatch(h.sent()[0], /lender\.co/);
   assert.match(h.sent()[0], /We are happy to help\./);
 });
+
+/* ======================================================================================
+ * PR-B3 r21 (Codex P1, the last matcher change): with a path or port, a 2-letter last label is a link in any case
+ * unless the first label is a known abbreviation.
+ * ====================================================================================== */
+
+test('T12 r21: linksIn — with a path or port, Lender.co/apply and Finn.no/home are links; abbreviations stay text', () => {
+  for (const t of ['visit Lender.co/apply for details', 'Finn.no/home', 'Example.CO/path', 'Homes.us:8080/x']) assert.equal(linksIn(t).length, 1, t);
+  for (const t of ['Sun.Mo/Tue', 'ref.no/123', 'sq.ft/year', 'Ph.D/MBA', 'Tel.no/fax', 'No.of/rooms', 'Dr.Al/Harbi', 'Sat.Su/Mo', 'Mon.Tu/We 10:00',
+    'ref.no:12', 'sq.ft:1200', 'Sun.Mo:10', 'Plot.no/5', 'Apt.no/3', 'Unit.no/4', 'Plot.no 5', 'Inc.co', 'Qty.ok/2']) {
+    assert.deepEqual(linksIn(t), [], t);
+  }
+});
+
+test('T12 r21 (Codex P1): "visit Lender.co/apply for details" on a first reply is stripped', async () => {
+  const h = bh({ turns: [brainReply('For a mortgage, visit Lender.co/apply for details. We are happy to help.')] });
+  await ask(h, 'Hi');
+  assert.doesNotMatch(h.sent()[0], /Lender\.co/i);
+  assert.match(h.sent()[0], /We are happy to help\./);
+});

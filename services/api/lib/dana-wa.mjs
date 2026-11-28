@@ -172,14 +172,19 @@ const PLACEHOLDER_RE = /^\[[^\]\n]{1,40}\]$/;
 const LISTING_ID_RE = /\bBONA-W?\d{3}\b/i;
 const LINK_RE = /https?:\/\/[^\s<>"'`]+/giu;
 /**
+ * The link matcher below is a SAFETY NET behind the model's own rules (prompt and the reply guard), not the gate: it
+ * stops a link the model should not have written. Any new single-token edge case (an abbreviation read as a domain,
+ * a domain read as text) goes to the T26 eval, not into this regex (r21: the last change to it).
+ *
  * A brain chat's links (r17-r19). A candidate is a URL with a scheme, or a bare host (every dot label, the WHOLE host,
  * so `bona-real-estate.com.au` is never read as `bona-real-estate.com`) with its port and path; never inside an
  * e-mail address or another host (the lookbehind). ONE rule (r19, r20) makes a bare candidate a link when any holds:
  *   (a) it starts with `www.`;
- *   (b) its last label is 2 letters, with a path or port or without (r20): it is in LINK_TLDS (gTLDs and a curated
- *       ccTLD list that leaves out the codes that collide with abbreviations and words: no, al, mo, so, ft, ok, us,
- *       co), or the host has 3+ labels (`x.com.au`), or the host is all lowercase and the label before the last has
- *       4+ characters (`lender.co`, `homes.us`; accepted P3: "plot.no" too);
+ *   (b) its last label is 2 letters. With a path or a port (r21): a link in any case unless its first label is in
+ *       LINK_ABBREVIATIONS (`Lender.co/apply` yes, `Sun.Mo/Tue` no). Without (r20): it is in LINK_TLDS (gTLDs and a
+ *       curated ccTLD list that leaves out the codes that collide with abbreviations and words: no, al, mo, so, ft,
+ *       ok, us, co), or the host has 3+ labels (`x.com.au`), or the host is all lowercase and the label before the
+ *       last has 4+ characters (`lender.co`, `homes.us`; accepted P3s: "plot.no" is a link, "Lender.co" is text);
  *   (c) its last label is 3-24 letters with a path or a port (any TLD: `example.finance/contact`), or in LINK_TLDS;
  * and some label before the last has 2+ characters ("e.g.", "a.m.to", "U.S." stay text). Otherwise it is text:
  * `sq.ft`, `ref.no`, `Tel.no`, `Dr.Al`, `Sun.Mo`, `ok.so`, `vs.us`, `Inc.co`, `Sun.Mo/Tue`, `ref.no:12`.
@@ -187,6 +192,9 @@ const LINK_RE = /https?:\/\/[^\s<>"'`]+/giu;
 const LINK_TLDS = new Set(('com net org info biz io me ai app dev gov edu xyz online site store tech link page realestate properties homes '
   + 'shop estate club top live world group agency website space news blog cloud digital media house land '
   + 'sa ae qa kw bh om eg jo uk eu de fr in au ca tv ly gl to cc ws').split(' '));
+/** First labels that make "x.yz/…" an abbreviation, not a link (r21): days, and the short forms property text uses. */
+const LINK_ABBREVIATIONS = new Set(('sun mon tue wed thu fri sat mo tu we th fr sa su '
+  + 'ref tel no sq dr mr mrs ms inc ltd co vs apt bldg flr rd st qty ph ok per plot flat unit lot blk ext pg approx al of').split(' '));
 const LINK_CANDIDATE_RE = new RegExp(String.raw`https?:\/\/[^\s<>"'\x60]+|(?<![@\w./-])[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?::\d{1,5})?(?:[/?#][^\s<>"'\x60]*)?`, 'giu');
 function bareLink(candidate) {
   const rawHost = candidate.split(/[:/?#]/)[0];
@@ -197,7 +205,12 @@ function bareLink(candidate) {
   if (!labels.slice(0, -1).some((l) => l.length >= 2)) return false;
   // A 2-letter last label, with a path or port or without (r20): the curated list, or 3+ labels, or an all-lowercase
   // host whose label before it has 4+ characters (`lender.co`, `homes.us`; never `Inc.co`, `Sun.Mo/Tue`, `ref.no:12`).
-  if (/^[a-z]{2}$/.test(last)) return LINK_TLDS.has(last) || labels.length >= 3 || (rawHost === host && labels[labels.length - 2].length >= 4);
+  if (/^[a-z]{2}$/.test(last)) {
+    // With a path or a port (r21): a link in any case (`Lender.co/apply`, `Finn.no/home`) unless its first label is a
+    // known abbreviation (`Sun.Mo/Tue`, `ref.no/123`, `sq.ft/year`, `ref.no:12`).
+    if (candidate.length > host.length) return !LINK_ABBREVIATIONS.has(labels[0]);
+    return LINK_TLDS.has(last) || labels.length >= 3 || (rawHost === host && labels[labels.length - 2].length >= 4);
+  }
   // A path or a port with any 3-24-letter TLD (`example.finance/contact`); otherwise the list.
   if (candidate.length > host.length && /^[a-z]{3,24}$/.test(last)) return true;
   return LINK_TLDS.has(last);
