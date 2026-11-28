@@ -3023,7 +3023,7 @@ test('T12 r14 I1: a stop request is honoured over an active hold and an old batc
   assert.equal(h.brain.calls.length, 0);
 });
 
-test('T12 r14 I2: two backfilled messages, one older than the history window, both reach the brain; none is marked covered unseen', async () => {
+test('T12 r14 I2 (amended r15): two backfilled messages: the fresh one is answered, the one past 2 h is `missed`; none is marked covered unseen', async () => {
   const h = bh({ turns: [brainReply('Of course.')] });
   for (let i = 0; i < 25; i += 1) h.client(`earlier ${i}`, { ts: T_IN - 4 * HOUR + i * 5 * 60_000 });
   const maxRid = h.s.db.prepare("SELECT MAX(rowid) AS r FROM wa_messages WHERE lead_id = ?").get(LEAD).r;
@@ -3032,9 +3032,12 @@ test('T12 r14 I2: two backfilled messages, one older than the history window, bo
   h.client('recent question', { ts: T_IN - 60_000 });
   h.client('an old one the backfill found', { ts: T_IN - 5 * HOUR });
   await h.dana.answer(LEAD, { ts: T_IN - 60_000 });
-  const parts = h.brain.calls[0].batchParts;
-  assert.equal(parts.length, 2, JSON.stringify(parts));
-  assert.deepEqual(parts, ['an old one the backfill found', 'recent question'], 'both, presented in ts order');
+  // r15: a message past its 2-h mark is never in a batch; it is handed over as `missed`, and stays uncovered.
+  assert.deepEqual(h.brain.calls[0].batchParts, ['recent question']);
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['missed']);
+  const cov = h.s.db.prepare("SELECT error FROM wa_outbox WHERE sender_kind = 'dana' ORDER BY created DESC LIMIT 1").get().error;
+  const oldRid = h.s.db.prepare("SELECT rowid AS r FROM wa_messages WHERE text = 'an old one the backfill found'").get().r;
+  assert.ok(Number(String(cov).replace(/^cov:/, '').split('|')[0]) < oldRid, 'the backfilled old message is not covered by the answer');
 });
 
 test('T12 r14 I2: a batch over the cap takes the first ten by rowid; the rest stays pending and is answered next', async () => {
@@ -3044,4 +3047,106 @@ test('T12 r14 I2: a batch over the cap takes the first ten by rowid; the rest st
   await h.dana.flush();
   assert.deepEqual(h.brain.calls[0].batchParts, Array.from({ length: 10 }, (_, i) => `q${i + 1}`));
   assert.deepEqual(h.brain.calls[1].batchParts, ['q11', 'q12'], 'the rest stayed pending and got its own turn');
+});
+
+/* ======================================================================================
+ * PR-B3 r15 (Codex P0/P1s, Claude N9): every pending message is masked as one series before the batch cap; an
+ * expired prefix never strands a fresh question; a stop request is always recorded, with or without its line.
+ * ====================================================================================== */
+
+test('T12 r15 1 (P0): a phone split across the batch cap never reaches OpenAI (every pending message masked as one series)', async () => {
+  const { brain, bodies } = realBrain([reply200('Of course.')]);
+  const h = bh({ brain });
+  for (let i = 1; i <= 9; i += 1) h.client(`question number ${'one two three four five six seven eight nine'.split(' ')[i - 1]}`, { ts: T_IN - 20_000 + i * 1000 });
+  h.client('please call me on 050', { ts: T_IN - 10_000 });
+  h.client('123 4567 thanks', { ts: T_IN - 9000 });
+  await h.dana.answer(LEAD, { ts: T_IN - 9000 });
+  assert.equal(bodies.length, 1);
+  const raw = JSON.stringify(bodies[0].messages.filter((x) => x.role !== 'system'));
+  assert.doesNotMatch(raw, /050|123|4567/, 'no digit run of the number in the request');
+});
+
+test('T12 r15 2: an expired prefix never strands a fresh question: one `missed` for the expired set, the question answered', async () => {
+  const h = bh({ turns: [brainReply('Yes, it is available.'), brainReply('never')] });
+  for (let i = 0; i < 10; i += 1) h.client(`old message ${i}`, { ts: T_IN - 3 * HOUR + i * 60_000 });
+  const q = h.client('is the villa available?', { ts: T_IN - 60_000 });
+  await h.dana.answer(LEAD, { ts: q });
+  await h.dana.flush();
+  assert.deepEqual(h.brain.calls[0].batchParts, ['is the villa available?']);
+  assert.ok(h.sent().at(-1).endsWith('Yes, it is available.'));
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['missed'], 'exactly one missed for the expired set');
+  h.tick(60_000);
+  await h.dana.answer(LEAD, { ts: q });
+  assert.equal(h.notes.of('handover').length, 1, 'no repeat');
+});
+
+test('T12 r15 3 (Q1): a stop request while Dana is off is recorded; switched on 2 days later, no brain answer', async () => {
+  const h = bh({ enabled: false, turns: [brainReply('never')] });
+  await ask(h, 'stop');
+  assert.equal(h.sent().length, 0, 'no line while Dana is off');
+  assert.deepEqual([h.lead().dana_off, h.lead().needs_human], [1, 1], 'recorded');
+  assert.deepEqual(h.notes.of('stopped').map((c) => c[2]), ['stop']);
+  h.tick(2 * DAY);
+  h.team.setSetting('dana_enabled', '1');
+  await ask(h, 'hello?');
+  assert.equal(h.brain.calls.length, 0, 'no brain answer: the chat stays stopped');
+});
+
+test('T12 r15 3 (Q1): a stop request while a person is active is recorded; 2 days later, no brain answer', async () => {
+  const h = bh({ lead: { last_human_out_ts: T_IN - HOUR }, turns: [brainReply('never')] });
+  await ask(h, 'stop');
+  assert.equal(h.sent().length, 0);
+  assert.equal(h.lead().dana_off, 1);
+  h.tick(2 * DAY);
+  await ask(h, 'hello?');
+  assert.equal(h.brain.calls.length, 0);
+});
+
+test('T12 r15 3: a team member replies before the batch fires (found by the refresh): no closing line, the stop recorded', async () => {
+  let stop;
+  const backfill = { refresh: async () => { if (stop) h.staff('I will take care of it.', stop + 1000); } };
+  const h = bh({ backfill, turns: [brainReply('never')] });
+  stop = h.client('delete my data');
+  await h.dana.answer(LEAD, { ts: stop });
+  assert.equal(h.sent().length, 0, 'no closing line over the person');
+  assert.deepEqual([h.lead().dana_off, h.lead().needs_human], [1, 1]);
+  assert.deepEqual(h.notes.of('stopped').map((c) => c[2]), ['deletion']);
+});
+
+test('T12 r15 3: "Let the AI answer again" still undoes a stop recorded without a line', async () => {
+  const h = bh({ enabled: false, turns: [brainReply('Yes, there is a bus stop nearby.')] });
+  await ask(h, 'next stop?');
+  assert.equal(h.lead().dana_off, 1);
+  h.team.setSetting('dana_enabled', '1');
+  h.tick(60_000);
+  // The dashboard button: the lead row and its audit row (routes.mjs inboxAnswerAgain), nothing else.
+  h.s.updateLead(LEAD, { dana_off: 0, dana_hold_until: null, dana_hold_reason: null });
+  h.s.db.prepare("INSERT INTO audit_log (id, ts, user_id, action, target, meta) VALUES ('AUD-1', ?, 'USR-x', 'dana_chat', ?, ?)")
+    .run(h.now(), LEAD, JSON.stringify({ dana_off: 0, dana_hold_until: null, dana_hold_reason: null }));
+  h.tick(60_000);
+  await ask(h, 'is there a bus stop near the villa?');
+  assert.equal(h.lead().dana_off, 0);
+  assert.ok(h.sent().at(-1).endsWith('Yes, there is a bus stop nearby.'));
+});
+
+test('T12 r15 2: a fresh "a person please" after an expired set still gets its hand-over line (the missed flag went with no line)', async () => {
+  const h = bh({ turns: [brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] })] });
+  h.client('old message', { ts: T_IN - 3 * HOUR });
+  const q = h.client('a person please', { ts: T_IN - 60_000 });
+  await h.dana.answer(LEAD, { ts: q });
+  assert.equal(h.sent().length, 1, 'the hand-over line');
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['missed', 'person']);
+  assert.equal(h.s.db.prepare("SELECT COUNT(*) AS n FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff'").get(LEAD).n, 1, 'one task, reused');
+});
+
+test('T12 r15 2: after a restart the expired set is not handed over again (read from the task)', async () => {
+  const h = bh({ turns: [brainReply('never'), brainReply('Yes.')] });
+  h.client('old message', { ts: T_IN - 3 * HOUR });
+  await h.dana.answer(LEAD, { ts: T_IN - 3 * HOUR });
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['missed']);
+  const r = h.restart([brainReply('never')]);
+  h.tick(60_000);
+  await r.dana.answer(LEAD, { ts: T_IN - 3 * HOUR });
+  assert.equal(r.notes.of('handover').length, 0, 'no repeat after the restart');
+  assert.equal(r.brain.calls.length, 0);
 });
