@@ -3918,3 +3918,42 @@ test('T12 r28 (rule): a sender rate limit returned while the route flips writes 
   assert.equal(h.retell.completions.length, 1);
   assert.ok(h.sent().at(-1).endsWith('Of course. Which district do you prefer?'));
 });
+
+/* ======================================================================================
+ * PR-B3 r29 (Claude U47, Codex P1): holds gate only the brain route (legacy never writes one; main has none), and a
+ * chat that runs on legacy loses its brain-only timed hold (a person-wait hold with its flag stays).
+ * ====================================================================================== */
+
+test('T12 r29 1 (Claude U47): a cap_chat hold with 40 min left, then dana_brain off: Retell answers the next message at once', async () => {
+  const h = bh({ auto: false, brainOn: true, lead: { dana_hold_reason: 'cap_chat', dana_hold_until: T_IN + 40 * 60_000 } });
+  h.team.setSetting('dana_brain', '0');
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.equal(h.retell.completions.length, 1);
+  assert.equal(h.sent().length, 1);
+  assert.equal(h.lead().dana_hold_reason, null, 'the stale brain-only timed hold is cleared on the legacy run');
+});
+
+test('T12 r29 1 (Codex P1): a second counted failure while the chat leaves auto mode: the facts are kept; the send_failed hold never gates legacy', async () => {
+  let h;
+  let n = 0;
+  // The second counted failure: #dana live off runs during the Evolution request, which returns a 4xx; later sends go.
+  h = bh({ evo: (k) => { n += 1; if (n === 1) { h.ownerTest.setAuto(LEAD, false); return { status: 400, body: {} }; } return { status: 201, body: { key: { id: `K${k}` } } }; },
+    turns: [brainReply('Yes, it is free.')] });
+  h.client('hi', { ts: T_IN - HOUR });
+  h.danaRow({ covers: T_IN - HOUR, created: T_IN - HOUR + 1000, status: 'failed', error: 'http_400' });
+  await ask(h, 'is it free?');
+  await h.dana.flush();
+  assert.equal(h.lead().needs_human, 1, 'the escalation is a fact');
+  assert.deepEqual(handoffTasks(h), ['send_failed']);
+  assert.deepEqual([h.lead().dana_hold_reason, h.lead().dana_hold_until], ['send_failed', null], 'the person-wait hold stays');
+  // Now on legacy: the chat waits for the person because of needs_human (main's rule), not the hold.
+  h.tick(60_000);
+  assert.deepEqual(await ask(h, 'hello?'), { skipped: 'needs_human' });
+  // A person clears the flag on the dashboard (no WhatsApp reply): legacy answers; the hold does not gate it.
+  h.s.updateLead(LEAD, { needs_human: 0 });
+  h.tick(60_000);
+  await ask(h, 'anyone?');
+  await h.dana.flush();
+  assert.equal(h.retell.completions.length, 1);
+});

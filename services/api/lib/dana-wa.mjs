@@ -787,7 +787,9 @@ export function createDana({
     // In auto mode an open hand-over is the dashboard's flag, not a gate (DESIGN §4.2).
     if (!auto && Number(lead.needs_human) === 1) return { ok: false, reason: 'needs_human' };
     const t = now();
-    if (activeHold(lead, t)) return { ok: false, reason: 'hold' };
+    // Holds gate the brain route only (r29): a legacy chat writes none and main has none, so a brain-route hold an owner
+    // switch left behind never gates Retell.
+    if (viaBrain && activeHold(lead, t)) return { ok: false, reason: 'hold' };
     if (Number.isFinite(lead.last_human_out_ts) && t - lead.last_human_out_ts < HUMAN_QUIET_MS) return { ok: false, reason: 'human_recent' };
     if (!replyJidFor(lead)) return { ok: false, reason: 'lid_only' };
     if (coversTs !== null && coversTs !== undefined && !openChat(lead.lead_id, coversTs, t)) return { ok: false, reason: 'no_open_chat' };
@@ -1745,15 +1747,23 @@ export function createDana({
 
   async function run(leadId, ts, { wokeAt = null, owed = null } = {}) {
     // The route this turn is made on, with its mode (r27): every routeFlip of this run compares against it.
-    turnRoute.set(String(leadId), routeKey(db.getLead(leadId)));
+    const route = routeKey(db.getLead(leadId));
+    turnRoute.set(String(leadId), route);
+    // A chat that runs on legacy loses a brain-only TIMED hold an owner switch left behind (r29: no stale "paused
+    // until…" on the dashboard); a person-wait hold (no time) stays with its flag. A legacy chat has none otherwise.
+    if (route === 'legacy') {
+      const l = db.getLead(leadId);
+      if (l?.dana_hold_reason && l.dana_hold_until !== null && l.dana_hold_until !== undefined) clearHold(leadId);
+    }
     // Stop first (r14 I1), before an owed line and before every other check.
     const stopped = await stopFirst(leadId);
     if (stopped) return stopped;
-    if (owed) return sendOwed(leadId, owed);
+    // (An owed line is a brain-route line: a legacy run answers its batch as main does, r29.)
+    if (owed && route !== 'legacy') return sendOwed(leadId, owed);
     // A chat that owes a line sends it (when due) before anything else, and starts no model turn in this run (r9): an
     // inbound wake never answers over, or covers up, the owed hand-over or closing line. Not due yet: it waits.
     const owing = db.getLead(leadId)?.dana_hold_reason;
-    if (isOwed(owing)) return sendOwed(leadId, owing);
+    if (isOwed(owing) && route !== 'legacy') return sendOwed(leadId, owing);
     const started = now();
     // A legacy chat keeps main's freshness rule (the woken message, 30 min, a silent `old` skip); a brain
     // chat's is the batch's own (2 h, backlog, missed: below).
