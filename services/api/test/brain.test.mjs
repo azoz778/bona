@@ -896,7 +896,7 @@ test('the runaway stops: $20 a day and $300 a month by default → budget with n
   day.team.setSetting('brain_usd_day', '2026-11-26:20000000');
   assert.deepEqual(await day.brain.turn(turnArgs()), { ok: false, code: 'budget' });
   assert.equal(day.calls.length, 0);
-  assert.deepEqual(day.alerts, [{ code: 'brain_spend', meta: { stop: 'day' } }]);
+  assert.deepEqual(day.alerts, [{ code: 'brain_spend', meta: { level: 'stop', stop: 'day' } }]);
   await day.brain.turn(turnArgs());
   assert.equal(day.alerts.length, 1, 'one stop alert');
   day.now = Date.parse('2026-11-27T00:00:01+03:00');
@@ -904,7 +904,7 @@ test('the runaway stops: $20 a day and $300 a month by default → budget with n
   const month = harness();
   month.team.setSetting('brain_usd_month', '2026-11:300000000');
   assert.deepEqual(await month.brain.turn(turnArgs()), { ok: false, code: 'budget' });
-  assert.deepEqual(month.alerts, [{ code: 'brain_spend', meta: { stop: 'month' } }]);
+  assert.deepEqual(month.alerts, [{ code: 'brain_spend', meta: { level: 'stop', stop: 'month' } }]);
   const shared = harness({ env: { BONA_BRAIN_MONTH_STOP_USD: '50' } });
   shared.team.setSetting('brain_usd_month', '2026-11:49900000');
   assert.equal((await shared.brain.turn(turnArgs())).ok, true, 'under $50, also after this turn\'s call');
@@ -1030,7 +1030,7 @@ test("Codex r17: a save the store committed but could not read back is no unsave
   assert.deepEqual(a.alerts.filter((x) => x.code === 'brain_spend'), [], 'not yet: the total could not be read');
   failRead = false;
   await a.brain.turn(turnArgs());
-  assert.deepEqual(a.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level), [{ code: 'brain_spend', meta: { level: 100 } }], 'the $40 check-in goes once the charge is saved');
+  assert.deepEqual(a.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level && !x.meta.stop), [{ code: 'brain_spend', meta: { level: 100 } }], 'the $40 check-in goes once the charge is saved');
 });
 
 test("Codex r18: a save committed while both read-backs failed is settled by the next good read, never counted twice; a pending charge that crosses the month alert and the day stop alerts before the stop", async () => {
@@ -1063,7 +1063,7 @@ test("Codex r18: a save committed while both read-backs failed is settled by the
   failRead = false;
   assert.deepEqual(await a.brain.turn(turnArgs()), { ok: false, code: 'budget' }, 'the day stop');
   assert.equal(a.calls.length, 1, 'no second paid request');
-  assert.deepEqual(a.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level), [{ code: 'brain_spend', meta: { level: 100 } }], 'the month alert went first');
+  assert.deepEqual(a.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level && !x.meta.stop), [{ code: 'brain_spend', meta: { level: 100 } }], 'the month alert went first');
 });
 
 test("a charge added after a write of unknown outcome stays unsaved when that write is settled: only the part it carried is taken off", async () => {
@@ -1115,7 +1115,7 @@ test("Codex r19: a write of unknown outcome is settled by the very next read: th
   a.team.setSetting('brain_usd_month', '2026-11:39990000');
   blindOnce(a);
   await a.brain.turn(turnArgs());
-  assert.deepEqual(a.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level), [{ code: 'brain_spend', meta: { level: 100 } }]);
+  assert.deepEqual(a.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level && !x.meta.stop), [{ code: 'brain_spend', meta: { level: 100 } }]);
 });
 
 test("Claude r21: a day write of unknown outcome from 23:59 settled after midnight takes nothing off the new day's unsaved spend", async () => {
@@ -1154,7 +1154,7 @@ test("Claude r20: the month alert goes once even when its own marker cannot be r
   let n = 0;
   h.team.getSetting = (k) => { if (k === 'brain_month_alerted' && (n += 1) % 2 === 0) throw new Error('busy'); return realGet(k); };
   for (let i = 0; i < 4; i += 1) await h.brain.turn(turnArgs()); // eslint-disable-line no-await-in-loop
-  assert.deepEqual(h.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level).map((x) => x.meta.level), [80]);
+  assert.deepEqual(h.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level && !x.meta.stop).map((x) => x.meta.level), [80]);
 });
 
 test('the runaway stops are checked before every paid request and after every response: crossing one mid-turn stops the turn at once, with the stop alert in that turn', async () => {
@@ -1165,12 +1165,12 @@ test('the runaway stops are checked before every paid request and after every re
   assert.deepEqual(await round.brain.turn(turnArgs()), { ok: false, code: 'budget' });
   assert.equal(round.calls.length, 1, 'no paid request after the crossing one');
   assert.equal(round.ran.length, 0, 'no tool runs for a turn that already stopped');
-  assert.deepEqual(stopAlerts(round), [{ code: 'brain_spend', meta: { stop: 'day' } }], 'the alert is sent in this turn, not the next one');
+  assert.deepEqual(stopAlerts(round), [{ code: 'brain_spend', meta: { level: 'stop', stop: 'day' } }], 'the alert is sent in this turn, not the next one');
   // The answer itself crossed it: never sent as a success (the caller takes the holding/outage path).
   const answer = harness({ script: [reply('Hello.')] });
   answer.team.setSetting('brain_usd_day', '2026-11-26:19990000');
   assert.deepEqual(await answer.brain.turn(turnArgs()), { ok: false, code: 'budget' });
-  assert.deepEqual(stopAlerts(answer), [{ code: 'brain_spend', meta: { stop: 'day' } }]);
+  assert.deepEqual(stopAlerts(answer), [{ code: 'brain_spend', meta: { level: 'stop', stop: 'day' } }]);
   // Another turn spent past the month stop while this one was on its tools: the next round is never sent.
   let tools;
   tools = harness({
@@ -1179,7 +1179,7 @@ test('the runaway stops are checked before every paid request and after every re
   });
   assert.deepEqual(await tools.brain.turn(turnArgs()), { ok: false, code: 'budget' });
   assert.equal(tools.calls.length, 1);
-  assert.deepEqual(stopAlerts(tools), [{ code: 'brain_spend', meta: { stop: 'month' } }]);
+  assert.deepEqual(stopAlerts(tools), [{ code: 'brain_spend', meta: { level: 'stop', stop: 'month' } }]);
   // Crossed while the main model failed: no backup request.
   let backup;
   backup = harness({ script: [() => { backup.team.setSetting('brain_usd_day', '2026-11-26:20000000'); return http(503, {}); }, reply('never')] });
@@ -1194,7 +1194,7 @@ test('the runaway stops are checked before every paid request and after every re
   const mail = harness({ promptDir: promptDirWithClassifier(), script: [reply('{"class":"client","wants":"x"}')] });
   mail.team.setSetting('brain_usd_day', '2026-11-26:19998000');
   assert.deepEqual(await mail.brain.classify({ fromName: 'Sara Example', fromDomain: 'example.com', subject: 'Villa', text: 'Hello' }), { error: 'budget' });
-  assert.deepEqual(stopAlerts(mail), [{ code: 'brain_spend', meta: { stop: 'day' } }]);
+  assert.deepEqual(stopAlerts(mail), [{ code: 'brain_spend', meta: { level: 'stop', stop: 'day' } }]);
   // One alert per day, however many turns hit the stop.
   await round.brain.turn(turnArgs());
   assert.equal(stopAlerts(round).length, 1);
@@ -1589,4 +1589,29 @@ test('the fake brain: scripted turns in order, every call recorded, the same sha
   const fn = createFakeBrain({ turns: [(input) => brainReply(`echo ${input.route}`)] });
   assert.equal((await fn.turn(turnArgs())).messages.at(-1).content, 'echo wa');
   assert.throws(() => brainError('nonsense'), TypeError);
+});
+
+/* Codex r36 P2 (the merge with T11): the stop alert the brain sends reads as the stop in owner notes, never as an 80% check-in. */
+test('brain_spend stop: the payload the brain sends gives the spend-stop note in owner notes', async () => {
+  const { createOwnerNotes } = await import('../lib/owner-notes.mjs');
+  const { openDb } = await import('../lib/db.mjs');
+  const { createTeam } = await import('../lib/team.mjs');
+  const { createInboxStore } = await import('../lib/inbox/store.mjs');
+  for (const which of ['day', 'month']) {
+    const db = openDb(':memory:');
+    const now = () => Date.UTC(2026, 10, 28, 9, 0, 0);
+    const team = createTeam(db, { now });
+    team.ensureOwner({ phone: '966500000001', name: 'Owner Example' });
+    const sent = [];
+    const notes = createOwnerNotes({
+      ledger: true, db, siteUrl: 'https://bona.example', publicApi: 'https://api.bona.example', team, inbox: createInboxStore(db, { now }),
+      ownerTest: { autoMode: () => false, active: () => false }, now, log: () => {}, setTimer: null,
+      sendNote: async (text) => { sent.push(text); return { ok: true }; },
+    });
+    // The exact payload overBudget() tells (pinned above: { level: 'stop', stop: 'day' | 'month' }).
+    assert.equal(notes.alert('brain_spend', { level: 'stop', stop: which }).queued, true, which);
+    await notes.tick();
+    assert.match(sent.at(-1) ?? '', /The AI spend stop was reached/, which);
+    assert.doesNotMatch(sent.at(-1) ?? '', /check-in level/, which);
+  }
 });

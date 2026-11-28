@@ -510,7 +510,8 @@ export function createBrain(deps = {}) {
     if (!stop) return null;
     if (state.stopAlerted[stop.which] !== stop.period) {
       state.stopAlerted[stop.which] = stop.period;
-      tell('brain_spend', { stop: stop.which });
+      // `level: 'stop'` is what owner notes read for the stop text (T11, owner-notes.mjs alert); `stop` says which (Codex r36).
+      tell('brain_spend', { level: 'stop', stop: stop.which });
     }
     return stop.which;
   }
