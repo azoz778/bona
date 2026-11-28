@@ -2459,3 +2459,129 @@ test('T12 r5: an uncertain recovery send is not counted as recovered: the hold e
   assert.equal(h.calls.filter((c) => c.url.includes('/message/')).length, lines, 'never sent again');
   assert.equal(h.brain.calls.length, 2);
 });
+
+/* ======================================================================================
+ * PR-B3 r6 (Codex P1s): an open outage is one whose marked line is newer than her last accepted brain answer;
+ * a person-wait hold survives an unsure recovery; fixed lines spend the backlog allowance; an owed line is
+ * sent by the sweep itself; the queue's missed fixes the task; a restart mid-line keeps the mark.
+ * ====================================================================================== */
+
+test('T12 r6 1: an unsure recovery never clears a send_failed hold afterFailure just set', async () => {
+  let n = 0;
+  const h = bh({ turns: [brainError('quota'), brainReply('Back now.')], evo: (k) => ((n += 1) === 2 ? { throws: timeoutErr() } : { status: 201, body: { key: { id: `K${k}` } } }) });
+  h.client('hi', { ts: T_IN - HOUR });
+  h.danaRow({ covers: T_IN - HOUR, created: T_IN - HOUR + 1000, status: 'failed', error: 'http_400' }); // one counted failure today
+  await ask(h, 'is it free?');
+  h.set(T_IN + 10 * 60_000);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.deepEqual([h.lead().dana_hold_reason, h.lead().dana_hold_until], ['send_failed', null], 'the second counted failure: held until a person writes');
+});
+
+test('T12 r6 1: an unsure recovery is still a recovery when cap_day replaced brain_out meanwhile (read from the outage mark)', async () => {
+  let n = 0;
+  const h = bh({ pacing: strictTier(), turns: [brainError('quota'), brainReply('Back now.')], evo: (k) => ((n += 1) === 2 ? { throws: timeoutErr() } : { status: 201, body: { key: { id: `K${k}` } } }) });
+  await ask(h, 'is it free?');
+  const base = T_IN + 20 * 60_000 - DAY;
+  fillDay(h, 59, base);
+  h.set(T_IN + 10 * 60_000);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.equal(h.lead().dana_hold_reason, 'cap_day');
+  h.set(base + DAY + 1);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.ok(h.notes.of('handover').some((c) => c[2].kind === 'send_failed'), 'the recovery hand-over, though the hold was cap_day');
+});
+
+test('T12 r6 2: a recovery reply closes the outage; a later outage gets its own line and alert', async () => {
+  const h = bh({ turns: [brainError('quota'), brainReply('Yes, it is free.'), brainError('quota')] });
+  await ask(h, 'is it free?');
+  h.set(T_IN + 10 * 60_000);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.equal(h.sent()[1], 'Yes, it is free.');
+  h.tick(5 * 60_000);
+  await ask(h, 'and the price?');
+  assert.equal(h.sent().length, 3, 'a second holding line for the second outage');
+  assert.ok(h.sent()[2].endsWith(HANDOVER.en));
+  assert.equal(h.notes.of('alert').filter((c) => c[1] === 'brain_out').length, 2);
+});
+
+test('T12 r6 3: a fixed line sent as a backlog answer spends the ten-an-hour allowance', async () => {
+  const h = bh({ link: { identityOk: () => true, linkStable: () => true },
+    turns: [brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }), brainReply('never')] });
+  for (let i = 0; i < 9; i += 1) {
+    const id = `LEAD-H${i}`;
+    h.s.insertLead({ lead_id: id, created: T_IN - DAY, updated: T_IN - DAY, phone_e164: `96650000110${i}`, wa_jid: `96650000110${i}@s.whatsapp.net`, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+    h.danaRow({ covers: T_IN - 50 * 60_000, created: T_IN - 10 * 60_000, id, guarded: 1 });
+  }
+  h.client('a person please', { ts: T_IN - 40 * 60_000 });
+  await h.dana.answer(LEAD, { ts: T_IN - 40 * 60_000 });
+  assert.equal(h.sent().length, 1, 'the hand-over line went as the tenth backlog answer');
+  const id = 'LEAD-H9';
+  h.s.insertLead({ lead_id: id, created: T_IN - DAY, updated: T_IN - DAY, phone_e164: '966500001109', wa_jid: '966500001109@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  h.ownerTest.setAuto(id, true);
+  const ts = h.client('hello?', { id, ts: T_IN - 40 * 60_000 });
+  assert.deepEqual(await h.dana.answer(id, { ts }), { skipped: 'backlog' }, 'the allowance is used up');
+});
+
+test('T12 r6 4: a deferred closing line is owed and the sweep sends it itself (a privacy stop, then the link holds)', async () => {
+  let stable = false;
+  const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
+    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'privacy' } }] }); }] });
+  h.client('what do you do with what I sent you', { ts: T_IN - 30 * 60_000 + 1000 });
+  await h.dana.answer(LEAD, { ts: T_IN - 30 * 60_000 + 1000 });
+  assert.equal(h.lead().dana_off, 1);
+  assert.equal(h.sent().length, 0, 'the closing line waits: backlog, the link not held');
+  assert.equal(h.lead().dana_hold_reason, 'owed_closing');
+  stable = true;
+  await sweepFor(h, h.now() + 60_000, h.now() + 3 * 60_000);
+  assert.equal(h.sent().length, 1);
+  assert.ok(h.sent()[0].endsWith(CLOSING.en), 'the owed closing line, despite dana_off');
+  assert.equal(h.brain.calls.length, 1, 'no second model turn');
+  assert.equal(h.lead().dana_hold_reason, null);
+});
+
+test('T12 r6 4: a deferred hand-over line is owed and sent by the sweep, not re-asked of the model', async () => {
+  let stable = false;
+  const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
+    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }, brainReply('never')] });
+  h.client('a person please', { ts: T_IN - 30 * 60_000 + 1000 });
+  await h.dana.answer(LEAD, { ts: T_IN - 30 * 60_000 + 1000 });
+  assert.equal(h.lead().dana_hold_reason, 'owed_handover');
+  stable = true;
+  await sweepFor(h, h.now() + 60_000, h.now() + 3 * 60_000);
+  assert.equal(h.sent().length, 1);
+  assert.ok(h.sent()[0].endsWith(HANDOVER.en));
+  assert.equal(h.brain.calls.length, 1);
+});
+
+test('T12 r6 5: when the queue crosses 2 h, the hand-off task becomes missed too', async () => {
+  const h = bh({ turns: [brainError('refusal')], link: { identityOk: () => true, linkStable: () => true },
+    pacing: { ...immediate, fifo: async (fn) => { h.tick(10_000); return fn(); } } });
+  h.client('hello', { ts: T_IN - 2 * HOUR + 5000 });
+  const r = await h.dana.answer(LEAD, { ts: T_IN - 2 * HOUR + 5000 });
+  assert.equal(r.handover, 'missed');
+  assert.equal(h.sent().length, 0);
+  assert.equal(h.s.db.prepare("SELECT reason FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff'").get(LEAD).reason, 'missed');
+  assert.ok(h.notes.of('handover').some((c) => c[2].kind === 'missed'));
+});
+
+test('T12 r6 6: a restart during the outage line\'s own send keeps its mark; the sweep retries the brain', async () => {
+  const h = bh({ turns: [] });
+  const ts = h.client('is it free?');
+  // What lastResort left when the process died mid-send: the hold, the flag, and the marked line still pending.
+  h.s.updateLead(LEAD, { dana_hold_reason: 'brain_out', dana_hold_until: T_IN + 10 * 60_000, needs_human: 1 });
+  h.inbox.insertOutbox({ send_id: 'SND-crash-outage-0001', lead_id: LEAD, jid: CLIENT_JID, text: HANDOVER.en, user_id: null, sender_kind: 'dana', covers_ts: ts });
+  h.s.db.prepare("UPDATE wa_outbox SET error = 'outage_line' WHERE send_id = 'SND-crash-outage-0001'").run();
+  h.sender.recoverInterrupted(); // the restart
+  const row = h.inbox.getOutbox('SND-crash-outage-0001');
+  assert.deepEqual([row.status, row.error], ['uncertain', 'outage_line'], 'the start-up recovery keeps the mark');
+  const r = h.restart([brainReply('Yes, it is free.')]);
+  h.set(T_IN + 10 * 60_000);
+  r.dana.sweep();
+  await r.dana.flush();
+  assert.equal(r.brain.calls.length, 1, 'the brain was retried: the line answered nothing');
+  assert.equal(h.sent().at(-1), 'Yes, it is free.');
+});

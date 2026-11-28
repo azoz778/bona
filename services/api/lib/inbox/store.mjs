@@ -383,7 +383,7 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
             WHERE lead_id IN (SELECT lead_id FROM wa_outbox
                               WHERE status = 'pending' AND created < ? AND sender_kind IN ('staff','dana') AND lead_id IS NOT NULL)`)
         .run(cutoff);
-      return prep("UPDATE wa_outbox SET status = 'uncertain', error = 'interrupted', updated = ? WHERE status = 'pending' AND created < ?")
+      return prep("UPDATE wa_outbox SET status = 'uncertain', error = COALESCE(error, 'interrupted'), updated = ? WHERE status = 'pending' AND created < ?")
         .run(now(), cutoff).changes;
     });
   }

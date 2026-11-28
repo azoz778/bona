@@ -448,8 +448,18 @@ export function createDana({
   /** How far back an outage of one chat reaches: past 2 h its message is `missed` (so the episode ends). */
   const outageWindow = (t) => t - FRESH_MS - BRAIN_OUT_HOLD_MS;
   /** Did this chat's holding line go in this outage? Read from the outbox, so a restart forgets nothing (r2 N1). */
-  const outageLineSince = (leadId, sinceTs) => Boolean(prep('outRowsSince', `SELECT 1 FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana'
-      AND status <> 'failed' AND error = ? AND created >= ? LIMIT 1`).get(String(leadId), OUTAGE_MARK, sinceTs));
+  /**
+   * Is an outage of this chat OPEN (r6)? Its marked holding line went inside the outage window AND after her last
+   * accepted brain answer (guarded=1): a recovery reply closes the outage, so a later outage gets its own line and
+   * alert. "Already lined" and "this run is a recovery" are both read here, from the outbox, never from the hold.
+   */
+  function openOutage(leadId, t = now()) {
+    const id = String(leadId);
+    const lastAnswer = Number(prep('lastGuarded', `SELECT MAX(created) AS at FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana'
+        AND status = 'accepted' AND guarded = 1`).get(id)?.at ?? 0) || 0;
+    return Boolean(prep('openOutage', `SELECT 1 FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana' AND status <> 'failed'
+        AND error = ? AND created >= ? AND created > ? LIMIT 1`).get(id, OUTAGE_MARK, outageWindow(t), lastAnswer));
+  }
 
   /**
    * THE waiting messages of a chat (r4 A): every reader takes them from here (the run's batch, refusedRun, the
@@ -789,13 +799,18 @@ export function createDana({
     if (!viaBrain) return send(lead, text, language, coversTs);
     const wait = safely(() => pace.typingFloorMs({ chars: text.length, newestTs: coversTs })) ?? 0;
     if (wait > 0) await sleep(wait);
-    const r = await pace.fifo((release) => {
+    const r = await pace.fifo(async (release) => {
       const g = sendGate(lead.lead_id, coversTs, { fixed: true, closing });
       if (!g.ok) {
         release?.();
         return { sent: false, stopped: g.stopped, cap: g.cap ?? null };
       }
-      return send(db.getLead(lead.lead_id), text, language, coversTs, { viaBrain: true, mark });
+      if (g.reserve) backlogReserved.add(lead.lead_id);
+      try {
+        return await send(db.getLead(lead.lead_id), text, language, coversTs, { viaBrain: true, mark });
+      } finally {
+        if (g.reserve) backlogReserved.delete(lead.lead_id);
+      }
     });
     if (r.uncertain || (!r.sent && r.failure === 'evolution')) afterFailure(lead, { alert: true });
     return r;
@@ -843,7 +858,7 @@ export function createDana({
       if (cap) return no(cap.reason, { cap });
       if (isBacklogTurn || age > BACKLOG_MS) {
         if (!backlogAllowed(t, { except: leadId })) return no('backlog');
-        reserve = !fixed;
+        reserve = true;
       }
     }
     if (document) {
@@ -903,17 +918,59 @@ export function createDana({
     const sent = Boolean(r.sent);
     let outcome = why;
     if (r.stopped === 'missed') {
-      // The line reached the queue past the 2-h mark: recorded as missed, no line (r5).
+      // The line reached the queue past the 2-h mark: recorded as missed (the task too, r6), no line (r5).
       outcome = 'missed';
+      taskMissed(leadId, why);
       if (auto) noteHandover(fresh, { kind: 'missed', coversTs });
-    } else if (r.stopped === 'backlog') {
-      backlog.set(leadId, coversTs); // the line waits like a model bubble: the sweep takes the chat up again
-    } else if (r.cap && r.cap.reason !== 'cap_chat_day') {
-      setTimedHold(leadId, r.cap.reason, Number.isFinite(r.cap.until) ? r.cap.until : now() + MINUTE_MS);
+    } else {
+      // Deferred by the backlog gate or a cap: the line is OWED (r6), like an outage line; the sweep sends it itself.
+      oweLine(leadId, line === 'closing' ? 'owed_closing' : 'owed_handover', r);
     }
     await notifyHandoff(leadId);
     say({ evt: 'dana.handover', leadId, why: outcome, sent });
     return { handover: outcome, sent };
+  }
+
+  /** The open hand-off task of this chat, written for `why`, becomes `missed` (the queue crossed 2 h; r6). */
+  function taskMissed(leadId, why = null) {
+    prep(why ? 'taskMissedWhy' : 'taskMissedAny', `UPDATE lead_tasks SET reason = 'missed', updated = ? WHERE lead_id = ? AND kind = 'handoff'
+        AND status = 'open' AND source = 'dana'${why ? ' AND reason = ?' : ''}`).run(now(), String(leadId), ...(why ? [String(why)] : []));
+  }
+  /** A fixed line the backlog gate or a cap deferred: owed, on a timed hold the sweep turns into the line itself (r6). */
+  function oweLine(leadId, reason, r) {
+    if (r?.stopped === 'backlog') setTimedHold(leadId, reason, now() + RATE_HOLD_MS);
+    else if (r?.cap && r.cap.reason !== 'cap_chat_day') setTimedHold(leadId, reason, Number.isFinite(r.cap.until) ? r.cap.until : now() + MINUTE_MS);
+  }
+  /**
+   * The sweep's send of an owed hand-over or closing line (r6): the line itself, through the same gate, never a new
+   * model turn (which would stop at chat_off, or skip the line at needs_human). Waits again while the gate defers it.
+   */
+  async function sendOwed(leadId, reason) {
+    const lead = db.getLead(leadId);
+    if (!lead || lead.inbox_state !== 'in') return skip(leadId, 'not_in_inbox');
+    const waiting = pendingFor(leadId, lead);
+    if (!waiting.length) { clearHold(leadId); return skip(leadId, 'nothing'); }
+    const coversTs = waiting[waiting.length - 1].ts;
+    const language = languageOf({ lead, texts: waiting.map((m) => m.text) });
+    const auto = autoOf(lead);
+    const closing = reason === 'owed_closing';
+    const text = closing ? (auto ? CLOSING[language] : HANDOVER[language]) : (auto ? autoHandoverLine(language, now()) : HANDOVER[language]);
+    const r = await sendFixed(lead, text, language, coversTs, true, { closing });
+    if (r.sent) {
+      clearHold(leadId);
+      say({ evt: 'dana.owed_line', leadId, sent: true });
+      return { handover: 'owed', sent: true };
+    }
+    if (r.stopped === 'backlog' || r.cap) {
+      oweLine(leadId, reason, r);
+      return skip(leadId, r.stopped);
+    }
+    clearHold(leadId);
+    if (r.stopped === 'missed') {
+      taskMissed(leadId);
+      if (auto) noteHandover(lead, { kind: 'missed', coversTs });
+    }
+    return skip(leadId, r.stopped ?? 'nothing');
   }
 
   /** A stop, privacy or deletion request (DESIGN §4.1): no more answers in this chat. */
@@ -941,7 +998,7 @@ export function createDana({
     const until = Number(fresh.dana_hold_until);
     // "Already lined" is the outbox's outage row inside the window, whatever hold the chat has moved to (a cap
     // between two retries included; r5). Owed: this chat's brain_out hold of the last span, with no line yet.
-    const lineWent = outageLineSince(leadId, outageWindow(t));
+    const lineWent = openOutage(leadId, t);
     const sameOutage = lineWent || (fresh.dana_hold_reason === 'brain_out' && Number.isFinite(until) && t - until < BRAIN_OUT_HOLD_MS);
     const lined = lineWent ? true : sameOutage ? false : undefined;
     db.transaction(() => {
@@ -1001,10 +1058,10 @@ export function createDana({
   /** DESIGN §6.4: a stable link, and fewer than ten backlog first-answers in the last hour. */
   function backlogAllowed(t, { except = null } = {}) {
     if (safely(() => link?.linkStable?.()) !== true) return false;
-    // The backlog first-answers of the last hour, from the outbox (a restart forgets none): brain answers
-    // (guarded=1) sent more than 30 min after the message they answered; plus the ones on their way now.
+    // The backlog first-answers of the last hour, from the outbox (a restart forgets none): every Dana turn sent
+    // more than 30 min after the message it answered, a fixed line included (r6); plus the ones on their way now.
     const sent = prep('backlogSent', `SELECT COUNT(*) AS n FROM (SELECT DISTINCT lead_id, covers_ts FROM wa_outbox
-        WHERE sender_kind = 'dana' AND status <> 'failed' AND guarded = 1 AND covers_ts IS NOT NULL AND created >= ?
+        WHERE sender_kind = 'dana' AND status <> 'failed' AND covers_ts IS NOT NULL AND created >= ?
           AND created - covers_ts > ?)`).get(t - HOUR_MS, BACKLOG_MS).n;
     const onTheirWay = [...backlogReserved].filter((id) => id !== except).length;
     return sent + onTheirWay < BACKLOG_PER_HOUR;
@@ -1141,7 +1198,8 @@ export function createDana({
     return skip(leadId, e.reason);
   }
 
-  async function run(leadId, ts, { wokeAt = null } = {}) {
+  async function run(leadId, ts, { wokeAt = null, owed = null } = {}) {
+    if (owed) return sendOwed(leadId, owed);
     const started = now();
     // A legacy chat keeps main's freshness rule (the woken message, 30 min, a silent `old` skip); a brain
     // chat's is the batch's own (2 h, backlog, missed: below).
@@ -1162,8 +1220,8 @@ export function createDana({
       return skip(leadId, 'nothing');
     }
     const lead = e.lead;
-    // A recovery run: the chat's outage hold is still on the row (r5: an unsure first send escalates).
-    const recovering = viaBrain && lead.dana_hold_reason === 'brain_out';
+    // A recovery run: an outage of this chat is open, read from its marked line, whatever hold it has now (r6).
+    const recovering = viaBrain && openOutage(leadId, started);
     const language = languageOf({ lead, texts: batch.map((m) => m.text) });
     const coversTs = batch[batch.length - 1].ts;
     if (!openChat(leadId, coversTs, started)) {
@@ -1386,7 +1444,7 @@ export function createDana({
         // The recovery's first bubble may not have gone (r5): never sent again, but never counted as recovered
         // either. The outage hold ends and the chat is handed over like a failed send (the flag, the note, no line).
         afterFailure(pre.lead, { alert: true });
-        clearHold(leadId);
+        // Only the outage hold ends (handover() does it); a person-wait hold afterFailure just set stays (r6).
         await handover(leadId, language, 'send_failed', coversTs, { checked: true, line: 'none', note: { kind: 'send_failed' }, viaBrain });
         outcome = { handover: 'send_failed', sent: false };
         sentAny = true;
@@ -1461,10 +1519,10 @@ export function createDana({
    * One run per chat at a time: a call made while a run is in flight waits for it, so two
    * runs never read the same batch. Never rejects.
    */
-  function answer(leadId, { ts = null, wokeAt = null } = {}) {
+  function answer(leadId, { ts = null, wokeAt = null, owed = null } = {}) {
     const id = String(leadId ?? '');
     const prev = inflight.get(id) ?? Promise.resolve();
-    const p = prev.then(() => run(id, ts, { wokeAt })).catch((err) => {
+    const p = prev.then(() => run(id, ts, { wokeAt, owed })).catch((err) => {
       say({ level: 'error', evt: 'dana.failed', name: errName(err) });
       return { error: 'failed' };
     });
@@ -1529,10 +1587,10 @@ export function createDana({
     const t = now();
     let woken = 0;
     const seen = new Set(); // one sweep runs a chat at most once (r4 E)
-    const wakeOnce = (id, ts) => {
+    const wakeOnce = (id, ts, owed = null) => {
       if (seen.has(id)) return;
       seen.add(id);
-      answer(id, { ts });
+      answer(id, { ts, owed });
       woken += 1;
     };
     try {
@@ -1551,6 +1609,8 @@ export function createDana({
         // The day cap: each freed turn wakes one waiting chat, the oldest first (below); its reason stays so a
         // chat still capped only waits again, with no repeat hand-over (r2). Past the 2-h mark it goes now (missed).
         if (r.dana_hold_reason === 'cap_day' && !pastMark) { capDay.push({ id: r.lead_id, oldest: Number(waiting[0].ts), ts: newest.ts }); continue; }
+        // An owed line is sent by the sweep itself (r6); its hold stays until the line goes or is given up.
+        if (r.dana_hold_reason === 'owed_handover' || r.dana_hold_reason === 'owed_closing') { wakeOnce(r.lead_id, newest.ts, r.dana_hold_reason); continue; }
         // A brain_out reason stays until a reply is accepted (r4 A); the run clears what ends.
         if (r.dana_hold_reason !== 'brain_out' && r.dana_hold_reason !== 'cap_day') clearHold(r.lead_id);
         wakeOnce(r.lead_id, newest.ts);
