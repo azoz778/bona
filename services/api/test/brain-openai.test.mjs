@@ -14,7 +14,7 @@ import {
   requestBody, parseCompletion, safetyIdentifier, cacheKey, retryAfterMs, assistantMessage, usageOf, MAX_COMPLETION_TOKENS, MAX_OUTPUT_TOKENS, REASONING_EFFORT,
   RESPONSES_PATH, MODELS_PATH,
 } from '../lib/brain/openai.mjs';
-import { CODES, codeFromHttp, codeFromThrown, BACKUP_CODES, OUT_CODES } from '../lib/brain/errors.mjs';
+import { CODES, codeFromHttp, codeFromThrown, codeFromFailed, BACKUP_CODES, OUT_CODES, PROVIDER_FAILURE_CODES } from '../lib/brain/errors.mjs';
 import { PROVIDERS, PROVIDER_HOSTS, DEFAULT_BASE_URL, providerFor } from '../lib/brain/providers.mjs';
 import { PRICES, costMicroUsd } from '../lib/brain/prices.mjs';
 import { TOOL_SCHEMAS, ROUTE_TOOLS, toolsFor, routeToolNames } from '../lib/brain/tool-schemas.mjs';
@@ -145,7 +145,11 @@ test('parseCompletion (a Responses body): the text, the function calls (call_id,
   assert.deepEqual(parseCompletion(response([{ ...FC, arguments: '' }])).toolCalls[0].args, {}, 'no arguments: {}');
   const parts = { ...said('x'), content: [{ type: 'output_text', text: 'One ', annotations: [] }, { type: 'output_text', text: 'two.', annotations: [] }] };
   assert.equal(parseCompletion(response([parts])).text, 'One two.');
-  assert.equal(parseCompletion(response([said('First.', 'msg_a'), said('Second.', 'msg_b')])).text, 'First.\n\nSecond.');
+  // r2 (Claude P3-2): the client text is the LAST message only; a preamble or commentary message never reaches the client.
+  assert.equal(parseCompletion(response([said('Checking the listings now.', 'msg_a'), said('We have one villa.', 'msg_b')])).text, 'We have one villa.');
+  assert.equal(parseCompletion(response([{ ...said('Checking now.', 'msg_a'), phase: 'commentary' }, { ...said('Final.', 'msg_b'), phase: 'final_answer' }])).text, 'Final.');
+  assert.equal(parseCompletion(response([said('A preamble.', 'msg_a'), said('', 'msg_b')])).text, '', 'an empty last message is no answer, never the preamble');
+  assert.deepEqual(parseCompletion(response([said('First.', 'msg_a'), said('Second.', 'msg_b')])).output.map((i) => i.id), ['msg_a', 'msg_b'], 'every item stays in output');
   const refused = parseCompletion(response([{ id: 'msg_r', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'refusal', refusal: 'I cannot help with that.' }] }]));
   assert.equal(refused.ok, true);
   assert.equal(refused.refusal, true);
@@ -157,7 +161,7 @@ test('parseCompletion (a Responses body): the text, the function calls (call_id,
     response([said('The villa is in Obhur and it has')], { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } }),
     response([REASONING], { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } }),
     response([FC], { status: 'incomplete', incomplete_details: null }),
-    response([], { status: 'failed', error: { code: 'server_error', message: 'The server had an error.' } }),
+    response([], { status: 'failed', error: { code: 'invalid_prompt', message: 'Invalid prompt.' } }),
     response([said('ok')], { error: { code: 'server_error', message: 'x' } }),
     response([said('ok')], { status: 'in_progress' }),
     response([said('ok')], { status: 'queued' }),
@@ -203,6 +207,23 @@ test('the one error enum (DESIGN-brain §4.1): HTTP status and thrown errors map
   assert.equal(retryAfterMs(new Headers({ 'retry-after-ms': '500' })), 500);
   assert.equal(retryAfterMs(new Headers({})), null);
   assert.equal(retryAfterMs(new Headers({ 'retry-after': 'soon' })), null);
+});
+
+test('T25b r2 (Codex P2): a 200 with status failed is down when the fault is on OpenAI\'s side (server_error, rate_limit_exceeded, vector_store_timeout), else bad_response', () => {
+  assert.deepEqual([...PROVIDER_FAILURE_CODES].sort(), ['rate_limit_exceeded', 'server_error', 'vector_store_timeout']);
+  for (const code of ['server_error', 'rate_limit_exceeded', 'vector_store_timeout', 'SERVER_ERROR']) {
+    assert.equal(codeFromFailed({ code, message: 'The model failed to generate a response.' }), 'down', code);
+    assert.deepEqual(parseCompletion(response([], { status: 'failed', error: { code, message: 'x' } })), { ok: false, code: 'down' }, code);
+  }
+  assert.deepEqual(parseCompletion(response(null, { status: 'failed', error: { code: 'server_error' } })), { ok: false, code: 'down' }, 'a failed body needs no output');
+  // Request-side codes (the prompt, an image) and anything unknown or missing stay bad_response.
+  for (const err of [{ code: 'invalid_prompt' }, { code: 'invalid_image' }, { code: 'image_content_policy_violation' }, { code: 'failed_to_download_image' },
+    { code: 'a_new_code' }, { code: null }, {}, null, 'server_error']) {
+    assert.equal(codeFromFailed(err), 'bad_response', JSON.stringify(err));
+    assert.deepEqual(parseCompletion(response([], { status: 'failed', error: err })), BAD, JSON.stringify(err));
+  }
+  assert.deepEqual(parseCompletion(response([said('ok')], { error: { code: 'server_error' } })), BAD, 'an error beside another status is no outage signal');
+  assert.deepEqual(parseCompletion(response([], { status: 'incomplete', error: { code: 'server_error' } })), BAD);
 });
 
 test('PROVIDERS is pinned to OpenAI; only an https URL on a listed host is a provider', () => {

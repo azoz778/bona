@@ -32,14 +32,18 @@ import path from 'node:path';
 /* A real brain (lib/brain.mjs) on a fake OpenAI: only for the request-body tests. */
 const brainTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-dana-brain-'));
 test.after(() => fs.rmSync(brainTmp, { recursive: true, force: true }));
-// A POST /v1/responses answer (T25b) and the request read back as chat turns: instructions first, then each input
-// message (a developer message is the brain's system note). These tests send no tool round.
+// A POST /v1/responses answer (T25b) and the request read back as chat turns: the instructions first (only when the
+// body has them, so a check on msgs[0] can still fail), then each input message (a developer message is the brain's
+// system note). These tests send no tool round.
 const reply200 = (content) => ({
   object: 'response', status: 'completed', error: null, incomplete_details: null,
   output: [{ id: 'msg_1', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: content, annotations: [] }] }],
   usage: { input_tokens: 10, output_tokens: 5 },
 });
-const chatOf = (b) => [{ role: 'system', content: b.instructions }, ...b.input.map((i) => ({ role: i.role === 'developer' ? 'system' : i.role, content: i.content }))];
+const chatOf = (b) => [
+  ...(typeof b.instructions === 'string' ? [{ role: 'system', content: b.instructions }] : []),
+  ...b.input.map((i) => ({ role: i.role === 'developer' ? 'system' : i.role, content: i.content })),
+];
 function realBrain(script) {
   const keyFile = path.join(brainTmp, `key-${Math.random().toString(36).slice(2)}.env`);
   fs.writeFileSync(keyFile, `${KEY_NAME}=sk-test-not-a-real-key-000000000000\n`, { mode: 0o600 });

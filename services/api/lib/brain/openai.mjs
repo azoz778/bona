@@ -21,12 +21,15 @@
  * (`assistantMessage`): never in a turn result, a log line, a marker or the next turn, and a backup restart starts
  * without them (they belong to the other model).
  *
- * The response: the text, the function calls (each with its arguments parsed: a JSON object or the whole response is
+ * The response: the text (the LAST assistant message only: a preamble or commentary message before it never reaches
+ * the client), the function calls (each with its arguments parsed: a JSON object or the whole response is
  * `bad_response`), a refusal flag, the usage token counts and the output items. Anything but `status:'completed'` is
  * `bad_response`, except an `incomplete` one stopped by the content filter, which is a refusal (never retried on
- * another model). Cut off at max_output_tokens is `bad_response` (the backup model's case).
+ * another model), and a `failed` one whose error code puts the fault on OpenAI's side, which is `down` as a 5xx
+ * (errors.mjs codeFromFailed). Cut off at max_output_tokens is `bad_response` (the backup model's case).
  */
 import { createHash } from 'node:crypto';
+import { codeFromFailed } from './errors.mjs';
 
 export const RESPONSES_PATH = '/responses';
 export const MODELS_PATH = '/models';
@@ -120,18 +123,20 @@ const BAD = Object.freeze({ ok: false, code: 'bad_response' });
 /**
  * @param {unknown} json  the parsed 200 body
  * @returns {{ ok: true, text: string, toolCalls: {id, name, arguments, args}[], refusal: boolean, finish: string,
- *             usage: object, output: object[] } | { ok: false, code: 'bad_response' }}
+ *             usage: object, output: object[] } | { ok: false, code: 'bad_response'|'down' }}
  *   `id` of a tool call is its `call_id` (what the function_call_output answers); `output` is the response's items,
  *   for assistantMessage.
  */
 export function parseCompletion(json) {
+  // A 200 that failed: `down` when OpenAI's own side failed (server_error and kin), else bad_response.
+  if (json && typeof json === 'object' && json.status === 'failed') return { ok: false, code: codeFromFailed(json.error) };
   if (!json || typeof json !== 'object' || !Array.isArray(json.output) || json.error != null) return BAD;
   if (json.status === 'incomplete') {
     if (json.incomplete_details?.reason !== 'content_filter') return BAD; // cut off: half an answer is never an answer
     return { ok: true, text: '', toolCalls: [], refusal: true, finish: 'content_filter', usage: usageOf(json), output: [] };
   }
   if (json.status !== 'completed') return BAD;
-  const texts = [];
+  let text = '';
   const toolCalls = [];
   let refusal = false;
   for (const item of json.output) {
@@ -142,20 +147,20 @@ export function parseCompletion(json) {
         if (p?.type === 'output_text' && typeof p.text === 'string') parts.push(p.text);
         else if (p?.type === 'refusal' && typeof p.refusal === 'string' && p.refusal.trim() !== '') refusal = true;
       }
-      if (parts.length) texts.push(parts.join(''));
+      text = parts.join(''); // the last message is the answer; an earlier one was a preamble
     } else if (item.type === 'function_call') {
       if (typeof item.call_id !== 'string' || !item.call_id || typeof item.name !== 'string' || !item.name) return BAD;
-      const text = typeof item.arguments === 'string' ? item.arguments : '';
+      const argText = typeof item.arguments === 'string' ? item.arguments : '';
       let args;
-      try { args = text.trim() ? JSON.parse(text) : {}; } catch { return BAD; }
+      try { args = argText.trim() ? JSON.parse(argText) : {}; } catch { return BAD; }
       if (!args || typeof args !== 'object' || Array.isArray(args)) return BAD;
-      toolCalls.push({ id: item.call_id, name: item.name, arguments: text, args });
+      toolCalls.push({ id: item.call_id, name: item.name, arguments: argText, args });
     }
     // `reasoning` items (and any other) only go back with the tool round (assistantMessage).
   }
   return {
     ok: true,
-    text: texts.join('\n\n').trim(),
+    text: text.trim(),
     toolCalls,
     refusal,
     finish: toolCalls.length ? 'tool_calls' : 'stop',

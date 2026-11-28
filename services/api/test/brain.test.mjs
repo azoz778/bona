@@ -997,6 +997,53 @@ test('a turn that throws during the half-open trial frees the trial: the next tu
   assert.equal(brain.ops().breaker, false, 'the trial worked: closed');
 });
 
+const failed200 = (code) => ({ status: 200, json: responseJson([], { status: 'failed', error: { code, message: 'The model failed to generate a response.' } }) });
+
+test('T25b r2 (Codex P2): a 200 that failed on the provider side is down: three in 10 min open the breaker exactly as three 5xx do, with no brain_bug', async () => {
+  const run = async (script) => {
+    const h = harness({ backupMode: 'handover', script: [...script, reply('never')] });
+    const codes = [];
+    for (let i = 0; i < 3; i += 1) { codes.push((await h.brain.turn(turnArgs())).code); h.advance(MIN); }
+    const n = h.calls.length;
+    const blocked = await h.brain.turn(turnArgs());
+    return { codes, calls: n, blocked, noCall: h.calls.length === n, alerts: h.alerts, ok: h.brain.health().ok, ops: { breaker: h.brain.ops().breaker, errors: h.brain.ops().errors } };
+  };
+  const fivexx = await run([http(500, {}), http(502, {}), http(503, {})]);
+  const failed = await run([failed200('server_error'), failed200('rate_limit_exceeded'), failed200('vector_store_timeout')]);
+  assert.deepEqual(failed, fivexx, 'the same path as three 5xx');
+  assert.deepEqual(failed.codes, ['down', 'down', 'down']);
+  assert.deepEqual(failed.blocked, { ok: false, code: 'down' });
+  assert.equal(failed.noCall, true, 'the breaker is open: no call');
+  assert.deepEqual(failed.alerts, [{ code: 'brain_out', meta: { code: 'down' } }], 'the outage alert, never brain_bug');
+  assert.equal(failed.ops.breaker, true);
+  const backup = harness({ script: [failed200('server_error'), reply('From the backup.')] });
+  const r = await backup.brain.turn(turnArgs());
+  assert.equal(r.ok && r.backup, true, 'it goes to the backup model, as a 5xx does');
+  // A request-side failure or an unknown code stays bad_response: it counts toward brain_bug, never the breaker.
+  const req = harness({ backupMode: 'handover', script: [failed200('invalid_prompt'), failed200('a_new_code'), { status: 200, json: responseJson([], { status: 'failed', error: null }) }, reply('Still open.')] });
+  const reqCodes = [];
+  for (let i = 0; i < 3; i += 1) { reqCodes.push((await req.brain.turn(turnArgs())).code); req.advance(MIN); }
+  assert.deepEqual(reqCodes, ['bad_response', 'bad_response', 'bad_response']);
+  assert.deepEqual(req.alerts, [{ code: 'brain_bug', meta: {} }]);
+  assert.equal((await req.brain.turn(turnArgs())).ok, true, 'the breaker never opened');
+  assert.equal(req.calls.length, 4);
+});
+
+test('T25b r2 (Claude P3-2): a response with two assistant messages answers with the last one only; the preamble is neither sent nor guard-checked', async () => {
+  const two = (first, last) => ({ status: 200, json: responseJson([reasoningItem(), textItem(first), textItem(last)]) });
+  const h = harness({ script: [two('Checking the listings now.', 'We have one villa in Obhur.')] });
+  const r = await h.brain.turn(turnArgs());
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.messages, [{ role: 'agent', content: 'We have one villa in Obhur.' }]);
+  assert.equal(JSON.stringify(r).includes('Checking the listings'), false);
+  const priced = harness({ script: [two('It is SAR 7,000,000, let me check.', 'A team member will confirm the price.'), reply('never')] });
+  const p = await priced.brain.turn(turnArgs());
+  assert.equal(p.ok, true);
+  assert.equal(p.guard.repaired, false, 'the guard reads what is sent: the final message, clean');
+  assert.equal(priced.calls.length, 1);
+  assert.deepEqual(p.messages, [{ role: 'agent', content: 'A team member will confirm the price.' }]);
+});
+
 test('3 bad responses in an hour raise one brain_bug alert', async () => {
   const h = harness({ backupMode: 'handover', script: [reply(''), reply(''), reply(''), reply('')] });
   for (let i = 0; i < 4; i += 1) await h.brain.turn(turnArgs());
