@@ -22,15 +22,21 @@
  *   - a reserved book_viewing followed by one that never ran (the brain's tool limit, a thrown tool): the outcome
  *     is unknown, so nothing is committed and the model's "booking it" never goes out alone: BOOKING_FAILED_LINE
  *     and the hand-over;
- *   - the safety net: a brain answer that claims a booking (reply-guard claimsBooking: booked, confirmed,
- *     تم الحجز, تم تأكيد …, in a sentence that does not deny it: "isn't booked yet", «لم يتم», «لسه ما») with
- *     no successful commit → BOOKING_FAILED_LINE and the hand-over, when it comes with any sign of a booking:
- *     a viewing tool in the turn, a viewing word (viewing, visit, appointment, booking, معاينة, زيارة, موعدك,
- *     حجزك), a weekday or a clock time, or a personal claim ("you're booked", "see you", «تم الحجز», «حجزت
- *     لك»). The claim usually comes in the turn after the slots were offered, with no viewing tool in it. "The
- *     developer has confirmed delivery in Q4 2027", "fully booked" or "Delivery is confirmed for 15 December
- *     2027" (a bare date is no sign) is no claim. Only on a brain turn: a legacy Retell completion has no
- *     booking tool and keeps today's behaviour (the same-release rule).
+ *   - the safety net: with no successful commit, a brain answer with a booking claim → BOOKING_FAILED_LINE and
+ *     the hand-over. Sentence by sentence (. ! ? ; ؟ ؛ newline):
+ *       1. a denial is cut out only where it governs the claim word ("isn't booked", "is not yet confirmed",
+ *          "hasn't been booked", "not booked yet", «لم يتم الحجز», «ما تم الحجز», «لسه ما تم الحجز», «الحجز
+ *          غير مؤكد»); a negative word about anything else ("the meeting point isn't set yet", «ولسه ما أرسلت
+ *          لك الموقع», «وهذا ما تم الاتفاق عليه») cuts nothing, and «بعد ما» + a past verb is "after", never "not";
+ *       2. what is left is a claim when it says booked / confirmed / تم الحجز / تم تأكيد … (reply-guard
+ *          claimsBooking) or uses a personal claim form (PERSONAL_CLAIM_RE: "you're all set", "see you then",
+ *          «حجزت لك», «نشوفك الأحد»);
+ *       3. and it fires when that same sentence has a sign of a booking (a viewing word, a weekday or tomorrow,
+ *          a clock time, a personal claim form) or the turn called viewing_slots or book_viewing.
+ *     The claim usually comes in the turn after the slots were offered, with no viewing tool in it. "The
+ *     developer has confirmed delivery in Q4 2027", "fully booked", "today" (no viewing is same-day) or a bare
+ *     date is no claim. A needless hand-over is the accepted cost; a phantom booking is not. Only on a brain
+ *     turn: a legacy Retell completion has no booking tool and keeps today's behaviour (the same-release rule).
  * The hand-over itself (needs_human, the alert, notes.handover) stays dana-wa's: `afterPreSend` answers it as
  * `handover: { kind }`, and dana-wa applies it as any other.
  *
@@ -59,27 +65,52 @@ export const DEFAULT_MAX_LINKS = 2;
 
 /** A word that names a viewing (the booking intent of a claim with no viewing tool in the turn). */
 const VIEWING_WORD_RE = /(?<![\p{L}])(?:viewings?|visits?|appointments?|bookings?)(?![\p{L}])|معاين|زيار|موعدك|حجزك/iu;
-/** A weekday, tomorrow or today (Arabic weekdays only with the article: «أحد» alone is "someone"). */
-const DAY_RE = /(?<![\p{L}])(?:(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|today|tonight)(?![\p{L}])|(?<![\p{L}])ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس|جمعة|جمعه|سبت)(?![\p{L}])|(?<![\p{L}])(?:بكرة|بكره|غدا|غداً|اليوم)(?![\p{L}])/iu;
+/**
+ * A weekday or tomorrow (Arabic weekdays only with the article: «أحد» alone is "someone"). Not "today": viewings
+ * are booked from tomorrow (lib/slots.mjs), and "fully booked today" is about stock.
+ */
+const DAY_RE = /(?<![\p{L}])(?:(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow)(?![\p{L}])|(?<![\p{L}])ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس|جمعة|جمعه|سبت)(?![\p{L}])|(?<![\p{L}])(?:بكرة|بكره|غدا|غداً)(?![\p{L}])/iu;
 /** A clock time: 10 am, 2:00 pm, 14:00, at 10, noon, الساعة 2, 2 ظهراً. */
 const TIME_RE = /(?<![\d:])\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)(?![\p{L}])|(?<![\d:])\d{1,2}:\d{2}(?![\d:])|(?<![\p{L}])at\s+\d{1,2}(?!\d|[,.]\d)|(?<![\p{L}])(?:noon|o'clock)(?![\p{L}])|الساعة\s*\d|(?<![\d:])\d{1,2}\s*(?:صباح|مساء|ظهر|عصر|الصبح|الظهر|العصر)/iu;
-/** A claim aimed at the client: "you're (all) set / booked / confirmed", "see you", «تم الحجز», «حجزت لك», «تأكد الحجز». */
-const PERSONAL_CLAIM_RE = /(?<![\p{L}])you(?:'re|’re|\s+are)\s+(?:all\s+)?(?:set|booked|confirmed)(?![\p{L}])|(?<![\p{L}])see\s+you(?![\p{L}])|تم\s+الحجز|حجزت\s*لك|تأكد\s+(?:ال)?حجز|تم\s+تأكيد\s+الحجز/iu;
-/** A sentence that denies the booking: isn't / is not / not yet / not … yet, «لم يتم», «ما تم», «لسه ما», «بعد ما (تم|تأكد)», «غير مؤكد». */
-const DENIAL_RE = /(?<![\p{L}])(?:isn['’]t|aren['’]t|wasn['’]t|hasn['’]t|haven['’]t|(?:is|are|was|has|have)\s+not|not\s+yet)(?![\p{L}])|(?<![\p{L}])not(?![\p{L}])[^.!?؟\n]*?(?<![\p{L}])yet(?![\p{L}])|لم\s+يتم|(?<![\p{L}])ما\s+تم|لسه\s+ما|لسا\s+ما|(?<![\p{L}])بعد\s+ما\s+(?:تم|تأكد|انحجز|حجزت)|غير\s+مؤكد/iu;
-/** Sentences, for the denial check (a denial in one sentence never cancels a claim in another). */
-const SENTENCE_SPLIT_RE = /[.!?؟؛\n]+/u;
+const WEEKDAY_AR = String.raw`ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس)`;
+/**
+ * A claim aimed at the client, and a booking sign on its own: "you're / you are (all) set|booked|confirmed",
+ * "see you then|on|at|there|tomorrow|<weekday>" (never "see you soon"), «تم الحجز», «حجزت لك», «تأكد (ال)حجز»,
+ * «تم تأكيد الحجز», «(ب)نشوفك» + a weekday, tomorrow or a time (never «نشوفك على خير»).
+ */
+const PERSONAL_CLAIM_RE = new RegExp([
+  String.raw`(?<![\p{L}])you(?:'re|’re|\s+are)\s+(?:all\s+)?(?:set|booked|confirmed)(?![\p{L}])`,
+  String.raw`(?<![\p{L}])see\s+you\s+(?:then|on|at|there|tomorrow|(?:sun|mon|tues|wednes|thurs|fri|satur)day)(?![\p{L}])`,
+  String.raw`تم\s+الحجز|حجزت\s*لك|تأكد\s+(?:ال)?حجز|تم\s+تأكيد\s+الحجز`,
+  String.raw`(?<![\p{L}])ب?نشوفك(?:م)?\s+(?:يوم\s+)?(?:${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة)`,
+].join('|'), 'iu');
+/**
+ * A denial that governs the claim word, cut out before the claim check (Claude r3): "isn't / aren't / wasn't /
+ * is not / not (yet) / hasn't been … booked|confirmed (yet)", «لم يتم / ما تم / لسه ما (تم) / للحين ما (تم) +
+ * الحجز|التأكيد|تأكد», «الحجز / موعدك / المعاينة لسه ما تأكد», «… غير مؤكد». «بعد ما» is "after" in Hijazi, so
+ * «بعد ما تم الحجز» is no denial (the lookbehind), and «ما تم الاتفاق عليه» ("what was agreed") is none either.
+ */
+const GOVERNED_DENIAL_RE = new RegExp([
+  String.raw`(?<![\p{L}])(?:isn['’]t|aren['’]t|wasn['’]t|(?:hasn['’]t|haven['’]t|has\s+not|have\s+not)\s+been|(?:is|are|was)\s+not|not)\s+(?:yet\s+|been\s+|fully\s+|actually\s+)?(?:booked|confirmed)(?![\p{L}])(?:\s+yet)?`,
+  String.raw`(?:لم\s+يتم|(?<!بعد\s+)(?<![\p{L}])ما\s+تم|(?:لسه|لسا|للحين)\s+ما(?:\s+تم)?)\s+(?:ال)?(?:حجز|تأكيد|تأكد|انحجز)\S*`,
+  String.raw`(?:الحجز|موعدك|المعاينة)\s+(?:(?:لسه|لسا|للحين)\s+ما\s+(?:تأكد|تم)|غير\s+مؤكد)`,
+].join('|'), 'giu');
+/** Sentences: a denial, a claim and its sign are read in one sentence at a time. */
+const SENTENCE_SPLIT_RE = /[.!?;؟؛\n]+/u;
 
-/** Whether the text affirms a booking in at least one sentence that does not deny it. */
-function affirmsBooking(body) {
-  return String(body ?? '').split(SENTENCE_SPLIT_RE).some((s) => claimsBooking(s) && !DENIAL_RE.test(s));
-}
-
-/** Any sign that a claim is about a booking (Claude r2 rule): a viewing tool, a viewing word, a weekday or a time, a personal claim. */
-function bookingIntent(calls, body) {
-  if (calls.some((c) => c.name === 'viewing_slots' || c.name === 'book_viewing')) return true;
-  const t = toAsciiDigits(String(body ?? ''));
-  return VIEWING_WORD_RE.test(t) || DAY_RE.test(t) || TIME_RE.test(t) || PERSONAL_CLAIM_RE.test(t);
+/**
+ * Whether the answer claims a booking (the safety net, Claude + Codex r1-r3): in one sentence, after the governed
+ * denials are cut out, a claim word or a personal claim form, with a booking sign in that same sentence or a viewing
+ * tool anywhere in the turn.
+ */
+function claimsABooking(calls, body) {
+  const viewingTool = calls.some((c) => c.name === 'viewing_slots' || c.name === 'book_viewing');
+  return String(body ?? '').split(SENTENCE_SPLIT_RE).some((sentence) => {
+    const s = toAsciiDigits(sentence.replace(GOVERNED_DENIAL_RE, ' '));
+    const personal = PERSONAL_CLAIM_RE.test(s);
+    if (!personal && !claimsBooking(s)) return false;
+    return viewingTool || personal || VIEWING_WORD_RE.test(s) || DAY_RE.test(s) || TIME_RE.test(s);
+  });
 }
 
 const LINK_RE = /https?:\/\/[^\s<>"'`]+/giu;
@@ -209,7 +240,7 @@ export function createDanaCommit(deps = {}) {
       body = BOOKING_FAILED_LINE[lang];
       handover = { kind: 'booking_failed' };
       say({ evt: 'dana.commit', leadId, booking: 'unbacked' });
-    } else if (brainTurn && affirmsBooking(body) && bookingIntent(calls, body)) {
+    } else if (brainTurn && claimsABooking(calls, body)) {
       // The safety net (DESIGN §4.3): only a commit may say a viewing is booked.
       body = BOOKING_FAILED_LINE[lang];
       handover = { kind: 'booking_failed' };

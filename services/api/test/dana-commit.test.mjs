@@ -367,8 +367,12 @@ test('a negated claim is no claim: the need_name flow and "not booked yet" answe
     ['لم يتم الحجز بعد، إيش اسمك الكريم؟', 'ar'],
     ['ما تم الحجز للحين، أي اسم أسجّله؟', 'ar'],
     ['لسه ما تم الحجز، إيش اسمك؟', 'ar'],
-    ['بعد ما تأكد الحجز، أرسل لي اسمك وأكمّل لك', 'ar'],
-    ['حجزت لك الموعد مبدئياً، وهو غير مؤكد للحين. إيش اسمك؟', 'ar'],
+    ['Not booked yet: may I have your name?', 'en'],
+    ["You're not booked yet; which name should I use?", 'en'],
+    ["Your viewing hasn't been confirmed yet. Your name, please?", 'en'],
+    ['الحجز لسه ما تأكد، إيش اسمك؟', 'ar'],
+    ['للحين ما تم الحجز، أرسل لي اسمك', 'ar'],
+    ['الحجز غير مؤكد للحين، إيش اسمك الكريم؟', 'ar'],
   ];
   for (const [text, lang] of denials) {
     for (const tools of [[needName], [slots], []]) {
@@ -405,4 +409,73 @@ test('a reserved book_viewing followed by one that never ran (the tool limit, a 
   const onlyFailed = { name: 'book_viewing', args: { slot_id: SLOT, listing_id: 'BONA-W003' }, result: { error: 'tool_failed' }, ok: false };
   const sorry = 'I cannot check that right now; a person from the team can help.';
   assert.deepEqual(await commitWith({ viewing: fakeViewing() }).afterPreSend({ lead: LEAD, turn: brainReply(sorry, { tools: [onlyFailed] }), text: sorry, language: 'en' }), { bubbles: [{ kind: 'text', text: sorry }] });
+});
+
+/* ---------------- PR-B4 r4 (the r3 reviews) ---------------- */
+
+const caughtWith = async (c, text, lang, tools) => {
+  const out = await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools }), text, language: lang });
+  return out.handover?.kind === 'booking_failed' && out.bubbles[0].text === BOOKING_FAILED_LINE[lang];
+};
+
+test('a denial counts only where it governs the claim word: a negative word about something else never hides a claim (Claude r3 P2-1, Codex r3 P1)', async () => {
+  const c = commitWith({ viewing: fakeViewing() });
+  const claims = [
+    ["You're booked for Sunday at 10, the exact meeting point isn't set yet, the team will send it.", 'en'],
+    ['Your viewing is confirmed for Sunday at 10 am; the meeting point is not shared yet.', 'en'],
+    ['Booked for Sunday 10:00, not yet sent you the location but I will.', 'en'],
+    ["Your viewing is booked for Sunday at 10, and there's nothing you haven't sent us.", 'en'],
+    ["Monday isn't available, but your Sunday viewing is booked", 'en'], // Codex r3
+    ["Not to worry, you're booked for Sunday 10:00", 'en'],
+    ["Your viewing is booked for Sunday at 10 — you don't need to do anything else.", 'en'],
+    ['تم حجز موعدك يوم الأحد الساعة 10، ولم يتم تحديد نقطة اللقاء بعد', 'ar'],
+    ['تم الحجز ✅ ولسه ما أرسلت لك الموقع، الفريق بيرسله', 'ar'],
+    ['تم تأكيد موعدك يوم الأحد، والموقع غير مؤكد للحين', 'ar'],
+    ['تم الحجز يوم الأحد، وهذا ما تم الاتفاق عليه', 'ar'], // «ما تم» = "what was", no denial
+    ['بعد ما حجزت لك الأحد الساعة 10، الفريق بيرسل لك الموقع', 'ar'], // «بعد ما» + a past verb = "after"
+    ['بعد ما تم الحجز، بيرسل لك الفريق نقطة اللقاء', 'ar'],
+    ['لا تشيل هم، تم الحجز', 'ar'],
+  ];
+  for (const [text, lang] of claims) {
+    for (const tools of [[], [NEEDS]]) assert.ok(await caughtWith(c, text, lang, tools), `${text} (${tools.length ? 'save_needs' : 'no tool'})`);
+  }
+  // Ambiguous or itself false: they hand over, the safe side (a needless hand-over, never a phantom booking).
+  for (const [text, lang] of [['بعد ما تأكد الحجز، أرسل لي اسمك وأكمّل لك', 'ar'], ['حجزت لك الموعد مبدئياً، وهو غير مؤكد للحين. إيش اسمك؟', 'ar']]) {
+    assert.ok(await caughtWith(c, text, lang, []), text);
+  }
+});
+
+test('personal claim forms are claims on their own: "You\'re all set for Sunday at 10. See you then!", «نشوفك الأحد الساعة 10»; a plain goodbye is not (Codex r3 P1)', async () => {
+  const c = commitWith({ viewing: fakeViewing() });
+  for (const [text, lang] of [
+    ["You're all set for Sunday at 10. See you then!", 'en'],
+    ['You are all set for Monday 12:00.', 'en'],
+    ['See you on Sunday at 10!', 'en'],
+    ['See you then!', 'en'],
+    ['تمام، نشوفك الأحد الساعة 10', 'ar'],
+    ['أبشر، بنشوفك بكرة الساعة 12 الظهر', 'ar'],
+  ]) {
+    for (const tools of [[], [NEEDS]]) assert.ok(await caughtWith(c, text, lang, tools), `${text} (${tools.length ? 'save_needs' : 'no tool'})`);
+  }
+  for (const [text, lang] of [['Hope to see you soon!', 'en'], ['See you soon, take care.', 'en'], ['نشوفك على خير', 'ar'], ['حياك الله، نشوفك قريب', 'ar']]) {
+    assert.deepEqual(await c.afterPreSend({ lead: LEAD, turn: brainReply(text), text, language: lang }), { bubbles: [{ kind: 'text', text }] }, text);
+  }
+});
+
+test("the booking sign is read in the claim's own sentence (the viewing tool turn-wide): a goodbye next to \"fully booked\", or \"today\", is no claim (Claude r3 P3-1)", async () => {
+  const c = commitWith({ viewing: fakeViewing() });
+  const untouched = [
+    ['Hope to see you soon! The 2-bedroom units are fully booked.', 'en'],
+    ['The 2-bedroom units are fully booked; the 3-bedroom ones are open from Sunday.', 'en'],
+    ['The developer confirmed the handover date today.', 'en'],
+    ['تم حجز كل الشقق بغرفتين اليوم', 'ar'],
+  ];
+  for (const [text, lang] of untouched) {
+    for (const tools of [[], [NEEDS]]) {
+      assert.deepEqual(await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools }), text, language: lang }), { bubbles: [{ kind: 'text', text }] }, text);
+    }
+  }
+  // A viewing tool in the turn is a sign for every sentence: the claim in the second one hands over.
+  const slots = { name: 'viewing_slots', args: { listing_id: 'BONA-W003' }, result: { bookable: true, slots: [] } };
+  assert.ok(await caughtWith(c, untouched[0][0], 'en', [slots]));
 });
