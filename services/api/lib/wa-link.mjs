@@ -172,6 +172,12 @@ export function createWaLink({
   let goodSince = null;
   let lastGood = null;
   let loggedIdentity = null;
+  // PR-INT r3: every identity check takes a number when it starts; an answer is recorded only when its check started
+  // after the last recorded one, so a slow early answer never overwrites a newer one (a confirmed mismatch, say).
+  let probeSeq = 0;
+  let recordedSeq = 0;
+  const takeSeq = () => { probeSeq += 1; return probeSeq; };
+  const newest = (seq) => { if (seq <= recordedSeq) return false; recordedSeq = seq; return true; };
   let started = false;
   let timer = null;
   let gen = 0;
@@ -241,10 +247,13 @@ export function createWaLink({
     const ac = new AbortController();
     controller = ac;
     const fresh = () => g === gen;
+    const seq = takeSeq();
     const id = await askIdentity(ac.signal);
     if (!fresh()) return;
 
-    if (id.error) {
+    if (!id.error && !newest(seq)) {
+      // A newer check answered first: this round records nothing, and asks the link on what that one recorded.
+    } else if (id.error) {
       idFails += 1;
       say({ level: 'warn', evt: 'wa.link.probe_failed', probe: 'identity', code: id.error });
     } else {
@@ -312,8 +321,9 @@ export function createWaLink({
     if (!canProbe || !started) return identityOk();
     if (inflight) { await inflight; return identityOk(); }
     const g = gen;
+    const seq = takeSeq();
     const id = await askIdentity(AbortSignal.timeout(timeoutMs));
-    if (g !== gen || id.error) return identityOk();
+    if (g !== gen || id.error || !newest(seq)) return identityOk();
     identity = { match: id.match, at: now() };
     if (id.match) mismatchAlerted = false;
     const idNow = identityOk();

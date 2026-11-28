@@ -1120,6 +1120,11 @@ function rig14({ env = {}, config = {}, openai = [], google = null, realBrain = 
       }
       if (u.includes('/instance/fetchInstances') || u.includes('/chat/whatsappNumbers/')) {
         if (evoState.down || (evoState.idDown && u.includes('/instance/fetchInstances'))) return reply(503, {});
+        if (u.includes('/instance/fetchInstances') && evoState.answers?.length) {
+          const a = evoState.answers.shift();
+          await a.wait;
+          return reply(200, [{ name: 'bona-test', ownerJid: jidOf(a.number), connectionStatus: 'open' }]);
+        }
         if (u.includes('/instance/fetchInstances')) return reply(200, [{ name: 'bona-test', ownerJid: jidOf(evoState.number), connectionStatus: 'open' }]);
         return reply(200, [{ number: BONA14, exists: true }]);
       }
@@ -2145,6 +2150,127 @@ test('T14 boot: the brain\'s models probe runs after the first identity round', 
     assert.ok(idAt >= 0 && probeAt > idAt, `identity first (${idAt}), then the models probe (${probeAt})`);
   } finally {
     h.app.stopTimers();
+    await h.close();
+  }
+});
+
+/* ---------------- PR-INT r3: stale identity answers, notes on an unproven instance, the held outage across a restart ---------------- */
+
+test('T14 identity: a late fast-check answer never overwrites a newer mismatch: no wake, and the mismatch stays', async () => {
+  const h = rig14({ waLink: null });
+  try {
+    const { app } = h;
+    app.team.setSetting('dana_enabled', '1');
+    h.evoState.idDown = true;
+    app.startTimers(noIntervals);
+    await app.waLink.probe();
+    h.seedLead('LEAD-20261203-stal0001', '966500000068');
+    await h.poll(h.rec('966500000068', 'C-1', 'hello?'));
+    assert.equal(h.sendsTo('966500000068').length, 0, 'refused while unproven');
+    h.evoState.idDown = false;
+    let release;
+    h.evoState.answers = [{ wait: new Promise((r) => { release = r; }), number: BONA14 }, { wait: null, number: '966500000099' }];
+    const fast = app.ticks.identity();
+    await new Promise((r) => setImmediate(r));
+    await app.waLink.probe();
+    assert.equal(app.waLink.identityMismatch(), true, 'the full round recorded the mismatch');
+    release();
+    assert.deepEqual(await fast, { woken: 0 }, 'the late answer of the earlier check is ignored');
+    assert.equal(app.waLink.identityMismatch(), true, 'the mismatch stays');
+    assert.equal(app.waLink.identityOk(), false);
+    await app.dana.flush();
+    assert.equal(h.sendsTo('966500000068').length, 0, 'no wake, no send');
+  } finally {
+    h.app.stopTimers();
+    await h.close();
+  }
+});
+
+test('T14 notes: on Bona\'s own number a queued note is held while the instance is not proven (mismatch after a restart), then goes once it is', async () => {
+  const db = openDb(':memory:');
+  try {
+    const a = rig14({ db });
+    a.app.team.setSetting('sending_enabled', '0');
+    assert.equal(a.app.notes.alert('breaker').queued, true);
+    await a.close();
+    const b = rig14({ db, waLink: null, startAt: T14 + 60_000 });
+    try {
+      b.app.team.setSetting('sending_enabled', '1');
+      b.evoState.number = '966500000099';
+      b.app.poller.start = () => true;
+      await b.app.start(noIntervals);
+      assert.equal(b.app.waLink.identityMismatch(), true);
+      b.advance(60_000);
+      await b.app.notes.tick();
+      assert.equal(noteSends(b.evo.sends).length, 0, 'nothing through an instance that failed identity');
+      assert.equal(b.notes("kind = 'alert'")[0].status, 'queued', 'held, never dropped');
+      b.evoState.number = BONA14;
+      await b.app.waLink.probe();
+      assert.equal(b.app.waLink.identityOk(), true);
+      b.advance(60_000);
+      await b.app.notes.tick();
+      b.advance(60_000);
+      await b.app.notes.tick();
+      assert.equal(noteSends(b.evo.sends).length, 1, 'proven: it goes, once');
+      assert.equal(b.notes("kind = 'alert'")[0].status, 'sent');
+    } finally {
+      b.app.stopTimers();
+      await b.close();
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('T14 brain: a persisted outage restored at start while the brain is not in use is held across the restart and delivered at the first moment of use', async () => {
+  const AUTH = { status: 401, json: { error: { code: 'invalid_api_key' } } };
+  const db = openDb(':memory:');
+  try {
+    const a = rig14({ db, realBrain: true, openai: [AUTH] });
+    await a.app.ticks.brainProbe();
+    assert.notEqual(a.app.team.brainOutSince(), null, 'the brain kept its marker');
+    assert.deepEqual(a.notes(), []);
+    await a.close();
+    const b = rig14({ db, realBrain: true, startAt: T14 + 60_000 });
+    try {
+      const pushed = [];
+      const owners = b.app.alerts.notifyOwners;
+      b.app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
+      await b.app.ticks.notes();
+      assert.deepEqual(b.notes(), [], 'not in use: still held');
+      b.app.team.setSetting('owner_as_client', '1');
+      await b.app.ticks.notes();
+      await b.app.alerts.flush();
+      assert.equal(b.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_out').length, 1, 'delivered once at the first use');
+      assert.deepEqual(pushed, ['brain']);
+      await b.app.ticks.notes();
+      await b.app.alerts.flush();
+      assert.deepEqual(pushed, ['brain'], 'once');
+    } finally {
+      await b.close();
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('T14 brain: a held outage alert is dropped when the brain recovers (the models probe answers 200) before it is in use', async () => {
+  const AUTH = { status: 401, json: { error: { code: 'invalid_api_key' } } };
+  const h = rig14({ realBrain: true, openai: [AUTH, { status: 200, json: { data: [] } }] });
+  try {
+    const { app } = h;
+    const pushed = [];
+    const owners = app.alerts.notifyOwners;
+    app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
+    await app.ticks.brainProbe();
+    await app.ticks.brainProbe();
+    assert.equal(app.brain.health().ok, true, 'the key works again');
+    app.team.setSetting('owner_as_client', '1');
+    await app.ticks.notes();
+    await app.alerts.flush();
+    assert.deepEqual(h.notes(), [], 'nothing stale delivered');
+    assert.deepEqual(pushed, []);
+  } finally {
     await h.close();
   }
 });

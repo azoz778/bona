@@ -409,7 +409,7 @@ export function createApp(options = {}) {
   const brainAlert = (code, meta) => {
     if (!brainInUse()) {
       log({ level: 'warn', evt: 'brain.alert_quiet', code: String(code).slice(0, 40), why: typeof meta?.code === 'string' ? meta.code.slice(0, 40) : null });
-      if (code === 'brain_out' && (meta?.code === 'quota' || meta?.code === 'auth')) deferredBrainOut = { code, meta: { code: meta.code } };
+      if (code === 'brain_out' && (meta?.code === 'quota' || meta?.code === 'auth')) deferredBrainOut = { code, meta: { code: meta.code }, push: true };
       return;
     }
     deliverBrainAlert(code, meta);
@@ -420,21 +420,35 @@ export function createApp(options = {}) {
     try { out = brain?.health?.()?.ok !== true; } catch { out = false; }
     if (!out) { deferredBrainOut = null; return; }
     if (!brainInUse()) return;
-    const { code, meta } = deferredBrainOut;
+    const { code, meta, push } = deferredBrainOut;
     deferredBrainOut = null;
-    deliverBrainAlert(code, meta);
+    deliverBrainAlert(code, meta, { push });
   };
-  function deliverBrainAlert(code, meta) {
+  function deliverBrainAlert(code, meta, { push = false } = {}) {
     try { notes?.alert?.(code, meta); } catch (err) { log({ level: 'error', evt: 'brain.alert_failed', code: String(code), name: loggableName(err) }); }
-    if (code === 'brain_out' && (meta?.code === 'quota' || meta?.code === 'auth')) alerts.notifyOwners?.({ reason: 'brain' });
+    if (code === 'brain_out' && (push || meta?.code === 'quota' || meta?.code === 'auth')) alerts.notifyOwners?.({ reason: 'brain' });
   }
   brain = options.brain ?? createBrain({
     cfg, runTool: (name, envelope) => tools.runInProcess(name, envelope), team, fetchImpl, now: clock, log, alert: brainAlert,
   });
+  // An outage the brain restored from its marker (PR-INT r3): the marker is set only by quota or auth, and its alert
+  // went before the restart, or was held then; held again while the brain is not in use, so its first use delivers it.
+  try {
+    if (brain.configured === true && team.brainOutSince?.() != null && !brainInUse()) deferredBrainOut = { code: 'brain_out', meta: { code: 'down' }, push: true };
+  } catch { /* nothing to hold */ }
   // The owner's notes (DESIGN §7, PR-B2): the ledger, paced and merged, sent through the one sender as kind 'note' (the
   // owner's jid only, its own `note:to:` limit, an outbox row without text or lead), held while Sending is off. A test
   // that hands createApp its own `sendWhatsApp` gets that as the transport instead (http.test.mjs's seam).
-  const sendNote = options.sendWhatsApp ?? ((text) => sender.sendTo({ jid: wa.ownerJid, text, kind: 'note' }));
+  // On Bona's own number (BONA_WA_INSTANCE_JID set) a note goes only through an instance proven to be Bona's
+  // (PR-INT r3, DESIGN §5.3): while it is not (unproven or mismatched), the ledger holds it, queued, and the next
+  // pass after the proof sends it; answered like the Sending switch's refusal, so it is never failed or dropped.
+  const sendNote = options.sendWhatsApp ?? ((text) => {
+    if (wa.ownNumberFrom === 'instance' && waLink.identityOk?.() !== true) {
+      log({ level: 'warn', evt: 'notes.held_identity' });
+      return { ok: false, error: 'sending_disabled', failure: 'local' };
+    }
+    return sender.sendTo({ jid: wa.ownerJid, text, kind: 'note' });
+  });
   notes = options.notes ?? createOwnerNotes({
     ledger: true, db, siteUrl: cfg.siteUrl, publicApi: cfg.publicApi, sendNote, team, ownerTest, inventory, brain, viewing, waLink,
     mail: { get configured() { return mail?.health?.()?.configured === true; }, health: () => mail?.health?.() ?? { configured: false } },
