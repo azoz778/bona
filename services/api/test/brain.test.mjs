@@ -1162,6 +1162,20 @@ test("Codex r9: a number the client split across two messages never reaches the 
   assert.equal(j.calls[0].body.messages.some((x) => x.content.includes('2 950 000')), true);
 });
 
+test("Codex r10: historyFromInbox masks the client's rows as one series before it clips them: a long row that ends inside a number does not leave the rest in the next row", async () => {
+  const rows = [
+    { key_id: 'k1', direction: 'in', text: `${'x'.repeat(320)} my number is 050` },
+    { key_id: 'k2', direction: 'out', sender_kind: 'dana', text: 'Thanks, the rest please?' },
+    { key_id: 'k3', direction: 'in', text: '000 0000' },
+  ];
+  const history = historyFromInbox(rows);
+  assert.equal(history.map((t) => t.content).join(' ').replace(/\D/g, '').includes('0000000'), false, JSON.stringify(history.map((t) => t.content.slice(-20))));
+  // The batch on its own: what a split leaves never stays as 7 digits starting with 0.
+  const h = harness({ script: [reply('Hello.')] });
+  await h.brain.turn(turnArgs({ history: [{ role: 'user', content: `${'x'.repeat(295)}…` }], batchText: '000 0000 is the rest' }));
+  assert.equal(h.calls[0].body.messages.map((x) => x.content).join('\n').replace(/\D/g, '').includes('0000000'), false);
+});
+
 test('every history row is clipped to 300 characters after masking, also when the caller did not build the history with historyFromInbox', async () => {
   const h = harness({ script: [reply('Hello.')] });
   await h.brain.turn(turnArgs({ history: [{ role: 'user', content: `${'x'.repeat(295)} 0500000000 ${'x'.repeat(4000)}` }, { role: 'team', content: 'y'.repeat(400) }] }));

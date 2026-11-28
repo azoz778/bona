@@ -254,8 +254,13 @@ function numberCuts(s) {
         // line break split, as a plain-text email wraps one ("055 123\n4567", Claude r13 F1).
         // ...and a phone found before the break goes on when the next line completes it into a longer clear one
         // ("+966 50 000 00\n00", Codex r9).
-        if (/[\r\n\u2028\u2029]/.test(gap)
-          && (lineStartsNumber(s, groups, j, gap.includes('+')) || (best && !lineCompletes(s, groups, j, digits)))) break;
+        // A `+` number of another country goes on too while it can still grow (E.164: 15 digits), unless it is a
+        // complete Saudi one ("+44 7700 900\n001", Codex r10; "+966 50 000 0000\n12 bedrooms" keeps its count).
+        if (/[\r\n\u2028\u2029]/.test(gap)) {
+          const goesOn = best && (lineCompletes(s, groups, j, digits)
+            || (plus && !/^966\d{9}$/.test(digits) && digits.length + groups[j].digits.length <= MAX_DIGITS));
+          if (lineStartsNumber(s, groups, j, gap.includes('+')) || (best && !goesOn)) break;
+        }
         if (!GAP_RE.test(gap)) { if (tail) break; wide = true; }
         gaps.push(gap);
         if (wide || SOFT_GAP_RE.test(gap)) soft = true;
@@ -332,7 +337,52 @@ function numberCuts(s) {
     cuts.push({ start, end, mask: best.mask });
     i = best.j + 1;
   }
-  return cuts;
+  return residual(s, groups, cuts);
+}
+
+/** Groups joined to `groups[k]` from it on, as a phone joins them, within one line, never across a date: their indexes. */
+function joinedRun(s, groups, k) {
+  const run = [k];
+  for (let m = k + 1; m < groups.length; m += 1) {
+    const gap = s.slice(groups[m - 1].end, groups[m].start);
+    if (groups[m].date || !PHONE_GAP_RE.test(gap) || /[\r\n\u2028\u2029]/.test(gap)) break;
+    run.push(m);
+  }
+  return run;
+}
+
+/**
+ * The net under the cuts (Codex r10): what a number split elsewhere (across messages, a clip, a cut that took only
+ * part of it) leaves in clear is masked too:
+ *   - R1: digits no cut took, joined as a phone is, 7 or more and starting with 0 (no amount starts with 0);
+ *   - R2: 4 or more digits joined to a phone or ID mask's end, unless they are one amount in thousands groups
+ *     ("[phone] 234 5678" goes; "551 234 567 - 1 000" keeps its amount).
+ * It only adds masks.
+ */
+function residual(s, groups, cuts) {
+  const covered = (g) => cuts.some((c) => g.start < c.end && g.end > c.start);
+  const out = cuts.slice();
+  const isThousands = (idx) => idx.length >= 2 && isAmount(idx.map((k) => groups[k]), idx.slice(1).map((k) => s.slice(groups[k - 1].end, groups[k].start)));
+  // R2: the digits right after a phone, ID or account mask.
+  for (const c of cuts) {
+    if (c.mask === '[email]' || c.mask === '[iban]') continue;
+    const k = groups.findIndex((g) => g.start >= c.end && !g.date);
+    if (k < 0 || covered(groups[k])) continue;
+    const gap = s.slice(c.end, groups[k].start);
+    if (!PHONE_GAP_RE.test(gap) || /[\r\n\u2028\u2029]/.test(gap)) continue;
+    const run = joinedRun(s, groups, k).filter((m) => !covered(groups[m]));
+    const digits = run.map((m) => groups[m].digits).join('');
+    if (digits.length >= 4 && !isThousands(run)) c.end = groups[run.at(-1)].end;
+  }
+  // R1: a run no cut took, 7+ digits, starting with 0.
+  for (let k = 0; k < groups.length;) {
+    if (groups[k].date || covered(groups[k])) { k += 1; continue; }
+    const run = joinedRun(s, groups, k).filter((m) => !covered(groups[m]));
+    const digits = run.map((m) => groups[m].digits).join('');
+    if (digits.length >= 7 && digits.startsWith('0')) out.push({ start: groups[run[0]].start, end: groups[run.at(-1)].end, mask: '[phone]' });
+    k = run.at(-1) + 1;
+  }
+  return out.sort((x, y) => x.start - y.start);
 }
 
 /** Every match of `re` in the probe: its span, then the span blanked so no later mask reads it again. */

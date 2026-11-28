@@ -142,8 +142,15 @@ const textOrMedia = (m) => (typeof m?.text === 'string' && m.text.trim() ? m.tex
  * Each row is masked before it is clipped, so a phone across the cut never leaves part of it.
  */
 export function historyFromInbox(rows, { exclude = new Set() } = {}) {
-  const list = (Array.isArray(rows) ? rows : []).filter((m) => m && !exclude.has(m.key_id)).slice(-CONTEXT_ROWS);
-  const turns = list.map((m) => ({ role: m.direction === 'in' ? 'user' : m.sender_kind === 'dana' ? 'assistant' : 'team', content: oneLine(defaultMinimise(String(textOrMedia(m))), ROW_CHARS) }));
+  const all = (Array.isArray(rows) ? rows : []).filter((m) => m && !exclude.has(m.key_id));
+  // The client's rows are masked as one series (minimiseParts) before any is clipped, so a number split across two
+  // of them, or cut by the 300-character clip, never leaves a piece in clear (Codex r10); ours on their own.
+  const texts = all.map((m) => String(textOrMedia(m)));
+  const ins = all.flatMap((m, i) => (m.direction === 'in' ? [i] : []));
+  const masked = texts.map((t) => defaultMinimise(t));
+  minimiseParts(ins.map((i) => texts[i])).forEach((t, k) => { masked[ins[k]] = t; });
+  const list = all.map((m, i) => ({ m, text: masked[i] })).slice(-CONTEXT_ROWS);
+  const turns = list.map(({ m, text }) => ({ role: m.direction === 'in' ? 'user' : m.sender_kind === 'dana' ? 'assistant' : 'team', content: oneLine(text, ROW_CHARS) }));
   const size = () => turns.reduce((n, t) => n + t.content.length, 0);
   while (turns.length > 1 && size() > LIMITS.historyChars) turns.shift();
   return turns;

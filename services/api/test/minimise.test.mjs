@@ -261,9 +261,10 @@ test('two amounts written in thousands groups on one dash, slash or "+" stay as 
   ]) assert.equal(minimise(input), want, input);
 });
 
-test('a 10-digit run that starts with "00" is no phone (a Saudi number starts 0 then 1-9)', () => {
-  for (const s of ['ref 000 310 0000', 'code 0000000000']) assert.equal(minimise(s), s, s);
+test('a 10-digit run that starts with "00" is no phone shape (a Saudi number starts 0 then 1-9), so no amount tail is read as one; the net still masks 7+ digits starting with 0 (Codex r10)', () => {
+  for (const s of ['ref 000 310 0000', 'code 0000000000']) assert.equal(minimise(s), s.replace(/\d[\d ]*\d/, '[phone]'), s);
   assert.equal(minimise('call 0130000000'), 'call [phone]');
+  for (const s of ['budget 500.000 - 600.000', '500 000 - 600 000 2 bedrooms', 'rent 20.000 - 30.000 a year']) assert.equal(minimise(s), s, s);
 });
 
 /* Codex r7 P0 + Claude r12 F1/F2: a number next to another number or an amount is never split so its tail stays in clear. */
@@ -343,6 +344,18 @@ test('minimiseParts masks a series as one text: a number split across two parts 
   assert.deepEqual(minimiseParts(['villa in Abhur?', '3 bedrooms']), ['villa in Abhur?', '3 bedrooms']);
   assert.deepEqual(minimiseParts([null, 'x 0500000000']), ['', 'x [phone]']);
   for (const t of ['call 0500000000', 'budget 500.000 - 600.000', 'mail a@example.com', '']) assert.deepEqual(minimiseParts([t]), [minimise(t)], t);
+});
+
+/* Codex r10: a "+" number of any country wrapped across a line; what a split leaves on its own. */
+test('a wrapped "+" number of any country stays one; a 7-digit run starting with 0, or digits a mask left next to it, never stay in clear', () => {
+  assert.equal(minimise('+44 7700 900\n001'), '[phone]');
+  assert.equal(minimise('call +966 50 000 0000\n12 bedrooms please'), 'call [phone]\n12 bedrooms please', 'a complete Saudi number ends at the break');
+  assert.equal(minimise('+966 50 000 0000\n+44 7700 900000'), '[phone]\n[phone]');
+  // What a number split elsewhere leaves: never 7 digits starting with 0 (no amount starts with 0).
+  assert.equal(minimise('000 0000'), '[phone]');
+  assert.equal(minimise('and 000 0000 please'), 'and [phone] please');
+  // Amounts and counts stay.
+  for (const t of ['551 234 567 - 1 000', 'budget 500 000 - 600 000 2 bedrooms', '2 950 000 SAR', 'call 0500000000  -  12 bedrooms']) assert.equal(minimise(t).includes(t.includes('551') ? '1 000' : t.split(' ').at(-1)), true, t);
 });
 
 /** The first 7-digit run of `num` still readable in `out` (digits only), else null. */
