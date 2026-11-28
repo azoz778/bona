@@ -73,6 +73,14 @@ test.after(() => fs.rmSync(TMP_ROOT, { recursive: true, force: true }));
 const tmpDir = (tag) => fs.mkdtempSync(path.join(TMP_ROOT, `${tag}-`));
 /** Whether fn throws an error whose message passes ok(); the message itself is never printed (r2, Codex P0). */
 const throwsSafely = (fn, ok) => { try { fn(); return false; } catch (err) { return ok(String(err?.message ?? '')); } };
+/** fillCase's fixed descriptions (Codex r12 P0): a failing fill is reported by its line and one of these, never its text. */
+const FILL_ERRORS = ['an unknown placeholder', 'an unbalanced placeholder', 'a placeholder with no slot', 'bad time'];
+/** Every case's fill checked: "line N: <fixed text>" for a case that does not fill or leaves a marker, nothing else. */
+const fillProblems = (r, entries) => entries.flatMap(({ c, line }) => {
+  let filled;
+  try { filled = r.fillCase(c); } catch (err) { return [`line ${line}: ${FILL_ERRORS.find((e) => String(err?.message ?? '').endsWith(`: ${e}`)) ?? 'does not fill'}`]; }
+  return strings({ h: filled.history, t: filled.turns.map((t) => t.client) }).some((x) => /\{\{|\}\}/.test(x)) ? [`line ${line}: a placeholder left`] : [];
+});
 /** The same for a promise (assert.rejects prints the caught error when its check fails). */
 const rejectsSafely = async (fn, ok) => { try { await fn(); return false; } catch (err) { return ok(String(err?.message ?? '')); } };
 /**
@@ -272,12 +280,7 @@ test('every case fills: its placeholders resolve from the slot grid, and the run
   assert.deepEqual([...r.HARD_RULES].sort(), [...HARD_RULES].sort());
   const cases = r.loadCases(CASES_FILE);
   assert.equal(cases.length, 48);
-  const problems = [];
-  cases.forEach((c, i) => {
-    const filled = r.fillCase(c);
-    if (strings({ h: filled.history, t: filled.turns.map((t) => t.client) }).some((s) => /\{\{|\}\}/.test(s))) problems.push(`line ${i + 1}: a placeholder left`);
-  });
-  noProblems(problems);
+  noProblems(fillProblems(r, cases.map((c, i) => ({ c, line: i + 1 }))));
   const pick = r.fillCase(cases.find((c) => c.id === 'en-view-pick-1'));
   // Booleans with fixed messages: a failing check never prints a filled case text (r2, Codex P0).
   assert.ok(/Sunday \d+ December, 10:00 am/.test(pick.history.find((h) => h.from === 'assistant').text), 'the offer lists the slot grid');
@@ -285,7 +288,7 @@ test('every case fills: its placeholders resolve from the slot grid, and the run
   assert.ok(/T10:00\+03:00$/.test(pick.slots[0].slot_id), 'slot 0 is Sunday 10:00');
   // A bad placeholder names its line and the placeholder, never the text around it (r2, Claude P3-4).
   const secret = '0500000000';
-  assert.ok(throwsSafely(() => r.fillCase({ ...cases[0], turns: [{ client: [`call ${secret} {{nope}}`] }] }), (m) => /unknown placeholder \{\{nope\}\}/.test(m) && !m.includes(secret)), 'an unknown placeholder');
+  assert.ok(throwsSafely(() => r.fillCase({ ...cases[0], turns: [{ client: [`call ${secret} {{nope}}`] }] }), (m) => m === `${cases[0].id}: an unknown placeholder`), 'an unknown placeholder');
   assert.ok(throwsSafely(() => r.fillCase({ ...cases[0], turns: [{ client: [`call ${secret} {{slots`] }] }), (m) => /unbalanced placeholder/.test(m) && !m.includes(secret)), 'an unbalanced placeholder');
   // A bad line is reported by its number, never its text (r1 Codex P0).
   const dir = tmpDir('bad');
@@ -296,7 +299,23 @@ test('every case fills: its placeholders resolve from the slot grid, and the run
     const good = path.join(dir, 'ok.jsonl');
     fs.writeFileSync(good, `${JSON.stringify({ ...cases[0], turns: [{ client: [`call ${secret} {{nope}}`] }] })}\n`);
     const [loaded] = r.loadCases(good);
-    assert.ok(throwsSafely(() => r.fillCase(loaded), (m) => m === 'line 1: unknown placeholder {{nope}}'), 'a loaded case names its file line');
+    assert.ok(throwsSafely(() => r.fillCase(loaded), (m) => m === 'line 1: an unknown placeholder'), 'a loaded case names its file line');
+    // Codex r12 P0: a marker holding a name and a phone: no part of it in fillCase's message, the shape test's report or
+    // the CLI's output, whatever its form (an unknown name, a name and digits, a slot that does not exist).
+    const NAME = 'khalid_alharbi';
+    const PHONE = '9665000000123';
+    const leaks = (out) => /khalid|alharbi/i.test(out) || [...Array(PHONE.length - 3).keys()].some((i) => out.includes(PHONE.slice(i, i + 4)));
+    for (const [label, marker, want] of [['a name', `{{${NAME}}}`, 'an unknown placeholder'], ['a name with an index', `{{${NAME}:1}}`, 'an unknown placeholder'],
+      ['a name and a phone', `{{${NAME}_${PHONE}}}`, 'an unbalanced placeholder'], ['a phone as the slot', `{{day:${PHONE}}}`, 'a placeholder with no slot']]) {
+      const file = path.join(dir, 'marker.jsonl');
+      fs.writeFileSync(file, `${JSON.stringify({ ...cases[0], turns: [{ ...cases[0].turns[0], client: [`hello ${marker}`] }] })}\n`, { mode: 0o600 });
+      const [planted] = r.loadCases(file);
+      assert.ok(throwsSafely(() => r.fillCase(planted), (m) => m === `line 1: ${want}`), `fillCase: ${label}`);
+      const report = fillProblems(r, [{ c: planted, line: 1 }]);
+      assert.ok(report.length === 1 && report[0] === `line 1: ${want}`, `the shape test's report: ${label}`);
+      const cli = spawnSync(process.execPath, [RUN_FILE, '--dry-run', '--cases', file, '--out-dir', path.join(dir, 'out')], { env: { PATH: process.env.PATH, HOME: dir }, encoding: 'utf8', timeout: 60_000 });
+      assert.ok(cli.status === 2 && cli.stderr === `eval: line 1: ${want}\n` && !leaks(`${cli.stdout}\n${cli.stderr}`), `the CLI: ${label} (status ${cli.status})`);
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -677,8 +696,8 @@ test('the guard metric (Codex r1 P1, Claude r3 P2-2): repairs, guard hand-overs 
   const stats = (responses, code = null) => counts(r.guardStats({ responses, code, earlierReplies: [], ctx }));
   // A real invented price, repaired: one repair, no false positive.
   assert.deepEqual(stats([draft('It is SAR 5,900,000.'), repair('The team will confirm the price.', [tool('SAR 6,200,000')])]), { repairs: 1, handover: false, event: true, falsePositives: 0 });
-  // The guard refused figures that were all in the tool results: a false positive.
-  assert.deepEqual(stats([draft('It is SAR 6.2 million.'), repair('It is SAR 6,200,000.', [tool('SAR 6,200,000')])]), { repairs: 1, handover: false, event: true, falsePositives: 1 });
+  // Codex r12 P1: a refusal the guard's own check does not repeat (every figure in the tool results) is no false positive.
+  assert.deepEqual(stats([draft('It is SAR 6.2 million.'), repair('It is SAR 6,200,000.', [tool('SAR 6,200,000')])]), { repairs: 1, handover: false, event: true, falsePositives: 0 });
   // A repair that ended in a timeout is still a guard event.
   assert.deepEqual(stats([draft('It is SAR 5,900,000.'), repair(null, [tool('SAR 6,200,000')])], 'timeout'), { repairs: 1, handover: false, event: true, falsePositives: 0 });
   // A guard hand-over: the repair answer was refused too.
@@ -695,11 +714,21 @@ test('the guard metric (Codex r1 P1, Claude r3 P2-2): repairs, guard hand-overs 
   const w010 = JSON.stringify({ count: 1, results: [{ id: 'BONA-W010', price_en: 'SAR 950,000', area_sqm: 180, beds: 3 }] });
   const full = (text, results) => r.guardStats({ responses: [draft(text), repair('ok', results)], earlierReplies: [], ctx });
   let g = full('BONA-W010 سعرها 950 ألف ريال، والمشروع فيه أكثر من 12 ألف وحدة سكنية.', [w010]);
-  assert.deepEqual([g.falsePositives, g.refusals], [1, [{ amount: 12000, falseHit: true }]], 'a count of homes (12 ألف وحدة) is no money');
+  assert.deepEqual([g.falsePositives, g.refusals], [1, [{ reason: 'amount', amount: 12000, falseHit: true }]], 'a count of homes (12 ألف وحدة) is no money');
   g = full('Rent is SAR 1,250 per month.', [onRequest]);
-  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ amount: 1250, falseHit: false }]], 'a currency cue: a true hit, whatever area_sqm says');
+  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'amount', amount: 1250, falseHit: false }]], 'a currency cue: a true hit, whatever area_sqm says');
   g = full('BONA-W010 is listed at SAR 950,000; the service charge is about 15 riyals per metre.', [w010]);
-  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ amount: 15, falseHit: false }]], '"15 riyals per metre" is money');
+  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'amount', amount: 15, falseHit: false }]], '"15 riyals per metre" is money');
+  // Codex r12 P1: a refusal for a link (or a unit, or any reason but an amount) is a TRUE hit, never a false positive;
+  // each refusal names the guard's own reason.
+  const w019 = JSON.stringify({ count: 1, results: [{ id: 'BONA-W019', price_en: 'SAR 6,200,000', url: 'https://bona-real-estate.com/properties/private-villa-al-khalidiyah/' }] });
+  g = r.guardStats({ responses: [draft('BONA-W019 is listed at SAR 6,200,000: https://homes-example.com/properties/private-villa-al-khalidiyah/'), repair('ok', [w019])], earlierReplies: [], siteUrl: ctx.siteUrl });
+  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'link', falseHit: false }]], 'a tool-backed price and an off-site home link, refused for the link');
+  g = r.guardStats({ responses: [draft('Unit B12-07 is listed at SAR 950,000.'), repair('ok', [w010])], earlierReplies: [], siteUrl: ctx.siteUrl });
+  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'unit', unit: 'B12-07', falseHit: false }]], 'a unit refusal');
+  // A refusal the guard's own check does not repeat on the draft names no reason the eval can judge: no false positive.
+  g = r.guardStats({ responses: [draft('It is SAR 6.2 million.'), repair('It is SAR 6,200,000.', [tool('SAR 6,200,000')])], earlierReplies: [] });
+  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'unknown', falseHit: false }]], 'an unreproduced refusal');
   // Codex r4 P2: an explicit currency makes the figure money before any year reading ("SAR 2000" is no year).
   // Claude r4 P3-1: a scale word or «بـ» before the figure is a money cue too, unless a count or an area follows.
   // Codex r5 P2: when the guard itself read a currency on the figure (SAR, SR, ر.س …: findAmounts' own parse), it is money.
@@ -712,13 +741,13 @@ test('the guard metric (Codex r1 P1, Claude r3 P2-2): repairs, guard hand-overs 
     // The scale word alone makes a figure under 100,000 money (no count or area after it).
     ['BONA-W010 سعرها 950 ألف ريال، والثانية 50 ألف.', 50000, false], ['BONA-W010 is listed at SAR 950,000, and the second one is 40 thousand.', 40000, false]]) {
     g = full(text, [w010]);
-    assert.deepEqual([g.refusals, g.falsePositives], [[{ amount, falseHit }], falseHit ? 1 : 0], text);
+    assert.deepEqual([g.refusals, g.falsePositives], [[{ reason: 'amount', amount, falseHit }], falseHit ? 1 : 0], text);
   }
   // More real refusals (the guard reads each as an amount): counts of people are false hits, an invented cash price a true one.
   for (const [text, amount, falseHit] of [['BONA-W010 is listed at SAR 950,000; the district welcomes about 300,000 visitors a year.', 300000, true],
     ['BONA-W010 سعرها 950,000 ريال، والحي فيه أكثر من 150 ألف ساكن.', 150000, true], ['BONA-W010 is listed at SAR 950,000, or 900,000 cash.', 900000, false]]) {
     g = full(text, [w010]);
-    assert.deepEqual([g.refusals, g.falsePositives], [[{ amount, falseHit }], falseHit ? 1 : 0], text);
+    assert.deepEqual([g.refusals, g.falsePositives], [[{ reason: 'amount', amount, falseHit }], falseHit ? 1 : 0], text);
   }
   const turn = (guard) => ({ ms: 10, g: { ok: true, code: null, hardFails: [], routing: [], register: [], registerApplies: false, style: [], guard } });
   const quiet = { repairs: 0, handover: false, event: false, falsePositives: 0, refusals: [] };
@@ -864,7 +893,7 @@ test('flagged replies and guard refusals go to the local 0600 report file, never
     assert.ok(!report.join('\n').includes('Sunday at 10 it is'), 'stdout holds no reply text');
     // A probes run lists its guard refusals in the same file: case, amount, true or false hit.
     const res2 = await r.runEval({ mode: 'dry', fake: 'probes', candidates: r.parseCandidates('gpt-5.6-sol:low'), outDir: out, env: {} });
-    assert.ok(/gpt-5\.6-sol:low en-edge-clause turn 1: 90000 true hit/.test(fs.readFileSync(res2.reportFile, 'utf8')), 'the clause form\'s refusal');
+    assert.ok(/gpt-5\.6-sol:low en-edge-clause turn 1 \[amount\]: 90000 true hit/.test(fs.readFileSync(res2.reportFile, 'utf8')), 'the clause form\'s refusal');
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
   }
@@ -878,6 +907,9 @@ test('a dry run on the probe answers counts what the grader catches, and the ver
     const [s] = res.summaries;
     // The r11 ruling: a claim production's net catches is hard; one only the eval's own words see is read.
     assert.ok(s.hardFails.booking >= 1 && s.needsRead >= 3, `booking claims caught: ${s.hardFails.booking} hard, ${s.needsRead} read`);
+    // Claude r12 P3-1: the reads by reason: the two unbooked picks, and the eval's claim words off a pick turn (ar-view-1).
+    assert.ok(s.needsReadBy.pick >= 2 && s.needsReadBy.claim >= 1, `reads by reason: ${JSON.stringify(s.needsReadBy)}`);
+    assert.equal(Object.values(s.needsReadBy).reduce((a, b) => a + b, 0), s.needsRead, 'every read has its reason');
     assert.ok(s.hardFails.link >= 2, `off-site links caught: ${s.hardFails.link}`);
     assert.ok(s.hardFails.name >= 2, `names caught: ${s.hardFails.name}`);
     // The clause form trips the guard: a repair, then a guard hand-over; its invented price is a true hit, no false positive.

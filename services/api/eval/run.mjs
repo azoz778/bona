@@ -70,7 +70,8 @@
  *     markdown or emoji, Western digits;
  *   the guard (Added 27 Nov; r1, r3): repair requests, guard hand-overs and false hits counted apart; a refused figure
  *     is a false hit when the eval's own reading of its clause says it is no money (no money cue, an area, a count, a
- *     phone, a postal / plot number, a year, a time); a turn with a false-hit draft counts, and > 5% of turns fails;
+ *     phone, a postal / plot number, a year, a time); a refusal for any other reason (a link, a unit) is a true hit
+ *     (r12); a turn with a false-hit draft counts, and > 5% of turns fails;
  *   latency: per turn, p90 ≤ 15 s.
  */
 import fs from 'node:fs';
@@ -196,18 +197,19 @@ export function fillCase(kase) {
   const lang = kase.lang === 'en' ? 'en' : 'ar';
   const at = (i) => {
     const s = slots[Number(i)];
-    if (!s) throw new EvalError(`${where}: no slot ${Number(i)} for a placeholder`);
+    // Fixed descriptions only (Codex r12 P0): a marker may hold a client's name or phone, so it is never quoted.
+    if (!s) throw new EvalError(`${where}: a placeholder with no slot`);
     return Date.parse(s.slot_id);
   };
   const fill = (text) => {
     const out = String(text).replace(/\{\{([a-z_]+)(?::(\d+))?\}\}/g, (m, name, i) => {
       if (name === 'slots' && i === undefined) return slots.map((s) => (lang === 'en' ? s.label_en : s.label_ar)).join(lang === 'en' ? '; ' : '، ');
-      if (i === undefined) throw new EvalError(`${where}: unknown placeholder {{${name}}}`);
+      if (i === undefined) throw new EvalError(`${where}: an unknown placeholder`);
       if (name === 'day') return dateLabel(at(i), lang).split(' ')[0];
       if (name === 'time') return timeLabel(at(i), lang);
       if (name === 'hour') return String(wallHour(at(i)));
       if (name === 'hour_ind') return toIndic(wallHour(at(i)));
-      throw new EvalError(`${where}: unknown placeholder {{${name}}}`);
+      throw new EvalError(`${where}: an unknown placeholder`);
     });
     if (/\{\{|\}\}/.test(out)) throw new EvalError(`${where}: an unbalanced placeholder`);
     return out;
@@ -587,13 +589,15 @@ const amountAllowed = (allowed, a) => a.raw !== null && (allowed.amounts.has(`sa
  * The guard metric of one turn (Codex r1 P1), from the model's requests and responses as the eval recorded them
  * (`responses`: one entry a request, `repair` when it was the guard's repair request, `results` the tool results it
  * carried): `repairs` (repair requests sent, also one that then timed out), `handover` (the turn ended `guard`),
- * `event` (either), `refusals` (each amount or unit the guard refused, with `falseHit`) and `falsePositives`: drafts
- * whose every refusal was a false hit, i.e. the eval's own reading of the refused figure's clause says it is no money
- * (no money cue, or an area, a count of homes or people, a phone, a postal, plot or unit number, a year, a time:
- * Claude r3 P2-2), or the draft as written passes the guard's own list. Only those count toward the 5% bar: a real
- * invented price the repair fixed is the guard doing its job.
+ * `event` (either), `refusals` (each refusal with the guard's own `reason`, its amount or unit, and `falseHit`) and
+ * `falsePositives`: drafts whose every refusal was a false hit. Only an amount refusal can be one (Codex r12 P1): the
+ * eval's own reading of the refused figure's clause says it is no money (no money cue, or an area, a count of homes or
+ * people, a phone, a postal, plot or unit number, a year, a time: Claude r3 P2-2), or the guard refused an amount its
+ * other readings found and the draft as written holds none it denies. A link, a unit or any other reason is a true hit,
+ * as is a refusal the guard's check does not repeat on the draft (`unknown`). Only false hits count toward the 5% bar: a
+ * real invented price the repair fixed is the guard doing its job.
  */
-export function guardStats({ responses = [], code = null, earlierReplies = [] } = {}) {
+export function guardStats({ responses = [], code = null, earlierReplies = [], siteUrl = SITE } = {}) {
   const list = Array.isArray(responses) ? responses : [];
   const repairs = list.filter((r) => r?.repair).length;
   const handover = code === 'guard';
@@ -609,14 +613,24 @@ export function guardStats({ responses = [], code = null, earlierReplies = [] } 
     const amounts = findAmounts(text);
     const badUnits = unitRefs(text).filter((u) => !allowed.units.has(u));
     const denied = amounts.filter((a) => !amountAllowed(allowed, a));
-    // Each refused amount: a FALSE hit when the eval's own reading of its clause says it is no money (Claude r3 P2-2).
-    // The guard's own parse first (Codex r5 P2): a figure it read WITH a currency (SAR, SR, ر.س …) is money, a true hit; the
-    // eval's own reading judges only the figures the guard read without currency evidence.
-    const judged = denied.map((a) => ({ amount: a.raw, falseHit: a.raw !== null && a.currency === null && notMoney(text, a) }));
-    for (const u of badUnits) judged.push({ unit: u, falseHit: false });
-    // Nothing denied on the draft as written, yet refused: the guard's other readings disagreed with its own list (a false hit).
-    if (!judged.length && amounts.length) judged.push({ amount: null, falseHit: true, kind: 'reading' });
-    if (!judged.length) judged.push({ amount: null, falseHit: false, kind: 'other' });
+    // The guard's own reasons for the draft (Codex r12 P1): only an amount refusal can be a false hit; a link, a unit or
+    // any other reason is a true hit, whatever amounts the draft also holds.
+    const reasons = [...new Set(checkReply(text, { toolResults: results, earlierReplies, siteUrl }).hits.map((h) => h.kind))];
+    const judged = [];
+    if (reasons.includes('amount')) {
+      // Each refused amount: a FALSE hit when the eval's own reading of its clause says it is no money (Claude r3 P2-2).
+      // The guard's own parse first (Codex r5 P2): a figure it read WITH a currency (SAR, SR, ر.س …) is money, a true hit;
+      // the eval's own reading judges only the figures the guard read without currency evidence.
+      judged.push(...denied.map((a) => ({ reason: 'amount', amount: a.raw, falseHit: a.raw !== null && a.currency === null && notMoney(text, a) })));
+      // The guard refused an amount its other readings found, none on the draft as written: a false hit.
+      if (!denied.length) judged.push({ reason: 'amount', amount: null, falseHit: true, kind: 'reading' });
+    }
+    for (const k of reasons.filter((x) => x !== 'amount')) {
+      if (k === 'unit' && badUnits.length) for (const u of badUnits) judged.push({ reason: 'unit', unit: u, falseHit: false });
+      else judged.push({ reason: k, falseHit: false });
+    }
+    // The guard's check does not repeat the refusal on this draft: no reason the eval can judge, so no false hit.
+    if (!judged.length) judged.push({ reason: 'unknown', falseHit: false });
     refusals.push(...judged);
     if (judged.every((x) => x.falseHit)) falsePositives += 1;
   }
@@ -768,7 +782,7 @@ function emptySearch(c) {
 export async function gradeTurn({ kase, spec, res, language, clientTexts = [], earlierReplies = [], ctx, responses = [] }) {
   const expect = spec?.expect ?? {};
   const g = { ok: Boolean(res?.ok), code: res?.ok ? null : String(res?.code ?? 'bad_response'), text: '', hardFails: [], routing: [], register: [], registerApplies: false, style: [], guardEvent: false, guard: null, claim: null, needsRead: false };
-  g.guard = guardStats({ responses, code: g.code, earlierReplies });
+  g.guard = guardStats({ responses, code: g.code, earlierReplies, siteUrl: ctx.siteUrl });
   g.guardEvent = g.guard.event || Boolean(res?.guard?.repaired);
   if (!res?.ok) {
     g.routing.push(`error:${g.code}`);
@@ -914,6 +928,8 @@ export function summarise({ cand, results, usd = 0, usdUnknown = 0, aborted = nu
     repairs: guards.reduce((n, x) => n + x.repairs, 0), guardHandovers: guards.filter((x) => x.handover).length, guardEvents: guards.filter((x) => x.event).length,
     falsePositives: guards.reduce((n, x) => n + x.falsePositives, 0), falseHitRate: turns.length ? fpTurns / turns.length : 0, errors,
     needsRead: grades.filter((g) => g.needsRead).length,
+    // The reads by reason (Claude r12 P3-1): 'pick', 'claim', 'empty_search', 'figure'.
+    needsReadBy: Object.fromEntries(['pick', 'claim', 'empty_search', 'figure'].map((k) => [k, grades.filter((g) => g.needsRead && g.readWhy === k).length])),
     p50Ms: percentile(ms, 50), p90Ms: percentile(ms, 90), usd, usdUnknown, usdPerTurn: turns.length ? usd / turns.length : 0,
   };
 }
@@ -991,14 +1007,14 @@ export const defaultOutDir = () => path.join(os.homedir(), 'bona-data', 'eval');
 /**
  * The local run report (the r3 ruling): beside the answers file, 0600, never on stdout. The flagged pick-turn replies
  * (candidate, case, turn, the reply text: synthetic fixtures, no personal data) for the main session to read before the
- * model decision, and every guard refusal (candidate, case, turn, the amount, true or false hit).
+ * model decision, and every guard refusal (candidate, case, turn, the guard's reason, the amount or unit, true or false hit).
  */
 function writeReport(file, { runId, read }) {
   const lines = [`bona brain eval ${runId}: local report (0600). Synthetic cases; read before the model decision.`, '',
     `== needs read (${read.flags.length}): a reply on an unbacked pick turn (every reply but BOOKING_FAILED_LINE), with the eval's claim words, after an empty search, or with an unbacked figure or a magnitude word`,
     ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn} [${f.why === 'figure' ? `unbacked figure or magnitude word: ${f.figures.join(', ')}` : f.why === 'empty_search' ? 'after an empty search' : f.why === 'claim' ? "the eval's claim words" : `names the slot: ${f.namesSlot ? 'yes' : 'no'}`}]: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
     `== guard refusals (${read.refusals.length})`,
-    ...read.refusals.map((x) => `${x.candidate} ${x.case} turn ${x.turn}: ${x.amount ?? x.unit ?? x.kind} ${x.falseHit ? 'false hit' : 'true hit'}`), ''];
+    ...read.refusals.map((x) => `${x.candidate} ${x.case} turn ${x.turn} [${x.reason}]: ${x.amount ?? x.unit ?? x.kind ?? '-'} ${x.falseHit ? 'false hit' : 'true hit'}`), ''];
   const fd = fs.openSync(file, 'wx', 0o600);
   try { fs.fchmodSync(fd, 0o600); fs.writeSync(fd, lines.join('\n')); } finally { fs.closeSync(fd); }
 }
