@@ -1,7 +1,7 @@
 /**
  * Bona's AI assistant on the OpenAI API (brain/DESIGN-brain.md §2-§4, §10; PLAN T25, PR-BR).
- * Zero dependencies: Chat Completions over `fetch`, the tools run in-process through the
- * concierge handlers (`runTool` = tools.run), and the output is Retell-shaped, so dana-wa's
+ * Zero dependencies: the Responses API over `fetch` (lib/brain/openai.mjs, T25b), the tools
+ * run in-process through the concierge handlers (`runTool` = tools.run), and the output is Retell-shaped, so dana-wa's
  * `answerFrom` / `handoffDetails`, actions' `extractActions` and dana-commit read it unchanged.
  *
  * INERT until PR-B3 (T12) calls `turn()`: building it reads files only (the key file, then the
@@ -80,7 +80,7 @@ import { checkReply, REPAIR_NOTE } from './reply-guard.mjs';
 import { identity as personaIdentity } from './persona.mjs';
 import { DEFAULT_BASE_URL, providerFor } from './brain/providers.mjs';
 import { codeFromHttp, codeFromThrown, BACKUP_CODES, OUT_CODES, CODES } from './brain/errors.mjs';
-import { requestBody, parseCompletion, assistantMessage, safetyIdentifier, cacheKey, retryAfterMs, usageOf, CHAT_PATH, MODELS_PATH } from './brain/openai.mjs';
+import { requestBody, parseCompletion, assistantMessage, safetyIdentifier, cacheKey, retryAfterMs, usageOf, RESPONSES_PATH, MODELS_PATH } from './brain/openai.mjs';
 import { toolsFor, routeToolNames, schemaArgNames } from './brain/tool-schemas.mjs';
 import { loadPrompts, systemPrompt, contextNote, clientTurn, PROMPT_DIR, CHANNEL_SECTIONS } from './brain/prompt.mjs';
 import { minimise as defaultMinimise, minimiseParts } from './brain/minimise.mjs';
@@ -553,7 +553,7 @@ export function createBrain(deps = {}) {
     let text = '';
     let thrown = null;
     try {
-      res = await fetchImpl(`${baseUrl}${CHAT_PATH}`, {
+      res = await fetchImpl(`${baseUrl}${RESPONSES_PATH}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

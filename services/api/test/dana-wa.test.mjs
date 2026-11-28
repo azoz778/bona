@@ -32,14 +32,25 @@ import path from 'node:path';
 /* A real brain (lib/brain.mjs) on a fake OpenAI: only for the request-body tests. */
 const brainTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-dana-brain-'));
 test.after(() => fs.rmSync(brainTmp, { recursive: true, force: true }));
-const reply200 = (content) => ({ choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
+// A POST /v1/responses answer (T25b) and the request read back as chat turns: the instructions first (only when the
+// body has them, so a check on msgs[0] can still fail), then each input message (a developer message is the brain's
+// system note). These tests send no tool round.
+const reply200 = (content) => ({
+  object: 'response', status: 'completed', error: null, incomplete_details: null,
+  output: [{ id: 'msg_1', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: content, annotations: [] }] }],
+  usage: { input_tokens: 10, output_tokens: 5 },
+});
+const chatOf = (b) => [
+  ...(typeof b.instructions === 'string' ? [{ role: 'system', content: b.instructions }] : []),
+  ...b.input.map((i) => ({ role: i.role === 'developer' ? 'system' : i.role, content: i.content })),
+];
 function realBrain(script) {
   const keyFile = path.join(brainTmp, `key-${Math.random().toString(36).slice(2)}.env`);
   fs.writeFileSync(keyFile, `${KEY_NAME}=sk-test-not-a-real-key-000000000000\n`, { mode: 0o600 });
   const bodies = [];
   const queue = [...script];
   const fetchImpl = async (url, init = {}) => {
-    bodies.push(JSON.parse(init.body));
+    bodies.push(chatOf(JSON.parse(init.body)));
     return new Response(JSON.stringify(queue.length ? queue.shift() : reply200('ok')), { status: 200 });
   };
   const brain = createBrain({
@@ -1444,7 +1455,7 @@ test('T12 brain branch: a phone split across the history clip and the batch neve
   // The staff message is newer than the client's first row: make the batch only the second one.
   await h.dana.answer(LEAD, { ts: T_IN - 1000 });
   assert.equal(bodies.length, 1);
-  const msgs = bodies[0].messages;
+  const msgs = bodies[0];
   const raw = JSON.stringify(msgs.filter((x) => x.role !== 'system'));
   assert.doesNotMatch(raw, /050|123 ?4567/, 'no piece of the number in any client or history message');
   assert.equal(msgs[0].role, 'system');
@@ -3069,7 +3080,7 @@ test('T12 r15 1 (P0): a phone split across the batch cap never reaches OpenAI (e
   h.client('123 4567 thanks', { ts: T_IN - 9000 });
   await h.dana.answer(LEAD, { ts: T_IN - 9000 });
   assert.equal(bodies.length, 1);
-  const raw = JSON.stringify(bodies[0].messages.filter((x) => x.role !== 'system'));
+  const raw = JSON.stringify(bodies[0].filter((x) => x.role !== 'system'));
   assert.doesNotMatch(raw, /050|123|4567/, 'no digit run of the number in the request');
 });
 
@@ -3176,7 +3187,7 @@ test('T12 r16 G1 (P0): a backfilled middle message is masked next to its neighbo
   const b = h.client('123 4567 thanks', { ts: T_IN - 9 * 60_000 });
   await h.dana.answer(LEAD, { ts: b });
   assert.equal(bodies.length, 1);
-  const raw = JSON.stringify(bodies[0].messages.filter((x) => x.role !== 'system'));
+  const raw = JSON.stringify(bodies[0].filter((x) => x.role !== 'system'));
   assert.match(raw, /villa/, 'the history reached the model');
   assert.doesNotMatch(raw, /050|123|4567/, 'no digit run of the number in the request');
 });
@@ -3297,7 +3308,7 @@ test('T12 r17 1 (P0): a number split at the history LIMIT is masked with both ha
   const q = h.client('and the price?', { ts: T_IN - 60_000 });
   await h.dana.answer(LEAD, { ts: q });
   assert.equal(bodies.length, 1);
-  const raw = JSON.stringify(bodies[0].messages.filter((x) => x.role !== 'system'));
+  const raw = JSON.stringify(bodies[0].filter((x) => x.role !== 'system'));
   assert.match(raw, /question nine/, 'the history reached the model');
   assert.doesNotMatch(raw, /050|123|4567/, 'no digit run of the number in the request');
 });

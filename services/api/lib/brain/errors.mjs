@@ -5,8 +5,10 @@
  *
  *   quota         429 insufficient_quota or 402: the credit ran out (no retry; the brain is `out`)
  *   auth          401 / 403: the key is refused (the brain is `out`; the models probe can clear it)
- *   rate          another 429: a rate limit (one short retry, else the backup model)
- *   down          5xx or a network error (the backup model; the breaker counts it)
+ *   rate          another 429, or a 200 that failed with rate_limit_exceeded: a rate limit (one short retry, else
+ *                 the backup model)
+ *   down          5xx, a network error, or a 200 that failed on OpenAI's side (codeFromFailed; the backup model;
+ *                 the breaker counts it)
  *   timeout       no answer in time (the backup model)
  *   bad_response  an unparsable body, a bad tool call, no text, a cut-off answer, too many rounds, another 4xx
  *   refusal       the model refused (never retried on another model)
@@ -40,4 +42,19 @@ export function codeFromHttp(status, body) {
 /** A thrown fetch: an abort (our timeout) is `timeout`; anything else (DNS, TLS, reset) is `down`. */
 export function codeFromThrown(err) {
   return err?.name === 'AbortError' || err?.name === 'TimeoutError' ? 'timeout' : 'down';
+}
+
+/**
+ * The Responses API's `error.code` values of a 200 body with `status:'failed'` that put the fault on OpenAI's side,
+ * and their code: `server_error` and `vector_store_timeout` are `down`, as a 5xx (the backup model, the outage
+ * breaker; never brain_bug); `rate_limit_exceeded` is `rate`, as an HTTP 429 (the short retry, the backup model, the
+ * main model's cooldown). Every other code is about our request (`invalid_prompt`, the image codes) or unknown, and
+ * stays `bad_response`.
+ */
+export const FAILED_CODES = Object.freeze({ server_error: 'down', vector_store_timeout: 'down', rate_limit_exceeded: 'rate' });
+
+/** @param {unknown} error  the `error` object of a 200 body with status 'failed' (read for its code only) */
+export function codeFromFailed(error) {
+  const code = error && typeof error === 'object' ? String(error.code ?? '').toLowerCase() : '';
+  return Object.hasOwn(FAILED_CODES, code) ? FAILED_CODES[code] : 'bad_response';
 }
