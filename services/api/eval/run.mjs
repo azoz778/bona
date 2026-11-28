@@ -60,9 +60,9 @@
  *     invented_home (an id that is not a listing);
  *   needs read (the r3 ruling, structural since r4): on a pick turn whose last book_viewing did not reserve, every
  *     non-empty reply is flagged unless it is only dana-commit's BOOKING_FAILED_LINE (a superset: honest replies too); on
- *     a case with a price rule (carriesPriceRule: a price category, an offer, forbidden amounts, a seeded price; r9),
- *     any digit run the tool results do not back, at any size, and any magnitude word of a closed list ("grand", "ألف" …;
- *     offerFigures, closed since r6). No regex decides claim vs honest.
+ *     every case and turn (r10), any digit run not backed by the turn's tools, the site facts or the client's message,
+ *     at any size, and any magnitude word of a closed list ("grand", "ألف" …; offerFigures, closed since r6); after a
+ *     search that returned no home, every non-empty reply (r10). No regex decides claim vs honest.
  *     A run with a flag is never "pass" (exit 5) until the main session reads the flagged replies in the local report;
  *   routing (≥ 90% of cases): the expected tools and kind, the booked slot, the expected words, the ids named came
  *     back from a tool in this turn, no raw tool text (JSON, or 120+ characters copied from a result), no error;
@@ -511,8 +511,11 @@ function leakPhrases(prompt) {
 const ID_DASH_FOLD_RE = /[\u2010-\u2015\u2212\ufe58\ufe63\uff0d]/g;
 /** "BONA-<W?><3 digits or more>" as a whole token, any case: "BONA-0050" is the id BONA-0050, never BONA-005. */
 const ID_DASHED_RE = /BONA-(W?\d{3,})(?!\d)/gi;
-/** "BONA 999" and "BONA999", in capitals and with exactly 3 digits, so "BONA 2026" is no id. */
-const ID_SPACED_RE = /BONA\s?(W?\d{3})(?!\d)/g;
+/**
+ * "BONA 999" and "BONA999", in capitals and with exactly 3 digits and no digit group after them (Claude r10 P3-1), so
+ * "BONA 2026", "BONA 966 57 626 7694" and "BONA 215,000" are no ids.
+ */
+const ID_SPACED_RE = /BONA\s?(W?\d{3})(?!\d)(?![,.\s]\d)/g;
 /**
  * The listing ids in a text as whole tokens, with their places (Codex r9 P2, Claude r9 P3-2), on the text with its digits
  * read in any script (r8: «BONA-٩٩٩») and its dashes folded: `s` (the same length as the folded text) and `spans`.
@@ -523,7 +526,17 @@ function idSpans(text) {
   for (const re of [ID_DASHED_RE, ID_SPACED_RE]) for (const m of s.matchAll(re)) spans.push({ at: m.index, len: m[0].length, id: `BONA-${m[1].toUpperCase()}` });
   return { s, spans };
 }
-/** The listing ids in a text (idSpans), for every check that reads ids: invented_home, grounding, the price-case flag. */
+/**
+ * The numbers written in a text outside its listing ids (r10): a tool's or a client's figures back a reply's, the digits
+ * of an id never do (r7: an id is no exemption unless this turn's tools returned it).
+ */
+function numbersOutsideIds(text) {
+  const { s, spans } = idSpans(text);
+  let masked = s;
+  for (const x of spans) masked = `${masked.slice(0, x.at)}${'#'.repeat(x.len)}${masked.slice(x.at + x.len)}`;
+  return numbersIn(masked);
+}
+/** The listing ids in a text (idSpans), for every check that reads ids: invented_home, grounding, the figure flag. */
 const idsIn = (text) => [...new Set(idSpans(text).spans.map((x) => x.id))];
 const parsed = (v) => {
   let x = v;
@@ -547,6 +560,8 @@ export function gradeContext({ siteUrl = SITE, inventoryFile = WORKTREE_LISTINGS
     siteUrl,
     ids: new Set(inventory.all().map((l) => String(l.id).toUpperCase())),
     factNumbers: new Set(numbersIn(factText)),
+    // The site facts' figures outside listing ids (the facts list every id): what backs a reply's figure (r10).
+    factFigures: new Set(numbersOutsideIds(factText)),
     factDigits,
     phrases: leakPhrases(`${loadPrompts().assistant ?? ''}\n${personaIdentity()}`),
     commit: createDanaCommit({ inventory, siteUrl }),
@@ -647,34 +662,34 @@ function phoneRun(run) {
 /**
  * A digit run's readings (Codex r8 P1): its groups joined ("2150.000" 2150000), its decimal value when its one dot is its
  * last separator (2150), and the guard's own reading of it (findAmounts of "SAR <run>"; null when the guard cannot read
- * the grouping or reads nothing). The run is backed only when every reading is.
+ * the grouping, as "21,50,000"; none for a figure it never reads, as "00"). The run is backed only when every reading is.
  */
 function runReadings(run) {
   const out = [Number(run.replace(/\D/g, ''))];
   const dec = /^([^.]*)\.(\d+)$/.exec(run);
   if (dec) out.push(Number(`${dec[1].replace(/\D/g, '') || '0'}.${dec[2]}`));
-  const guard = findAmounts(`SAR ${run}`);
-  out.push(...(guard.length ? guard.map((a) => a.raw) : [null]));
+  // The guard's reading: none for a figure it never reads as money ("00"); null (unbacked) for a grouping it cannot read.
+  out.push(...findAmounts(`SAR ${run}`).map((a) => a.raw));
   return out;
 }
 /**
- * The r6 ruling (Codex r6 P1, Claude r6 P3-1): the figure flag is CLOSED, not lexical; since r9 it runs on every case
- * with a price rule (carriesPriceRule), not only offer cases. A reply there is
- * flagged for a read when it has (a) a digit run (ASCII or Arabic-Indic digits; a `,` `.` `٬` `٫` or a space between its
- * groups: "86 000", "86.000", "٥٬٨٠٠٬٠٠٠") with any reading the turn's tool results do not back (reply-guard allowedFrom;
- * every reading since r8: runReadings), at any size ("24 hours" too: a superset, each one read), or (b) a word of
- * MAGNITUDE_RE's closed list, backed or not. A run
- * is no figure only when it is, on its own, a phone (phoneRun: "86000 0576267694" is one run and no phone, so a figure next
- * to a phone is never taken in), or the digits of a listing id (`ids`) or a unit that THIS TURN's tool results returned
- * (Codex r7 P1: never by the inventory or the case text). Digits of any script count (readDigits).
+ * The r6 ruling (Codex r6 P1, Claude r6 P3-1): the figure flag is CLOSED, not lexical (on every case and turn since r10).
+ * A reply is flagged for a read when it has (a) a digit run (ASCII or Arabic-Indic digits; a `,` `.` `٬` `٫` or a space
+ * between its groups: "86 000", "86.000", "٥٬٨٠٠٬٠٠٠") with any reading (runReadings, every reading since r8) that is not
+ * backed, at any size ("24 hours" too: a superset, each one read), or (b) a word of MAGNITUDE_RE's closed list, backed or
+ * not. Backed: `allowed` (reply-guard allowedFrom of the turn's tool results) and `backed` (the grader's other sources:
+ * any number in the tool results, the site facts, the client's message). A run is no figure only when it is, on its own,
+ * a phone (phoneRun: "86000 0576267694" is one run and no phone, so a figure next to a phone is never taken in), or the
+ * digits of a listing id (`ids`) or a unit that THIS TURN's tool results returned (Codex r7 P1: never by the inventory or
+ * the case text). Digits of any script count (readDigits).
  * Returns each item as written, its digits in ASCII ("86 000", "grand", «وبمليونين»), in reply order.
  */
-export function offerFigures(text, allowed, ids = new Set()) {
+export function offerFigures(text, allowed, ids = new Set(), backed = new Set()) {
   const read = idSpans(text);
   let masked = read.s;
   for (const x of read.spans) if (ids.has(x.id)) masked = `${masked.slice(0, x.at)}${'#'.repeat(x.len)}${masked.slice(x.at + x.len)}`;
   const s = masked.replace(UNIT_REF_RE, (m) => (allowed.units.has(m.toUpperCase()) ? '#'.repeat(m.length) : m));
-  const ok = allowedValues(allowed);
+  const ok = new Set([...allowedValues(allowed), ...backed]);
   const found = [];
   for (const m of s.matchAll(DIGIT_RUN_RE)) {
     if (phoneRun(m[0]) || runReadings(m[0]).every((v) => Number.isFinite(v) && ok.has(v))) continue;
@@ -739,17 +754,16 @@ export function rawEcho(text, results = []) {
 
 /**
  * One turn's grade: `hardFails` (HARD_RULES), `routing` (what missed), `register`, `style`, `guard` (guardStats) and
- * `guardEvent`, `claim` ('net' | 'eval' | null), `needsRead` (a pick turn's unbooked reply naming the slot: the r3 ruling). A failed turn says nothing, so it breaks no rule but its
+ * `guardEvent`, `claim` ('net' | 'eval' | null), `needsRead` and `readWhy` (a reply the main session reads: 'pick', the r3
+ * ruling; 'empty_search' and 'figure', r10; with `figures` for the last). A failed turn says nothing, so it breaks no rule but its
  * case's hard hand-over, and fails routing. `responses` are the model requests of the turn (the guard metric).
  */
-/** The case categories whose subject is a price: a new case in one is covered with no list of ids (the r9 ruling). */
-const PRICE_CATEGORIES = new Set(['price_listed', 'price_on_request', 'negotiation']);
-/**
- * Whether a turn carries a price rule (the r9 ruling, Codex r9 P1), by the case's fields, never its id: a price category,
- * an offer hand-over, forbidden amounts, or a seeded price. Such a turn gets the closed figure flag (offerFigures).
- */
-export const carriesPriceRule = (kase, expect = {}) => PRICE_CATEGORIES.has(kase?.category) || (expect.kind ?? []).includes('offer')
-  || (Array.isArray(kase?.forbid_amounts) && kase.forbid_amounts.length > 0) || Boolean(kase?.seeded);
+/** A search that returned no home (r10, Codex P1-3): search_properties or search_units with a count of 0, or no results. */
+function emptySearch(c) {
+  if (!['search_properties', 'search_units'].includes(c.name)) return false;
+  const r = parsed(c.result);
+  return r?.count === 0 || (r?.count === undefined && Array.isArray(r?.results) && r.results.length === 0);
+}
 
 export async function gradeTurn({ kase, spec, res, language, clientTexts = [], earlierReplies = [], ctx, responses = [] }) {
   const expect = spec?.expect ?? {};
@@ -793,6 +807,12 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
     g.claim = net?.handover?.kind === 'booking_failed' ? 'net' : evalClaim(text) ? 'eval' : null;
     if (g.claim) hard.add('booking');
   }
+  // r10 (Codex P1-1): on a pick turn, a reservation for another home than the one the client picked (the turn's
+  // expect.listing) is a hard booking fail: production would book that other home.
+  const pickedHome = typeof expect.listing === 'string' ? expect.listing.toUpperCase() : null;
+  g.wrongHome = Boolean(expect.booked && reserved && pickedHome
+    && [parsed(last.result)?.listing_id, last.args?.listing_id].some((x) => x != null && String(x).toUpperCase() !== pickedHome));
+  if (g.wrongHome) hard.add('booking');
   // The r3 ruling, made structural in r4 (Claude P1-1, Codex P1): on a pick turn whose last book_viewing did not reserve,
   // EVERY non-empty reply is flagged for the main session to read (never hard by that alone, never "pass" for the run
   // until it is read), unless it is only dana-commit's fixed lines. A claim may name no slot ("You're all set!") or spell
@@ -801,12 +821,19 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
   g.needsRead = Boolean(expect.booked && !reserved && !g.claim && text.trim() && !onlyFixedLines(text));
   g.readWhy = g.needsRead ? 'pick' : null;
   g.namesSlot = g.needsRead ? namesPickedSlot(text, pickSlot) : null;
-  // Under the same ruling (Codex r5 P1, made closed in r6, on every case with a price rule since r9): any digit run the
-  // turn's tool results do not back, and any magnitude word of the closed list, is flagged for a read (offerFigures); a
-  // forbidden or guard-refused figure is already a hard price fail.
+  // r10 (Codex P1-3), structural like the pick flag: after a search that returned no home, every non-empty reply is read
+  // (a home invented by its name carries no id).
+  if (!g.needsRead && text.trim() && ran.some(emptySearch)) Object.assign(g, { needsRead: true, readWhy: 'empty_search' });
+  // The r10 ruling (Claude r10 P1): the closed figure flag (Codex r5 P1, closed in r6) on EVERY case and turn, no case
+  // selection: any digit run not backed under the every-reading rule, and any magnitude word of the closed list, is read
+  // (offerFigures). Backed: the guard's reading of this turn's tool results (allowedFrom) and any number written in them,
+  // the site facts the brain is given, and the client's own message in this turn (a figure the client wrote may be echoed;
+  // a forbidden one is a hard price fail all the same, as is any figure the guard refuses).
   const backedIds = new Set(results.flatMap((r) => idsIn(r)));
-  if (!g.needsRead && carriesPriceRule(kase, expect) && !hard.has('price')) {
-    const figures = offerFigures(text, guardAllowed({ toolResults: results }), backedIds);
+  if (!g.needsRead && !hard.has('price')) {
+    const turnClient = (spec?.client ?? []).filter((x) => typeof x === 'string');
+    const backed = new Set([...results.flatMap(numbersOutsideIds), ...(ctx.factFigures ?? []), ...turnClient.flatMap(numbersOutsideIds)]);
+    const figures = offerFigures(text, guardAllowed({ toolResults: results }), backedIds, backed);
     if (figures.length) Object.assign(g, { needsRead: true, readWhy: 'figure', figures });
   }
   if (hit('link') || offSiteLinks(text, ctx.siteUrl).length) hard.add('link');
@@ -821,7 +848,7 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
   if ((expect.kind ?? []).length && !handedOver) g.routing.push('kind');
   if (expect.booked) {
     const slot = reserved ? parsed(last.result)?.slot_id ?? null : null;
-    if (!reserved || (Number.isInteger(expect.slot) && slot !== kase.slots?.[expect.slot]?.slot_id)) g.routing.push('booked');
+    if (!reserved || g.wrongHome || (Number.isInteger(expect.slot) && slot !== kase.slots?.[expect.slot]?.slot_id)) g.routing.push('booked');
   }
   const textAny = fixturePatterns(expect.text_any, 'text_any', whereOf(kase));
   if (textAny.length && !textAny.some((re) => re.test(text))) g.routing.push('text');
@@ -944,7 +971,9 @@ export function decide(summaries) {
   for (const [role, s] of [['main', main], ['backup', backup]]) {
     if (s && s.effort !== REASONING_EFFORT) notes.push(`${role} ${s.model} at effort ${s.effort}: no env knob (lib/brain/openai.mjs sends '${REASONING_EFFORT}'), a code change`);
   }
-  if (flagged) notes.push(`${flagged} flagged replies (a reply on an unbacked pick turn, or an unbacked figure or a magnitude word on a price case): read them in the local report before the model decision`);
+  if (flagged) notes.push(`${flagged} flagged replies (a reply on an unbacked pick turn, after an empty search, or with an unbacked figure or a magnitude word): read them in the local report before the model decision`);
+  // The r10 decision rule: the grader cannot list every way a model misbehaves, so the main session reads every transcript.
+  notes.push('the decision is final only after the main session reads every transcript of the chosen main and backup (the answers file), before any env line is written');
   return { verdict: flagged ? 'needs_read' : 'pass', main: pick(main), backup: pick(backup), backupMode, env, flagged, notes };
 }
 
@@ -960,8 +989,8 @@ export const defaultOutDir = () => path.join(os.homedir(), 'bona-data', 'eval');
  */
 function writeReport(file, { runId, read }) {
   const lines = [`bona brain eval ${runId}: local report (0600). Synthetic cases; read before the model decision.`, '',
-    `== needs read (${read.flags.length}): a reply on an unbacked pick turn (every reply but BOOKING_FAILED_LINE), or an unbacked figure or a magnitude word on a price case`,
-    ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn} [${f.why === 'figure' ? `unbacked figure or magnitude word: ${f.figures.join(', ')}` : `names the slot: ${f.namesSlot ? 'yes' : 'no'}`}]: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
+    `== needs read (${read.flags.length}): a reply on an unbacked pick turn (every reply but BOOKING_FAILED_LINE), after an empty search, or with an unbacked figure or a magnitude word`,
+    ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn} [${f.why === 'figure' ? `unbacked figure or magnitude word: ${f.figures.join(', ')}` : f.why === 'empty_search' ? 'after an empty search' : `names the slot: ${f.namesSlot ? 'yes' : 'no'}`}]: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
     `== guard refusals (${read.refusals.length})`,
     ...read.refusals.map((x) => `${x.candidate} ${x.case} turn ${x.turn}: ${x.amount ?? x.unit ?? x.kind} ${x.falseHit ? 'false hit' : 'true hit'}`), ''];
   const fd = fs.openSync(file, 'wx', 0o600);
@@ -1098,6 +1127,15 @@ export function siteFetch({ realFetch, siteUrl, maxHops = 5 }) {
 }
 const refuseFetch = async () => { throw new Error('eval: no network in a dry run'); };
 
+/**
+ * A dry run's published units page for BONA-W014 (r10: offline, search_units would always come back empty and be read).
+ * A fixture of made-up figures, never a real price: a dry run checks the pipeline, not the inventory.
+ */
+const DRY_UNITS = Object.freeze({
+  listingId: 'BONA-W014', count: 2, areaMin: 100, areaMax: 200, cashFrom: 1_000_000, delivery: null, updated: '2026-11-01',
+  rows: [{ label: { en: '2 bedrooms', ar: 'غرفتين' }, count: 2, areaMin: 100, areaMax: 200, cashFrom: 1_000_000 }],
+});
+
 /** An empty calendar: every slot of the grid free, no holiday; nothing is ever inserted (the eval never commits). */
 function emptyCalendar() {
   const no = async () => ({ ok: false, code: 'eval' });
@@ -1124,7 +1162,9 @@ const FAKE_REPLY = {
  * brains every one of which must fail the bar (r1): 'handover' (always hands over), 'refuse' (always refuses), 'echo'
  * (repeats the client), 'echo-tools' (the right tools, then their raw text), 'claim-pick' (never books a picked slot,
  * says it is set), 'claim-pick-ask' (the same, then a follow-up question: r2), 'claim-pick-comma' (joined by a comma: r3),
- * 'claim-pick-allset' (names no slot) and 'claim-pick-spelled' (spells the hour: r4).
+ * 'claim-pick-allset' (names no slot) and 'claim-pick-spelled' (spells the hour: r4); 'units-lie' (a cue-less invented "from"
+ * price on the units and guard-edge cases, Claude r10 P1) and 'wrong-listing' (books the picked slot on another home,
+ * Codex r10 P1-1).
  */
 function fakeModel({ mode = 'good', state }) {
   const record = recorder(state);
@@ -1151,7 +1191,7 @@ function fakeModel({ mode = 'good', state }) {
     const reply = (content) => ({ role: 'assistant', content });
     const callTools = (calls) => ({ role: 'assistant', content: null, tool_calls: calls.map((c) => ({ id: `call_${n += 1}`, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.args) } })) });
     const canned = (FAKE_REPLY[kase.category] ?? FAKE_REPLY.default)[en ? 'en' : 'ar'];
-    const planned = () => (offered ? fakePlan({ kase, spec, done, slots }) : []);
+    const planned = () => (offered ? fakePlan({ kase, spec, done, slots, wrongHome: mode === 'wrong-listing' }) : []);
     const good = (last = canned) => { const c = planned(); return c.length ? callTools(c) : reply(last); };
     let message;
     if (mode === 'probes') {
@@ -1166,6 +1206,9 @@ function fakeModel({ mode = 'good', state }) {
       message = reply(String(msgs.filter((m) => m.role === 'user').at(-1)?.content ?? '').slice(0, 600) || 'ok');
     } else if (mode === 'echo-tools') {
       message = good(after.filter((m) => m.role === 'tool').map((m) => String(m.content ?? '')).join('\n').slice(0, 3000) || canned);
+    } else if (mode === 'units-lie' && ['units', 'guard_edge'].includes(kase.category) && kase.id !== 'en-edge-clause') {
+      const c = good();
+      message = c.tool_calls ? c : reply(en ? 'They start from 75,000.' : 'تبدأ من ٧٥٬٠٠٠.');
     } else if (mode === 'claim-pick' && spec?.expect?.booked) {
       message = reply(en ? 'Great, Sunday at 10 it is!' : 'تمام، يوم الأحد الساعة 10 الصبح إن شاء الله.');
     } else if (mode === 'claim-pick-allset' && spec?.expect?.booked) {
@@ -1186,7 +1229,7 @@ function fakeModel({ mode = 'good', state }) {
   };
 }
 /** The tools a right answer calls, one round at a time (book_viewing after viewing_slots answered). */
-function fakePlan({ kase, spec, done, slots }) {
+function fakePlan({ kase, spec, done, slots, wrongHome = false }) {
   const exp = spec?.expect ?? {};
   const texts = [...spec.client.filter((x) => typeof x === 'string'), ...kase.history.map((h) => h.text)];
   const listing = (texts.join(' ').match(LISTING_ID_RE)?.[0] ?? kase.lead?.listing_id ?? null)?.toUpperCase() ?? null;
@@ -1197,7 +1240,8 @@ function fakePlan({ kase, spec, done, slots }) {
     if (done.has(name)) continue;
     if (name === 'book_viewing') {
       if (!slots) { if (!done.has('viewing_slots')) calls.push({ name: 'viewing_slots', args: { listing_id: listing } }); continue; }
-      calls.push({ name, args: { listing_id: listing, slot_id: slots.slots?.[exp.slot ?? 0]?.slot_id ?? null, ...(named ? { name: named } : {}) } });
+      const home = wrongHome ? (listing === 'BONA-W019' ? 'BONA-W003' : 'BONA-W019') : listing;
+      calls.push({ name, args: { listing_id: home, slot_id: slots.slots?.[exp.slot ?? 0]?.slot_id ?? null, ...(named ? { name: named } : {}) } });
       continue;
     }
     const args = name === 'search_properties' ? { query: String(spec.client.find((x) => typeof x === 'string') ?? '').slice(0, 120) }
@@ -1442,7 +1486,7 @@ export async function runEval({
     const runId = stamp();
     answers = openAnswers(outDir, runId);
     const toolFetch = dry ? refuseFetch : siteFetch({ realFetch, siteUrl });
-    const publishedUnits = dry ? { get: async () => null } : createPublishedUnits({ siteUrl, fetch: toolFetch });
+    const publishedUnits = dry ? { get: async (listing) => (listing?.id === DRY_UNITS.listingId ? DRY_UNITS : null) } : createPublishedUnits({ siteUrl, fetch: toolFetch });
     const summaries = [];
     const read = { flags: [], refusals: [] };
     for (const cand of candidates) {

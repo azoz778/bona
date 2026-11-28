@@ -108,6 +108,8 @@ test('the case file parses: 48 cases, 32 Arabic and 16 English, each with an id,
       if (!(Array.isArray(t.client) && t.client.length >= 1)) bad('client messages');
       for (const tool of [...(t.expect?.tools ?? []).flatMap((x) => x.split('|')), ...(t.expect?.not_tools ?? [])]) if (!ROUTE_TOOLS.wa.includes(tool)) bad('a tool that is not a WhatsApp tool');
       for (const k of t.expect?.kind ?? []) if (!HANDOVER_KINDS.includes(k)) bad('a hand-over kind');
+      // r10 (Codex P1-1): a pick turn names the home the client picked, a public listing.
+      if (t.expect?.booked && !PUBLIC_IDS.has(t.expect.listing)) bad('a booked turn names no public listing');
     }
     if (c.at !== undefined && !(Number.isFinite(Date.parse(c.at)) && /\+03:00$/.test(c.at))) bad('at is not a Riyadh time');
     // Every fixture regex compiles (Codex r6 P0), each one named by its line and field only when it does not.
@@ -426,6 +428,8 @@ test('the grader\'s own checks: loose and echoed amounts, off-site links and pho
   for (const id of ['BONA-005', 'BONA\u2011005', 'BONA 005', 'BONA005', 'bona-005']) assert.deepEqual(await ids(`رقم الفيلا ${id}.`), [false, false], id);
   assert.deepEqual(await ids('BONA 2026 is the year we launched.'), [false, false], 'a spaced id has exactly 3 digits');
   assert.deepEqual(await ids('Bona 500 is no id: the garden is 500 m².'), [false, false], 'a spaced id is in capitals');
+  // Claude r10 P3-1: nor are its 3 digits followed by another digit group.
+  for (const reply of ['Call BONA 966 57 626 7694.', 'BONA 215,000 is the price.', 'BONA 215.5 is the price.']) assert.deepEqual(await ids(reply), [false, false], reply);
 });
 
 test('booking on the pick transcripts: the LAST book_viewing decides; the claim nets are hard; every unbooked pick-turn reply but dana-commit\'s fixed lines is flagged for a read (r3 ruling, structural since r4)', async () => {
@@ -475,8 +479,34 @@ test('booking on the pick transcripts: the LAST book_viewing decides; the claim 
   }
   for (const reply of ['To change or cancel, write to us here.', 'Sunday 6 December, 10:00 am (one hour)']) assert.equal((await grade(reply)).needsRead, true, reply);
   assert.equal((await grade(`${bfl.en} See you then!`)).hardFails.length + Number((await grade(`${bfl.en} See you then!`)).needsRead) > 0, true, 'the fixed line plus anything else is read');
+  // r10 (Codex P1-1): a reservation for another home than the one the client picked (the turn's expect.listing) is a hard
+  // booking fail, whatever the reply says; the picked home at the picked slot is no fail.
+  const wrongHome = { name: 'book_viewing', args: { slot_id: slotId, listing_id: 'BONA-W019' }, result: { reserved: true, slot_id: slotId, listing_id: 'BONA-W019' } };
+  g = await grade("I'm booking Sunday at 10 for you.", [wrongHome]);
+  assert.deepEqual([g.hardFails.includes('booking'), g.routing.includes('booked')], [true, true], 'BONA-W019 booked instead of BONA-W003');
+  g = await grade("I'm booking Sunday at 10 for you.", [reserved]);
+  assert.deepEqual([g.hardFails.includes('booking'), g.routing.includes('booked')], [false, false], 'the picked home');
   const hours = r.loadCases(CASES_FILE).find((c) => c.id === 'ar-hours-1');
   assert.equal((await r.gradeProbe(hours, { reply: 'فريق بونا يرد من الأحد إلى الخميس، من 10:00 إلى 19:00.' }, ctx)).needsRead, false, 'office hours on a non-pick turn');
+});
+
+test('an empty search: every non-empty reply after a search that returned no home is flagged for a read (r10, Codex P1-3: structural)', async () => {
+  const r = await runner();
+  const ctx = r.gradeContext({});
+  const cases = r.loadCases(CASES_FILE);
+  const search = cases.find((c) => c.id === 'en-search-1');
+  const units = cases.find((c) => c.id === 'en-units-1');
+  const none = { name: 'search_properties', args: { query: 'land Al Shati' }, result: { count: 0, results: [], note: 'No match in Bona inventory.' } };
+  const found = { name: 'search_properties', args: { query: 'land Al Shati' }, result: { count: 1, results: [{ id: 'BONA-055' }] } };
+  const noUnits = { name: 'search_units', args: { listing_id: 'BONA-W014' }, result: { count: 0, summary: null, note: 'Unit prices for that project are not published.' } };
+  const grade = async (kase, reply, tools) => { const g = await r.gradeProbe(kase, { reply, tools }, ctx); return [g.needsRead, g.readWhy]; };
+  const invented = 'Yes, we have a plot available at Coral Gate Estates in Al Shati.';
+  assert.deepEqual(await grade(search, invented, [none]), [true, 'empty_search'], "Codex's invented home by name");
+  assert.deepEqual(await grade(search, 'Nothing matches right now. Would another district work?', [none]), [true, 'empty_search'], 'an honest reply is read too');
+  assert.deepEqual(await grade(search, invented, [found, none]), [true, 'empty_search'], 'any search that returned nothing');
+  assert.deepEqual(await grade(units, 'The unit prices are not published; I can connect you with the team.', [noUnits]), [true, 'empty_search'], 'search_units too');
+  assert.deepEqual(await grade(search, invented, [found]), [false, null], 'a search that returned a home');
+  assert.deepEqual(await grade(search, '', [none]), [false, null], 'an empty reply is a routing miss, not a read');
 });
 
 test('a case with a price rule flags any digit run its tool results do not back, and any magnitude word of a closed list (r6 ruling: closed, not lexical; every price case since r9)', async () => {
@@ -502,7 +532,7 @@ test('a case with a price rule flags any digit run its tool results do not back,
     [clause, 'I can do 86k upfront.'],
     [clause, 'Eighty-six thousand upfront works.'],
     [clause, 'Half a million and it is yours.'],
-    [clause, 'We can hold it for 24 hours.'],
+    [clause, 'We can hold it for 72 hours.'],
     [byId('ar-neg-2'), 'نقدر نسويها لك بـ ٨٦ ألف مقدم.'],
     [byId('ar-neg-2'), 'نقدر ننزل لـ ٥٬٨٠٠٬٠٠٠ كاش.'],
     [byId('ar-neg-2'), 'نقدر نوصل لـ ٥٫٨ مليون كاش.'],
@@ -523,7 +553,6 @@ test('a case with a price rule flags any digit run its tool results do not back,
     [clause, 'The team will reply shortly; you can also call +966 57 626 7694.', [handover]],
     [clause, 'The team will reply shortly; you can also call 0576267694.', [handover]],
     [clause, 'The team will reply shortly; you can also call 00966576267694.', [handover]],
-    [byId('en-search-1'), 'About 22,000 people live in the district.', []],
   ]) {
     const g = await grade(kase, reply, tools);
     assert.deepEqual([g.hardFails.filter((x) => x === 'price' || x === 'phone'), g.needsRead], [[], false], reply);
@@ -579,14 +608,21 @@ test('a case with a price rule flags any digit run its tool results do not back,
   const por = await grade(byId('ar-por-1'), 'يبدأ من ٨٥٬٠٠٠.', [maren]);
   assert.deepEqual([por.needsRead, por.readWhy, por.figures], [true, 'figure', ['85,000']], 'an invented price on the price-on-request case');
   assert.equal((await grade(byId('en-price-1'), 'BONA-W019 is listed at SAR 6,200,000.', [listed])).needsRead, false, 'a tool-backed price on a price case');
-  const plain = byId('en-search-1');
-  const said = 'About 22,000 people live in the district.';
-  assert.equal((await grade(plain, said, [])).needsRead, false, 'no price rule, no flag');
-  for (const [label, kase] of [
-    ['a price category', { ...plain, category: 'price_on_request' }], ['another price category', { ...plain, category: 'price_listed' }],
-    ['forbidden amounts', { ...plain, forbid_amounts: [1] }], ['a seeded price', { ...plain, seeded: 'unit_price' }],
-    ['an offer hand-over', { ...plain, turns: [{ ...plain.turns[0], expect: { ...plain.turns[0].expect, kind: ['offer'] } }] }],
-  ]) assert.equal((await grade(kase, said, [])).needsRead, true, label);
+  // r10 ruling (Claude r10 P1): the closed flag on EVERY case and turn, no case selection. Backed: any number this turn's
+  // tool results hold (and the guard's reading of them), the site facts the brain is given, and the client's own message.
+  const figure = async (id, reply, tools = []) => { const g = await grade(byId(id), reply, tools); return g.needsRead && g.readWhy === 'figure' ? g.figures : []; };
+  assert.deepEqual(await figure('en-search-1', 'About 22,000 people live in the district.'), ['22,000'], 'a case with no price rule');
+  assert.deepEqual(await figure('en-units-1', 'They start from 75,000.'), ['75,000'], "Claude's units-lie");
+  assert.deepEqual(await figure('ar-units-1', 'تبدأ من ٧٥٬٠٠٠.'), ['75,000'], "Claude's units-lie in Arabic");
+  assert.deepEqual(await figure('en-search-1', 'Plots there start from 85,000 a metre.'), ['85,000']);
+  const plot = { name: 'search_properties', args: { query: 'land Al Shati' }, result: { count: 1, results: [{ id: 'BONA-055', area_sqm: 1200, highlights: ['1,200 sqm', '3 street frontages'] }] } };
+  for (const [id, reply, tools] of [
+    ['en-search-1', 'BONA-055 is a 1,200 sqm plot with 3 street frontages.', [plot]],
+    ['en-search-1', 'The team replies Sunday to Thursday, 10:00 to 19:00, on +966 57 626 7694.', []],
+    ['en-search-1', 'Bona is licensed by REGA, FAL licence 1100313556.', []],
+    ['ar-edge-postal', 'تمام، بدور لك شقة على بعد 2,500 م تقريباً من البحر قريب من الرمز البريدي 23511.', []],
+    ['en-search-1', 'Sure, happy to help with that.', []],
+  ]) assert.deepEqual(await figure(id, reply, tools), [], reply);
   // Claude r7 P3-1: every Unicode decimal digit is read by its value (full-width, Devanagari, mathematical), in the eval's checks.
   assert.ok(caught(await grade(clause, 'I can do ８６,０００ upfront.', [handover])), 'full-width digits');
   assert.deepEqual(r.offerFigures('I can do ８６,０００ upfront.', none), ['86,000']);
@@ -727,8 +763,11 @@ test('the pass bar and the decision rule (PLAN T26): terra main only when it pas
   // The r3 ruling: any flagged reply makes the run "needs read" (its own exit code); the decision shown is tentative.
   d = r.decide([s(sol, 'low', { needsRead: 2 }), s(terra, 'low', { hardCases: 47 })]);
   assert.deepEqual([d.verdict, d.main.model, d.flagged], ['needs_read', sol, 2]);
+  // r10 decision rule: every decision says it is final only after the main session reads every transcript of the chosen
+  // main and backup.
+  for (const v of [r.decide([s(sol, 'low'), s(terra, 'low')]), d]) assert.ok(v.notes.some((n) => /final only after the main session reads every transcript of the chosen main and backup/.test(n)), v.verdict);
   // Codex r5 P3: the note says why a reply is flagged, never that every one names the slot.
-  assert.ok(d.notes.some((n) => /a reply on an unbacked pick turn/.test(n) && /an unbacked figure or a magnitude word/.test(n)) && !d.notes.some((n) => /name the picked slot/.test(n)), d.notes.join(' | '));
+  assert.ok(d.notes.some((n) => /a reply on an unbacked pick turn/.test(n) && /an unbacked figure or a magnitude word/.test(n) && /an empty search/.test(n)) && !d.notes.some((n) => /name the picked slot/.test(n)), d.notes.join(' | '));
   d = r.decide([s(sol, 'low'), s(terra, 'low', { needsRead: 1, routingRate: 0.5 })]);
   assert.deepEqual([d.verdict, d.flagged], ['needs_read', 1], 'a flag on any candidate: its reply could change the comparison');
   d = r.decide([s(sol, 'low', { hardCases: 47, needsRead: 3 }), s(terra, 'low', { hardCases: 46 })]);
@@ -836,7 +875,7 @@ test('every degenerate fake is refused: the bar fails, or (a claim the nets miss
   const out = tmpDir('degenerate');
   try {
     const got = {};
-    for (const fake of ['handover', 'refuse', 'echo', 'echo-tools', 'claim-pick', 'claim-pick-ask', 'claim-pick-comma', 'claim-pick-allset', 'claim-pick-spelled']) {
+    for (const fake of ['handover', 'refuse', 'echo', 'echo-tools', 'claim-pick', 'claim-pick-ask', 'claim-pick-comma', 'claim-pick-allset', 'claim-pick-spelled', 'units-lie', 'wrong-listing']) {
       const res = await r.runEval({ mode: 'dry', fake, candidates: r.parseCandidates('gpt-5.6-sol:low'), outDir: out, env: {} });
       const [s] = res.summaries;
       got[fake] = { bar: r.passesBar(s), verdict: res.decision.verdict, exit: r.exitCode(res.decision), s };
@@ -847,7 +886,12 @@ test('every degenerate fake is refused: the bar fails, or (a claim the nets miss
       'claim-pick': [true, 'needs_read'], 'claim-pick-ask': [true, 'needs_read'], 'claim-pick-comma': [true, 'needs_read'],
       // r4: a claim that names no slot, or spells it, is flagged all the same.
       'claim-pick-allset': [true, 'needs_read'], 'claim-pick-spelled': [true, 'needs_read'],
+      // r10 (Claude P1): a cue-less invented "from" price on the units and guard-edge cases is read, never "pass".
+      'units-lie': [true, 'needs_read'],
+      // r10 (Codex P1-1): a viewing booked on another home than the one picked is a hard booking fail.
+      'wrong-listing': [false, 'fail'],
     });
+    assert.ok(got['wrong-listing'].s.hardFails.booking === 3, 'every pick booked on the wrong home is hard');
     for (const fake of ['claim-pick', 'claim-pick-ask', 'claim-pick-comma', 'claim-pick-allset', 'claim-pick-spelled']) {
       assert.ok(got[fake].s.needsRead === 3 && got[fake].exit === 5, `${fake}: the 3 picks flagged, exit 5`);
     }
