@@ -185,7 +185,8 @@ const LINK_RE = /https?:\/\/[^\s<>"'`]+/giu;
  *       curated ccTLD list that leaves out the codes that collide with abbreviations and words: no, al, mo, so, ft,
  *       ok, us, co), or the host has 3+ labels (`x.com.au`), or the host is all lowercase and the label before the
  *       last has 4+ characters (`lender.co`, `homes.us`; accepted P3s: "plot.no" is a link, "Lender.co" is text);
- *   (c) its last label is 3-24 letters with a path or a port (any TLD: `example.finance/contact`), or in LINK_TLDS;
+ *   (c) its last label is 3-24 letters with a path or a port (any TLD: `example.finance/contact`) and its first label
+ *       is no abbreviation (r22: `Sun.Thu/9:00`, `Ref.BONA/001` stay text), or the last label is in LINK_TLDS;
  * and some label before the last has 2+ characters ("e.g.", "a.m.to", "U.S." stay text). Otherwise it is text:
  * `sq.ft`, `ref.no`, `Tel.no`, `Dr.Al`, `Sun.Mo`, `ok.so`, `vs.us`, `Inc.co`, `Sun.Mo/Tue`, `ref.no:12`.
  */
@@ -212,7 +213,7 @@ function bareLink(candidate) {
     return LINK_TLDS.has(last) || labels.length >= 3 || (rawHost === host && labels[labels.length - 2].length >= 4);
   }
   // A path or a port with any 3-24-letter TLD (`example.finance/contact`); otherwise the list.
-  if (candidate.length > host.length && /^[a-z]{3,24}$/.test(last)) return true;
+  if (candidate.length > host.length && /^[a-z]{3,24}$/.test(last) && !LINK_ABBREVIATIONS.has(labels[0])) return true;
   return LINK_TLDS.has(last);
 }
 /** Every link of a brain chat's text, with its position (r19: removed by position, never by its first occurrence). */
@@ -1783,6 +1784,16 @@ export function createDana({
       if (wait > 0) await sleep(wait);
     }
     const pre = await preSend(leadId, coversTs);
+    // The route flipped while the turn ran (#dana brain on / off, auto mode on / off; r22): the reply was made for the
+    // other path, so it is dropped (no commit hook, no send) and the chat is re-woken to answer the batch on the new
+    // route.
+    // Read from the lead itself, so a refusal on the new route (a cap, a switch) is never handled on the old one.
+    const routeNow = useBrain(db.getLead(leadId));
+    if (routeNow !== Boolean(viaBrain)) {
+      pendingAgain.set(String(leadId), Math.max(pendingAgain.get(String(leadId)) ?? 0, Number(coversTs)));
+      say({ evt: 'dana.route_changed', leadId, brain: routeNow });
+      return skip(leadId, 'route_changed');
+    }
     // A stop, privacy or deletion request stored while she worked (preSend's refresh included) wins before anything
     // else this step would decide (r13, r14 I1): no booking, no bubble; the chat is woken so the stop flow runs.
     if (viaBrain) {

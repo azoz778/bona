@@ -3488,3 +3488,37 @@ test('T12 r21 (Codex P1): "visit Lender.co/apply for details" on a first reply i
   assert.doesNotMatch(h.sent()[0], /Lender\.co/i);
   assert.match(h.sent()[0], /We are happy to help\./);
 });
+
+/* ======================================================================================
+ * PR-B3 r22 (Codex P1, Claude P3): a turn whose route flips while it runs (#dana brain on / off) sends nothing and
+ * re-wakes the chat on the new route; an abbreviation's first label keeps a 3-24-letter "x.word/…" text too.
+ * ====================================================================================== */
+
+test('T12 r22 1: legacy → brain while Retell answers: no Retell text, the re-wake answers through the brain', async () => {
+  let h;
+  h = bh({ auto: false, turns: [brainReply('From the brain.')], retellAnswer: () => { h.team.setSetting('dana_brain', '1'); return defaultAnswer(); } });
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.equal(h.retell.completions.length, 1, 'the Retell turn was made');
+  assert.ok(!h.sent().some((t) => /Which district/.test(t)), 'its reply never goes');
+  assert.equal(h.brain.calls.length, 1);
+  assert.equal(h.sent().length, 1);
+  assert.ok(h.sent()[0].endsWith('From the brain.'));
+});
+
+test('T12 r22 1: brain → legacy while the brain answers: no brain text, the re-wake answers through Retell', async () => {
+  let h;
+  h = bh({ auto: false, brainOn: true, turns: [async () => { h.team.setSetting('dana_brain', '0'); return brainReply('From the brain.'); }] });
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.equal(h.brain.calls.length, 1, 'the brain turn was made');
+  assert.ok(!h.sent().some((t) => /From the brain/.test(t)), 'its reply never goes');
+  assert.equal(h.retell.completions.length, 1);
+  assert.equal(h.sent().length, 1);
+  assert.ok(h.sent()[0].endsWith('Of course. Which district do you prefer?'));
+});
+
+test('T12 r22 2: an abbreviation first label keeps "x.word/…" text; real links stay links', () => {
+  for (const t of ['Sun.Thu/9:00-17:00', 'Al.Rawdah/north', 'St.Andalus/5', 'Ref.BONA/001', 'Mon.Fri/9-5']) assert.deepEqual(linksIn(t), [], t);
+  for (const t of ['example.finance/contact', 'Lender.co/apply', 'st.com/x']) assert.equal(linksIn(t).length, 1, t);
+});
