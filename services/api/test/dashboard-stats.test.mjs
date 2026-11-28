@@ -676,7 +676,7 @@ test('ownerSummary(): no fixed line PR-B3 sends as a dana row is an answer — e
   // The 4 hand-over variants (variant 0 is also the in-hours outage line), out of hours, the outage and closing lines, both
   // languages; and dana-commit's BOOKING_FAILED_LINE (PR-B4) once that module defines it.
   const bookingFailed = Object.values(danaCommitModule.BOOKING_FAILED_LINE ?? {});
-  assert.equal(FIXED_LINES.length, 14 + bookingFailed.length);
+  assert.equal(FIXED_LINES.length, 16 + bookingFailed.length, 'and the neutral line (r2)');
   for (const line of bookingFailed) assert.ok(NOT_ANSWER_LINES.includes(line), `booking_failed is no answer: ${line}`);
   for (const line of FIXED_LINES) {
     const db = openDb(':memory:');

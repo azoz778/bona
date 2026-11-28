@@ -422,7 +422,7 @@ test("the form's note is not on the one sender's note minute: it takes none of t
       const owner = `${OWNER_DIGITS}@s.whatsapp.net`;
       await (await enquiry(base)).json();
       for (let i = 0; i < 6; i += 1) assert.equal((await h.app.sender.sendTo({ jid: owner, text: `note ${i}`, kind: 'note' })).ok, true, `note ${i}`);
-      assert.deepEqual(await h.app.sender.sendTo({ jid: owner, text: 'note 7', kind: 'note' }), { ok: false, error: 'rate_limited', failure: 'local' });
+      assert.deepEqual(await h.app.sender.sendTo({ jid: owner, text: 'note 7', kind: 'note' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' });
       const { lead_id: leadId } = await (await enquiry(base, { event_id: 'seams-form-0000002' })).json();
       assert.equal(evo.sends().length, 2, 'both forms, today\'s way');
       assert.deepEqual(evo.sends().at(-1), { number: OWNER_DIGITS, text: leadNote(h.db.getLead(leadId), { siteUrl: SITE }) });

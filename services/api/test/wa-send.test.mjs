@@ -169,14 +169,16 @@ test('limits: per recipient per minute, and across every sender', async () => {
   const h = harness();
   const one = '966500000001@s.whatsapp.net';
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: one, text: 'x', kind: 'code' })).ok, true);
-  assert.deepEqual(await h.sender.sendTo({ jid: one, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
-  let ok = PER_RECIPIENT_PER_MIN;
+  assert.deepEqual(await h.sender.sendTo({ jid: one, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' });
+  // The shared minute (staff replies; login codes are outside it since PR-B3 r2).
+  let ok = 0;
   for (let n = 2; ok < SEND_PER_MIN; n += 1) {
-    if ((await h.sender.sendTo({ jid: `9665000000${String(n).padStart(2, '0')}@s.whatsapp.net`, text: 'x', kind: 'code' })).ok) ok += 1;
+    if ((await h.sender.sendTo({ jid: `9665000000${String(n).padStart(2, '0')}@s.whatsapp.net`, text: 'x', kind: 'staff' })).ok) ok += 1;
   }
-  assert.deepEqual(await h.sender.sendTo({ jid: '966599999999@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966599999999@s.whatsapp.net', text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' });
+  assert.equal((await h.sender.sendTo({ jid: '966599999999@s.whatsapp.net', text: 'x', kind: 'code' })).ok, true, 'a login code is outside the shared minute');
   h.tick(60_000);
-  assert.equal((await h.sender.sendTo({ jid: '966599999999@s.whatsapp.net', text: 'x', kind: 'code' })).ok, true, 'refills');
+  assert.equal((await h.sender.sendTo({ jid: '966599999998@s.whatsapp.net', text: 'x', kind: 'staff' })).ok, true, 'refills');
   h.s.close();
 });
 
@@ -185,7 +187,7 @@ test('a limiter refusal leaves the other limiters untouched (peek before take)',
   const hot = '966500000001@s.whatsapp.net';
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: hot, text: 'x', kind: 'code' })).ok, true);
   // burn a handful of refusals against the per-recipient limiter alone
-  for (let i = 0; i < 5; i += 1) assert.deepEqual(await h.sender.sendTo({ jid: hot, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  for (let i = 0; i < 5; i += 1) assert.deepEqual(await h.sender.sendTo({ jid: hot, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' });
   // if those refusals had also charged the shared per-minute bucket, this would stall below SEND_PER_MIN
   let ok = PER_RECIPIENT_PER_MIN;
   for (let n = 100; ok < SEND_PER_MIN && n < 200; n += 1) {
@@ -198,7 +200,7 @@ test('a limiter refusal leaves the other limiters untouched (peek before take)',
 test("the owner's own jid skips the shared per-minute/per-day budget, but not the per-recipient one", async () => {
   const h = harness();
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code' })).ok, true);
-  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' }, 'still capped per-recipient');
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' }, 'still capped per-recipient');
   // immediately after, in the same minute, a fresh recipient still gets the FULL shared allowance
   let ok = 0;
   for (let n = 0; ok < SEND_PER_MIN && n < 100; n += 1) {
@@ -216,7 +218,7 @@ test('bypass is still subject to the per-recipient limit', async () => {
   }
   assert.deepEqual(
     await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true }),
-    { ok: false, error: 'rate_limited', failure: 'local' },
+    { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' },
   );
   h.s.close();
 });
@@ -405,7 +407,7 @@ test('a refusal before the call writes no row of its own', async () => {
   await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' });
   h.team.setSetting('sending_enabled', '1');
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' });
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' });
   assert.equal(outboxRows(h).length, PER_RECIPIENT_PER_MIN, 'only the sends that were attempted');
   h.s.close();
 });
@@ -479,24 +481,25 @@ test('a ledger write that fails after a 2xx with a key still answers ok, logged 
 test('a full day (SEND_PER_DAY) in the last 24 hours stops everyone but the owner — and a restart does not reset it', async () => {
   const h = harness();
   seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
-  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.equal((await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })).ok, true, 'a team login code still goes (PR-B3 r2)');
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'day' });
   assert.ok(h.logs.some((l) => l.evt === 'wa.send.rate_limited' && l.limit === 'day'));
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true, "the owner's own code still goes");
-  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls.length, 2);
 
   // A fresh process over the same file: the in-memory limiters are new, the ledger is not.
   const again = createSender({ env: ENV, team: h.team, inbox: createInboxStore(h.s, { now: h.now }), db: h.s, now: h.now, fetchImpl: async () => { throw new Error('must not be called'); } });
-  assert.deepEqual(await again.sendTo({ jid: '966500000003@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await again.sendTo({ jid: '966500000003@s.whatsapp.net', text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'day' });
   h.s.close();
 });
 
-test('one short of the day (codes and replies alike): one more goes, and that one fills the day', async () => {
+test('one short of the day (login codes spend none of it, PR-B3 r2): one more goes, and that one fills the day', async () => {
   const h = harness();
   seedOutbox(h, 50, { created: NOW - 3_600_000, kind: 'code' });
-  seedOutbox(h, SEND_PER_DAY - 1 - 50, { created: NOW - 3_600_000, kind: 'staff', status: 'uncertain' });
+  seedOutbox(h, SEND_PER_DAY - 1, { created: NOW - 3_600_000, kind: 'staff', status: 'uncertain' });
   assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' })).ok, true);
-  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000002@s.whatsapp.net', text: 'x', kind: 'staff', userId: 'USR-b' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'day' });
+  assert.equal((await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })).ok, true, 'a login code still goes');
   h.s.close();
 });
 
@@ -513,7 +516,7 @@ test('the day is rolling: a send becomes possible the moment the oldest of the d
   const h = harness();
   seedOutbox(h, SEND_PER_DAY, { created: NOW - DAY + 1_000 });
   h.tick(1_000);
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local' }, 'exactly 24 hours old still counts');
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'day' }, 'exactly 24 hours old still counts');
   h.tick(1);
   assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' })).ok, true);
   h.s.close();
@@ -529,7 +532,7 @@ test('per user: 30 a minute from one team member; another member and a login cod
   for (let i = 0; i < PER_USER_PER_MIN; i += 1) {
     assert.equal((await h.sender.sendTo({ jid: to(i), text: 'x', kind: 'staff', userId: 'USR-a' })).ok, true, `send ${i + 1}`);
   }
-  assert.deepEqual(await h.sender.sendTo({ jid: to(100), text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: to(100), text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' });
   assert.equal((await h.sender.sendTo({ jid: to(101), text: 'x', kind: 'staff', userId: 'USR-b' })).ok, true, 'another member has their own allowance');
   assert.equal((await h.sender.sendTo({ jid: to(102), text: 'x', kind: 'code' })).ok, true, 'a login code has no member behind it');
   h.tick(60_000);
@@ -1008,7 +1011,7 @@ test('reply: its own pending row is not counted twice against the day', async ()
   const staff2 = staffOf(full);
   seedChat(full);
   seedOutbox(full, SEND_PER_DAY);
-  assert.deepEqual(await full.sender.reply(replyArgs(staff2)), { ok: false, error: 'rate_limited', status: 'failed', sendId: SID });
+  assert.deepEqual(await full.sender.reply(replyArgs(staff2)), { ok: false, error: 'rate_limited', status: 'failed', sendId: SID, limit: 'day' });
   assert.equal(full.inbox.getOutbox(SID).status, 'failed');
   assert.equal(full.calls.length, 0);
   h.s.close();
@@ -1250,7 +1253,7 @@ test("kind 'dana' passes the gate like a staff reply: a text row with no user, t
     assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: `Dana ${i}`, kind: 'dana', leadId: 'LEAD-D', sendId: id })).ok, true);
   }
   const over = danaRow('one too many');
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'one too many', kind: 'dana', leadId: 'LEAD-D', sendId: over }), { ok: false, error: 'rate_limited', failure: 'local', sendId: over },
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'one too many', kind: 'dana', leadId: 'LEAD-D', sendId: over }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute', sendId: over },
     'the per-recipient limit binds her like anyone');
   assert.equal(h.inbox.getOutbox(over).status, 'failed', 'a refusal closes her row');
   h.team.setSetting('sending_enabled', '0');
@@ -1307,11 +1310,12 @@ test("split: the owner's personal number keeps its login-code bypass; the Bona n
 test('split: a full day stops everyone but the owner and the Bona number, both still capped per recipient', async () => {
   const h = harness({ env: SPLIT_ENV });
   seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
-  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'day' });
+  assert.equal((await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })).ok, true, 'a team login code still goes (PR-B3 r2)');
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true);
   assert.equal((await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' })).ok, true);
   for (let i = 1; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' })).ok, true);
-  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' });
   h.s.close();
 });
 
@@ -1328,14 +1332,14 @@ test('unset: only the owner is outside the shared day budget, as before the spli
   seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true);
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'note' })).ok, true, "the owner's notes are outside it too");
-  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.equal((await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' })).ok, true, 'a login code is outside the day (PR-B3 r2)');
   // Only the login code and the note are free (critic C13): Dana and a staff reply into the
   // owner's own chat (the test chat) are paced like any client's.
-  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'day' });
   ownerChatMessage(h);
   h.inbox.insertOutbox({ send_id: 'SND-dana-owner-full', lead_id: 'LEAD-O', jid: OWNER_JID, text: 'x', sender_kind: 'dana', covers_ts: NOW - 1000 });
   assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'dana', leadId: 'LEAD-O', sendId: 'SND-dana-owner-full' }),
-    { ok: false, error: 'rate_limited', failure: 'local', sendId: 'SND-dana-owner-full' });
+    { ok: false, error: 'rate_limited', failure: 'local', limit: 'day', sendId: 'SND-dana-owner-full' });
   h.s.close();
 });
 
@@ -1393,15 +1397,15 @@ test('a note is outside the shared budget and pays its own per-recipient limit',
   const h = harness();
   // The shared minute used up by sends to other people...
   for (let i = 0; i < SEND_PER_MIN; i += 1) {
-    assert.equal((await h.sender.sendTo({ jid: `9665000001${String(i).padStart(2, '0')}@s.whatsapp.net`, text: 'x', kind: 'code' })).ok, true);
+    assert.equal((await h.sender.sendTo({ jid: `9665000001${String(i).padStart(2, '0')}@s.whatsapp.net`, text: 'x', kind: 'staff' })).ok, true);
   }
-  assert.deepEqual(await h.sender.sendTo({ jid: '966500000199@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000199@s.whatsapp.net', text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' });
   // ...and the shared day too.
   seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) {
     assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: `note ${i}`, kind: 'note' })).ok, true, `note ${i}: neither stops it`);
   }
-  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'one too many', kind: 'note' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'one too many', kind: 'note' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' });
   h.s.close();
 });
 
@@ -1409,7 +1413,7 @@ test("notes and Dana's sends to the owner use separate limiter keys: 6 notes do 
   const h = harness();
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: `note ${i}`, kind: 'note' })).ok, true);
   // The notes' own minute really is used up (the clock is frozen)...
-  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'note 7', kind: 'note' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'note 7', kind: 'note' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' });
   // ...and Dana's next send into the owner's chat goes all the same.
   const id = danaOwnerRow(h, 1);
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'Dana 1', kind: 'dana', leadId: 'LEAD-O', sendId: id })).ok, true);
@@ -1423,7 +1427,7 @@ test("notes and Dana's sends to the owner use separate limiter keys: 6 notes do 
     assert.equal((await r.sender.sendTo({ jid: OWNER_JID, text: `Dana ${n}`, kind: 'dana', leadId: 'LEAD-O', sendId: more })).ok, true);
   }
   const over = danaOwnerRow(r, 99);
-  assert.deepEqual(await r.sender.sendTo({ jid: OWNER_JID, text: 'Dana 99', kind: 'dana', leadId: 'LEAD-O', sendId: over }), { ok: false, error: 'rate_limited', failure: 'local', sendId: over });
+  assert.deepEqual(await r.sender.sendTo({ jid: OWNER_JID, text: 'Dana 99', kind: 'dana', leadId: 'LEAD-O', sendId: over }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute', sendId: over });
   const calls = r.calls.length;
   assert.equal((await r.sender.sendTo({ jid: OWNER_JID, text: 'same minute', kind: 'note' })).ok, true, "Dana's full minute is not the note's");
   assert.equal(r.calls.length, calls + 1);
@@ -1437,7 +1441,7 @@ test("Dana to the owner's jid is counted in the day budget, and her row is count
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'Dana 1', kind: 'dana', leadId: 'LEAD-O', sendId: id })).ok, true,
     'the 500th send of the day: her own pending row is this send, not an earlier one');
   assert.equal(h.inbox.countSentSince(NOW - DAY, { excludeJids: [OWNER_JID] }), SEND_PER_DAY, 'it counts toward the 500');
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'day' });
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'n', kind: 'note' })).ok, true, 'a note still goes');
   h.s.close();
 });
@@ -1487,7 +1491,7 @@ test('T12: every refusal carries its failure class — local for our own refusal
   assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'sending_disabled', failure: 'local' });
   h.team.setSetting('sending_enabled', '1');
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) await h.sender.sendTo({ jid: CLIENT_JID, text: `x${i}`, kind: 'staff' });
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' });
   const off = harness({ env: { ...T12_ENV, BONA_WA_NOTIFY: '0' } });
   assert.equal((await off.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' })).failure, 'local');
   const bare = harness({ env: { BONA_WA_INSTANCE: 'bona-test' } });
@@ -1570,4 +1574,31 @@ test('T12: postMedia — a brochure goes as a document by URL with a caption, it
   assert.equal(t.calls.length, 1, 'never retried');
   h.s.close();
   t.s.close();
+});
+
+test('T12 r2: a rate_limited refusal says which limit (minute or day); dayFull() reports the day before any call', async () => {
+  const h = harness({ env: T12_ENV });
+  for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) await h.sender.sendTo({ jid: CLIENT_JID, text: `x${i}`, kind: 'staff' });
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'minute' });
+  assert.equal(h.sender.dayFull(), false);
+  const d = harness({ env: T12_ENV });
+  seedOutbox(d, SEND_PER_DAY, { created: NOW - 3_600_000 });
+  assert.equal(d.sender.dayFull(), true);
+  assert.deepEqual(await d.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local', limit: 'day' });
+  h.s.close();
+  d.s.close();
+});
+
+test('T12 r2: team login codes are outside the shared minute and day budget (still capped per recipient), and spend none of it', async () => {
+  const h = harness({ env: T12_ENV });
+  seedOutbox(h, SEND_PER_DAY, { created: NOW - 3_600_000 });
+  assert.equal((await h.sender.sendTo({ jid: '966500000077@s.whatsapp.net', text: '123456', kind: 'code' })).ok, true, 'a full day: a staff member still gets a login code');
+  const m = harness({ env: T12_ENV });
+  for (let i = 0; i < SEND_PER_MIN; i += 1) assert.equal((await m.sender.sendTo({ jid: `9665000004${String(i).padStart(2, '0')}@s.whatsapp.net`, text: '123456', kind: 'code' })).ok, true);
+  assert.equal((await m.sender.sendTo({ jid: CLIENT_JID, text: 'hello', kind: 'staff' })).ok, true, "eight codes this minute spent none of the shared minute");
+  assert.equal(m.sender.dayFull(), false);
+  const r = harness({ env: T12_ENV });
+  for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) await r.sender.sendTo({ jid: '966500000077@s.whatsapp.net', text: `${i}`, kind: 'code' });
+  assert.equal((await r.sender.sendTo({ jid: '966500000077@s.whatsapp.net', text: 'again', kind: 'code' })).error, 'rate_limited', 'still capped per recipient');
+  for (const x of [h, m, r]) x.s.close();
 });

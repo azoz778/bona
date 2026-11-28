@@ -36,7 +36,7 @@ function rig({ client = CLIENT, inboxVia = null, turns = [], commit = null, paci
     posts.push({ route: String(url).split('/message/')[1].split('/')[0], body: JSON.parse(init.body), at: clock });
     return { ok: true, status: 201, text: async () => JSON.stringify({ key: { id: `KEY-${posts.length}` } }) };
   };
-  const env = { EVOLUTION_API_URL: 'http://evo.test/', EVOLUTION_API_KEY: 'k', BONA_WA_INSTANCE: 'bona2', BONA_OWNER_JID: `${OWNER}@s.whatsapp.net` };
+  const env = { EVOLUTION_API_URL: 'http://evo.test/', EVOLUTION_API_KEY: 'k', BONA_WA_INSTANCE: 'bona-test', BONA_OWNER_JID: `${OWNER}@s.whatsapp.net` };
   const sender = createSender({ env, team, inbox, db: s, fetchImpl, now });
   const sleep = async (ms) => { clock += ms; };
   const pacing = givenPacing ?? createPacing({ cfg: { waLinkedAt: null }, now, random: () => 0, sleep });

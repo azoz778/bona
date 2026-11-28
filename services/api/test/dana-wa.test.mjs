@@ -12,7 +12,7 @@ import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import {
   createDana, languageOf, leadFacts, recentContext, batchText, withLinks, clip, answerFrom,
   HUMAN_QUIET_MS, SESSION_IDLE_MS, FRESH_MS, PER_CHAT_PER_HOUR, PER_DAY, CONTEXT_MESSAGES, MAX_LINKS, MAX_ANSWER_LEN, DISCLOSURE, HANDOVER,
-  BACKLOG_MS, LEGACY_DISCLOSURE, CLOSING, FIXED_LINES, requestKind, handoffDetails, brainInput, fixedLinesFrom,
+  BACKLOG_MS, LEGACY_DISCLOSURE, CLOSING, FIXED_LINES, requestKind, handoffDetails, brainInput, fixedLinesFrom, NEUTRAL, LEGACY_MAX_LINKS,
   LEGACY_FRESH_MS, LEGACY_PER_CHAT_PER_HOUR, LEGACY_PER_DAY,
   PER_CHAT_PER_10MIN, PER_CHAT_PER_DAY, PER_DAY_TIERS,
 } from '../lib/dana-wa.mjs';
@@ -968,12 +968,21 @@ function bh({
     lead_id: LEAD, created: at - DAY, updated: at - DAY, phone_e164: CLIENT, wa_jid: CLIENT_JID, name: 'Khalid', channel: 'whatsapp',
     match_method: 'ref', stage: 'new', stage_ts: at - DAY, inbox_state: 'in', inbox_since: at - DAY, interest: 'villa in Al Khalidiyah', ...lead,
   });
-  const dana = createDana({
-    db: s, inbox, team, sender, retell, inventory, siteUrl: SITE, agentId, brain, ownerTest, notes, pacing, link, wa,
+  const slept = [];
+  const build = (b = brain, n = notes) => createDana({
+    db: s, inbox, team, sender, retell, inventory, siteUrl: SITE, agentId, brain: b, ownerTest, notes: n, pacing, link, wa,
     ...(commit ? { commit } : {}),
     alerts: { notify: (id, o) => { pushed.push([id, o]); return Promise.resolve({}); }, notifyOwners: (o) => { owners.push(o); return Promise.resolve({}); } },
     isExcludedLead: (l) => isExcludedLead(team, s, l), now: () => clock, log: (o) => logs.push(o), batchMs: 0,
+    sleep: async (ms) => { slept.push(ms); clock += ms; },
   });
+  const dana = build();
+  /** A restart: a new createDana on the same database, with a brain and notes of its own. */
+  const restart = (turns2 = [], o = {}) => {
+    const b = createFakeBrain({ turns: turns2, configured: true, ...o });
+    const n = fakeNotes();
+    return { dana: build(b, n), brain: b, notes: n };
+  };
   let k = 0;
   const client = (text, { ts = clock, id = LEAD, media = null } = {}) => {
     k += 1;
@@ -988,7 +997,7 @@ function bh({
   };
   const sent = () => calls.map((c) => c.body.text ?? c.body.caption);
   return {
-    s, team, inbox, sender, retell, brain, notes, dana, calls, pushed, owners, logs, ownerTest, client, staff, danaRow, sent,
+    s, team, inbox, sender, retell, brain, notes, dana, calls, pushed, owners, logs, ownerTest, client, staff, danaRow, sent, slept, restart,
     lead: () => s.getLead(LEAD), tick: (ms) => { clock += ms; }, now: () => clock, set: (t) => { clock = t; },
   };
 }
@@ -1691,11 +1700,12 @@ test('LEGACY GUARD (r1): no loop guard for a legacy chat — the same text 3 tim
   assert.equal(h.lead().dana_hold_reason, null);
 });
 
-test('LEGACY GUARD (r1): the sender\'s rate limit is a skip (no hold, no hand-over); Evolution failures are main\'s hand-over, never a breaker or a hold', async () => {
+test('LEGACY GUARD (r1, r2): the sender\'s rate limit and Evolution failures are main\'s send_failed hand-over, never a breaker or a hold', async () => {
+  // r2 (R2): a legacy rate_limited is main's send_failed hand-over again (the flag, the task, the push; no line, no hold).
   const r = bh({ auto: false, at: NOW });
   refuseFirst(r);
-  assert.deepEqual(await ask(r, 'hello'), { skipped: 'rate_limited' });
-  assert.deepEqual([r.lead().dana_hold_reason, r.lead().needs_human, r.pushed.length], [null, 0, 0]);
+  assert.deepEqual(await ask(r, 'hello'), { handover: 'send_failed', sent: false });
+  assert.deepEqual([r.lead().dana_hold_reason, r.lead().needs_human, r.pushed.length, tasks(r)], [null, 1, 1, 1]);
   const f = bh({ auto: false, at: NOW, evo: () => ({ status: 400 }) });
   for (let i = 0; i < 3; i += 1) {
     const id = i === 0 ? LEAD : `LEAD-G${i}`;
@@ -1742,30 +1752,31 @@ test('T12 r1 brain rate_limited: the hold backs off (60 s, then 120 s), never a 
   assert.equal(h.calls.length, 1);
 });
 
-test('T12 r1 links (C1): every link of the text obeys the allowance — the model\'s own on a first message, three homes later, an off-site URL; the maps link stays', async () => {
+test('T12 r1/r2 links (C1, R1): on a brain chat every link obeys the allowance; a pointer left alone becomes the neutral line; legacy keeps main\'s', async () => {
   const homes = inventory.all().slice(0, 3);
   const urls = homes.map((l) => inventory.card(l).url.en);
   const found = { name: 'search_properties', result: { results: homes.map((l, i) => ({ id: l.id, slug: l.slug, url_en: urls[i] })) } };
   const h = bh({ turns: [
     brainReply(`Yes, one by the sea:\n${urls[0]}`, { tools: [found] }),
     brainReply(`Three homes:\n${urls[0]}\n${urls[1]}\n${urls[2]}`, { tools: [found] }),
-    brainReply('Details: https://example.com/villa and the map https://maps.google.com/?q=21.5,39.2', { tools: [found] }),
+    brainReply('The villa is close to the beach. More at https://example.com/villa\nMap: https://maps.google.com/?q=21.5,39.2', { tools: [found] }),
   ] });
   await ask(h, 'do you have a villa by the sea?');
   assert.equal((h.sent()[0].match(/https?:\/\//g) ?? []).length, 0, 'a first message: none, the model\'s own included');
-  assert.ok(h.sent()[0].endsWith('Yes, one by the sea:'));
+  assert.ok(h.sent()[0].endsWith(NEUTRAL.en), 'only a pointer was left ("…:"): the neutral line, never an empty hand-over (r2)');
+  assert.equal(h.lead().needs_human, 0);
   h.tick(60_000);
   await ask(h, 'more please');
   assert.deepEqual(h.sent()[1].match(/https?:\/\/\S+/g), [urls[0], urls[1]], 'at most two, in reading order');
   h.tick(60_000);
   await ask(h, 'where?');
-  assert.doesNotMatch(h.sent()[2], /example\.com/, 'an off-site URL is stripped');
-  assert.match(h.sent()[2], /https:\/\/maps\.google\.com\/\?q=21\.5,39\.2/, 'the code-built maps link may stay');
-  // A legacy Retell first message with a link: the same rule (PLAN §2 row 7 allows it).
+  assert.ok(h.sent()[2].startsWith('The villa is close to the beach.'), h.sent()[2]);
+  assert.doesNotMatch(h.sent()[2], /example\.com|More at|maps\.google|Map:/, 'the off-site URL, its dangling "More at" and a model-written maps link all go (r2)');
+  assert.ok((h.sent()[2].match(/https:\/\/bona\.azoz\.uk\//g) ?? []).length <= 2, "the tool's homes as cards, within MAX_LINKS");
+  // A legacy Retell answer keeps main's link handling exactly (r2, R1).
   const l = bh({ auto: false, retellAnswer: () => agentSays(`See ${urls[0]} for details.`) });
   await ask(l, 'hi');
-  assert.doesNotMatch(l.sent()[0], /https?:\/\//);
-  assert.ok(l.sent()[0].endsWith('See for details.'));
+  assert.equal(l.sent()[0], `${LEGACY_DISCLOSURE.en}\n\nSee ${urls[0]} for details.`);
 });
 
 test('T12 r1 fixed lines (C2): a brain chat\'s hand-over, closing and outage lines go through the FIFO', async () => {
@@ -1863,4 +1874,206 @@ test('T12 r1 small ones: a throwing autoMode fails closed; in hours the hand-ove
     assert.equal((await ask(a, text)).answered, true, text);
   }
   assert.equal(a.lead().dana_hold_reason, null);
+});
+
+/* ======================================================================================
+ * PR-B3 r2 (Claude + Codex, strict inert): legacy links and rate limits as on main; the outage,
+ * the breaker and the backlog survive a restart; fixed lines re-checked in the queue.
+ * ====================================================================================== */
+
+test('LEGACY GUARD (r2, R1): links as on main — a first answer keeps its URL, later answers get up to three cards', async () => {
+  assert.equal(LEGACY_MAX_LINKS, 3);
+  const homes = inventory.all().slice(0, 4);
+  const found = { role: 'tool_call_result', tool_call_id: 't1', content: JSON.stringify({ results: homes.map((l) => ({ id: l.id, slug: l.slug })) }) };
+  const withCards = () => ({ messages: [
+    { role: 'tool_call_invocation', tool_call_id: 't1', name: 'search_properties', arguments: '{}' }, found,
+    { role: 'agent', content: `Here are some homes:\n- ${homes[0].title.en}` },
+  ] });
+  const h = bh({ auto: false, retellAnswer: withCards });
+  await ask(h, 'any villas?');
+  assert.equal((h.sent()[0].match(/https?:\/\//g) ?? []).length, 3, 'a first legacy message gets main\'s three cards');
+  assert.equal(h.lead().needs_human, 0);
+});
+
+test('LEGACY GUARD (r2, R2): with the sender\'s day full a legacy turn hands over as main does, without paying for a Retell call', async () => {
+  const h = bh({ auto: false, at: NOW });
+  h.sender.dayFull = () => true;
+  assert.deepEqual(await ask(h, 'hello'), { handover: 'send_failed', sent: false });
+  assert.deepEqual([h.retell.chats.length, h.retell.completions.length, h.calls.length], [0, 0, 0]);
+  assert.deepEqual([h.lead().needs_human, tasks(h), h.pushed.length], [1, 1, 1]);
+});
+
+test('T12 r2 links: a bubble left with no real words is dropped; with nothing left the neutral line goes, never an `empty` hand-over', async () => {
+  const homes = inventory.all().slice(0, 1);
+  const url = inventory.card(homes[0]).url.en;
+  const found = { name: 'search_properties', result: { results: [{ id: homes[0].id, slug: homes[0].slug, url_en: url }] } };
+  for (const text of [`Here it is:\n${url}`, `Villa by the sea — ${url}`, `Map: ${url}`, `And ${url}`, `Details (${url})`]) {
+    const h = bh({ turns: [brainReply(text, { tools: [found] })] });
+    await ask(h, 'do you have a villa?');
+    assert.equal(h.sent().length, 1, text);
+    assert.ok(h.sent()[0].endsWith(NEUTRAL.en), `${text} → ${h.sent()[0]}`);
+    assert.deepEqual([h.lead().needs_human, tasks(h)], [0, 0], `${text}: no hand-over`);
+  }
+  assert.ok(FIXED_LINES.includes(NEUTRAL.en) && FIXED_LINES.includes(NEUTRAL.ar), 'the neutral line is no answer for the stats');
+});
+
+test('T12 r2 N1: a restart mid-outage sends no second line, alert, note or push, and the recovery still answers', async () => {
+  const h = bh({ turns: [brainError('quota')] });
+  await ask(h, 'is it free?');
+  assert.equal(h.calls.length, 1);
+  h.tick(60_000);
+  h.client('hello??');
+  const r1 = h.restart([brainError('quota')]);
+  h.set(T_IN + 10 * 60_000);
+  r1.dana.sweep();
+  await r1.dana.flush();
+  assert.equal(h.calls.length, 1, 'no second outage line after the restart');
+  assert.deepEqual(r1.notes.calls, [], 'no second alert or note');
+  assert.equal(h.pushed.length, 1, 'no second push');
+  assert.equal(h.lead().dana_hold_until, T_IN + 20 * 60_000, 'the hold is extended');
+  const r2 = h.restart([brainReply('Yes, it is free.')]);
+  h.set(T_IN + 20 * 60_000);
+  r2.dana.sweep();
+  await r2.dana.flush();
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.sent()[1], 'Yes, it is free.', 'the recovery answered the messages the holding line covered');
+  assert.equal(r2.brain.calls[0].batchParts.length, 2, 'both waiting messages, the floor read from the database');
+});
+
+test('T12 r2 N1: with no new message, a restart still leaves the recovery turn to run when the hold expires', async () => {
+  const h = bh({ turns: [brainError('down')] });
+  await ask(h, 'is it free?');
+  const r = h.restart([brainReply('Yes, it is.')]);
+  h.set(T_IN + 10 * 60_000);
+  assert.equal(r.dana.sweep().woken, 1);
+  await r.dana.flush();
+  assert.equal(h.sent()[1], 'Yes, it is.');
+});
+
+test('T12 r2 N2: an expired brain_out hold of a chat refused for another reason is cleared, not re-woken every minute', async () => {
+  const off = bh({ turns: [brainError('quota')] });
+  await ask(off, 'hello');
+  off.team.setSetting('dana_enabled', '0', { by: 'system' });
+  let wakes = 0;
+  for (let m = 10; m < 60; m += 1) {
+    off.set(T_IN + m * 60_000);
+    wakes += off.dana.sweep().woken;
+    await off.dana.flush();
+  }
+  assert.equal(wakes, 1, 'woken once, then the hold is gone');
+  assert.equal(off.lead().dana_hold_reason, null);
+  // A stop request during the outage: the closing line at expiry, then no more wakes.
+  const st = bh({ turns: [brainError('quota'), brainError('quota')] });
+  await ask(st, 'hello');
+  st.tick(60_000);
+  st.client('stop');
+  let w = 0;
+  for (let m = 10; m < 40; m += 1) {
+    st.set(T_IN + m * 60_000);
+    w += st.dana.sweep().woken;
+    await st.dana.flush();
+  }
+  assert.ok(st.sent().at(-1).endsWith(CLOSING.en));
+  assert.equal(st.lead().dana_off, 1);
+  assert.ok(w <= 2, `${w} wakes`);
+  assert.equal(st.lead().dana_hold_reason, null);
+});
+
+test('T12 r2: a queued fixed line is re-checked in the queue (a person wrote, Dana switched off) and waits for the typing floor', async () => {
+  for (const meanwhile of [(h) => h.staff('I have it, thanks.', h.now() + 1), (h) => h.team.setSetting('dana_enabled', '0')]) {
+    const h = bh({ turns: [brainError('quota')], pacing: { ...immediate, fifo: async (fn) => { meanwhile(h); return fn(); } } });
+    await ask(h, 'hello');
+    assert.equal(h.calls.length, 0, 'the queued outage line does not go');
+  }
+  const f = bh({ turns: [brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] })], pacing: { ...immediate, typingFloorMs: () => 9000 } });
+  await ask(f, 'a person please');
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.slept, [9000], 'the hand-over line waited for the typing floor');
+});
+
+test('T12 r2: the breaker counts the 30-minute window from the outbox, so a restart forgets no failure', async () => {
+  const h = bh({ turns: [brainReply('a'), brainReply('b')], evo: () => ({ status: 500 }) });
+  const chat = (i) => {
+    const id = `LEAD-K${i}`;
+    h.s.insertLead({ lead_id: id, created: T_IN - DAY, updated: T_IN - DAY, phone_e164: `96650000050${i}`, wa_jid: `96650000050${i}@s.whatsapp.net`, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+    h.ownerTest.setAuto(id, true);
+    return id;
+  };
+  await ask(h, 'hi', { id: chat(1) });
+  h.tick(60_000);
+  await ask(h, 'hi', { id: chat(2) });
+  assert.equal(h.team.getSetting('dana_enabled'), '1');
+  const r = h.restart([brainReply('c')]);
+  h.tick(60_000);
+  const ts = h.client('hi', { id: chat(3) });
+  await r.dana.answer('LEAD-K3', { ts });
+  assert.equal(h.team.getSetting('dana_enabled'), '0', 'the third failure in 30 min trips it after the restart');
+});
+
+test('T12 r2: concurrent backlog turns never pass ten an hour (the 9/10 race)', async () => {
+  const h = bh({ turns: Array.from({ length: 9 }, () => brainReply('Sorry for the wait.')), link: { identityOk: () => true, linkStable: () => true } });
+  const add = (i) => {
+    const id = `LEAD-Q${String(i).padStart(2, '0')}`;
+    h.s.insertLead({ lead_id: id, created: T_IN - DAY, updated: T_IN - DAY, phone_e164: `9665000006${String(i).padStart(2, '0')}`, wa_jid: `9665000006${String(i).padStart(2, '0')}@s.whatsapp.net`, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+    h.ownerTest.setAuto(id, true);
+    return id;
+  };
+  for (let i = 0; i < 9; i += 1) {
+    const id = add(i);
+    const ts = h.client('hi', { id, ts: h.now() - 40 * 60_000 });
+    assert.equal((await h.dana.answer(id, { ts })).answered, true);
+    h.tick(61_000);
+  }
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const r = h.restart([async () => { await gate; return brainReply('A.'); }, async () => { await gate; return brainReply('B.'); }]);
+  // A fresh process has no memory of the nine: the allowance is read from the outbox too.
+  const a = add(10);
+  const b = add(11);
+  const ta = h.client('hi', { id: a, ts: h.now() - 40 * 60_000 });
+  const tb = h.client('hi', { id: b, ts: h.now() - 40 * 60_000 });
+  const both = Promise.all([r.dana.answer(a, { ts: ta }), r.dana.answer(b, { ts: tb })]);
+  await new Promise((resolve) => setImmediate(resolve));
+  release();
+  const out = await both;
+  assert.equal(out.filter((x) => x.answered).length, 1, 'the tenth goes, the eleventh waits');
+  assert.ok(out.some((x) => x.skipped === 'backlog'));
+});
+
+test('T12 r2: a continuation that fails as the chat\'s second counted failure holds it AND alerts', async () => {
+  const commit = fakeCommit((o) => ({ bubbles: [{ kind: 'text', text: o.text }, { kind: 'document', url: 'https://bona.azoz.uk/b/w012.pdf', fileName: 'BONA-W012.pdf', caption: 'The brochure' }] }));
+  const h = bh({ commit, turns: [brainReply('Here are the details.')], evo: (n, body) => (body.mediatype === 'document' ? { status: 400 } : { status: 201, body: { key: { id: `K${n}` } } }) });
+  h.client('hi', { ts: T_IN - HOUR });
+  h.danaRow({ covers: T_IN - HOUR, created: T_IN - HOUR + 1000, status: 'failed', error: 'http_400' });
+  await ask(h, 'send me the brochure');
+  assert.deepEqual([h.lead().dana_hold_reason, h.lead().dana_hold_until], ['send_failed', null]);
+  assert.equal(h.pushed.length, 1, 'the alert');
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['send_failed']);
+});
+
+test('T12 r2: cap_day frees one turn → one waiting chat is woken (the oldest), the others wait for the next free turn', async () => {
+  const pacing = createPacing({ cfg: { waLinkedAt: null }, now: () => T_IN });
+  const h = bh({ pacing: { ...immediate, tier: pacing.tier }, turns: [brainReply('Now I can answer.')] });
+  const at0 = T_IN - DAY + 5 * 60_000;
+  for (let i = 0; i < 60; i += 1) {
+    const id = `LEAD-W${String(i).padStart(3, '0')}`;
+    h.s.insertLead({ lead_id: id, created: T_IN - 2 * DAY, updated: T_IN - 2 * DAY, phone_e164: `96650007${String(i).padStart(4, '0')}`, wa_jid: `96650007${String(i).padStart(4, '0')}@s.whatsapp.net`, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+    h.danaRow({ covers: at0 + i * 60_000, created: at0 + i * 60_000, id });
+  }
+  const waiting = [];
+  for (let i = 0; i < 3; i += 1) {
+    const id = `LEAD-P${i}`;
+    h.s.insertLead({ lead_id: id, created: T_IN - DAY, updated: T_IN - DAY, phone_e164: `96650000070${i}`, wa_jid: `96650000070${i}@s.whatsapp.net`, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+    h.ownerTest.setAuto(id, true);
+    const ts = h.client(`q${i}`, { id, ts: T_IN - (3 - i) * 60_000 });
+    assert.equal((await h.dana.answer(id, { ts })).handover, 'cap_day');
+    waiting.push(id);
+  }
+  h.set(at0 + DAY + 1);
+  assert.equal(h.dana.sweep().woken, 1, 'one freed turn, one chat');
+  await h.dana.flush();
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].body.number, '966500000700', 'the oldest waiting chat first');
+  assert.ok(h.s.getLead('LEAD-P1').dana_hold_until > h.now(), 'the others wait for the next free turn');
+  assert.equal(h.notes.of('handover').length, 3, 'no repeat hand-over');
 });

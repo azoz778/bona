@@ -52,6 +52,9 @@
  *     never retried. The URL must be https and the file name end in `.pdf` (Evolution derives the
  *     type from it; T00 finding 6), or it is refused `bad_document`.
  *
+ * A `rate_limited` refusal also says which limit: `limit: 'minute'|'day'`. A login `code` to anyone is
+ * outside the shared minute and day (PR-B3 r2: the team can log in on a full day), capped per recipient.
+ *
  * Every refusal carries its failure class (PR-B3, the breaker of lib/dana-wa.mjs): `failure:
  * 'local'` for this file's own refusals (a bad argument, the Sending switch, BONA_WA_NOTIFY,
  * no Evolution, a rate limit, never-first, a duplicate), `failure: 'evolution'` for what
@@ -172,6 +175,23 @@ export function createSender({
   // The warm-up anchor (BONA_WA_LINKED_AT): the day's cap grows with the number's age (DESIGN §6.3).
   const linkedAt = parseIsoInstant(env.BONA_WA_LINKED_AT);
   const dayCap = () => SEND_PER_DAY_TIERS[tierIndex(now(), linkedAt)];
+  let codesStmt = null;
+  /**
+   * What the shared day has spent: the outbox's count (`countSentSince` leaves out free-kind rows to the
+   * unbudgeted jids), less the login codes to team members, which spend none of it (PR-B3 r2).
+   */
+  function daySent() {
+    const since = now() - DAY_MS;
+    let codes = 0;
+    if (db?.db) {
+      codesStmt ??= db.db.prepare(`SELECT COUNT(*) AS n FROM wa_outbox WHERE sender_kind = 'code' AND status IN ('pending','accepted','uncertain')
+          AND created >= ? AND jid NOT IN (?, ?)`);
+      codes = codesStmt.get(since, unbudgetedJids[0] ?? '', unbudgetedJids[1] ?? '').n;
+    }
+    return inbox.countSentSince(since, { excludeJids: unbudgetedJids }) - codes;
+  }
+  /** Is the shared day budget used up? Asked by lib/dana-wa.mjs before a paid model call (PR-B3 r2). */
+  const dayFull = () => daySent() >= dayCap();
   let openStmt = null;
   /**
    * Never first (DESIGN §6.1): `coversTs` is a stored client message of this chat under 24 h old.
@@ -270,9 +290,9 @@ export function createSender({
     // A refusal closes a row the caller already wrote, so it is never left `pending` —
     // which a restart would turn into "not sure it went" for a message that never left.
     // Every one of these is ours, not Evolution's: `failure: 'local'` (the breaker never counts it).
-    const refuse = (error) => {
+    const refuse = (error, extra = {}) => {
       if (givenRow) inbox.updateOutbox(given, { status: 'failed', error });
-      return givenRow ? { ok: false, error, failure: 'local', sendId: given } : { ok: false, error, failure: 'local' };
+      return givenRow ? { ok: false, error, failure: 'local', ...extra, sendId: given } : { ok: false, error, failure: 'local', ...extra };
     };
 
     const m = PHONE_JID_RE.exec(String(jid ?? ''));
@@ -304,22 +324,23 @@ export function createSender({
     if (kind !== 'code' && !cfg.enabled) return refuse('disabled');
     if (!cfg.baseUrl || !cfg.apiKey) return refuse('evolution-not-configured');
 
-    const free = FREE_KINDS.has(kind) && unbudgeted.has(m[1]);
+    // A login code to anyone (the owner, a team member) is outside the shared minute and day (PR-B3 r2):
+    // on a busy day the team can still log in. Still capped per recipient.
+    const free = (FREE_KINDS.has(kind) && unbudgeted.has(m[1])) || kind === 'code';
     const gates = free
       ? [[perRecipient, `${kind === 'note' ? 'note' : 'send'}:to:${m[1]}`]]
       : [[perMinute, 'send:minute'], [perRecipient, `send:to:${m[1]}`], ...(userId ? [[perUser, `send:user:${userId}`]] : [])];
     let dayFull = false;
     if (!free) {
-      const since = now() - DAY_MS;
       // The caller's own `pending` row is already in the count; it is this send, not an earlier one.
-      // (`countSentSince` leaves out only free-kind rows to the unbudgeted jids, as `free` does.)
-      const own = givenRow && givenRow.created >= since
+      const own = givenRow && givenRow.created >= now() - DAY_MS && givenRow.sender_kind !== 'code'
         && !(FREE_KINDS.has(givenRow.sender_kind) && unbudgetedJids.includes(givenRow.jid)) ? 1 : 0;
-      dayFull = inbox.countSentSince(since, { excludeJids: unbudgetedJids }) - own >= dayCap();
+      dayFull = daySent() - own >= dayCap();
     }
     if (dayFull || gates.some(([limiter, key]) => !limiter.peek(key).ok)) {
-      log({ level: 'warn', evt: 'wa.send.rate_limited', kind, limit: dayFull ? 'day' : 'minute' });
-      return refuse('rate_limited');
+      const limit = dayFull ? 'day' : 'minute';
+      log({ level: 'warn', evt: 'wa.send.rate_limited', kind, limit });
+      return refuse('rate_limited', { limit });
     }
     for (const [limiter, key] of gates) limiter.take(key);
 
@@ -439,6 +460,8 @@ export function createSender({
     if (!out.ok) {
       const res = { ok: false, error: out.error, status: out.uncertain ? 'uncertain' : 'failed', sendId };
       if (out.uncertain) res.uncertain = true;
+      // Which limit refused it (the dashboard's copy may say "today" rather than "this minute").
+      if (out.limit) res.limit = out.limit;
       return res;
     }
 
@@ -487,5 +510,5 @@ export function createSender({
    */
   const recoverInterrupted = () => inbox.markStalePending(Number.MAX_SAFE_INTEGER);
 
-  return { sendTo, reply, recoverInterrupted };
+  return { sendTo, reply, recoverInterrupted, dayFull };
 }
