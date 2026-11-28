@@ -355,8 +355,9 @@ test('T14 the thread names the T12 holds in words: cap_day, owed_handover and ow
     match_method: 'own_number', inbox_state: 'in', inbox_since: NOW - 86_400_000, handler_user_id: null, needs_human: 0, last_msg_ts: NOW - 60_000,
     created: NOW - 86_400_000, stage_ts: NOW - 86_400_000, channel: 'whatsapp',
   };
+  const EXAMPLE_OWNER = { user_id: 'USR-example', name: 'Owner Example', role: 'owner', phone_e164: '966500000008', active: 1, last_login: null };
   const page = (reason) => threadPage({
-    me: OWNER, lead: { ...lead, dana_hold_reason: reason, dana_hold_until: NOW + 3_600_000 }, messages: [], gaps: [], outbox: [], users: [OWNER],
+    me: EXAMPLE_OWNER, lead: { ...lead, dana_hold_reason: reason, dana_hold_until: NOW + 3_600_000 }, messages: [], gaps: [], outbox: [], users: [EXAMPLE_OWNER],
     sendId: 'SND-abcdefghijklmnop', seenTs: NOW, seenRev: 1, sendingEnabled: true, canReply: true, repliesEnabled: true, now: NOW,
     danaEnabled: true, danaConfigured: true,
   });

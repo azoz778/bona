@@ -1094,7 +1094,7 @@ function rig14({ env = {}, config = {}, openai = [], google = null, realBrain = 
   const ai = { calls: [], queue: [...openai] };
   const gq = { calls: [], events: new Map() };
   const seen = [];
-  const evoState = { down: Boolean(options.evoDown), number: BONA14 };
+  const evoState = { down: Boolean(options.evoDown), idDown: false, number: BONA14 };
   const fetchImpl = async (url, init = {}) => {
     const u = String(url);
     seen.push({ method: init.method ?? 'GET', url: u });
@@ -1119,7 +1119,7 @@ function rig14({ env = {}, config = {}, openai = [], google = null, realBrain = 
         return reply(201, { key: { id: `KEY-${evo.sends.length}` } });
       }
       if (u.includes('/instance/fetchInstances') || u.includes('/chat/whatsappNumbers/')) {
-        if (evoState.down) return reply(503, {});
+        if (evoState.down || (evoState.idDown && u.includes('/instance/fetchInstances'))) return reply(503, {});
         if (u.includes('/instance/fetchInstances')) return reply(200, [{ name: 'bona-test', ownerJid: jidOf(evoState.number), connectionStatus: 'open' }]);
         return reply(200, [{ number: BONA14, exists: true }]);
       }
@@ -1955,25 +1955,25 @@ test('T14 identity: fetchInstances 503 while findMessages works → no push, no 
   }
 });
 
-test('T14 identity: a mismatch a probe established pushes the owners while Dana is on; with Dana off a refused message pushes nothing new', async () => {
+test('T14 identity: a mismatch the boot probe established is pushed once by the link probe (PR-L, Dana on or off), and Dana\'s refusal adds no second push', async () => {
   for (const on of [true, false]) {
     const h = rig14({ waLink: null });
     try {
       const { app } = h;
       h.evoState.number = '966500000099';
       if (on) app.team.setSetting('dana_enabled', '1');
+      const pushed = [];
+      const owners = app.alerts.notifyOwners;
+      app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
       app.poller.start = () => true;
       await app.start(noIntervals);
       assert.equal(app.waLink.identityMismatch(), true);
       await app.waLink.flush?.();
-      const pushed = [];
-      const owners = app.alerts.notifyOwners;
-      app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
       h.seedLead(`LEAD-20261203-mism000${on ? 1 : 2}`, '966500000065');
       await h.poll(h.rec('966500000065', 'C-1', 'hello'));
       await app.alerts.flush();
       assert.equal(h.sendsTo('966500000065').length, 0);
-      assert.deepEqual(pushed, on ? ['identity_mismatch'] : [], on ? 'Dana refused a send: the owners hear why' : 'Dana off: nothing was refused');
+      assert.deepEqual(pushed, ['identity_mismatch'], 'one push for the incident: the link probe\'s, never a second from Dana');
     } finally {
       h.app.stopTimers();
       await h.close();
@@ -2070,6 +2070,81 @@ test('T14 timers: the summary minute queues the 08:00 summary (not at 07:59), an
     assert.equal(h.notes("kind = 'summary'").length, 1, 'one a day');
     assert.equal(reconciled, 2);
   } finally {
+    await h.close();
+  }
+});
+
+test('T14 identity: an hour of 30-s identity ticks with fetchInstances 503 asks whatsappNumbers no more than the probe\'s own loop does, and a 60-s blip never makes the link down', async () => {
+  const h = rig14({ waLink: null });
+  try {
+    const { app } = h;
+    h.evoState.idDown = true;
+    const pushed = [];
+    const owners = app.alerts.notifyOwners;
+    app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
+    app.poller.start = () => true;
+    await app.start(noIntervals);
+    const numbers = () => h.seen.filter((c) => c.url.includes('/chat/whatsappNumbers/')).length;
+    const boot = numbers();
+    assert.equal(boot, 1, 'the boot round asked the link once');
+    for (let i = 0; i < 120; i += 1) {
+      h.advance(30_000);
+      await app.ticks.identity();
+    }
+    assert.ok(numbers() - boot <= 6, `whatsappNumbers ${numbers() - boot} times from the ticks`);
+    assert.equal(numbers(), boot, 'the identity tick never runs the link half');
+    assert.ok(h.seen.filter((c) => c.url.includes('/instance/fetchInstances')).length >= 120, 'the identity half, every tick');
+    assert.equal(app.waLink.linkOk(), true);
+    await app.alerts.flush();
+    assert.ok(!pushed.includes('wa_link_down') && !pushed.includes('identity_mismatch'), JSON.stringify(pushed));
+  } finally {
+    h.app.stopTimers();
+    await h.close();
+  }
+});
+
+test('T14 brain: an auth outage seen before the brain is in use is held, then delivered once (note and push) when the owner test turns on without a restart', async () => {
+  const AUTH = { status: 401, json: { error: { code: 'invalid_api_key' } } };
+  const h = rig14({ realBrain: true, openai: [AUTH, AUTH, AUTH] });
+  try {
+    const { app } = h;
+    const pushed = [];
+    const owners = app.alerts.notifyOwners;
+    app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
+    await app.ticks.brainProbe();
+    await app.ticks.notes();
+    await app.alerts.flush();
+    assert.deepEqual(h.notes(), [], 'not in use: no note');
+    assert.deepEqual(pushed, []);
+    app.team.setSetting('owner_as_client', '1');
+    assert.equal(app.ownerTest.active(), true);
+    await app.ticks.notes();
+    await app.alerts.flush();
+    const out = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_out');
+    assert.equal(out.length, 1, 'the held outage note, once');
+    assert.equal(out[0].meta.code, 'auth');
+    assert.deepEqual(pushed, ['brain'], 'and its push, once');
+    await app.ticks.notes();
+    await app.ticks.brainProbe();
+    await app.alerts.flush();
+    assert.deepEqual(pushed, ['brain'], 'never twice');
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 boot: the brain\'s models probe runs after the first identity round', async () => {
+  const h = rig14({ waLink: null, realBrain: true, openai: [{ status: 200, json: { data: [] } }] });
+  try {
+    h.app.poller.start = () => true;
+    await h.app.start(noIntervals);
+    await new Promise((r) => setImmediate(r));
+    for (let i = 0; i < 20 && !h.seen.some((c) => c.url.endsWith('/v1/models')); i += 1) await new Promise((r) => setImmediate(r));
+    const idAt = h.seen.findIndex((c) => c.url.includes('/instance/fetchInstances'));
+    const probeAt = h.seen.findIndex((c) => c.url.endsWith('/v1/models'));
+    assert.ok(idAt >= 0 && probeAt > idAt, `identity first (${idAt}), then the models probe (${probeAt})`);
+  } finally {
+    h.app.stopTimers();
     await h.close();
   }
 });

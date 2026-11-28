@@ -1713,7 +1713,9 @@ export function createDana({
       // first answer) refuses the send all the same and raises nothing; the link probe has its own Kuma line for it.
       const lead = safely(() => db.getLead(leadId));
       const on = safely(() => team.danaEnabled()) === true || Number(lead?.dana_test) === 1;
-      if (on && safely(() => link?.identityMismatch?.()) === true && t - identityAlertAt >= HOUR_MS) {
+      // A mismatch lib/wa-link.mjs has already pushed (once per incident, PR-INT r2) gets no second push from here.
+      const alerted = safely(() => link?.identityMismatchAlerted?.()) === true;
+      if (on && !alerted && safely(() => link?.identityMismatch?.()) === true && t - identityAlertAt >= HOUR_MS) {
         identityAlertAt = t;
         safely(() => alerts?.notifyOwners?.({ reason: 'identity_mismatch' }));
       }

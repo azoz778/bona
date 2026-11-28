@@ -130,6 +130,8 @@ const codeOf = (err) => (PROBE_CODES.has(err?.code) ? err.code : 'bad_response')
  * @typedef {object} WaLink
  * @property {() => boolean} identityOk  the instance is Bona's own, checked number (false until a probe has answered)
  * @property {() => boolean} identityMismatch  the newest probe answer named another number (an established mismatch)
+ * @property {() => boolean} identityMismatchAlerted  the owners were already pushed about the current mismatch
+ * @property {() => Promise<boolean>} probeIdentity  the identity half alone: no link probe, no Kuma beat, no failure count
  * @property {() => boolean} linkOk      WhatsApp answers through the instance (true until two probes in a row fail)
  * @property {() => boolean} linkStable  the link has answered for 10 min (DESIGN §6.4; false until two good probes of this run span it)
  * @property {() => void} start          forget the last run, probe now, then every 10 min (a second call does nothing)
@@ -300,6 +302,29 @@ export function createWaLink({
     else await beat('up', 'identity_pending');
   }
 
+  /**
+   * The identity half alone (PR-INT r2): fetchInstances, the same answer rules as a round (the answer recorded, a
+   * mismatch alerted once per incident), but no link probe, no Kuma beat and no failure counted. index.mjs's 30-s
+   * identity watch runs it until the instance is proven once, so a 503 blip there never adds to the link's count.
+   * A full round in flight answers it instead. Resolves to identityOk() after it.
+   */
+  async function probeIdentity() {
+    if (!canProbe || !started) return identityOk();
+    if (inflight) { await inflight; return identityOk(); }
+    const g = gen;
+    const id = await askIdentity(AbortSignal.timeout(timeoutMs));
+    if (g !== gen || id.error) return identityOk();
+    identity = { match: id.match, at: now() };
+    if (id.match) mismatchAlerted = false;
+    const idNow = identityOk();
+    if (idNow !== loggedIdentity) {
+      say({ level: idNow ? 'info' : 'error', evt: 'wa.identity', ok: idNow, why: idNow ? 'match' : 'mismatch' });
+      loggedIdentity = idNow;
+    }
+    if (identity.match === false && !mismatchAlerted) { mismatchAlerted = true; await push('identity_mismatch'); }
+    return identityOk();
+  }
+
   function probe() {
     if (!canProbe) return Promise.resolve();
     if (!inflight) {
@@ -361,6 +386,9 @@ export function createWaLink({
     flush,
     // A probe's answer named another number (PR-INT r1): a mismatch established, not merely an identity unproven.
     identityMismatch: () => setup.ok && identity?.match === false,
+    // This run has already pushed the owners about the current mismatch (once per incident): a caller adds none.
+    identityMismatchAlerted: () => mismatchAlerted,
+    probeIdentity,
     health: () => ({ linkOk: linkUp === true, identityOk: identityOk() === true }),
   };
 }

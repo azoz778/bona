@@ -402,14 +402,32 @@ export function createApp(options = {}) {
         && Boolean(db.db.prepare("SELECT 1 FROM leads WHERE inbox_state = 'in' AND inbox_via = 'own_number' LIMIT 1").get());
     } catch { return false; }
   };
+  // The one outage alert (brain_out for quota or auth) the quiet sink held back (PR-INT r2): delivered, note and
+  // push, once the brain enters use (a switch or the owner test on, seen on the notes tick or a setting change) while
+  // the brain is still not answering; dropped once it answers again.
+  let deferredBrainOut = null;
   const brainAlert = (code, meta) => {
     if (!brainInUse()) {
       log({ level: 'warn', evt: 'brain.alert_quiet', code: String(code).slice(0, 40), why: typeof meta?.code === 'string' ? meta.code.slice(0, 40) : null });
+      if (code === 'brain_out' && (meta?.code === 'quota' || meta?.code === 'auth')) deferredBrainOut = { code, meta: { code: meta.code } };
       return;
     }
+    deliverBrainAlert(code, meta);
+  };
+  const flushDeferredBrainAlert = () => {
+    if (!deferredBrainOut) return;
+    let out = false;
+    try { out = brain?.health?.()?.ok !== true; } catch { out = false; }
+    if (!out) { deferredBrainOut = null; return; }
+    if (!brainInUse()) return;
+    const { code, meta } = deferredBrainOut;
+    deferredBrainOut = null;
+    deliverBrainAlert(code, meta);
+  };
+  function deliverBrainAlert(code, meta) {
     try { notes?.alert?.(code, meta); } catch (err) { log({ level: 'error', evt: 'brain.alert_failed', code: String(code), name: loggableName(err) }); }
     if (code === 'brain_out' && (meta?.code === 'quota' || meta?.code === 'auth')) alerts.notifyOwners?.({ reason: 'brain' });
-  };
+  }
   brain = options.brain ?? createBrain({
     cfg, runTool: (name, envelope) => tools.runInProcess(name, envelope), team, fetchImpl, now: clock, log, alert: brainAlert,
   });
@@ -724,7 +742,7 @@ export function createApp(options = {}) {
   const dashboard = options.dashboard ?? createDashboardRoutes({
     db, cfg, inventory, fanout, app, log, sendWhatsApp, probeRetell, team, audit, sendCode,
     inbox: inboxStore, sender, backfill, alerts, ownerTest,
-    onSettingChanged: (key, value) => ownerTest.onSettingChanged?.(key, value),
+    onSettingChanged: (key, value) => { ownerTest.onSettingChanged?.(key, value); flushDeferredBrainAlert(); },
     hooks: {
       onTaskChange: (task, patch) => viewing.onTaskChange?.(task, patch),
       onLeadLeaving: (leadId) => viewing.onLeadLeaving?.(leadId),
@@ -846,7 +864,8 @@ export function createApp(options = {}) {
   let identityProven = false;
   async function identityWatch() {
     if (wa.ownNumberFrom !== 'instance') return { woken: 0 };
-    if (!identityProven) await waLink.probe?.();
+    // The identity half alone (wa-link probeIdentity): no link probe, no Kuma beat, no failure count from this tick.
+    if (!identityProven) await (waLink.probeIdentity ? waLink.probeIdentity() : waLink.probe?.());
     if (waLink.identityOk?.() !== true) return { woken: 0 };
     identityProven = true;
     let woken = 0;
@@ -859,11 +878,15 @@ export function createApp(options = {}) {
   }
   app.ticks = {
     identity: tick('identity', identityWatch),
-    notes: tick('notes', () => notes.tick?.()),
+    notes: tick('notes', () => { flushDeferredBrainAlert(); return notes.tick?.(); }),
     summary: tick('summary', summaryMinute),
     sweep: tick('sweep', () => dana.sweep?.()),
     viewing: tick('viewing', () => viewing.tick?.()),
-    brainProbe: tick('brainProbe', () => (brain.configured === true ? brain.probe?.() : undefined)),
+    brainProbe: tick('brainProbe', async () => {
+      const out = brain.configured === true ? await brain.probe?.() : undefined;
+      flushDeferredBrainAlert();
+      return out;
+    }),
     upkeep: () => app.inboxMaintenance(),
   };
   let running = null;
@@ -901,6 +924,8 @@ export function createApp(options = {}) {
     if (waLink.identityOk?.() === true) identityProven = true;
     // A shutdown meanwhile (SIGTERM inside the first ≤ 15 s) stopped the timers: the poller is not started after it.
     if (!running) return { timers, pollStarted: null };
+    // The brain's $0 models probe, after the identity round (PR-INT r2): its alert sink then reads the instance as proven.
+    app.ticks.brainProbe();
     const pollStarted = poller ? poller.start({ intervalMs: cfg.waPollMs }) : null;
     return { timers, pollStarted };
   };
@@ -1555,12 +1580,11 @@ if (isMain) {
   // models probe and the daily upkeep, plus the link probe, whose first round runs now. The WhatsApp
   // poller starts once that round has answered (`app.start`): `BONA_WA_POLL=0` turns it off; without
   // Evolution credentials it starts and skips every tick rather than guessing a URL. It never sets a
-  // webhook. The brain's probe also runs once now ($0, only with a key).
+  // webhook. The brain's probe runs once right after that round ($0, only with a key).
   app.start().then(({ timers, pollStarted }) => {
     jsonLog('info', { evt: 'timers.init', timers: timers.map((x) => x.name) });
     if (app.poller) jsonLog('info', { evt: 'wa.poll.init', started: pollStarted, everyMs: app.cfg.waPollMs, ...app.poller.status() });
   }).catch((err) => jsonLog('error', { evt: 'start.failed', name: loggableName(err) }));
-  app.ticks.brainProbe();
   app.server.listen(app.cfg.port, app.cfg.host, () => {
     jsonLog('info', { evt: 'listening', ...redacted(app.cfg) });
   });
