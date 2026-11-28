@@ -483,3 +483,59 @@ test('access: one events.list (maxResults=1, accessRole only) says whether the r
   assert.deepEqual(await createGcal({ fetchImpl: off.fetchImpl }).access(), { ok: false, code: 'auth' });
   assert.equal(off.calls.length, 0);
 });
+
+/* ---------------- T18a: the outage record (DESIGN §14, "calendar failing over 1 h") ---------------- */
+
+test('T18a outage(): only transport, timeout, auth and 5xx failures open or extend it (first and latest time, latest code); not_found, forbidden, quota, another 4xx and odd data never do; a success ends it; health() keeps its keys', async () => {
+  let mode = 'ok';
+  const routes = {
+    [`POST ${FB_PATH}`]: () => {
+      if (mode === '503') return json(503, {});
+      if (mode === '404') return json(404, { error: { code: 404 } });
+      if (mode === '403') return json(403, { error: { errors: [{ reason: 'forbidden' }] } });
+      if (mode === '429') return json(429, {});
+      if (mode === '400') return json(400, {});
+      if (mode === 'odd') return json(200, { kind: 'calendar#freeBusy', calendars: {} });
+      if (mode === 'net') throw new TypeError('fetch failed');
+      return freeBusyOk()();
+    },
+  };
+  const { gcal, clock } = client({ routes });
+  assert.equal(gcal.outage(), null, 'never called: no outage');
+  for (const m of ['404', '403', '429', '400', 'odd']) {
+    mode = m;
+    assert.equal((await gcal.freeBusy(WINDOW)).ok, false, m);
+  }
+  assert.equal(gcal.outage(), null, 'the calendar answered each time: none of these is an outage');
+  assert.equal(gcal.health().ok, false, 'health still says the last call failed');
+  mode = '503';
+  await gcal.freeBusy(WINDOW);
+  const first = clock.t;
+  assert.deepEqual(gcal.outage(), { since: first, last: first, code: 'bad_response' }, 'a 5xx opens it (printed as bad_response)');
+  clock.t += 30 * MIN;
+  mode = '404';
+  await gcal.freeBusy(WINDOW);
+  assert.deepEqual(gcal.outage(), { since: first, last: first, code: 'bad_response' }, 'a not_found neither extends it nor ends it');
+  clock.t += 31 * MIN;
+  mode = 'net';
+  await gcal.freeBusy(WINDOW);
+  assert.deepEqual(gcal.outage(), { since: first, last: first + 61 * MIN, code: 'network' });
+  clock.t += MIN;
+  mode = 'ok';
+  assert.equal((await gcal.freeBusy(WINDOW)).ok, true);
+  assert.equal(gcal.outage(), null, 'a success ends it');
+  assert.deepEqual(Object.keys(gcal.health()).sort(), ['configured', 'lastErrorCode', 'ok'], 'the /health keys are unchanged');
+
+  const auth = client({ routes: { token: () => json(401, {}) } });
+  await auth.gcal.freeBusy(WINDOW);
+  assert.equal(auth.gcal.outage()?.code, 'auth', 'a refused token');
+  const down = client({ routes: { token: () => json(503, {}) } });
+  await down.gcal.freeBusy(WINDOW);
+  assert.equal(down.gcal.outage()?.code, 'bad_response', 'a token endpoint 5xx');
+  const odd = client({ routes: { token: () => json(200, { token_type: 'Bearer' }) } });
+  await odd.gcal.freeBusy(WINDOW);
+  assert.equal(odd.gcal.outage(), null, 'a 200 without a token is odd data, not an outage');
+  const slow = client({ routes: { [`POST ${FB_PATH}`]: () => 'hang' }, timeoutMs: 20 });
+  await slow.gcal.freeBusy(WINDOW);
+  assert.equal(slow.gcal.outage()?.code, 'timeout');
+});

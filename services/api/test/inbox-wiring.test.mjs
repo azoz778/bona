@@ -2456,9 +2456,16 @@ function t18aCalendar() {
   fs.writeFileSync(saFile, JSON.stringify({ type: 'service_account', client_email: 'robot@example.iam.gserviceaccount.com', private_key: privateKey }), { mode: 0o600 });
   const cal = {
     down: true,
+    /** When not down: null = up; '404' = every call not_found; 'odd' = a 200 without the holiday list. */
+    answers: null,
     config: { gcalSaFile: saFile, gcalCalendarId: 'test-calendar@example.com' },
-    // Down: every Calendar call answers 503 (gcal's code bad_response). Up: an empty holiday feed.
-    google: () => (cal.down ? { status: 503, json: {} } : { status: 200, json: { items: [] } }),
+    // Down: every Calendar call answers 503 (gcal's code bad_response, a 5xx). Up: an empty holiday feed.
+    google: () => {
+      if (cal.down) return { status: 503, json: {} };
+      if (cal.answers === '404') return { status: 404, json: { error: { code: 404 } } };
+      if (cal.answers === 'odd') return { status: 200, json: { kind: 'calendar#events' } };
+      return { status: 200, json: { items: [] } };
+    },
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };
   return cal;
@@ -2467,6 +2474,18 @@ function t18aCalendar() {
 async function t18aRound(h) {
   await h.app.ticks.viewing();
   await h.app.ticks.summary();
+}
+/** The summary's minute alone, every 10 min for `ms`: the checks run, nothing calls the calendar. */
+async function t18aQuietMinutes(h, ms) {
+  for (let left = ms; left > 0; left -= 10 * 60_000) {
+    h.advance(Math.min(10 * 60_000, left));
+    await h.app.ticks.summary();
+  }
+}
+/** The new automation on, and the calendar in use for bookings (the gcal alert's two gates). */
+function t18aBookingOn(h) {
+  h.app.team.setSetting('owner_as_client', '1');
+  h.app.team.setSetting('calendar_booking', '1');
 }
 
 test('T18a turns_month: 80% then 100% of the month level, each once (a later hour too), never again after a restart on the same database; the next Riyadh month alerts again', async () => {
@@ -2546,11 +2565,11 @@ test('T18a turns_month: quiet while the automation is off (one journal line a da
   }
 });
 
-test('T18a gcal: failing 59 min → nothing, 61 min → one alert with the code; still failing → no second; a success ends it, and a new incident alerts again after its own hour', async () => {
+test('T18a gcal: failed calls spanning 59 min → nothing, 61 min → one alert with the code; still failing → no second; a success ends it, and a new incident alerts again after its own hour', async () => {
   const cal = t18aCalendar();
   const h = rig14({ google: cal.google, config: cal.config });
   try {
-    h.app.team.setSetting('owner_as_client', '1');
+    t18aBookingOn(h);
     await t18aRound(h);
     assert.equal(h.app.viewing.health().gcal.ok, false);
     assert.equal(h.app.viewing.health().gcal.lastErrorCode, 'bad_response', 'the calendar\'s own failure signal');
@@ -2588,7 +2607,7 @@ test('T18a gcal: failing 59 min → nothing, 61 min → one alert with the code;
   }
 });
 
-test('T18a gcal: an incident past its hour while the automation is off is one journal line and leaves the incident open: the owner test turns on and it alerts once', async () => {
+test('T18a gcal: an incident past its hour while the automation is off, or while booking is off, is one journal line a day and leaves the incident open: both on, and it alerts once', async () => {
   const cal = t18aCalendar();
   const h = rig14({ google: cal.google, config: cal.config });
   try {
@@ -2597,12 +2616,77 @@ test('T18a gcal: an incident past its hour while the automation is off is one jo
     await t18aRound(h);
     h.advance(30 * 60_000);
     await t18aRound(h);
-    assert.deepEqual(gcalAlerts(h), []);
+    assert.deepEqual(gcalAlerts(h), [], 'automation off: nothing');
     assert.equal(quietLines(h, 'gcal').length, 1);
     h.app.team.setSetting('owner_as_client', '1');
     await t18aRound(h);
+    h.advance(10 * 60_000);
     await t18aRound(h);
-    assert.equal(gcalAlerts(h).length, 1, 'the open incident alerts once the automation is on');
+    assert.deepEqual(gcalAlerts(h), [], 'the owner test on, but the calendar is not in use for bookings: nothing');
+    assert.equal(quietLines(h, 'gcal').length, 1, 'still one line that day');
+    h.app.team.setSetting('calendar_booking', '1');
+    await t18aRound(h);
+    await t18aRound(h);
+    assert.equal(gcalAlerts(h).length, 1, 'the open incident alerts once both are on');
+  } finally {
+    await h.close();
+    cal.cleanup();
+  }
+});
+
+test('T18a gcal: one failed call, then 3 h with no call at all → nothing (the last call failed, but no failures span an hour)', async () => {
+  const cal = t18aCalendar();
+  const h = rig14({ google: cal.google, config: cal.config });
+  try {
+    t18aBookingOn(h);
+    await t18aRound(h);
+    await t18aQuietMinutes(h, 3 * 3_600_000);
+    assert.equal(h.app.viewing.health().gcal.ok, false, '/health still says the last call failed');
+    assert.deepEqual(gcalAlerts(h), []);
+  } finally {
+    await h.close();
+    cal.cleanup();
+  }
+});
+
+test('T18a gcal: two failed calls, at 0 and at 61 min, with no call between → one alert', async () => {
+  const cal = t18aCalendar();
+  const h = rig14({ google: cal.google, config: cal.config });
+  try {
+    t18aBookingOn(h);
+    await t18aRound(h);
+    await t18aQuietMinutes(h, 60 * 60_000);
+    assert.deepEqual(gcalAlerts(h), [], 'one failed call so far');
+    h.advance(60_000);
+    await t18aRound(h);
+    assert.equal(gcalAlerts(h).length, 1, 'the second failed call, 61 min after the first: one alert');
+    assert.equal(gcalAlerts(h)[0].meta.code, 'bad_response');
+  } finally {
+    await h.close();
+    cal.cleanup();
+  }
+});
+
+test('T18a gcal: a calendar that answers, with not_found or with odd data, for hours never alerts (it is answering)', async () => {
+  const cal = t18aCalendar();
+  cal.down = false;
+  cal.answers = '404';
+  const h = rig14({ google: cal.google, config: cal.config });
+  try {
+    t18aBookingOn(h);
+    for (let i = 0; i < 9; i += 1) {
+      await t18aRound(h);
+      h.advance(10 * 60_000);
+    }
+    assert.equal(h.app.viewing.health().gcal.lastErrorCode, 'not_found');
+    cal.answers = 'odd';
+    for (let i = 0; i < 9; i += 1) {
+      await t18aRound(h);
+      h.advance(10 * 60_000);
+    }
+    assert.equal(h.app.viewing.health().gcal.lastErrorCode, 'bad_response', 'a 200 without the list');
+    assert.deepEqual(gcalAlerts(h), []);
+    assert.deepEqual(quietLines(h, 'gcal'), [], 'not even a quiet line: no outage at all');
   } finally {
     await h.close();
     cal.cleanup();

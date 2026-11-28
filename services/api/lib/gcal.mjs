@@ -28,6 +28,12 @@
  * Errors are a fixed enum (GCAL_ERROR_CODES, the /health `lastErrorCode` vocabulary), never
  * Google's words: an error text can carry a calendar id or an address. Nothing here logs a
  * calendar id, the service account's address, the key, a name or a phone: an operation and a code.
+ *
+ * outage() (T18a, DESIGN §14 "calendar failing over 1 h"): the calls that found the calendar NOT
+ * ANSWERING since the last success, in memory: a network error, a timeout, auth (the key or the
+ * token), or a 5xx (its code is bad_response). The first and the latest such failure and the latest
+ * one's code; a success ends it. A calendar that answers, however oddly (not_found, forbidden,
+ * quota, another 4xx, a 200 that is not what was asked), neither opens nor extends nor ends it.
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -46,6 +52,8 @@ export const HOLIDAY_STALE_MS = 7 * 86_400_000;
 export const HOLIDAY_WINDOW_DAYS = 60;
 /** The only codes a caller (and /health) ever sees. */
 export const GCAL_ERROR_CODES = Object.freeze(['auth', 'forbidden', 'not_found', 'timeout', 'quota', 'network', 'bad_response']);
+/** The codes that say the calendar is not answering at all (outage()); a 5xx counts too, whose code is bad_response. */
+const NOT_ANSWERING = new Set(['auth', 'timeout', 'network']);
 /** The holidays that block a day by their summary alone (verify/T00.md step 4). */
 export const HOLIDAY_SUMMARY_RE = /\b(?:Eid al-Fitr|Eid al-Adha|Arafat Day|Founding Day|National Day)\b/i;
 /** The line that ends every event description (no assistant name: brain/DESIGN-brain.md §6.3). */
@@ -192,17 +200,25 @@ export function createGcal({
 } = {}) {
   const configured = Boolean(saFile && calendarId);
   const extra = Array.isArray(extraBusyIds) ? extraBusyIds.map((s) => String(s).trim()).filter(Boolean) : [];
-  const state = { ok: false, lastErrorCode: null };
+  // `outage`: { since, last, code } of the not-answering failures since the last success, or null (outage()).
+  const state = { ok: false, lastErrorCode: null, outage: null };
   let token = null; // { value, until }
   let holidayCopy = null; // { dates: Set<string>, fetchedAt }
 
-  const succeeded = () => { state.ok = true; state.lastErrorCode = null; };
-  function failed(op, code, extraOut = {}) {
+  const succeeded = () => { state.ok = true; state.lastErrorCode = null; state.outage = null; };
+  /** A failed call. `serverError`: Google answered 5xx (code bad_response), which counts as not answering. */
+  function failed(op, code, extraOut = {}, serverError = false) {
     state.ok = false;
     state.lastErrorCode = code;
+    if (serverError || NOT_ANSWERING.has(code)) {
+      const t = now();
+      state.outage = { since: state.outage?.since ?? t, last: t, code };
+    }
     log({ level: 'warn', evt: 'gcal.failed', op, code });
     return fail(code, extraOut);
   }
+  /** A call answered with an HTTP status that is not the one asked for (codeForStatus); a 5xx is not answering. */
+  const failedStatus = (op, r, extraOut = {}) => failed(op, codeForStatus(r.status, r.body), extraOut, r.status >= 500);
 
   /** One HTTP call: `{ status, body }` (body parsed when it is JSON), or `{ error: code }` for a timeout or a network error. */
   async function http(method, url, { headers = {}, body } = {}) {
@@ -236,7 +252,7 @@ export function createGcal({
     });
     if (r.error) return failed('token', r.error);
     if (r.status === 400 || r.status === 401 || r.status === 403) return failed('token', 'auth');
-    if (r.status !== 200 || typeof r.body?.access_token !== 'string' || !r.body.access_token) return failed('token', codeForStatus(r.status, r.body));
+    if (r.status !== 200 || typeof r.body?.access_token !== 'string' || !r.body.access_token) return failedStatus('token', r);
     token = { value: r.body.access_token, until: now() + TOKEN_TTL_MS };
     return { ok: true, value: token.value };
   }
@@ -276,7 +292,7 @@ export function createGcal({
     if (r.notConfigured) return fail('auth');
     if (r.reported) return fail(r.error);
     if (r.error) return failed('freeBusy', r.error);
-    if (r.status !== 200) return failed('freeBusy', codeForStatus(r.status, r.body));
+    if (r.status !== 200) return failedStatus('freeBusy', r);
     const cals = r.parseOk ? r.body?.calendars : null;
     if (!cals || typeof cals !== 'object' || Array.isArray(cals)) return failed('freeBusy', 'bad_response');
     const busy = [];
@@ -324,9 +340,8 @@ export function createGcal({
       if (r.reported) return fallback(r.error);
       if (r.error) { failed('holidays', r.error); return fallback(r.error); }
       if (r.status !== 200 || !r.parseOk || !Array.isArray(r.body?.items)) {
-        const code = r.status !== 200 ? codeForStatus(r.status, r.body) : 'bad_response';
-        failed('holidays', code);
-        return fallback(code);
+        // A 200 without the list is bad_response (codeForStatus' default), and the calendar answered.
+        return fallback(failedStatus('holidays', r).code);
       }
       for (const ev of r.body.items) if (isBlockingHoliday(ev)) for (const d of eventDays(ev)) dates.add(d);
       pageToken = typeof r.body.nextPageToken === 'string' && r.body.nextPageToken ? r.body.nextPageToken : null;
@@ -360,7 +375,7 @@ export function createGcal({
       }
       return failed('insert', 'bad_response', { uncertain: false });
     }
-    return failed('insert', codeForStatus(r.status, r.body), { uncertain: r.status >= 500 });
+    return failedStatus('insert', r, { uncertain: r.status >= 500 });
   }
 
   /**
@@ -375,7 +390,7 @@ export function createGcal({
     if (r.reported) return fail(r.error);
     if (r.error) return failed('get', r.error);
     if (r.status === 404 || r.status === 410) { succeeded(); return fail('not_found', { gone: true }); }
-    if (r.status !== 200 || !r.parseOk || !r.body || typeof r.body !== 'object') return failed('get', r.status === 200 ? 'bad_response' : codeForStatus(r.status, r.body));
+    if (r.status !== 200 || !r.parseOk || !r.body || typeof r.body !== 'object') return failedStatus('get', r);
     succeeded();
     return { ok: true, event: r.body };
   }
@@ -391,7 +406,7 @@ export function createGcal({
     if (r.notConfigured) return fail('auth');
     if (r.reported) return fail(r.error);
     if (r.error) return failed('access', r.error);
-    if (r.status !== 200) return failed('access', codeForStatus(r.status, r.body));
+    if (r.status !== 200) return failedStatus('access', r);
     if (!r.parseOk || !r.body || typeof r.body !== 'object') return failed('access', 'bad_response');
     const role = r.body.accessRole;
     if (role !== 'writer' && role !== 'owner') return failed('access', 'forbidden');
@@ -408,7 +423,7 @@ export function createGcal({
     if (r.error) return failed('delete', r.error);
     if (r.status === 404 || r.status === 410) { succeeded(); return { ok: true, gone: true }; }
     if (r.status === 200 || r.status === 204) { succeeded(); return { ok: true }; }
-    return failed('delete', codeForStatus(r.status, r.body));
+    return failedStatus('delete', r);
   }
 
   return {
@@ -424,5 +439,7 @@ export function createGcal({
     access,
     /** The /health `booking.gcal` keys: ok = the last call went through; lastErrorCode = the last failure's code. */
     health: () => ({ configured, ok: configured && state.ok, lastErrorCode: configured ? state.lastErrorCode : null }),
+    /** The calendar not answering since the last success: `{ since, last, code }` (times in ms), or null. Never on /health. */
+    outage: () => (configured && state.outage ? { ...state.outage } : null),
   };
 }

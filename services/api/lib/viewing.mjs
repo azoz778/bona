@@ -159,6 +159,8 @@ const errClass = (err) => (err && typeof err === 'object' && typeof err.name ===
  *   `held` counts the 404s left alone because the run found none of its events in the calendar (ids that record
  *   no calendar, or another one); a 404 of an event this calendar made is a deletion, never held
  * @property {() => { enabled: boolean, gcal: { configured: boolean, ok: boolean, lastErrorCode: string|null } }} health
+ * @property {() => { since: number, last: number, code: string }|null} calendarOutage  the calendar not answering
+ *   since its last success (gcal outage(), T18a's alert); null without a calendar. Never on /health.
  */
 
 /**
@@ -975,5 +977,6 @@ export function createViewing(deps = {}) {
     tick,
     reconcile,
     health,
+    calendarOutage: () => (configured ? gcal.outage?.() ?? null : null),
   };
 }

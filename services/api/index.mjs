@@ -105,7 +105,7 @@ export const TIMERS = Object.freeze([
 ]);
 /** The calendar's daily reconcile hour, Riyadh time (DESIGN §8.4); it also runs before the summary builds. */
 const RECONCILE_HOUR = 5;
-/** DESIGN §14: the owner hears of a calendar that has failed for longer than this without a success between. */
+/** DESIGN §14: the owner hears of a calendar whose failed calls span longer than this without a success between. */
 const GCAL_ALERT_AFTER_MS = 3_600_000;
 /** The month answer alert's levels (DESIGN §6.3), the highest first: percent of BONA_DANA_TURNS_MONTH_ALERT. */
 const TURNS_MONTH_LEVELS = Object.freeze([100, 80]);
@@ -868,16 +868,19 @@ export function createApp(options = {}) {
 
   /**
    * The two owner alerts no module raises (PLAN T18, "Added 28 Nov (T14 #101 review)"; DESIGN §6.3, §7.2, §14), checked
-   * on the summary's minute. Each goes only while the new automation is on (`automationOn`, the Greeting/Away rule);
-   * otherwise it is one `ops.alert_quiet` line a Riyadh day and takes nothing, so the month's level or the open incident
-   * still alerts once the automation is on. INERT with default settings: no note, no setting written.
+   * on the summary's minute. Each goes only while the new automation is on (`automationOn`, the Greeting/Away rule), and
+   * the calendar's only while it is in use for bookings too (`calendar_booking`); otherwise it is one `ops.alert_quiet`
+   * line a Riyadh day and takes nothing, so the month's level or the open incident still alerts once the gates are open.
+   * INERT with default settings: no note, no setting written.
    *   - turns_month: the AI's answers this Riyadh month (store.countDanaTurns, the Ops panel's "Assistant turns this
    *     month") reach 80%, then 100%, of BONA_DANA_TURNS_MONTH_ALERT: the highest level due, once a month each. The
    *     level sent is the `dana_month_alerted` marker (`2026-12:80`), written before the alert, so no restart sends it
    *     again. An alert only (§6.3): nothing is handed over or stopped.
-   *   - gcal: the calendar's own failure signal (viewing.health().gcal, the /health booking keys: the last call failed,
-   *     with its code) held for over an hour with no success seen between: one alert an incident; a success ends it.
-   *     The incident is this process's (a restart mid-outage starts a new hour).
+   *   - gcal: the calendar NOT ANSWERING (viewing.calendarOutage(), gcal's record: network, timeout, auth or a 5xx;
+   *     never not_found, forbidden, quota, another 4xx or odd data, where it answered) in failed calls that span over
+   *     an hour, the first to the latest, with no success between: one alert an outage, with the latest one's code. A
+   *     failed call followed by silence never alerts; a success ends the outage. The record is this process's memory,
+   *     so a restart mid-outage starts it again (its next alert an hour of failures after the restart at the soonest).
    */
   const quietDay = new Map();
   function quietAlert(code, t) {
@@ -899,15 +902,15 @@ export function createApp(options = {}) {
     team.setSetting('dana_month_alerted', `${month}:${level}`, { by: 'system' });
     notes.alert('turns_month', { level: String(level) });
   }
-  let gcalIncident = null;
+  /** The outage alerted already, by its first failure's time (outage().since): the next outage has another. */
+  let gcalAlertedSince = null;
   function gcalCheck(t) {
-    const g = viewing.health?.()?.gcal;
-    if (!(g?.configured === true && g.ok !== true && HEALTH_ERROR_CODES.has(g.lastErrorCode))) { gcalIncident = null; return; }
-    gcalIncident ??= { since: t, alerted: false };
-    if (gcalIncident.alerted || t - gcalIncident.since <= GCAL_ALERT_AFTER_MS) return;
-    if (!automationOn()) { quietAlert('gcal', t); return; }
-    gcalIncident.alerted = true;
-    notes.alert('gcal', { code: g.lastErrorCode });
+    const out = viewing.calendarOutage?.() ?? null;
+    if (!out || !HEALTH_ERROR_CODES.has(out.code) || !(out.last - out.since > GCAL_ALERT_AFTER_MS)) return;
+    if (gcalAlertedSince === out.since) return;
+    if (!(automationOn() && team.calendarBookingEnabled?.() === true)) { quietAlert('gcal', t); return; }
+    gcalAlertedSince = out.since;
+    notes.alert('gcal', { code: out.code });
   }
   /** Both checks, each on its own: one that throws is an `ops.alert_failed` line naming it, never its message. */
   app.opsAlerts = function opsAlerts() {
