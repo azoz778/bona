@@ -596,3 +596,24 @@ test('"مليون ريال و500 ألف" is one amount of 1,500,000', () => {
     assert.equal(checkReply(reply, { toolResults: ['{"p":"SAR 1,500,000"}'] }).ok, true, `${reply}: the total was published`);
   }
 });
+
+/* Codex r32 P2: "مليون إلا 100 ألف" is one amount of 900,000. */
+test('"مليون إلا 100 ألف ريال" is 900,000: refused unless that amount was published', () => {
+  const parts = { toolResults: ['{"p":"SAR 1,000,000"}', '{"q":"SAR 100,000"}'] };
+  for (const reply of ['سعر الفيلا مليون إلا 100 ألف ريال', 'سعر الفيلا مليون الا ١٠٠ ألف', '1 مليون ريال إلا 100 ألف', '2 مليون إلا 100 ألف']) {
+    assert.equal(checkReply(reply, parts).ok, false, reply);
+  }
+  assert.equal(checkReply('سعر الفيلا مليون إلا 100 ألف ريال', { toolResults: ['{"p":"SAR 900,000"}'] }).ok, true);
+  assert.deepEqual(findAmounts('2 مليون إلا 100 ألف').map((a) => a.raw), [1_900_000]);
+});
+
+/* Claude r30 P3: the colloquial short form of 1.5M is a value the guard cannot read. */
+test('"مليون وخمسمية" / "مليون و٥٠٠" are refused against a published 1,000,000; real neighbours keep their amount', () => {
+  const parts = { toolResults: ['{"p":"SAR 1,000,000"}', '{"q":"SAR 2,000,000"}', '{"r":"SAR 2,500,000"}'] };
+  for (const reply of ['السعر مليون وخمسمية', 'السعر مليون ومتين ألف', 'السعر مليون و٥٠٠', 'السعر مليون ريال و500.', '1 مليون و500 ريال', 'السعر 2 مليون و٥٠٠']) {
+    assert.equal(checkReply(reply, parts).ok, false, reply);
+  }
+  for (const reply of ['السعر 2 مليون و3 غرف نوم', 'السعر 2 مليون و500 ألف', 'السعر مليون و500 متر من البحر', 'السعر مليون ريال والمساحة 500 متر']) {
+    assert.equal(checkReply(reply, parts).ok, true, reply);
+  }
+});
