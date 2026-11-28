@@ -588,15 +588,15 @@ test("owner_command_ts (PR-A2) takes '' or comma-separated <switch>:<ms> pairs o
   s.close();
 });
 
-test("greeting_seen (PR-A2, Codex T07 r5) takes '' or up to 50 comma-separated <text hash>.<chat hash>.<ms> marks only, and is no switch", () => {
+test("greeting_seen (PR-A2, Codex T07 r5) takes '' or up to 500 comma-separated <text hash>.<chat hash>.<ms> marks only, and is no switch", () => {
   const { s, team } = teamHarness();
   assert.equal(SETTINGS_DEFAULTS.greeting_seen, '');
   const mark = (i = 0) => `${'aB3-_'.repeat(3)}${i % 10}.${'Zz9_-'.repeat(2)}x.${NOW + i}`;
-  for (const ok of ['', mark(), `${mark(0)},${mark(1)}`, Array.from({ length: 50 }, (_, i) => mark(i)).join(',')]) {
+  for (const ok of ['', mark(), `${mark(0)},${mark(1)}`, Array.from({ length: 500 }, (_, i) => mark(i)).join(',')]) {
     assert.equal(team.setSetting('greeting_seen', ok), ok);
   }
   const bad = [
-    Array.from({ length: 51 }, (_, i) => mark(i)).join(','), `${mark()},`, `,${mark()}`, mark().replace('.', ':'),
+    Array.from({ length: 501 }, (_, i) => mark(i)).join(','), `${mark()},`, `,${mark()}`, mark().replace('.', ':'),
     `${'a'.repeat(15)}.${'b'.repeat(11)}.${NOW}`, `${'a'.repeat(16)}.${'b'.repeat(12)}.${NOW}`, `${'a'.repeat(16)}.${'b'.repeat(11)}.`,
     `${'a'.repeat(16)}.${'b'.repeat(11)}.12345678901234567`, `${'a'.repeat(16)}.${'b'.repeat(11)}.-1`, `${'a+/='.repeat(4)}.${'b'.repeat(11)}.${NOW}`,
     'Back tomorrow', '966500000000', `${mark()} `,

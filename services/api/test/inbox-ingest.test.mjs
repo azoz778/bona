@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { openDb } from '../lib/db.mjs';
 import { createTeam, learnTeamLid, isExcludedLead as isExcludedLeadOf } from '../lib/team.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
-import { createIngest, RESOLVE_WINDOW_MS, SEND_SKEW_MS } from '../lib/inbox/ingest.mjs';
+import { createIngest, RESOLVE_WINDOW_MS, SEND_SKEW_MS, GREETING_MARKS } from '../lib/inbox/ingest.mjs';
 import { codeMessage } from '../lib/dashboard/auth.mjs';
 import { createBackfill } from '../lib/inbox/backfill.mjs';
 import { createSender } from '../lib/wa-send.mjs';
@@ -1000,17 +1000,18 @@ test("the Greeting/Away detector remembers the test chat's dropped copy across a
   far.s.close();
 });
 
-test('the Greeting/Away marker keeps the newest 50 dropped copies, prunes what can no longer count, and a junk marker breaks no record', () => {
+test('the Greeting/Away marker keeps the newest GREETING_MARKS (500, as many as the memory) dropped copies, prunes what can no longer count, and a junk marker breaks no record', () => {
+  assert.equal(GREETING_MARKS, 500);
   const h = testChat();
-  for (let i = 0; i < 60; i++) h.ingest(h.lead(), toOwner({ id: `CAP-${i}`, text: `Typed on the Fold ${i}`, ts: NOW - 3_600_000 + i * 1000 }));
+  for (let i = 0; i < GREETING_MARKS + 10; i++) h.ingest(h.lead(), toOwner({ id: `CAP-${i}`, text: `Typed on the Fold ${i}`, ts: NOW - 3_600_000 + i * 1000 }));
   assert.match(h.team.getSetting('greeting_seen'), GREETING_MARK);
-  assert.deepEqual(markTimes(h), Array.from({ length: 50 }, (_, i) => NOW - 3_600_000 + (i + 10) * 1000), 'the oldest ten went');
+  assert.deepEqual(markTimes(h), Array.from({ length: GREETING_MARKS }, (_, i) => NOW - 3_600_000 + (i + 10) * 1000), 'the oldest ten went');
   // The oldest one's second copy, after a restart, no longer counts; the newest one's does.
   h.restart();
   h.ingest(h.lead(LEAD_ID), rec({ id: 'CAP-old', fromMe: true, jid: PHONE_JID, jidAlt: null, text: 'Typed on the Fold 0', ts: NOW - 60_000 }));
   assert.deepEqual(h.alerts, []);
   h.restart();
-  h.ingest(h.lead(LEAD_ID), rec({ id: 'CAP-new', fromMe: true, jid: PHONE_JID, jidAlt: null, text: 'Typed on the Fold 59', ts: NOW - 50_000 }));
+  h.ingest(h.lead(LEAD_ID), rec({ id: 'CAP-new', fromMe: true, jid: PHONE_JID, jidAlt: null, text: `Typed on the Fold ${GREETING_MARKS + 9}`, ts: NOW - 50_000 }));
   assert.deepEqual(h.alerts.map((a) => a.code), ['greeting_away']);
   h.s.close();
 
@@ -1039,6 +1040,23 @@ test('the Greeting/Away marker keeps the newest 50 dropped copies, prunes what c
   c.ingest(c.lead(LEAD_ID), rec({ id: 'C-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: GREETING, ts: NOW - 60_000 }));
   assert.equal(c.team.getSetting('greeting_seen'), '');
   c.s.close();
+});
+
+test("Codex T07 r6: the test chat's away reply, then sixty other texts typed there (more than the old cap of 50), then a restart: its copy in a client's chat later still raises the alert; a copy WhatsApp dated a day ahead leaves no mark", () => {
+  const h = testChat();
+  h.ingest(h.lead(), toOwner({ id: 'AM-1', text: GREETING, ts: NOW - 50 * 60_000 })); // the test chat joined an hour ago
+  for (let i = 0; i < 60; i++) h.ingest(h.lead(), toOwner({ id: `AM-T${i}`, text: `Testing the bot ${i}`, ts: NOW - 45 * 60_000 + i * 1000 }));
+  h.restart();
+  h.ingest(h.lead(LEAD_ID), rec({ id: 'PM-1', fromMe: true, jid: PHONE_JID, jidAlt: null, text: GREETING, ts: NOW - 60_000 }));
+  assert.deepEqual(h.alerts.map((a) => a.code), ['greeting_away']);
+  h.s.close();
+
+  const f = testChat();
+  f.ingest(f.lead(), toOwner({ id: 'F-1', text: 'A real one', ts: NOW - 60_000 }));
+  const before = markTimes(f);
+  f.ingest(f.lead(), toOwner({ id: 'F-2', text: 'Dated a day ahead', ts: NOW + T_DAY + 60_000 }));
+  assert.deepEqual(markTimes(f), before, 'no mark for a copy dated more than a window ahead; the real one stays');
+  f.s.close();
 });
 
 test('the Greeting/Away detector has no shortest text: a short away message in English or Arabic, in two chats, raises the alert; in one chat it does not', () => {

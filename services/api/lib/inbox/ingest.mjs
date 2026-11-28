@@ -85,7 +85,8 @@
  *     caption) never counts. A text is remembered as a hash only; the stored copies of other
  *     chats count too, and so does a copy the owner's test chat dropped, kept as a mark in the
  *     `greeting_seen` setting (a hash of the text, a hash of the chat, the copy's time: never
- *     the text, a number or a lead id; the newest 50, each until it can no longer count), so a
+ *     the text, a number or a lead id; as many as the in-memory memory keeps, GREETING_MEMORY,
+ *     each until it can no longer count), so a
  *     restart forgets nothing (Codex T07 r5), and a day's alert already in the owner-notes
  *     ledger is not raised again;
  *   - a human message seen for the first time also ends a hold that waits for a person
@@ -139,8 +140,11 @@ const GREETING_MEMORY = 500;
  * none, so without its mark a restart between its copy and a client's would hide the pair.
  */
 export const GREETING_SEEN_KEY = 'greeting_seen';
-/** Marks the setting keeps: the newest, by the copy's time. */
-export const GREETING_MARKS = 50;
+/**
+ * Marks the setting keeps: the newest, by the copy's time. As many as the in-memory memory keeps texts
+ * (GREETING_MEMORY), so a restart never forgets a copy sooner than the running process would (Codex T07 r6).
+ */
+export const GREETING_MARKS = GREETING_MEMORY;
 const GREETING_MARK_RE = /^([A-Za-z0-9_-]{16})\.([A-Za-z0-9_-]{11})\.(\d{1,16})$/;
 /** What a mark keeps of a text (its SHA-256, the memory's key) and of a chat: truncated hashes, never either. */
 const textMark = (key) => key.slice(0, 16);
@@ -306,8 +310,11 @@ export function createIngest({
       const marks = readMarks();
       const same = (m) => m.text === text && m.chat === chat;
       const at = Math.max(Math.trunc(ts), ...marks.filter(same).map((m) => m.at));
-      const kept = marks.filter((m) => !same(m) && m.at >= t - 2 * GREETING_WINDOW_MS);
-      kept.push({ text, chat, at });
+      // A mark counts only between twice the window ago and one window ahead (a copy WhatsApp dated in the future
+      // never takes the place of a real one).
+      const counts = (m) => m.at >= t - 2 * GREETING_WINDOW_MS && m.at <= t + GREETING_WINDOW_MS;
+      const kept = marks.filter((m) => !same(m) && counts(m));
+      if (counts({ at })) kept.push({ text, chat, at });
       kept.sort((a, b) => a.at - b.at);
       const next = kept.slice(-GREETING_MARKS);
       team.setSetting(GREETING_SEEN_KEY, next.map((m) => `${m.text}.${m.chat}.${m.at}`).join(','));

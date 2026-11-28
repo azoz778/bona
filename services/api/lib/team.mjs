@@ -36,7 +36,7 @@ export const ROLES = ['owner', 'staff'];
  * pairs, comma-separated), so a restart never lets an older command undo a newer one, and
  * `greeting_seen`, the Greeting/Away detector's memory of the sent texts the owner's test chat
  * drops (lib/inbox/ingest.mjs, PR-A2): `<text hash>.<chat hash>.<ms>` marks, comma-separated,
- * at most 50, so a restart forgets no copy the transcript does not keep. Hashes and times
+ * at most 500, so a restart forgets no copy the transcript does not keep. Hashes and times
  * only: never a text, a number or a lead id.
  */
 export const SETTINGS_DEFAULTS = {
@@ -86,8 +86,8 @@ export const SETTINGS_ALLOWED = {
   brain_usd_month: new RegExp(`^(?:|${MONTH}:${COUNT})$`),
   // `<switch>:<ms>` pairs, comma-separated, one per switch a command has set (six today).
   owner_command_ts: /^(?:|[a-z_]{1,32}:\d{1,16}(?:,[a-z_]{1,32}:\d{1,16}){0,15})$/,
-  // 16 + 11 base64url characters (two truncated SHA-256 hashes) and a time, at most 50 marks.
-  greeting_seen: new RegExp(`^(?:|${GREETING_MARK}(?:,${GREETING_MARK}){0,49})$`),
+  // 16 + 11 base64url characters (two truncated SHA-256 hashes) and a time, at most 500 marks (ingest's GREETING_MARKS).
+  greeting_seen: new RegExp(`^(?:|${GREETING_MARK}(?:,${GREETING_MARK}){0,499})$`),
 };
 /** The owner's on/off switches: each one is '0' or '1' and nothing else, and fails closed. */
 export const SWITCH_KEYS = Object.keys(SETTINGS_ALLOWED).filter((k) => SETTINGS_ALLOWED[k] === SWITCH);
