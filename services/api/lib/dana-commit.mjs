@@ -23,20 +23,22 @@
  *     is unknown, so nothing is committed and the model's "booking it" never goes out alone: BOOKING_FAILED_LINE
  *     and the hand-over;
  *   - the safety net: with no successful commit, a brain answer with a booking claim → BOOKING_FAILED_LINE and
- *     the hand-over. Sentence by sentence (. ! ? ; ؟ ؛ newline):
- *       1. a denial is cut out only where it governs the claim word ("isn't booked", "is not yet confirmed",
- *          "hasn't been booked", "not booked yet", «لم يتم الحجز», «ما تم الحجز», «لسه ما تم الحجز», «الحجز
- *          غير مؤكد»); a negative word about anything else ("the meeting point isn't set yet", «ولسه ما أرسلت
- *          لك الموقع», «وهذا ما تم الاتفاق عليه») cuts nothing, and «بعد ما» + a past verb is "after", never "not";
- *       2. what is left is a claim when it says booked / confirmed / تم الحجز / تم تأكيد … (reply-guard
- *          claimsBooking) or uses a personal claim form (PERSONAL_CLAIM_RE: "you're all set", "see you then",
+ *     the hand-over (claimsABooking; every sentence the reviews raised is a row of the corpus test in
+ *     test/dana-commit.test.mjs). Sentence by sentence (. ! ? ; ؟ ؛ newline):
+ *       1. a denial is cut out only where it governs the claim word ("isn't booked", "I haven't booked it yet",
+ *          "hasn't been confirmed", «لم يتم الحجز», «ما تم الحجز», «ما حجزت لك», «الحجز غير مؤكد»); a negative word
+ *          about anything else ("the meeting point isn't set yet", «ولسه ما أرسلت لك الموقع», «وهذا ما تم الاتفاق
+ *          عليه») cuts nothing, and «بعد ما» + a past verb is "after", never "not";
+ *       2. a personal claim form fires on its own ("you're booked", "see you on Sunday", «تم الحجز», «تم التأكيد»,
  *          «حجزت لك», «نشوفك الأحد»);
- *       3. and it fires when that same sentence has a sign of a booking (a viewing word, a weekday or tomorrow,
- *          a clock time, a personal claim form) or the turn called viewing_slots or book_viewing.
- *     The claim usually comes in the turn after the slots were offered, with no viewing tool in it. "The
- *     developer has confirmed delivery in Q4 2027", "fully booked", "today" (no viewing is same-day) or a bare
- *     date is no claim. A needless hand-over is the accepted cost; a phantom booking is not. Only on a brain
- *     turn: a legacy Retell completion has no booking tool and keeps today's behaviour (the same-release rule).
+ *       3. a claim word (booked, confirmed, reserved, تم تأكيد …, or "you're all set") fires with a viewing tool
+ *          in the turn, a booking sign in its own sentence (a viewing word, a weekday or tomorrow, a clock time, a
+ *          second-person object such as "booked you in", or "today"), or a sign anywhere in the answer unless its
+ *          own sentence is about stock, price or delivery ("Sunday at 10 works. It's booked!").
+ *     The claim usually comes in the turn after the slots were offered, with no viewing tool in it. "The developer
+ *     has confirmed delivery in Q4 2027", "fully booked" or "You're all set: I've sent you the brochure" is no
+ *     claim. A needless hand-over is the accepted cost; a phantom booking is not. Only on a brain turn: a legacy
+ *     Retell completion has no booking tool and keeps today's behaviour (the same-release rule).
  * The hand-over itself (needs_human, the alert, notes.handover) stays dana-wa's: `afterPreSend` answers it as
  * `handover: { kind }`, and dana-wa applies it as any other.
  *
@@ -73,43 +75,62 @@ const DAY_RE = /(?<![\p{L}])(?:(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorr
 /** A clock time: 10 am, 2:00 pm, 14:00, at 10, noon, الساعة 2, 2 ظهراً. */
 const TIME_RE = /(?<![\d:])\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)(?![\p{L}])|(?<![\d:])\d{1,2}:\d{2}(?![\d:])|(?<![\p{L}])at\s+\d{1,2}(?!\d|[,.]\d)|(?<![\p{L}])(?:noon|o'clock)(?![\p{L}])|الساعة\s*\d|(?<![\d:])\d{1,2}\s*(?:صباح|مساء|ظهر|عصر|الصبح|الظهر|العصر)/iu;
 const WEEKDAY_AR = String.raw`ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس)`;
+/** "today" is a sign only in a sentence that is not about stock: a claim for today is itself a phantom (no viewing is same-day). */
+const TODAY_RE = /(?<![\p{L}])(?:today|tonight)(?![\p{L}])|(?<![\p{L}])اليوم(?![\p{L}])/iu;
+/** A second-person object on the claim word: "booked you (in)", "reserved you a place", "booked it for you", «حجزنا لك». */
+const OBJECT_RE = /(?<![\p{L}])(?:booked|confirmed|reserved)\s+you(?:r)?(?![\p{L}])|(?<![\p{L}])(?:booked|confirmed|reserved)\s+(?:it|this|that|one)\s+for\s+you(?![\p{L}])|(?:حجزت|حجزنا|أكدت|أكدنا|اكدت|اكدنا)\s*(?:لك|لكم|عليك)/iu;
+/** A sentence about stock, price or delivery: its claim needs its sign in that same sentence ("fully booked", "confirmed delivery"). */
+const STOCK_RE = /(?<![\p{L}])(?:units?|apartments?|flats?|villas?|homes?|price|prices|delivery|handover|completion|project)(?![\p{L}])|الشقق|الشقة|الوحدات|الوحدة|السعر|الأسعار|التسليم|المشروع|الفلل/iu;
+/** Claim words beyond reply-guard claimsBooking (booked, confirmed, تم الحجز, تم تأكيد, حجزت لك, تأكد الحجز). */
+const EXTRA_CLAIM_RE = /(?<![\p{L}])reserved(?![\p{L}])/iu;
 /**
- * A claim aimed at the client, and a booking sign on its own: "you're / you are (all) set|booked|confirmed",
- * "see you then|on|at|there|tomorrow|<weekday>" (never "see you soon"), «تم الحجز», «حجزت لك», «تأكد (ال)حجز»,
- * «تم تأكيد الحجز», «(ب)نشوفك» + a weekday, tomorrow or a time (never «نشوفك على خير»).
+ * A personal claim form: a claim AND a booking sign on its own (Codex r3, Claude r4). "you're / you are (all)
+ * booked|confirmed", "see(ing) you then|on|at|there|tomorrow|<weekday>" (never "see you soon"), «تم الحجز»,
+ * «تم التأكيد», «حجزت لك», «حجزنا لك», «تأكد (ال)حجز», «تم تأكيد الحجز», «(ب)نشوفك» + up to three words + a
+ * weekday, tomorrow, a time, «هناك» or «في المعاينة|الموعد» (never «نشوفك على خير»).
  */
 const PERSONAL_CLAIM_RE = new RegExp([
-  String.raw`(?<![\p{L}])you(?:'re|’re|\s+are)\s+(?:all\s+)?(?:set|booked|confirmed)(?![\p{L}])`,
-  String.raw`(?<![\p{L}])see\s+you\s+(?:then|on|at|there|tomorrow|(?:sun|mon|tues|wednes|thurs|fri|satur)day)(?![\p{L}])`,
-  String.raw`تم\s+الحجز|حجزت\s*لك|تأكد\s+(?:ال)?حجز|تم\s+تأكيد\s+الحجز`,
-  String.raw`(?<![\p{L}])ب?نشوفك(?:م)?\s+(?:يوم\s+)?(?:${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة)`,
+  String.raw`(?<![\p{L}])you(?:'re|’re|\s+are)\s+(?:all\s+)?(?:booked|confirmed)(?![\p{L}])`,
+  String.raw`(?<![\p{L}])see(?:ing)?\s+you\s+(?:then|on|at|there|tomorrow|(?:sun|mon|tues|wednes|thurs|fri|satur)day)(?![\p{L}])`,
+  String.raw`تم\s+الحجز|تم\s+التأكيد|حجز(?:ت|نا)\s*لك|تأكد\s+(?:ال)?حجز|تم\s+تأكيد\s+الحجز`,
+  String.raw`(?<![\p{L}])ب?نشوفك(?:م)?(?:\s+\S+){0,3}?\s+(?:يوم\s+)?(?:${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة|هناك|في\s+(?:المعاينة|الموعد))`,
 ].join('|'), 'iu');
+/** "You're all set": a claim, but it needs a booking sign ("You're all set: I've sent you the brochure" is no booking). */
+const ALL_SET_RE = /(?<![\p{L}])you(?:'re|’re|\s+are)\s+all\s+set(?![\p{L}])/iu;
 /**
- * A denial that governs the claim word, cut out before the claim check (Claude r3): "isn't / aren't / wasn't /
- * is not / not (yet) / hasn't been … booked|confirmed (yet)", «لم يتم / ما تم / لسه ما (تم) / للحين ما (تم) +
- * الحجز|التأكيد|تأكد», «الحجز / موعدك / المعاينة لسه ما تأكد», «… غير مؤكد». «بعد ما» is "after" in Hijazi, so
- * «بعد ما تم الحجز» is no denial (the lookbehind), and «ما تم الاتفاق عليه» ("what was agreed") is none either.
+ * A denial that governs the claim word, cut out before the claim check (Claude r3, r4; Codex r4): "isn't / aren't /
+ * wasn't / is not / not (yet) / haven't / hasn't / have not / has not (been) / didn't / did not … booked|confirmed|
+ * book|confirm (it|this|the …) (yet)", «لم يتم / ما تم / لسه ما (تم) / للحين ما (تم) + الحجز|التأكيد|تأكد», «ما +
+ * حجزت|أكدت|انحجز|تأكد», «الحجز / موعدك / المعاينة لسه ما تأكد», «… غير مؤكد». «بعد ما» is "after" in Hijazi, so
+ * «بعد ما تم الحجز» / «بعد ما حجزت لك» are no denials (the lookbehinds), and «ما تم الاتفاق عليه» ("what was agreed")
+ * is none either.
  */
 const GOVERNED_DENIAL_RE = new RegExp([
-  String.raw`(?<![\p{L}])(?:isn['’]t|aren['’]t|wasn['’]t|(?:hasn['’]t|haven['’]t|has\s+not|have\s+not)\s+been|(?:is|are|was)\s+not|not)\s+(?:yet\s+|been\s+|fully\s+|actually\s+)?(?:booked|confirmed)(?![\p{L}])(?:\s+yet)?`,
+  String.raw`(?<![\p{L}])(?:isn['’]t|aren['’]t|wasn['’]t|(?:hasn['’]t|haven['’]t|has\s+not|have\s+not)(?:\s+been)?|didn['’]t|did\s+not|(?:is|are|was)\s+not|not)\s+(?:yet\s+|been\s+|fully\s+|actually\s+)?(?:booked|confirmed|book|confirm)(?![\p{L}])(?:\s+(?:it|this|that|the\s+\S+|your\s+\S+))?(?:\s+yet)?`,
   String.raw`(?:لم\s+يتم|(?<!بعد\s+)(?<![\p{L}])ما\s+تم|(?:لسه|لسا|للحين)\s+ما(?:\s+تم)?)\s+(?:ال)?(?:حجز|تأكيد|تأكد|انحجز)\S*`,
+  String.raw`(?<!بعد\s+)(?<![\p{L}])ما\s+(?:حجزت|أكدت|انحجز|تأكد)\S*`,
   String.raw`(?:الحجز|موعدك|المعاينة)\s+(?:(?:لسه|لسا|للحين)\s+ما\s+(?:تأكد|تم)|غير\s+مؤكد)`,
 ].join('|'), 'giu');
-/** Sentences: a denial, a claim and its sign are read in one sentence at a time. */
+/** Sentences: a denial and a claim are read one sentence at a time. */
 const SENTENCE_SPLIT_RE = /[.!?;؟؛\n]+/u;
 
+/** A booking sign in one sentence: a viewing word, a weekday or tomorrow, a clock time, a second-person object, or today (not about stock). */
+const signIn = (s) => VIEWING_WORD_RE.test(s) || DAY_RE.test(s) || TIME_RE.test(s) || OBJECT_RE.test(s) || (TODAY_RE.test(s) && !STOCK_RE.test(s));
+
 /**
- * Whether the answer claims a booking (the safety net, Claude + Codex r1-r3): in one sentence, after the governed
- * denials are cut out, a claim word or a personal claim form, with a booking sign in that same sentence or a viewing
- * tool anywhere in the turn.
+ * Whether the answer claims a booking (the safety net; Claude's r4 rule, Codex r1-r4). Sentence by sentence, after the
+ * governed denials are cut out: a personal claim form fires on its own; a claim word (or "you're all set") fires with
+ * a viewing tool anywhere in the turn, a booking sign in its own sentence, or a sign anywhere in the answer when its
+ * own sentence is not about stock, price or delivery ("Sunday at 10 works. It's booked!").
  */
 function claimsABooking(calls, body) {
   const viewingTool = calls.some((c) => c.name === 'viewing_slots' || c.name === 'book_viewing');
-  return String(body ?? '').split(SENTENCE_SPLIT_RE).some((sentence) => {
-    const s = toAsciiDigits(sentence.replace(GOVERNED_DENIAL_RE, ' '));
-    const personal = PERSONAL_CLAIM_RE.test(s);
-    if (!personal && !claimsBooking(s)) return false;
-    return viewingTool || personal || VIEWING_WORD_RE.test(s) || DAY_RE.test(s) || TIME_RE.test(s);
+  const sentences = String(body ?? '').split(SENTENCE_SPLIT_RE).map((x) => toAsciiDigits(x.replace(GOVERNED_DENIAL_RE, ' ')));
+  const answerSign = sentences.some(signIn);
+  return sentences.some((s) => {
+    if (PERSONAL_CLAIM_RE.test(s)) return true;
+    if (!claimsBooking(s) && !EXTRA_CLAIM_RE.test(s) && !ALL_SET_RE.test(s)) return false;
+    return viewingTool || signIn(s) || (answerSign && !STOCK_RE.test(s));
   });
 }
 

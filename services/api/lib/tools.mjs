@@ -471,10 +471,15 @@ export function createToolHandlers({
       // The reason code only: a calendar's own error code never reaches the model.
       return { bookable: false, ...(typeof r?.reason === 'string' ? { reason: r.reason } : {}), note: SLOTS_OFF_NOTE };
     }
+    // The same name rule as book_viewing (viewing.validate → lead-tasks plausibleName): a CRM name "A" is no name.
+    const askName = !plausibleName(who.lead.name);
     return {
       bookable: true, timezone: r.timezone,
       slots: r.slots.map((x) => ({ slot_id: x.slot_id, label_ar: x.label_ar, label_en: x.label_en })),
-      note: 'Offer 3 or 4 of these slots by their labels in one message; if the client record has no name, ask for it in that same message.',
+      ask_name: askName,
+      note: askName
+        ? 'Offer 3 or 4 of these slots by their labels in one message, and ask for their name in that same message.'
+        : 'Offer 3 or 4 of these slots by their labels in one message.',
     };
   }
 

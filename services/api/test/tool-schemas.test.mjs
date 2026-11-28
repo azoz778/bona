@@ -164,3 +164,9 @@ test('prompts/assistant.md: nameless (only the identity line says "never call yo
   assert.ok(lines >= 30 && lines <= 70, `~50 lines, not ${lines}`);
   assert.ok(fs.existsSync(new URL('../prompts/assistant.md', import.meta.url)));
 });
+
+test('the viewing lines ask for the name when the record has no PLAUSIBLE name, as viewing_slots answers ask_name (Codex r4 P1)', () => {
+  const wa = render();
+  assert.match(wa, /if the client record has no plausible name for them \(viewing_slots says ask_name\), ask for it in that same message/);
+  assert.match(TOOL_SCHEMAS.viewing_slots.description, /ask_name/);
+});

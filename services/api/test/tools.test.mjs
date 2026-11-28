@@ -1376,3 +1376,21 @@ test('the brochure HEAD goes only to Bona\'s site over https, with no redirect; 
     assert.ok(inits.every((i) => i.method === 'HEAD' && i.redirect === 'error'), 'a redirect is a failure, never followed');
   } finally { h.cleanup(); }
 });
+
+/* ---------------- PR-B4 r5 (the r4 reviews) ---------------- */
+
+test('viewing_slots says ask_name when the CRM name is missing or not plausible (lead-tasks plausibleName, as book_viewing validates it; Codex r4 P1)', async () => {
+  const h = b4({ viewing: fakeViewing() });
+  try {
+    const cases = [['LEAD-20261201-0000b501', 'Sara Example', false], ['LEAD-20261201-0000b502', 'A', true], ['LEAD-20261201-0000b503', '🙂', true],
+      ['LEAD-20261201-0000b504', null, true], ['LEAD-20261201-0000b505', '0500000099', true], ['LEAD-20261201-0000b506', 'نورة', false]];
+    for (const [id, name, ask] of cases) {
+      h.lead(id, { name });
+      const out = await h.wa('viewing_slots', ARGS.viewing_slots, { leadId: id });
+      assert.equal(out.bookable, true);
+      assert.equal(out.ask_name, ask, String(name));
+      if (ask) assert.match(out.note, /ask for their name in that same message/, String(name));
+      else assert.doesNotMatch(out.note, /ask for their name/, String(name));
+    }
+  } finally { h.cleanup(); }
+});

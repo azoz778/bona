@@ -479,3 +479,194 @@ test("the booking sign is read in the claim's own sentence (the viewing tool tur
   const slots = { name: 'viewing_slots', args: { listing_id: 'BONA-W003' }, result: { bookable: true, slots: [] } };
   assert.ok(await caughtWith(c, untouched[0][0], 'en', [slots]));
 });
+
+/* ---------------- PR-B4 r5 (the r4 reviews) ---------------- */
+
+test('a claim whose slot sits in the next sentence is caught (the sign may come from anywhere unless the claim names stock), and «تم التأكيد» is a claim (Claude r4 P2-1)', async () => {
+  const c = commitWith({ viewing: fakeViewing() });
+  for (const [text, lang] of [
+    ["Sunday at 10 works. It's booked!", 'en'], ['Perfect, Sunday at 10. Booked!', 'en'], ['Great choice: Sunday 10 am. It is confirmed.', 'en'],
+    ['Sunday at 10 it is. All confirmed!', 'en'], ['تمام، الأحد الساعة 10. تم التأكيد ✅', 'ar'], ['الأحد الساعة 10. تم تأكيد الموعد', 'ar'],
+    ['يوم الأحد الساعة ١٠ صباحاً. تم الحجز ✅', 'ar'],
+  ]) {
+    for (const tools of [[], [NEEDS]]) assert.ok(await caughtWith(c, text, lang, tools), `${text} (${tools.length ? 'save_needs' : 'no tool'})`);
+  }
+  // A claim about stock keeps needing its sign in its own sentence.
+  const stock = 'The team is in on Sunday. The 3-bedroom units are fully booked.';
+  assert.deepEqual(await c.afterPreSend({ lead: LEAD, turn: brainReply(stock), text: stock, language: 'en' }), { bubbles: [{ kind: 'text', text: stock }] });
+});
+
+test('"I\'ve booked you in" is a claim on its own: a second-person object on the claim word is a booking sign (Codex r4 P1)', async () => {
+  const c = commitWith({ viewing: fakeViewing() });
+  for (const [text, lang] of [["Perfect, I've booked you in!", 'en'], ["Done, I've reserved you a place.", 'en'], ['All good, I booked it for you.', 'en'], ['تمام، حجزنا لك', 'ar']]) {
+    for (const tools of [[], [NEEDS]]) assert.ok(await caughtWith(c, text, lang, tools), `${text} (${tools.length ? 'save_needs' : 'no tool'})`);
+  }
+});
+
+test('active-voice denials pass in the need_name flow: "I haven\'t booked your viewing yet", «ما حجزت لك للحين» (Codex r4 P2, Claude r4 P2-2)', async () => {
+  const c = commitWith({ viewing: fakeViewing() });
+  const needName = book({ slot_id: SLOT, listing_id: 'BONA-W003' }, { reserved: false, need_name: true, reason: 'need_name' });
+  for (const [text, lang] of [
+    ["I haven't booked your viewing yet. What name should I use?", 'en'], ["I haven't booked it yet. What name should I put it under?", 'en'],
+    ["We haven't confirmed it yet; may I have your name?", 'en'], ['I have not booked it yet — what is your name?', 'en'],
+    ["I didn't book it yet, may I have your name?", 'en'], ['ما حجزت لك للحين، إيش اسمك؟', 'ar'], ['لسه ما حجزت لك، إيش اسمك الكريم؟', 'ar'],
+  ]) {
+    for (const tools of [[], [needName]]) {
+      assert.deepEqual(await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools }), text, language: lang }), { bubbles: [{ kind: 'text', text }] }, `${text} (${tools.length ? 'need_name' : 'no tool'})`);
+    }
+  }
+});
+
+/**
+ * THE CLAIM CORPUS (PR-B4 r1-r5; Claude's and Codex's examples from every round). One row per sentence:
+ * `trips` is the outcome with no tool in the turn AND with save_needs only (the turn after the slots were offered);
+ * `viewing`, when set, is the outcome with a viewing tool in the turn (viewing_slots, and a need_name book_viewing).
+ * Later rounds add rows here. Kinds: claim, split (the slot in another sentence), personal (no claim word), today,
+ * denial (the need_name flow), ordinary (an answer about stock, price, delivery or a goodbye), over (an accepted
+ * over-trigger: a needless hand-over, never a phantom booking).
+ */
+const CORPUS = [
+  // claims
+  ['claim', 'Your viewing is booked for Sunday at 10.', 'en', true, true],
+  ['claim', 'All confirmed, see you then!', 'en', true, true],
+  ['claim', 'تم الحجز يوم الأحد الساعة 10', 'ar', true, true],
+  ['claim', 'تم تأكيد موعدك', 'ar', true, true],
+  ['claim', 'Great, your visit is confirmed for Monday 12:00 pm.', 'en', true, true],
+  ['claim', 'Done! The viewing is booked for 6 December.', 'en', true, true],
+  ['claim', 'تم حجز موعد معاينتك يوم الأحد الساعة 10', 'ar', true, true],
+  ['claim', 'تم تأكيد زيارتك بكرة الساعة ٢ ظهراً', 'ar', true, true],
+  ['claim', 'Booked! See you on Sunday.', 'en', true, true],
+  ['claim', "Done, you're booked for Sunday 10:00.", 'en', true, true],
+  ['claim', 'Great, your appointment is confirmed.', 'en', true, true],
+  ['claim', 'Your viewing is confirmed, Sara.', 'en', true, true],
+  ['claim', 'Perfect, it is booked for tomorrow at 10 am.', 'en', true, true],
+  ['claim', 'Your viewing is booked.', 'en', true, true],
+  ['claim', 'تمام، تم الحجز ✅', 'ar', true, true],
+  ['claim', 'أبشري، حجزت لك الأحد الساعة 10 الصبح', 'ar', true, true],
+  ['claim', 'تم حجز المعاينة ✅', 'ar', true, true],
+  ['claim', 'تم تأكيد موعد المعاينة يوم الأحد', 'ar', true, true],
+  ['claim', 'تم حجز موعدك يوم الأحد الساعة ١٠ صباحاً', 'ar', true, true],
+  ['claim', "Sorry, Monday isn't free. Your viewing is booked for Sunday at 10.", 'en', true, true],
+  ['claim', "You're booked for Sunday at 10, the exact meeting point isn't set yet, the team will send it.", 'en', true, true],
+  ['claim', 'Your viewing is confirmed for Sunday at 10 am; the meeting point is not shared yet.', 'en', true, true],
+  ['claim', 'Booked for Sunday 10:00, not yet sent you the location but I will.', 'en', true, true],
+  ['claim', "Your viewing is booked for Sunday at 10, and there's nothing you haven't sent us.", 'en', true, true],
+  ['claim', "Monday isn't available, but your Sunday viewing is booked", 'en', true, true],
+  ['claim', "Not to worry, you're booked for Sunday 10:00", 'en', true, true],
+  ['claim', 'No worries, your viewing is booked for Sunday at 10.', 'en', true, true],
+  ['claim', "Your viewing is booked for Sunday at 10 — you don't need to do anything else.", 'en', true, true],
+  ['claim', "Your viewing is booked for Sunday at 10 a.m. The team hasn't sent the pin yet.", 'en', true, true],
+  ['claim', 'تم حجز موعدك يوم الأحد الساعة 10، ولم يتم تحديد نقطة اللقاء بعد', 'ar', true, true],
+  ['claim', 'تم الحجز ✅ ولسه ما أرسلت لك الموقع، الفريق بيرسله', 'ar', true, true],
+  ['claim', 'تم تأكيد موعدك يوم الأحد، والموقع غير مؤكد للحين', 'ar', true, true],
+  ['claim', 'تم الحجز يوم الأحد، وهذا ما تم الاتفاق عليه', 'ar', true, true],
+  ['claim', 'بعد ما حجزت لك الأحد الساعة 10، الفريق بيرسل لك الموقع', 'ar', true, true],
+  ['claim', 'بعد ما تم الحجز، بيرسل لك الفريق نقطة اللقاء', 'ar', true, true],
+  ['claim', 'لا تشيل هم، تم الحجز', 'ar', true, true],
+  ['claim', 'ولا يهمك، تم الحجز يوم الأحد الساعة 10', 'ar', true, true],
+  ['claim', "Perfect, I've booked you in!", 'en', true, true],
+  ['claim', 'All good, I booked it for you.', 'en', true, true],
+  // the slot in the next sentence
+  ['split', "Sunday at 10 works. It's booked!", 'en', true, true],
+  ['split', 'Perfect, Sunday at 10. Booked!', 'en', true, true],
+  ['split', 'Great choice: Sunday 10 am. It is confirmed.', 'en', true, true],
+  ['split', 'Sunday at 10 it is. All confirmed!', 'en', true, true],
+  ['split', 'Sunday 10:00 — booked!', 'en', true, true],
+  ['split', 'Sunday at 10, booked and confirmed.', 'en', true, true],
+  ['split', 'تمام، الأحد الساعة 10. تم التأكيد ✅', 'ar', true, true],
+  ['split', 'الأحد الساعة 10. تم تأكيد الموعد', 'ar', true, true],
+  ['split', 'يوم الأحد الساعة ١٠ صباحاً. تم الحجز ✅', 'ar', true, true],
+  // personal forms, no claim word
+  ['personal', "You're all set for Sunday at 10. See you then!", 'en', true, true],
+  ['personal', 'You are all set for Monday 12:00.', 'en', true, true],
+  ['personal', 'See you on Sunday at 10!', 'en', true, true],
+  ['personal', 'See you Sunday at 10!', 'en', true, true],
+  ['personal', 'See you then!', 'en', true, true],
+  ['personal', 'Looking forward to seeing you on Sunday at 10.', 'en', true, true],
+  ['personal', 'تمام، نشوفك الأحد الساعة 10', 'ar', true, true],
+  ['personal', 'أبشر، بنشوفك بكرة الساعة 12 الظهر', 'ar', true, true],
+  ['personal', 'تمام، نشوفك إن شاء الله يوم الأحد الساعة 10', 'ar', true, true],
+  ['personal', 'أبشري، نشوفك الأحد', 'ar', true, true],
+  ['personal', 'نشوفك بكرة الساعة 10', 'ar', true, true],
+  ['personal', 'نشوفك هناك يوم الأحد', 'ar', true, true],
+  ['personal', 'نشوفك في المعاينة يوم الأحد', 'ar', true, true],
+  // "today": no viewing is same-day, so a claim for today is itself a phantom
+  ['today', 'Booked for today!', 'en', true, true],
+  ['today', "You're booked for today.", 'en', true, true],
+  ['today', 'Your viewing is confirmed for today.', 'en', true, true],
+  ['today', 'تم تأكيد موعدك اليوم', 'ar', true, true],
+  // denials: the need_name flow passes as written, with a viewing tool in the turn too
+  ['denial', "Your viewing isn't booked yet. What name should I use?", 'en', false, false],
+  ['denial', 'Your viewing is not confirmed yet; which name should I put it under?', 'en', false, false],
+  ['denial', "It's not booked yet. Shall I book Sunday 10:00 for you?", 'en', false, false],
+  ['denial', 'The viewing is not yet confirmed: what is your name?', 'en', false, false],
+  ['denial', 'Not booked yet: may I have your name?', 'en', false, false],
+  ['denial', "You're not booked yet; which name should I use?", 'en', false, false],
+  ['denial', "Your viewing hasn't been confirmed yet. Your name, please?", 'en', false, false],
+  ['denial', "It hasn't been booked yet. What's your name?", 'en', false, false],
+  ['denial', "I haven't booked your viewing yet. What name should I use?", 'en', false, false],
+  ['denial', "I haven't booked it yet. What name should I put it under?", 'en', false, false],
+  ['denial', "We haven't confirmed it yet; may I have your name?", 'en', false, false],
+  ['denial', 'I have not booked it yet — what is your name?', 'en', false, false],
+  ['denial', "Your viewing isn't booked yet — what name should I use?", 'en', false, false],
+  ['denial', "Sorry, Monday isn't free. Shall I book Sunday at 10?", 'en', false, false],
+  ['denial', 'لم يتم الحجز بعد، إيش اسمك الكريم؟', 'ar', false, false],
+  ['denial', 'ما تم الحجز للحين، أي اسم أسجّله؟', 'ar', false, false],
+  ['denial', 'لسه ما تم الحجز، إيش اسمك؟', 'ar', false, false],
+  ['denial', 'الحجز لسه ما تأكد، إيش اسمك؟', 'ar', false, false],
+  ['denial', 'للحين ما تم الحجز، أرسل لي اسمك', 'ar', false, false],
+  ['denial', 'الحجز غير مؤكد للحين، إيش اسمك الكريم؟', 'ar', false, false],
+  ['denial', 'ما حجزت لك للحين، إيش اسمك؟', 'ar', false, false],
+  ['denial', 'لسه ما حجزت لك، إيش اسمك الكريم؟', 'ar', false, false],
+  ['denial', 'Monday at 12 is taken; shall I keep Sunday at 10?', 'en', false, false],
+  // ordinary answers (stock, price, delivery, brochures, needs, goodbyes)
+  ['ordinary', 'Yes, the developer has confirmed delivery in Q4 2027.', 'en', false],
+  ['ordinary', 'Confirmed: it has a private pool', 'en', false],
+  ['ordinary', 'The 2-bedroom units are fully booked right now, but the 3-bedroom ones are available.', 'en', false],
+  ['ordinary', 'تم تأكيد موعد التسليم في الربع الرابع 2027', 'ar', false],
+  ['ordinary', 'تم حجز كل الشقق بغرفتين، والمتاح الحين 3 غرف', 'ar', false],
+  ['ordinary', 'The price is confirmed by the developer.', 'en', false],
+  ['ordinary', 'Delivery is confirmed for 15 December 2027.', 'en', false],
+  ['ordinary', "You're all set: I've sent you the brochure.", 'en', false],
+  ['ordinary', "Thanks Sara, you're all set — I've noted your budget.", 'en', false],
+  ['ordinary', 'Hope to see you soon! The 2-bedroom units are fully booked.', 'en', false],
+  ['ordinary', 'The 2-bedroom units are fully booked; the 3-bedroom ones are open from Sunday.', 'en', false],
+  ['ordinary', 'The developer confirmed the handover date today.', 'en', false],
+  ['ordinary', 'تم حجز كل الشقق بغرفتين اليوم', 'ar', false],
+  ['ordinary', 'The team is in on Sunday. The 3-bedroom units are fully booked.', 'en', false],
+  ['ordinary', 'The 2-bedroom units are fully booked today.', 'en', false],
+  ['ordinary', 'I am booking it for you now.', 'en', false, false],
+  ['ordinary', 'Hope to see you soon!', 'en', false, false],
+  ['ordinary', 'See you soon, take care.', 'en', false, false],
+  ['ordinary', 'نشوفك على خير', 'ar', false, false],
+  ['ordinary', 'حياك الله، نشوفك قريب', 'ar', false, false],
+  ['ordinary', 'Here is one villa in Al Shati that matches.', 'en', false, false],
+  // accepted over-triggers: a needless hand-over, never a phantom booking
+  ['over', 'تم تأكيد السعر من المطور يوم الأحد', 'ar', true],
+  ['over', 'بعد ما تأكد الحجز، أرسل لي اسمك وأكمّل لك', 'ar', true],
+  ['over', 'حجزت لك الموعد مبدئياً، وهو غير مؤكد للحين. إيش اسمك؟', 'ar', true],
+].map(([kind, text, lang, trips, viewing]) => ({ kind, text, lang, trips, viewing }));
+
+test(`the claim corpus: ${CORPUS.filter((r) => r.trips).length} claims trip and ${CORPUS.filter((r) => !r.trips).length} non-claims pass, with no tool, with save_needs only, and with a viewing tool where the row says`, async () => {
+  const c = commitWith({ viewing: fakeViewing() });
+  const slots = { name: 'viewing_slots', args: { listing_id: 'BONA-W003' }, result: { bookable: true, slots: [] } };
+  const needName = book({ slot_id: SLOT, listing_id: 'BONA-W003' }, { reserved: false, need_name: true, reason: 'need_name' });
+  const outcome = async (row, tools) => {
+    const out = await c.afterPreSend({ lead: LEAD, turn: brainReply(row.text, { tools }), text: row.text, language: row.lang });
+    if (isDeepStrictEqualish(out, { bubbles: [{ kind: 'text', text: row.text }] })) return false;
+    assert.deepEqual(out, { bubbles: [{ kind: 'text', text: BOOKING_FAILED_LINE[row.lang] }], handover: { kind: 'booking_failed' } }, `${row.kind}: ${row.text}`);
+    return true;
+  };
+  const wrong = [];
+  for (const row of CORPUS) {
+    const runs = [['no tool', [], row.trips], ['save_needs', [NEEDS], row.trips]];
+    if (row.viewing !== undefined) runs.push(['viewing_slots', [slots], row.viewing], ['need_name book_viewing', [needName], row.viewing]);
+    for (const [label, tools, want] of runs) if ((await outcome(row, tools)) !== want) wrong.push(`${row.kind} (${label}, wants ${want ? 'trip' : 'untouched'}): ${row.text}`);
+  }
+  assert.deepEqual(wrong, [], wrong.join('\n'));
+  assert.equal(new Set(CORPUS.map((r) => r.text)).size, CORPUS.length, 'no row twice');
+});
+
+function isDeepStrictEqualish(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}

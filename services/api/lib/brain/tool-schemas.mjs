@@ -60,7 +60,7 @@ export const TOOL_SCHEMAS = Object.freeze({
   },
   viewing_slots: {
     description:
-      'The free viewing times for one home, from tomorrow, Sunday to Thursday. Call it when the client wants to see or visit a home. Offer 3 or 4 of the slots it returns, by their labels, in one message. If bookable is false, call request_human with kind viewing.',
+      'The free viewing times for one home, from tomorrow, Sunday to Thursday. Call it when the client wants to see or visit a home. Offer 3 or 4 of the slots it returns, by their labels, in one message; if ask_name is true, ask for their name in that same message. If bookable is false, call request_human with kind viewing.',
     parameters: {
       type: 'object',
       properties: {
