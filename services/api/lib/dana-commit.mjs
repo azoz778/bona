@@ -107,7 +107,7 @@ const AR_THING = String.raw`(?:ال)?(?:موعد|معاين|حجز|زيار|جو
  * you a place", "booked it for you", "the villa is booked for you", "put you down", «حجزنا لك», «الشقة محجوزة لك».
  */
 const OBJECT_RE = new RegExp([
-  String.raw`(?<![\p{L}])(?:${EN_DONE})\s+(?:you(?:r)?|(?:it|this|that|one)\s+for\s+you|for\s+you)(?![\p{L}])`,
+  String.raw`(?<![\p{L}])(?:booked|confirmed|reserved|scheduled)\s+(?:you(?:r)?|(?:it|this|that|one)\s+for\s+you|for\s+you)(?![\p{L}])`,
   String.raw`(?<![\p{L}])put\s+you\s+down(?![\p{L}])`,
   String.raw`(?:${AR_VERB})\s*(?:لك|لكم|عليك)`,
   String.raw`(?:${AR_ADJ})(?:ة|ه)?\s*(?:لك|لكم)`,
@@ -145,15 +145,19 @@ const FUTURE_RE = new RegExp([
   String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي)(?:تأكد|تثبت|تسجل|ترتب|نحجز|تحجز)\s+${AR_THING}\S*`,
   String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي|حي|سي)كون\s+(?:\S+\s+){0,2}?(?:${AR_ADJ})\S*`,
   String.raw`(?<![\p{L}])(?:once|when|after|as\s+soon\s+as|until|if)\s+(?:it['’]s|it\s+is|it\s+has\s+been|(?:a|the|your)\s+(?:\w+\s+)?(?:is|has\s+been))\s+(?:${EN_DONE})(?![\p{L}])`,
-  String.raw`(?<![\p{L}])(?:will|would|can|could|may|might|should|must|['’]ll)\s+be\s+(?:${EN_DONE})(?![\p{L}])`,
+  // "'ll" after any word ("You'll", "it’ll", "we'll": Codex r9)
+  String.raw`(?:(?<![\p{L}])(?:will|would|can|could|may|might|should|must)|['’]ll)\s+be\s+(?:${EN_DONE})(?![\p{L}])`,
+  // "sorted / arranged (it|them|the …) (for you) by|according to|in order|as a" is how a list is laid out, no booking (Claude r9 P3-1)
+  String.raw`(?<![\p{L}])(?:arranged|sorted)(?:\s+(?:it|them|these|the\s+\S+))?(?:\s+for\s+you)?\s+(?:by|according\s+to|in\s+order|as\s+an?)(?![\p{L}])`,
 ].join('|'), 'giu');
 /**
  * How viewings work, in general ("Viewings are scheduled Sunday to Thursday"), never "your viewings are booked": cut
  * out only from a sentence with no booking sign of its own ("Both viewings are booked for Sunday at 10" stays a claim).
  */
 const GENERAL_RE = new RegExp(String.raw`(?<![\p{L}])(?<!your\s+)(?:viewings|visits|appointments|bookings)\s+(?:are|get)\s+(?:usually\s+|normally\s+|only\s+)?(?:${EN_DONE})(?![\p{L}])`, 'giu');
-/** Clauses inside a sentence: the stock test reads the claim's own clause (, ، — – " - " "and" «و»). */
-const CLAUSE_SPLIT_RE = /\s*(?:[,،—–]|\s-\s|(?<![\p{L}])and(?![\p{L}])|\sو(?=\S))\s*/iu;
+/** Clauses inside a sentence: the stock test reads the claim's own clause (, ، — – " - " "and" «و»). The delimiter is kept. */
+const CLAUSE_DELIM_RE = /(\s*(?:[,،—–]|\s-\s)\s*|\s*(?<![\p{L}])and(?![\p{L}])\s*|\sو(?=\S))/iu;
+const AND_RE = /(?<![\p{L}])and(?![\p{L}])|و/iu;
 /**
  * A clause about stock, price, delivery or the home's features: a claim in it needs its sign in its own sentence, even
  * with a viewing tool in the turn ("fully booked", "confirmed delivery", "the private pool is confirmed"). Read on the
@@ -162,27 +166,31 @@ const CLAUSE_SPLIT_RE = /\s*(?:[,،—–]|\s-\s|(?<![\p{L}])and(?![\p{L}])|\sو
 const STOCK_RE = /(?<![\p{L}])(?:units?|apartments?|flats?|villas?|homes?|price|prices|delivery|handover|completion|project|pools?|gardens?|parking|elevators?|lifts?|terraces?|balcon(?:y|ies)|amenities|finish(?:ing|es)?|specifications?|gyms?)(?![\p{L}])|الشقق|الشقة|الوحدات|الوحدة|السعر|الأسعار|التسليم|المشروع|الفلل|مسبح|حديقة|موقف|مواقف|مصعد|التشطيب|النادي|الجيم/iu;
 /**
  * Claim words beyond reply-guard claimsBooking (booked, confirmed, تم الحجز, تم تأكيد, حجزت لك, تأكد الحجز): they need
- * a booking sign. The adjectives «مسجل / مرتب / متأكد» count only next to the booking («الموعد مسجل», «مرتب الموعد»):
- * «الصك مسجل», «البيت مرتب» and «أنا متأكدة» are no claims.
+ * a booking sign. The adjectives «مؤكد / مسجل / مرتب / متأكد» count only next to the booking («موعدك مؤكد», «الموعد
+ * مسجل»): «إيه مؤكد», «الصك مسجل», «البيت مرتب» and «أنا متأكدة» are no claims. A first-person past verb is a claim with a
+ * booking noun as its object («حجزنا موعدك»), never with another one («رتبت لك الخيارات», «سجلت لك طلبك»).
  */
 const EXTRA_CLAIM_RE = new RegExp([
   String.raw`(?<![\p{L}])(?:reserved|scheduled|arranged|sorted|locked\s+in|set\s+for|fixed\s+for|put\s+you\s+down)(?![\p{L}])`,
-  String.raw`(?<![\p{L}])[وف]?(?:محجوز|مؤكد|مثبت)(?:ة|ه)?(?![\p{L}])|(?<![\p{L}])[وف]?انحجز(?:ت)?(?![\p{L}])`,
-  String.raw`(?:الموعد|موعدك|المعاينة|معاينتك|الزيارة|الحجز|حجزك)\s+(?:\S+\s+)?(?:مسجل|مرتب|متأكد)(?:ة|ه)?(?![\p{L}])`,
-  String.raw`(?<![\p{L}])(?:مسجل|مرتب|متأكد)(?:ة|ه)?\s+${AR_THING}`,
+  String.raw`(?<![\p{L}])[وف]?(?:محجوز|مثبت)(?:ة|ه)?(?![\p{L}])|(?<![\p{L}])[وف]?انحجز(?:ت)?(?![\p{L}])`,
+  String.raw`(?:الموعد|موعدك|المعاينة|معاينتك|الزيارة|زيارتك|الحجز|حجزك)\s+(?:\S+\s+)?(?:مؤكد|مسجل|مرتب|متأكد)(?:ة|ه)?(?![\p{L}])`,
+  String.raw`(?<![\p{L}])(?:مؤكد|مسجل|مرتب|متأكد)(?:ة|ه)?\s+${AR_THING}`,
+  // a first-person past verb with a booking noun as its object, «لك» or not («حجزنا موعدك», «أكدنا المعاينة»: Codex r9)
+  String.raw`(?<![\p{L}])[وف]?(?:${AR_VERB})\s+(?:لك(?:م)?\s+)?(?:ال)?(?:موعد|معاين|حجز|زيار)`,
   String.raw`(?<![\p{L}])[وف]?تأكد\s+${AR_THING}`,
 ].join('|'), 'iu');
 /**
  * A personal claim form: a claim AND a booking sign on its own (Codex r3, Claude r4). "you're / you are (all)
  * booked|confirmed", "see(ing) you then|on|at|there|tomorrow|<weekday>" (never "see you soon"), at a word start (with
  * «و» / «ف»; «يتم الحجز» is not «تم الحجز»): «تم الحجز», «تم التأكيد», «تم التثبيت», «تم تأكيد الحجز», «تأكد الحجز»,
- * «تم تثبيت|تسجيل|ترتيب الموعد», «حجزت / أكدت / ثبتت لك», «رتبت / سجلت لك الموعد», «انحجز لك», and «(ب)نشوفك» + up
+ * «تم تثبيت|تسجيل|ترتيب الموعد», «حجزت / حجزنا لك», «أكدت / ثبتت / رتبت / سجلت لك الموعد» (never «ثبتنا لك السعر»,
+ * «رتبت لك الخيارات»), «انحجز لك», and «(ب)نشوفك» + up
  * to three words + a weekday, tomorrow, a time, «هناك» or «في المعاينة|الموعد» (never «نشوفك على خير»).
  */
 const PERSONAL_CLAIM_RE = new RegExp([
   String.raw`(?<![\p{L}])you(?:'re|’re|\s+are)\s+(?:all\s+)?(?:booked|confirmed)(?![\p{L}])`,
   String.raw`(?<![\p{L}])see(?:ing)?\s+you\s+(?:then|on|at|there|tomorrow|(?:sun|mon|tues|wednes|thurs|fri|satur)day)(?![\p{L}])`,
-  String.raw`(?<![\p{L}])[وف]?(?:تم\s+الحجز|تم\s+التأكيد|تم\s+التثبيت|تم\s+تأكيد\s+الحجز|تأكد\s+(?:ال)?حجز|تم\s+(?:ال)?(?:تثبيت|تسجيل|ترتيب)\s+${AR_THING}|(?:حجزت|حجزنا|أكدت|أكدنا|اكدت|اكدنا|ثبتت|ثبتنا|ثبت)\s*لك|(?:رتبت|رتبنا|سجلت|سجّلت|سجلنا|سجّلنا)\s*لك\s+${AR_THING}|انحجز\s*لك)`,
+  String.raw`(?<![\p{L}])[وف]?(?:تم\s+الحجز|تم\s+التأكيد|تم\s+التثبيت|تم\s+تأكيد\s+الحجز|تأكد\s+(?:ال)?حجز|تم\s+(?:ال)?(?:تثبيت|تسجيل|ترتيب)\s+${AR_THING}|(?:حجزت|حجزنا)\s*لك|(?:أكدت|أكدنا|اكدت|اكدنا|ثبتت|ثبتنا|ثبت|رتبت|رتبنا|سجلت|سجّلت|سجلنا|سجّلنا)\s*لك\s+${AR_THING}|انحجز\s*لك)`,
   String.raw`(?<![\p{L}])ب?نشوفك(?:م)?(?:\s+\S+){0,3}?\s+(?:يوم\s+)?(?:${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة|هناك|في\s+(?:المعاينة|الموعد))`,
 ].join('|'), 'iu');
 /** "You're all set": a claim, but it needs a booking sign ("You're all set: I've sent you the brochure" is no booking). */
@@ -231,10 +239,17 @@ function claimsABooking(calls, body) {
     if (!claimsBooking(s) && !EXTRA_CLAIM_RE.test(s) && !ALL_SET_RE.test(s)) return false;
     // A claim about stock needs its own sign, with a viewing tool in the turn too (Claude r6 P3-1), judged on the claim's
     // own clause: a feature clause next to it never switches the sign off (Claude r7 P2-1, Codex r7 P1).
-    // A claim clause of one or two words ("…, and confirmed", «… ومؤكد») is read with the clause before it.
-    const clauses = s.split(CLAUSE_SPLIT_RE);
-    const claimClauses = clauses.map((cl, i) => (i > 0 && cl.trim().split(/\s+/u).length <= 2 ? `${clauses[i - 1]} ${cl}` : cl))
-      .filter((cl, i) => claimsBooking(clauses[i]) || EXTRA_CLAIM_RE.test(clauses[i]) || ALL_SET_RE.test(clauses[i]));
+    // A claim clause of one or two words joined by "and" / «و» («النادي جاهز ومؤكد») is read with the clause before it;
+    // never across a comma or a dash ("The villa — confirmed!" is a claim of its own: Claude r9 P3-2).
+    const parts = s.split(CLAUSE_DELIM_RE);
+    const clauses = [];
+    for (let i = 0; i < parts.length; i += 2) clauses.push({ text: parts[i], joined: i > 0 && AND_RE.test(parts[i - 1]) });
+    const claimClauses = clauses
+      .filter((cl) => claimsBooking(cl.text) || EXTRA_CLAIM_RE.test(cl.text) || ALL_SET_RE.test(cl.text))
+      .map((cl) => {
+        const i = clauses.indexOf(cl);
+        return i > 0 && cl.joined && cl.text.trim().split(/\s+/u).length <= 2 ? `${clauses[i - 1].text} ${cl.text}` : cl.text;
+      });
     const stock = claimClauses.length ? claimClauses.every((cl) => STOCK_RE.test(cl)) : STOCK_RE.test(s);
     return signIn(s) || ((viewingTool || answerSign) && !stock);
   });

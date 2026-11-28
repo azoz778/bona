@@ -1437,3 +1437,26 @@ test('one PDF per chat per day (DESIGN §6.3, Codex r8 P1): a second home in the
     assert.equal((await f.wa('send_brochure', { listing_id: 'BONA-W003' })).will_send, 'pdf', 'a failed send is no PDF the client got');
   } finally { f.cleanup(); }
 });
+
+test('one PDF per chat per day across a restart (Claude r9 P3-4): a fresh handler reads wa_outbox alone, with no promise in memory', async () => {
+  const cases = [
+    ['no row', [], 'pdf'],
+    ['accepted 1 h ago', [[3_600_000, 'accepted', 'dana']], 'link'],
+    ['pending 1 min ago', [[60_000, 'pending', 'dana']], 'link'],
+    ['uncertain 23 h ago', [[23 * 3_600_000, 'uncertain', 'dana']], 'link'],
+    ['failed 1 h ago', [[3_600_000, 'failed', 'dana']], 'pdf'],
+    ['accepted 25 h ago', [[25 * 3_600_000, 'accepted', 'dana']], 'pdf'],
+    ['a staff document 1 h ago', [[3_600_000, 'accepted', 'staff']], 'link'],
+  ];
+  for (const [what, rows, want] of cases) {
+    const h = b4(); // a fresh handler: what a restart gives
+    try {
+      h.lead();
+      rows.forEach(([ago, status, kind], i) => h.db.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, media_kind, guarded)
+        VALUES (?, ?, '966500000041@s.whatsapp.net', NULL, NULL, ?, ?, NULL, ?, ?, NULL, 'document', 0)`).run(`snd-${i}`, B4_LEAD, kind, status, B4_NOW - ago, B4_NOW - ago));
+      const out = await h.wa('send_brochure', { listing_id: 'BONA-W003' });
+      assert.equal(out.will_send, want, what);
+      if (want === 'link') assert.equal(out.reason, 'pdf_today', what);
+    } finally { h.cleanup(); }
+  }
+});

@@ -783,6 +783,37 @@ const CORPUS = [
   ['ordinary', 'البيت مرتب ونظيف وجاهز', 'ar', false, false],
   ['ordinary', 'بيتم ترتيب الموعد بعد ما ترسل اسمك', 'ar', false, false],
   ['denial', 'الموعد لسه مو مرتب، إيش اسمك؟', 'ar', false, false],
+  // r9 (Codex P1): a first-person past verb of each root with a booking noun as its object is a claim, «لك» or not
+  ['claim', 'حجزنا موعدك يوم الأحد الساعة 10', 'ar', true, true],
+  ['claim', 'حجزت المعاينة يوم الأحد', 'ar', true, true],
+  ['claim', 'أكدنا المعاينة يوم الأحد', 'ar', true, true],
+  ['claim', 'ثبتنا الموعد بكرة الساعة 12', 'ar', true, true],
+  ['claim', 'سجلنا موعدك يوم الأحد', 'ar', true, true],
+  ['claim', 'رتبنا الزيارة يوم الأحد الساعة 10', 'ar', true, true],
+  ['ordinary', 'رتبت لك الخيارات حسب ميزانيتك', 'ar', false, false],
+  ['ordinary', 'سجلت لك طلبك، وأقدر أشيك لك على مواعيد الأحد', 'ar', false],
+  ['denial', 'ما حجزنا موعدك للحين، إيش اسمك؟', 'ar', false, false],
+  ['ordinary', 'بنحجز موعدك بعد ما ترسل لي اسمك', 'ar', false, false],
+  // r9 (Codex P2): 'll / ’ll after any word
+  ['ordinary', "You'll be booked once you send your name. What name should I use?", 'en', false, false],
+  ['ordinary', 'You’ll be booked once you send your name. What name should I use?', 'en', false, false],
+  ['ordinary', "It'll be confirmed here once you pick a time.", 'en', false, false],
+  ['ordinary', 'We’ll be set for Sunday once you send your name. What name should I use?', 'en', false, false],
+  // r9 (Claude P3-2): a short clause joins the one before it only across "and" / «و», never a comma or a dash
+  ['split', 'Sunday at 10 then. The villa — confirmed!', 'en', true, true],
+  ['split', 'Sunday at 10 then. The apartment, booked ✅', 'en', true, true],
+  ['split', 'Sunday at 10 works. Your villa, booked!', 'en', true, true],
+  // r9 (Claude P3-1): "sorted / arranged by …", "… for you" with those verbs, and a bare «مؤكد» are no claims
+  ['ordinary', 'Here are three villas in Al Shati, sorted for you by price.', 'en', false, false],
+  ['ordinary', "I've arranged it for you by budget.", 'en', false, false],
+  ['ordinary', 'Here is the brochure; I arranged it for you as a PDF.', 'en', false, false],
+  ['ordinary', 'Here are the free times, sorted by day: Sunday 10 am, Monday 12 pm. Which suits you?', 'en', false, false],
+  ['ordinary', "I've sorted the options for you by budget.", 'en', false, false],
+  ['ordinary', 'إيه مؤكد، والمواعيد المتاحة الأحد 10 الصبح أو الاثنين 12 الظهر', 'ar', false, false],
+  ['ordinary', 'إيه مؤكد، فيه مسبح خاص', 'ar', false, false],
+  ['claim', 'Your viewing is arranged for Sunday, as you asked.', 'en', true, true],
+  ['ordinary', 'ثبتنا لك السعر لين نهاية الشهر', 'ar', false, false], // «ثبتنا / أكدت لك» need a booking noun, as «رتبت / سجلت لك» do
+  ['ordinary', 'أكدت لك إن الفيلا فيها مسبح خاص', 'ar', false, false],
 ].map(([kind, text, lang, trips, viewing]) => ({ kind, text, lang, trips, viewing }));
 
 test(`the claim corpus: ${CORPUS.filter((r) => r.trips).length} claims trip and ${CORPUS.filter((r) => !r.trips).length} non-claims pass, with no tool, with save_needs only, and with a viewing tool where the row says`, async () => {
