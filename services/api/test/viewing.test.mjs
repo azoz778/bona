@@ -2231,6 +2231,36 @@ test("a start another lead books while this lookup's freeBusy is on its way is n
       assert.equal(list.includes(MON), false, "C's booking made during the lookup is busy");
     } finally { h.db.close(); }
   }
+
+  // Codex r12: B's insert reaches Google but its answer is lost (uncertain), so B's row waits for the worker as
+  // cancel_pending with its event still in the calendar, while A's answer, taken before that insert, is on its way.
+  {
+    const h = harness();
+    try {
+      const a = h.lead('LEAD-20261201-0000aaaa');
+      const b = h.lead('LEAD-20261201-0000bbbb');
+      const realInsert = h.gcal.insert;
+      h.gcal.insert = async (ev) => {
+        h.gcal.events.set(ev.id, { ...ev, status: 'confirmed' }); // it went through, but the answer was lost
+        return { ok: false, code: 'timeout', uncertain: true };
+      };
+      const fb = h.hold('freeBusy');
+      const p = h.offered(a);
+      await fb.reached();
+      const got = await h.viewing.commitBooking({ lead: b, listingId: 'BONA-W901', slotId: SLOT });
+      assert.equal(got.ok, false, JSON.stringify(got));
+      assert.deepEqual(h.rows().map((r) => r.status), ['cancel_pending'], "B's row waits for the worker to delete its event");
+      fb.answer();
+      const list = await p;
+      assert.equal(list.includes(SLOT), false, 'an uncertain insert awaiting its deletion is busy for that lookup');
+      assert.equal(list.includes(SUN16), true, 'the rest of the day is still offered');
+      h.gcal.insert = realInsert;
+      // The worker deletes the event and cancels the row: the start is free again.
+      await h.viewing.tick();
+      assert.deepEqual(h.rows().map((r) => r.status), ['cancelled']);
+      assert.equal((await h.offered(a)).includes(SLOT), true, 'free once the worker deleted the event');
+    } finally { h.db.close(); }
+  }
 });
 
 /* ---------------- the dashboard hooks, wired the way index.mjs wires them ---------------- */
