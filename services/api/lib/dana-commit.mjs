@@ -65,8 +65,8 @@ export const BOOKING_FAILED_LINE = Object.freeze({
   en: 'Thank you — the Bona team will confirm a time for your viewing with you here.',
   ar: 'شكراً لك، فريق بونا بيأكد معك موعد المعاينة هنا.',
 });
-/** Brochure documents one answer may carry (one per home asked for). */
-export const MAX_DOCUMENTS = 2;
+/** Brochure documents one answer may carry: one PDF per chat per day (DESIGN §6.3); send_brochure answers 'link' for the rest. */
+export const MAX_DOCUMENTS = 1;
 /** Links one answer may carry when the caller passes no `maxLinks` (DESIGN §6.5: MAX_LINKS goes from 3 to 2). */
 export const DEFAULT_MAX_LINKS = 2;
 
@@ -82,11 +82,36 @@ const TIME_RE = /(?<![\d:])\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)(?![\p{L}
 const WEEKDAY_AR = String.raw`ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس)`;
 /** "today" is a sign only in a sentence that is not about stock: a claim for today is itself a phantom (no viewing is same-day). */
 const TODAY_RE = /(?<![\p{L}])(?:today|tonight)(?![\p{L}])|(?<![\p{L}])اليوم(?![\p{L}])/iu;
+/* ---------------- the claim lexicon (Codex r8: swept once, every form a corpus row) ----------------
+ * One table for every claim, denial, future, general and object form, so a new word is added in one place:
+ *   English done-forms  booked, confirmed, reserved, scheduled, arranged, sorted, fixed, set, locked in (+ "put you down")
+ *   Arabic roots        ح-ج-ز  حجزت/حجزنا لك, تم (ال)حجز, محجوز(ة), انحجز
+ *                       أ-ك-د  أكدت/أكدنا لك, تأكد الموعد|الحجز, تم (ال)تأكيد, مؤكد(ة), الموعد متأكد
+ *                       ث-ب-ت  ثبتت/ثبتنا لك, تم (ال)تثبيت, مثبت(ة)
+ *                       س-ج-ل  سجلت/سجلنا لك موعد, تم تسجيل الموعد, الموعد مسجل
+ *                       ر-ت-ب  رتبت/رتبنا لك موعد, تم ترتيب الموعد, الموعد مرتب
+ */
+const EN_DONE = String.raw`booked|confirmed|reserved|scheduled|arranged|sorted|fixed|set|locked\s+in`;
+const EN_BASE = String.raw`book|confirm|reserve|schedule|arrange|sort|fix|set|lock\s+in|put\s+you\s+down`;
+/** The done-verbs said to the client («… لك»). */
+const AR_VERB = String.raw`حجزت|حجزنا|أكدت|أكدنا|اكدت|اكدنا|ثبتت|ثبتنا|ثبت|رتبت|رتبنا|سجلت|سجّلت|سجلنا|سجّلنا`;
+/** The nouns after «تم» / «يتم». */
+const AR_NOUN = String.raw`حجز|تأكيد|تثبيت|تسجيل|ترتيب`;
+/** The adjectives («موعدك مؤكد»). */
+const AR_ADJ = String.raw`محجوز|مؤكد|مثبت|مسجل|مرتب|متأكد`;
+/** What a booking is in Arabic: the viewing, the appointment, the booking, the visit, a tour. */
+const AR_THING = String.raw`(?:ال)?(?:موعد|معاين|حجز|زيار|جولة)`;
+
 /**
  * A second-person object on the claim word, addressed to the client (a sign, never stock): "booked you (in)", "reserved
- * you a place", "booked it for you", "the villa is booked for you", «حجزنا لك», «الشقة محجوزة لك».
+ * you a place", "booked it for you", "the villa is booked for you", "put you down", «حجزنا لك», «الشقة محجوزة لك».
  */
-const OBJECT_RE = /(?<![\p{L}])(?:booked|confirmed|reserved|scheduled)\s+you(?:r)?(?![\p{L}])|(?<![\p{L}])(?:booked|confirmed|reserved|scheduled)\s+(?:it|this|that|one)\s+for\s+you(?![\p{L}])|(?<![\p{L}])(?:booked|confirmed|reserved|scheduled)\s+for\s+you(?![\p{L}])|(?:حجزت|حجزنا|أكدت|أكدنا|اكدت|اكدنا)\s*(?:لك|لكم|عليك)|محجوز(?:ة|ه)?\s*(?:لك|لكم)/iu;
+const OBJECT_RE = new RegExp([
+  String.raw`(?<![\p{L}])(?:${EN_DONE})\s+(?:you(?:r)?|(?:it|this|that|one)\s+for\s+you|for\s+you)(?![\p{L}])`,
+  String.raw`(?<![\p{L}])put\s+you\s+down(?![\p{L}])`,
+  String.raw`(?:${AR_VERB})\s*(?:لك|لكم|عليك)`,
+  String.raw`(?:${AR_ADJ})(?:ة|ه)?\s*(?:لك|لكم)`,
+].join('|'), 'iu');
 /** The client's own slot: "your slot / place / spot / appointment / viewing time / time slot" (Codex r5), never a bare "your time". */
 const YOUR_SLOT_RE = /(?<![\p{L}])your\s+(?:slot|place|spot|appointment|viewing\s+time|time\s+slot)(?![\p{L}])/iu;
 const ANY_WEEKDAY_EN = String.raw`(?:sun|mon|tues|wednes|thurs|fri|satur)day`;
@@ -109,26 +134,24 @@ function withoutRanges(s) {
   });
 }
 /**
- * Future and conditional booking forms, cut out before the claim check like a denial (Claude r5 P2-1): how booking
- * works, or a slot offer that mentions the confirmation, is no claim. «يتم / بيتم / ويتم / راح يتم / سيتم الحجز|التأكيد»,
- * «يتأكد الحجز|الموعد», "once / when / after / until it's (the viewing is) booked|confirmed", "will / 'll be booked|
- * confirmed". «وتم الحجز» (and) stays a claim.
+ * Future, conditional and modal forms of every claim word, cut out before the claim check like a denial (Claude r5
+ * P2-1, Codex r6 P2, r8): how booking works, or a slot offer that mentions the confirmation, is no claim.
+ * «يتم / بيتم / ويتم / راح يتم / سيتم + الحجز|التأكيد|التثبيت|التسجيل|الترتيب», «يتأكد / يتثبت / يترتب الموعد»,
+ * «يكون / بيكون / راح يكون (الموعد) محجوز|مؤكد|مثبت|مسجل|مرتب», "once / when / after / until / if it's (your viewing
+ * is) <done>", "will / can / could / may / should / must be <done>". «وتم الحجز» (and) stays a claim.
  */
 const FUTURE_RE = new RegExp([
-  String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي|حي|سي)تم\s+(?:ال)?(?:حجز|تأكيد|تثبيت|تسجيل)\S*`,
-  String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي)(?:تأكد|تثبت|تسجل|نحجز|تحجز)\s+(?:ال)?(?:حجز|موعد|معاين)\S*`,
-  // «يكون / بيكون / راح يكون (موعدك) محجوز|مؤكد|مثبت»
-  String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي|حي|سي)كون\s+(?:\S+\s+){0,2}?(?:محجوز|مؤكد|مثبت)\S*`,
-  // every claim word: "once / when / after / until / if it's (your viewing is) booked|confirmed|reserved|scheduled|set|locked in"
-  String.raw`(?<![\p{L}])(?:once|when|after|as\s+soon\s+as|until|if)\s+(?:it['’]s|it\s+is|it\s+has\s+been|(?:a|the|your)\s+(?:\w+\s+)?(?:is|has\s+been))\s+(?:booked|confirmed|reserved|scheduled|set|locked\s+in)(?![\p{L}])`,
-  // "will / can / could / may / should / must be booked …" (Claude r6 P3-2)
-  String.raw`(?<![\p{L}])(?:will|would|can|could|may|might|should|must|['’]ll)\s+be\s+(?:booked|confirmed|reserved|scheduled|set|locked\s+in)(?![\p{L}])`,
+  String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي|حي|سي)تم\s+(?:ال)?(?:${AR_NOUN})\S*`,
+  String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي)(?:تأكد|تثبت|تسجل|ترتب|نحجز|تحجز)\s+${AR_THING}\S*`,
+  String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي|حي|سي)كون\s+(?:\S+\s+){0,2}?(?:${AR_ADJ})\S*`,
+  String.raw`(?<![\p{L}])(?:once|when|after|as\s+soon\s+as|until|if)\s+(?:it['’]s|it\s+is|it\s+has\s+been|(?:a|the|your)\s+(?:\w+\s+)?(?:is|has\s+been))\s+(?:${EN_DONE})(?![\p{L}])`,
+  String.raw`(?<![\p{L}])(?:will|would|can|could|may|might|should|must|['’]ll)\s+be\s+(?:${EN_DONE})(?![\p{L}])`,
 ].join('|'), 'giu');
 /**
  * How viewings work, in general ("Viewings are scheduled Sunday to Thursday"), never "your viewings are booked": cut
  * out only from a sentence with no booking sign of its own ("Both viewings are booked for Sunday at 10" stays a claim).
  */
-const GENERAL_RE = /(?<![\p{L}])(?<!your\s+)(?:viewings|visits|appointments|bookings)\s+(?:are|get)\s+(?:usually\s+|normally\s+|only\s+)?(?:booked|scheduled|confirmed|reserved|set)(?![\p{L}])/giu;
+const GENERAL_RE = new RegExp(String.raw`(?<![\p{L}])(?<!your\s+)(?:viewings|visits|appointments|bookings)\s+(?:are|get)\s+(?:usually\s+|normally\s+|only\s+)?(?:${EN_DONE})(?![\p{L}])`, 'giu');
 /** Clauses inside a sentence: the stock test reads the claim's own clause (, ، — – " - " "and" «و»). */
 const CLAUSE_SPLIT_RE = /\s*(?:[,،—–]|\s-\s|(?<![\p{L}])and(?![\p{L}])|\sو(?=\S))\s*/iu;
 /**
@@ -136,39 +159,48 @@ const CLAUSE_SPLIT_RE = /\s*(?:[,،—–]|\s-\s|(?<![\p{L}])and(?![\p{L}])|\sو
  * with a viewing tool in the turn ("fully booked", "confirmed delivery", "the private pool is confirmed"). Read on the
  * claim's clause only: "I've booked it, and visitor parking is available" is a booking.
  */
-const STOCK_RE = /(?<![\p{L}])(?:units?|apartments?|flats?|villas?|homes?|price|prices|delivery|handover|completion|project|pools?|gardens?|parking|elevators?|lifts?|terraces?|balcon(?:y|ies)|amenities|finish(?:ing|es)?|specifications?)(?![\p{L}])|الشقق|الشقة|الوحدات|الوحدة|السعر|الأسعار|التسليم|المشروع|الفلل|مسبح|حديقة|موقف|مواقف|مصعد|التشطيب/iu;
-/** Claim words beyond reply-guard claimsBooking (booked, confirmed, تم الحجز, تم تأكيد, حجزت لك, تأكد الحجز); Claude r5 P3-1. */
-const EXTRA_CLAIM_RE = /(?<![\p{L}])(?:reserved|scheduled|locked\s+in|set\s+for)(?![\p{L}])|(?<![\p{L}])[وف]?(?:محجوز(?:ة|ه)?|انحجز(?:ت)?)(?![\p{L}])/iu;
+const STOCK_RE = /(?<![\p{L}])(?:units?|apartments?|flats?|villas?|homes?|price|prices|delivery|handover|completion|project|pools?|gardens?|parking|elevators?|lifts?|terraces?|balcon(?:y|ies)|amenities|finish(?:ing|es)?|specifications?|gyms?)(?![\p{L}])|الشقق|الشقة|الوحدات|الوحدة|السعر|الأسعار|التسليم|المشروع|الفلل|مسبح|حديقة|موقف|مواقف|مصعد|التشطيب|النادي|الجيم/iu;
+/**
+ * Claim words beyond reply-guard claimsBooking (booked, confirmed, تم الحجز, تم تأكيد, حجزت لك, تأكد الحجز): they need
+ * a booking sign. The adjectives «مسجل / مرتب / متأكد» count only next to the booking («الموعد مسجل», «مرتب الموعد»):
+ * «الصك مسجل», «البيت مرتب» and «أنا متأكدة» are no claims.
+ */
+const EXTRA_CLAIM_RE = new RegExp([
+  String.raw`(?<![\p{L}])(?:reserved|scheduled|arranged|sorted|locked\s+in|set\s+for|fixed\s+for|put\s+you\s+down)(?![\p{L}])`,
+  String.raw`(?<![\p{L}])[وف]?(?:محجوز|مؤكد|مثبت)(?:ة|ه)?(?![\p{L}])|(?<![\p{L}])[وف]?انحجز(?:ت)?(?![\p{L}])`,
+  String.raw`(?:الموعد|موعدك|المعاينة|معاينتك|الزيارة|الحجز|حجزك)\s+(?:\S+\s+)?(?:مسجل|مرتب|متأكد)(?:ة|ه)?(?![\p{L}])`,
+  String.raw`(?<![\p{L}])(?:مسجل|مرتب|متأكد)(?:ة|ه)?\s+${AR_THING}`,
+  String.raw`(?<![\p{L}])[وف]?تأكد\s+${AR_THING}`,
+].join('|'), 'iu');
 /**
  * A personal claim form: a claim AND a booking sign on its own (Codex r3, Claude r4). "you're / you are (all)
- * booked|confirmed", "see(ing) you then|on|at|there|tomorrow|<weekday>" (never "see you soon"), «تم الحجز»,
- * «تم التأكيد», «حجزت لك», «حجزنا لك», «تأكد (ال)حجز», «تم تأكيد الحجز», «(ب)نشوفك» + up to three words + a
- * weekday, tomorrow, a time, «هناك» or «في المعاينة|الموعد» (never «نشوفك على خير»).
+ * booked|confirmed", "see(ing) you then|on|at|there|tomorrow|<weekday>" (never "see you soon"), at a word start (with
+ * «و» / «ف»; «يتم الحجز» is not «تم الحجز»): «تم الحجز», «تم التأكيد», «تم التثبيت», «تم تأكيد الحجز», «تأكد الحجز»,
+ * «تم تثبيت|تسجيل|ترتيب الموعد», «حجزت / أكدت / ثبتت لك», «رتبت / سجلت لك الموعد», «انحجز لك», and «(ب)نشوفك» + up
+ * to three words + a weekday, tomorrow, a time, «هناك» or «في المعاينة|الموعد» (never «نشوفك على خير»).
  */
 const PERSONAL_CLAIM_RE = new RegExp([
   String.raw`(?<![\p{L}])you(?:'re|’re|\s+are)\s+(?:all\s+)?(?:booked|confirmed)(?![\p{L}])`,
   String.raw`(?<![\p{L}])see(?:ing)?\s+you\s+(?:then|on|at|there|tomorrow|(?:sun|mon|tues|wednes|thurs|fri|satur)day)(?![\p{L}])`,
-  // At a word start (with «و» / «ف»): «يتم الحجز» and «يتأكد الحجز» are not «تم الحجز» / «تأكد الحجز».
-  String.raw`(?<![\p{L}])[وف]?(?:تم\s+الحجز|تم\s+التأكيد|حجز(?:ت|نا)\s*لك|تأكد\s+(?:ال)?حجز|تم\s+تأكيد\s+الحجز|تم\s+تثبيت\s+(?:ال)?(?:موعد|حجز|معاين)|تم\s+تسجيل\s+(?:ال)?موعد|ثبت(?:نا|ت)?\s*لك|(?:سجلت|سجّلت|سجلنا|سجّلنا)\s*لك\s+(?:ال)?موعد|انحجز\s*لك)`,
+  String.raw`(?<![\p{L}])[وف]?(?:تم\s+الحجز|تم\s+التأكيد|تم\s+التثبيت|تم\s+تأكيد\s+الحجز|تأكد\s+(?:ال)?حجز|تم\s+(?:ال)?(?:تثبيت|تسجيل|ترتيب)\s+${AR_THING}|(?:حجزت|حجزنا|أكدت|أكدنا|اكدت|اكدنا|ثبتت|ثبتنا|ثبت)\s*لك|(?:رتبت|رتبنا|سجلت|سجّلت|سجلنا|سجّلنا)\s*لك\s+${AR_THING}|انحجز\s*لك)`,
   String.raw`(?<![\p{L}])ب?نشوفك(?:م)?(?:\s+\S+){0,3}?\s+(?:يوم\s+)?(?:${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة|هناك|في\s+(?:المعاينة|الموعد))`,
 ].join('|'), 'iu');
 /** "You're all set": a claim, but it needs a booking sign ("You're all set: I've sent you the brochure" is no booking). */
 const ALL_SET_RE = /(?<![\p{L}])you(?:'re|’re|\s+are)\s+all\s+set(?![\p{L}])/iu;
 /**
- * A denial that governs the claim word, cut out before the claim check (Claude r3, r4; Codex r4): "isn't / aren't /
- * wasn't / is not / not (yet) / haven't / hasn't / have not / has not (been) / didn't / did not … booked|confirmed|
- * book|confirm (it|this|the …) (yet)", «لم يتم / ما تم / لسه ما (تم) / للحين ما (تم) + الحجز|التأكيد|تأكد», «ما +
- * حجزت|أكدت|انحجز|تأكد», «الحجز / موعدك / المعاينة لسه ما تأكد», «… غير مؤكد». «بعد ما» is "after" in Hijazi, so
- * «بعد ما تم الحجز» / «بعد ما حجزت لك» are no denials (the lookbehinds), and «ما تم الاتفاق عليه» ("what was agreed")
- * is none either.
+ * A denial that governs the claim word, cut out before the claim check (Claude r3, r4; Codex r4, r5, r8): "isn't /
+ * aren't / wasn't / is not / not (yet) / haven't / hasn't / have not / has not (been) / didn't / did not … <done or
+ * base form> (it|this|the …) (yet)", «لم يتم / ما تم / لسه ما (تم) / للحين ما (تم) + الحجز|التأكيد|التثبيت|التسجيل|
+ * الترتيب», «ما + حجزت|أكدت|ثبتت|سجلت|رتبت|انحجز|تأكد», «الموعد لسه ما تأكد», «(لسه) مو / غير / مش + محجوز|مؤكد|مثبت|
+ * مسجل|مرتب». «بعد ما» is "after" in Hijazi, so «بعد ما تم الحجز» / «بعد ما حجزت لك» are no denials (the lookbehinds),
+ * and «ما تم الاتفاق عليه» ("what was agreed") is none either.
  */
 const GOVERNED_DENIAL_RE = new RegExp([
-  String.raw`(?<![\p{L}])(?:isn['’]t|aren['’]t|wasn['’]t|(?:hasn['’]t|haven['’]t|has\s+not|have\s+not)(?:\s+been)?|didn['’]t|did\s+not|(?:is|are|was)\s+not|not)\s+(?:yet\s+|been\s+|fully\s+|actually\s+)?(?:booked|confirmed|reserved|scheduled|book|confirm|reserve|schedule)(?![\p{L}])(?:\s+(?:it|this|that|the\s+\S+|your\s+\S+))?(?:\s+yet)?`,
-  String.raw`(?:لم\s+يتم|(?<!بعد\s+)(?<![\p{L}])ما\s+تم|(?:لسه|لسا|للحين)\s+ما(?:\s+تم)?)\s+(?:ال)?(?:حجز|تأكيد|تأكد|انحجز)\S*`,
-  String.raw`(?<!بعد\s+)(?<![\p{L}])ما\s+(?:حجزت|أكدت|انحجز|تأكد)\S*`,
-  String.raw`(?:الحجز|موعدك|المعاينة)\s+(?:(?:لسه|لسا|للحين)\s+ما\s+(?:تأكد|تم)|غير\s+مؤكد)`,
-  // «(لسه) مو / غير / مش محجوز|مؤكد» (Codex r6)
-  String.raw`(?<![\p{L}])(?:(?:لسه|لسا|للحين)\s+)?(?:مو|مب|مش|غير|ليس|ليست|مهو|ماهو|مهي|ماهي)\s+(?:محجوز|مؤكد)\S*`,
+  String.raw`(?<![\p{L}])(?:isn['’]t|aren['’]t|wasn['’]t|(?:hasn['’]t|haven['’]t|has\s+not|have\s+not)(?:\s+been)?|didn['’]t|did\s+not|(?:is|are|was)\s+not|not)\s+(?:yet\s+|been\s+|fully\s+|actually\s+)?(?:${EN_DONE}|${EN_BASE})(?![\p{L}])(?:\s+(?:it|this|that|the\s+\S+|your\s+\S+))?(?:\s+yet)?`,
+  String.raw`(?:لم\s+يتم|(?<!بعد\s+)(?<![\p{L}])ما\s+تم|(?:لسه|لسا|للحين)\s+ما(?:\s+تم)?)\s+(?:ال)?(?:${AR_NOUN}|تأكد|انحجز)\S*`,
+  String.raw`(?<!بعد\s+)(?<![\p{L}])ما\s+(?:${AR_VERB}|انحجز|تأكد)\S*`,
+  String.raw`(?:الحجز|موعدك|الموعد|المعاينة)\s+(?:(?:لسه|لسا|للحين)\s+ما\s+(?:تأكد|تم|تثبت|ترتب|تسجل))`,
+  String.raw`(?<![\p{L}])(?:(?:لسه|لسا|للحين)\s+)?(?:مو|مب|مش|غير|ليس|ليست|مهو|ماهو|مهي|ماهي)\s+(?:${AR_ADJ})\S*`,
 ].join('|'), 'giu');
 /** Sentences: a denial and a claim are read one sentence at a time. */
 const SENTENCE_SPLIT_RE = /[.!?;؟؛\n]+/u;
@@ -199,7 +231,10 @@ function claimsABooking(calls, body) {
     if (!claimsBooking(s) && !EXTRA_CLAIM_RE.test(s) && !ALL_SET_RE.test(s)) return false;
     // A claim about stock needs its own sign, with a viewing tool in the turn too (Claude r6 P3-1), judged on the claim's
     // own clause: a feature clause next to it never switches the sign off (Claude r7 P2-1, Codex r7 P1).
-    const claimClauses = s.split(CLAUSE_SPLIT_RE).filter((cl) => claimsBooking(cl) || EXTRA_CLAIM_RE.test(cl) || ALL_SET_RE.test(cl));
+    // A claim clause of one or two words ("…, and confirmed", «… ومؤكد») is read with the clause before it.
+    const clauses = s.split(CLAUSE_SPLIT_RE);
+    const claimClauses = clauses.map((cl, i) => (i > 0 && cl.trim().split(/\s+/u).length <= 2 ? `${clauses[i - 1]} ${cl}` : cl))
+      .filter((cl, i) => claimsBooking(clauses[i]) || EXTRA_CLAIM_RE.test(clauses[i]) || ALL_SET_RE.test(clauses[i]));
     const stock = claimClauses.length ? claimClauses.every((cl) => STOCK_RE.test(cl)) : STOCK_RE.test(s);
     return signIn(s) || ((viewingTool || answerSign) && !stock);
   });

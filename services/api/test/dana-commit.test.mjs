@@ -729,6 +729,60 @@ const CORPUS = [
   ['split', 'الأحد الساعة 10. محجوز لك، والمسبح والحديقة جاهزين تشوفهم', 'ar', true, true],
   ['split', "Sunday at 10 works. I've booked it, and visitor parking is available.", 'en', true, true],
   ['split', 'Sunday at 10 works. I’ve booked it, and visitor parking is available.', 'en', true, true],
+  // r8 (Claude P3-2): the gym is a feature
+  ['ordinary', 'The pool, the garden and the gym are all confirmed. Shall I check Sunday at 10 for you?', 'en', false, false],
+  ['ordinary', 'النادي جاهز ومؤكد. وأقدر أشيك لك على موعد الأحد', 'ar', false, false], // «ومؤكد» is read with «النادي جاهز» (stock)
+  // r8 (Codex P1): the claim lexicon, swept once. Each form: a claim with a sign (trips), and a stock, denial or future twin (passes).
+  // English
+  ['claim', 'Your viewing is arranged for Sunday at 10.', 'en', true, true],
+  ['ordinary', 'Parking is arranged for visitors.', 'en', false, false],
+  ['denial', "It isn't arranged yet; may I have your name?", 'en', false, false],
+  ['ordinary', "Once it's arranged, you'll get a confirmation here.", 'en', false, false],
+  ['claim', 'All sorted for Sunday at 10!', 'en', true, true],
+  ['ordinary', 'The homes are sorted by price, the cheapest first.', 'en', false, false],
+  ['denial', 'Not sorted yet: what name should I use?', 'en', false, false],
+  ['claim', 'Your viewing is fixed for Sunday at 10.', 'en', true, true],
+  ['ordinary', 'The price is fixed for this month.', 'en', false, false],
+  ['ordinary', 'It will be fixed for you once you send your name.', 'en', false, false],
+  ['claim', "I've put you down for Sunday at 10.", 'en', true, true],
+  ['claim', "Great, I've put you down for it.", 'en', true, true],
+  ['denial', "I haven't put you down yet. What name should I use?", 'en', false, false],
+  ['denial', "It's not set yet; may I have your name?", 'en', false, false],
+  ['denial', "Your viewing isn't scheduled yet. What name should I use?", 'en', false, false],
+  ['denial', "Sunday isn't locked in yet: what name should I put it under?", 'en', false, false],
+  // ح-ج-ز
+  ['claim', 'حجزتلك الموعد يوم الأحد الساعة 10', 'ar', true, true],
+  ['denial', 'ما حجزنا لك للحين، إيش اسمك؟', 'ar', false, false],
+  // أ-ك-د
+  ['claim', 'موعدك مؤكد يوم الأحد الساعة 10', 'ar', true, true],
+  ['claim', 'المعاينة مؤكدة يوم الأحد', 'ar', true, true],
+  ['claim', 'أكدت لك الموعد يوم الأحد الساعة 10', 'ar', true, true],
+  ['claim', 'تأكد موعدك يوم الأحد', 'ar', true, true],
+  ['claim', 'الموعد متأكد يوم الأحد الساعة 10', 'ar', true, true],
+  ['ordinary', 'السعر مؤكد من المطور', 'ar', false, false],
+  ['denial', 'الموعد مو مؤكد للحين، إيش اسمك؟', 'ar', false, false],
+  ['denial', 'ما أكدت الموعد للحين، أرسل لي اسمك', 'ar', false, false],
+  ['ordinary', 'أنا متأكدة إن الفيلا فيها مسبح', 'ar', false, false],
+  ['ordinary', 'بيكون الموعد مؤكد بعد ما ترسل اسمك', 'ar', false, false],
+  // ث-ب-ت
+  ['claim', 'ثبتت لك الموعد يوم الأحد', 'ar', true, true],
+  ['claim', 'تم التثبيت ✅ يوم الأحد الساعة 10', 'ar', true, true],
+  ['claim', 'موعدك مثبت يوم الأحد الساعة 10', 'ar', true, true],
+  ['claim', 'المعاينة مثبتة بكرة الساعة 12', 'ar', true, true],
+  ['ordinary', 'السعر مثبت لين آخر الشهر', 'ar', false, false],
+  ['denial', 'الموعد لسه مو مثبت، أرسل لي اسمك', 'ar', false, false],
+  ['ordinary', 'بيتم تثبيت الموعد بعد ما ترسل اسمك', 'ar', false, false],
+  // س-ج-ل
+  ['claim', 'موعدك مسجل يوم الأحد الساعة 10', 'ar', true, true],
+  ['ordinary', 'الصك مسجل باسم المالك', 'ar', false, false],
+  ['denial', 'ما سجلت لك الموعد للحين، إيش اسمك؟', 'ar', false, false],
+  // ر-ت-ب
+  ['claim', 'رتبت لك الموعد يوم الأحد الساعة 10', 'ar', true, true],
+  ['claim', 'تم ترتيب الموعد يوم الأحد', 'ar', true, true],
+  ['claim', 'الموعد مرتب يوم الأحد الساعة 10', 'ar', true, true],
+  ['ordinary', 'البيت مرتب ونظيف وجاهز', 'ar', false, false],
+  ['ordinary', 'بيتم ترتيب الموعد بعد ما ترسل اسمك', 'ar', false, false],
+  ['denial', 'الموعد لسه مو مرتب، إيش اسمك؟', 'ar', false, false],
 ].map(([kind, text, lang, trips, viewing]) => ({ kind, text, lang, trips, viewing }));
 
 test(`the claim corpus: ${CORPUS.filter((r) => r.trips).length} claims trip and ${CORPUS.filter((r) => !r.trips).length} non-claims pass, with no tool, with save_needs only, and with a viewing tool where the row says`, async () => {
@@ -754,3 +808,10 @@ test(`the claim corpus: ${CORPUS.filter((r) => r.trips).length} claims trip and 
 function isDeepStrictEqualish(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
+
+test('at most one brochure document per turn (DESIGN §6.3 one PDF per chat per day; Codex r8 P1)', async () => {
+  const c = commitWith();
+  const pdf = (id) => ({ name: 'send_brochure', args: { listing_id: id }, result: { will_send: 'pdf', reason: 'ok' } });
+  const out = await c.afterPreSend({ lead: LEAD, turn: brainReply('Sending both.', { tools: [pdf('BONA-W003'), pdf('BONA-W006')] }), text: 'Sending both.', language: 'en' });
+  assert.deepEqual(out.bubbles.map((b) => [b.kind, b.listingId ?? null]), [['text', null], ['document', 'BONA-W003']]);
+});

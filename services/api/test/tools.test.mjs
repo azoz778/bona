@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { inspect, isDeepStrictEqual } from 'node:util';
-import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES, UNITS_NOTE, UNITS_NOT_PUBLISHED_NOTE, BLOCKED_BROCHURES, BROCHURE_HEAD_MS, BROCHURE_CACHE_MS, BROCHURE_MAX_BYTES, BROCHURE_FAIL_CACHE_MS, HANDOVER_KINDS, WA_ONLY_TOOLS } from '../lib/tools.mjs';
+import { createToolHandlers, tokenMatches, extractToken, conversationId, conversationLocale, toolArgs, leadKey, HANDOVER_TOOL, TOOL_NAMES, FULL_UNIT_ROW_SOURCES, UNITS_NOTE, UNITS_NOT_PUBLISHED_NOTE, BLOCKED_BROCHURES, BROCHURE_HEAD_MS, BROCHURE_CACHE_MS, BROCHURE_MAX_BYTES, BROCHURE_FAIL_CACHE_MS, HANDOVER_KINDS, WA_ONLY_TOOLS, PDF_PER_CHAT_MS } from '../lib/tools.mjs';
 import { saveNeeds as realSaveNeeds } from '../lib/lead-tasks.mjs';
 import { createInventory, readInventoryFile, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { createUnits, WORKTREE_UNITS } from '../lib/units.mjs';
@@ -1378,7 +1378,9 @@ test('the brochure HEAD goes only to Bona\'s site over https, with no redirect; 
     }
     assert.equal(h.heads.length, 0, 'no request to another host');
     assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W965' })).will_send, 'pdf');
-    assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W966' })).will_send, 'pdf');
+    // Another chat: this one has had its PDF for the day.
+    h.lead('LEAD-20261201-0000b4ee');
+    assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W966' }, { leadId: 'LEAD-20261201-0000b4ee' })).will_send, 'pdf');
     assert.equal(h.heads.length, 2);
     assert.ok(inits.every((i) => i.method === 'HEAD' && i.redirect === 'error'), 'a redirect is a failure, never followed');
   } finally { h.cleanup(); }
@@ -1400,4 +1402,38 @@ test('viewing_slots says ask_name when the CRM name is missing or not plausible 
       else assert.doesNotMatch(out.note, /ask for their name/, String(name));
     }
   } finally { h.cleanup(); }
+});
+
+test('one PDF per chat per day (DESIGN §6.3, Codex r8 P1): a second home in the same turn, or a PDF sent earlier today, is a link; the same home again stays a PDF (idempotent)', async () => {
+  assert.equal(PDF_PER_CHAT_MS, 24 * 3_600_000);
+  const h = b4();
+  try {
+    h.lead();
+    assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W003' })).will_send, 'pdf');
+    assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W003' })).will_send, 'pdf', 'the same call again (a backup retry) is the same answer');
+    const second = await h.wa('send_brochure', { listing_id: 'BONA-W006' });
+    assert.deepEqual(second, { will_send: 'link', reason: 'pdf_today', url: inventory.find('BONA-W006').brochureUrl, note: 'Give this link on its own line; no PDF is sent.' });
+    h.clock.t += 24 * 3_600_000 + 1;
+    assert.equal((await h.wa('send_brochure', { listing_id: 'BONA-W006' })).will_send, 'pdf', 'a day later another PDF may go');
+  } finally { h.cleanup(); }
+  // A PDF this chat got earlier today (a wa_outbox document row, which survives a restart) makes the next one a link.
+  const t = b4();
+  try {
+    t.lead();
+    const row = (id, created, status = 'accepted') => t.db.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, media_kind, guarded)
+      VALUES (?, ?, '966500000041@s.whatsapp.net', NULL, NULL, 'dana', ?, NULL, ?, ?, NULL, 'document', 0)`).run(id, B4_LEAD, status, created, created);
+    row('snd-old', B4_NOW - 25 * 3_600_000);
+    assert.equal((await t.wa('send_brochure', { listing_id: 'BONA-W003' })).will_send, 'pdf', 'yesterday\'s PDF does not count');
+    row('snd-today', B4_NOW - 3_600_000, 'uncertain');
+    const out = await t.wa('send_brochure', { listing_id: 'BONA-W006' });
+    assert.equal(out.will_send, 'link');
+    assert.equal(out.reason, 'pdf_today');
+  } finally { t.cleanup(); }
+  const f = b4();
+  try {
+    f.lead();
+    f.db.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, media_kind, guarded)
+      VALUES ('snd-failed', ?, '966500000041@s.whatsapp.net', NULL, NULL, 'dana', 'failed', NULL, ?, ?, NULL, 'document', 0)`).run(B4_LEAD, B4_NOW - 60_000, B4_NOW - 60_000);
+    assert.equal((await f.wa('send_brochure', { listing_id: 'BONA-W003' })).will_send, 'pdf', 'a failed send is no PDF the client got');
+  } finally { f.cleanup(); }
 });

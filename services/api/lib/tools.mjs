@@ -50,6 +50,8 @@ export const BROCHURE_HEAD_MS = 5_000;
 /** A measured size is kept 12 h per URL; a failed HEAD (timeout, 404, no length) only 10 min. */
 export const BROCHURE_CACHE_MS = 12 * 3_600_000;
 export const BROCHURE_FAIL_CACHE_MS = 10 * 60_000;
+/** One PDF per chat per day (DESIGN §6.3, the brochure row): a second brochure within it goes as a link. */
+export const PDF_PER_CHAT_MS = 24 * 3_600_000;
 /** The only hosts a brochure may come from (https, no user, no port, no redirect), besides the configured site's. */
 export const BROCHURE_HOSTS = Object.freeze(['bona-real-estate.com', 'www.bona-real-estate.com']);
 
@@ -525,6 +527,21 @@ export function createToolHandlers({
     sizes.set(url, { at: t, size, ttl: size === null ? brochureFailCacheMs : brochureCacheMs });
     return size;
   }
+  /**
+   * This chat already has its PDF for the day (DESIGN §6.3): a document row in wa_outbox in the last 24 h (accepted,
+   * pending or uncertain: one that may have gone counts; it survives a restart), or a PDF this process promised it for
+   * another home within 24 h (two brochures in one turn: one PDF, one link). The same home again stays a PDF, so the
+   * brain's retry of a turn gets the same answer; dana-commit sends at most one document a turn anyway.
+   */
+  const pdfPromised = new Map();
+  function pdfToday(lead, listingId) {
+    const t = now();
+    for (const [k, v] of pdfPromised) if (t - v.at >= PDF_PER_CHAT_MS) pdfPromised.delete(k);
+    const promised = pdfPromised.get(lead.lead_id);
+    if (promised && promised.listingId !== listingId) return true;
+    return Boolean(db.db.prepare("SELECT 1 FROM wa_outbox WHERE lead_id = ? AND media_kind = 'document' AND status IN ('accepted','pending','uncertain') AND created >= ? LIMIT 1")
+      .get(lead.lead_id, t - PDF_PER_CHAT_MS));
+  }
   /** The assistant has not answered this chat yet (dana-wa's `introduced`): a first message carries no PDF. */
   const firstMessage = (lead) => Number(lead.dana_introduced) !== 1
     && !db.db.prepare("SELECT 1 FROM wa_outbox WHERE lead_id = ? AND sender_kind = 'dana' AND status = 'accepted' LIMIT 1").get(lead.lead_id);
@@ -541,9 +558,11 @@ export function createToolHandlers({
     if (!url) return { will_send: false, reason: 'not_on_site', note: NO_BROCHURE_NOTE };
     const link = (reason) => ({ will_send: 'link', reason, url, note: 'Give this link on its own line; no PDF is sent.' });
     if (firstMessage(who.lead)) return link('first_message');
+    if (pdfToday(who.lead, listing.id)) return link('pdf_today');
     const size = await brochureSize(url);
     if (size === null) return link('size_unknown');
     if (size > BROCHURE_MAX_BYTES) return link('too_big');
+    pdfPromised.set(who.lead.lead_id, { listingId: listing.id, at: now() });
     return { will_send: 'pdf', reason: 'ok', note: 'The PDF goes right after your message: say one short line that you are sending it.' };
   }
 
