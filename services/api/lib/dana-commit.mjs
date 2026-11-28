@@ -19,12 +19,18 @@
  *   - send_location with `precision: 'exact'` (and an exact pin in the inventory) → a maps link at the end of
  *     the text, only while the text has fewer than MAX_LINKS links and not with a booking (the confirmation
  *     carries its own);
+ *   - a reserved book_viewing followed by one that never ran (the brain's tool limit, a thrown tool): the outcome
+ *     is unknown, so nothing is committed and the model's "booking it" never goes out alone: BOOKING_FAILED_LINE
+ *     and the hand-over;
  *   - the safety net: a brain answer that claims a booking (reply-guard claimsBooking: booked, confirmed,
- *     تم الحجز, تم تأكيد …) with no successful commit → BOOKING_FAILED_LINE and the hand-over, but only with
- *     booking intent: the turn called viewing_slots or book_viewing, or the text names a viewing (viewing,
- *     visit, appointment, booking, معاينة, زيارة, موعدك, حجزك) together with a day, a date or a time. "The
- *     developer has confirmed delivery in Q4 2027" or "fully booked" is no claim. Only on a brain turn: a
- *     legacy Retell completion has no booking tool and keeps today's behaviour (the same-release rule).
+ *     تم الحجز, تم تأكيد …, in a sentence that does not deny it: "isn't booked yet", «لم يتم», «لسه ما») with
+ *     no successful commit → BOOKING_FAILED_LINE and the hand-over, when it comes with any sign of a booking:
+ *     a viewing tool in the turn, a viewing word (viewing, visit, appointment, booking, معاينة, زيارة, موعدك,
+ *     حجزك), a weekday or a clock time, or a personal claim ("you're booked", "see you", «تم الحجز», «حجزت
+ *     لك»). The claim usually comes in the turn after the slots were offered, with no viewing tool in it. "The
+ *     developer has confirmed delivery in Q4 2027", "fully booked" or "Delivery is confirmed for 15 December
+ *     2027" (a bare date is no sign) is no claim. Only on a brain turn: a legacy Retell completion has no
+ *     booking tool and keeps today's behaviour (the same-release rule).
  * The hand-over itself (needs_human, the alert, notes.handover) stays dana-wa's: `afterPreSend` answers it as
  * `handover: { kind }`, and dana-wa applies it as any other.
  *
@@ -57,16 +63,23 @@ const VIEWING_WORD_RE = /(?<![\p{L}])(?:viewings?|visits?|appointments?|bookings
 const DAY_RE = /(?<![\p{L}])(?:(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|today|tonight)(?![\p{L}])|(?<![\p{L}])ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس|جمعة|جمعه|سبت)(?![\p{L}])|(?<![\p{L}])(?:بكرة|بكره|غدا|غداً|اليوم)(?![\p{L}])/iu;
 /** A clock time: 10 am, 2:00 pm, 14:00, at 10, noon, الساعة 2, 2 ظهراً. */
 const TIME_RE = /(?<![\d:])\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)(?![\p{L}])|(?<![\d:])\d{1,2}:\d{2}(?![\d:])|(?<![\p{L}])at\s+\d{1,2}(?!\d|[,.]\d)|(?<![\p{L}])(?:noon|o'clock)(?![\p{L}])|الساعة\s*\d|(?<![\d:])\d{1,2}\s*(?:صباح|مساء|ظهر|عصر|الصبح|الظهر|العصر)/iu;
-const MONTHS_EN = 'january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec';
-const MONTHS_AR = 'يناير|فبراير|مارس|أبريل|ابريل|مايو|يونيو|يوليو|أغسطس|اغسطس|سبتمبر|أكتوبر|اكتوبر|نوفمبر|ديسمبر';
-/** A day of a month: 6 December, December 6, ٦ ديسمبر (a month alone, "December 2027", is no date). */
-const DATE_RE = new RegExp(`(?<!\\d)\\d{1,2}(?:st|nd|rd|th)?\\s+(?:${MONTHS_EN})(?![\\p{L}])|(?<![\\p{L}])(?:${MONTHS_EN})\\s+\\d{1,2}(?![\\d])|(?<!\\d)\\d{1,2}\\s+(?:${MONTHS_AR})`, 'iu');
+/** A claim aimed at the client: "you're (all) set / booked / confirmed", "see you", «تم الحجز», «حجزت لك», «تأكد الحجز». */
+const PERSONAL_CLAIM_RE = /(?<![\p{L}])you(?:'re|’re|\s+are)\s+(?:all\s+)?(?:set|booked|confirmed)(?![\p{L}])|(?<![\p{L}])see\s+you(?![\p{L}])|تم\s+الحجز|حجزت\s*لك|تأكد\s+(?:ال)?حجز|تم\s+تأكيد\s+الحجز/iu;
+/** A sentence that denies the booking: isn't / is not / not yet / not … yet, «لم يتم», «ما تم», «لسه ما», «بعد ما (تم|تأكد)», «غير مؤكد». */
+const DENIAL_RE = /(?<![\p{L}])(?:isn['’]t|aren['’]t|wasn['’]t|hasn['’]t|haven['’]t|(?:is|are|was|has|have)\s+not|not\s+yet)(?![\p{L}])|(?<![\p{L}])not(?![\p{L}])[^.!?؟\n]*?(?<![\p{L}])yet(?![\p{L}])|لم\s+يتم|(?<![\p{L}])ما\s+تم|لسه\s+ما|لسا\s+ما|(?<![\p{L}])بعد\s+ما\s+(?:تم|تأكد|انحجز|حجزت)|غير\s+مؤكد/iu;
+/** Sentences, for the denial check (a denial in one sentence never cancels a claim in another). */
+const SENTENCE_SPLIT_RE = /[.!?؟؛\n]+/u;
 
-/** The booking intent a claim needs before the safety net replaces it (Claude + Codex r1). */
+/** Whether the text affirms a booking in at least one sentence that does not deny it. */
+function affirmsBooking(body) {
+  return String(body ?? '').split(SENTENCE_SPLIT_RE).some((s) => claimsBooking(s) && !DENIAL_RE.test(s));
+}
+
+/** Any sign that a claim is about a booking (Claude r2 rule): a viewing tool, a viewing word, a weekday or a time, a personal claim. */
 function bookingIntent(calls, body) {
   if (calls.some((c) => c.name === 'viewing_slots' || c.name === 'book_viewing')) return true;
   const t = toAsciiDigits(String(body ?? ''));
-  return VIEWING_WORD_RE.test(t) && (DAY_RE.test(t) || TIME_RE.test(t) || DATE_RE.test(t));
+  return VIEWING_WORD_RE.test(t) || DAY_RE.test(t) || TIME_RE.test(t) || PERSONAL_CLAIM_RE.test(t);
 }
 
 const LINK_RE = /https?:\/\/[^\s<>"'`]+/giu;
@@ -175,8 +188,12 @@ export function createDanaCommit(deps = {}) {
     let booking = null;
     let handover = null;
     // The LAST book_viewing decides (Codex + Claude r1): a refused later call never books an earlier slot.
-    const last = calls.filter((c) => c.name === 'book_viewing').at(-1);
+    const books = calls.filter((c) => c.name === 'book_viewing');
+    const last = books.at(-1);
     const book = last && last.ok && last.result?.reserved === true ? last : null;
+    // A reserved call, then one that never ran or answered (the tool limit, a throw): nothing is committed, and the
+    // model's "booking it" is not sent unbacked (Claude r2 P3-1). A last call that ran and refused is the model's to answer.
+    const unbacked = !book && Boolean(last) && !last.ok && books.some((c) => c.ok && c.result?.reserved === true);
     if (book) {
       const r = await commit(lead, book, lang);
       if (r?.ok === true && typeof r.text === 'string' && r.text) {
@@ -188,7 +205,11 @@ export function createDanaCommit(deps = {}) {
         handover = { kind: 'booking_failed' };
         say({ evt: 'dana.commit', leadId, booking: 'failed', reason: typeof r?.reason === 'string' ? r.reason : 'error' });
       }
-    } else if (brainTurn && claimsBooking(body) && bookingIntent(calls, body)) {
+    } else if (unbacked) {
+      body = BOOKING_FAILED_LINE[lang];
+      handover = { kind: 'booking_failed' };
+      say({ evt: 'dana.commit', leadId, booking: 'unbacked' });
+    } else if (brainTurn && affirmsBooking(body) && bookingIntent(calls, body)) {
       // The safety net (DESIGN §4.3): only a commit may say a viewing is booked.
       body = BOOKING_FAILED_LINE[lang];
       handover = { kind: 'booking_failed' };

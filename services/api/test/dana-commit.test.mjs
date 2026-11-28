@@ -158,10 +158,13 @@ test('an exact location → a maps link at the end of the text, within MAX_LINKS
 test('the safety net: a brain answer that claims a booking with no successful commit → the "team will confirm" line and a booking_failed hand-over', async () => {
   const c = commitWith({ viewing: fakeViewing() });
   const slots = { name: 'viewing_slots', args: { listing_id: 'BONA-W003' }, result: { bookable: true, slots: [] } };
+  const needs = { name: 'save_needs', args: { name: 'Sara Example' }, result: { saved: true } };
   for (const [text, lang] of [['Your viewing is booked for Sunday at 10.', 'en'], ['All confirmed, see you then!', 'en'], ['تم الحجز يوم الأحد الساعة 10', 'ar'], ['تم تأكيد موعدك', 'ar']]) {
-    // A viewing tool in the turn is the booking intent.
-    const out = await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools: [slots] }), text, language: lang });
-    assert.deepEqual(out, { bubbles: [{ kind: 'text', text: BOOKING_FAILED_LINE[lang] }], handover: { kind: 'booking_failed' } }, text);
+    // The turn after the slots were offered has no viewing tool (or save_needs only): the claim is caught anyway.
+    for (const tools of [[], [needs], [slots]]) {
+      const out = await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools }), text, language: lang });
+      assert.deepEqual(out, { bubbles: [{ kind: 'text', text: BOOKING_FAILED_LINE[lang] }], handover: { kind: 'booking_failed' } }, `${text} (${tools.map((t) => t.name).join(',') || 'no tool'})`);
+    }
   }
   // A claim next to a book_viewing that was not reserved: still caught.
   const refused = await c.afterPreSend({ lead: LEAD, turn: brainReply('Booked!', { tools: [book(undefined, { reserved: false })] }), text: 'Booked!', language: 'en' });
@@ -241,7 +244,7 @@ test('end to end on the real modules (a fake calendar): the tools validate, the 
 
 /* ---------------- PR-B4 r2 (the r1 reviews) ---------------- */
 
-test('the safety net fires only with booking intent: a viewing tool in the turn, or a viewing word with a day or a time; delivery, availability and price sentences are untouched', async () => {
+test('the safety net fires only with booking intent (a viewing tool, a viewing word, a weekday or clock time, a personal claim form): delivery, availability and price sentences are untouched', async () => {
   const c = commitWith({ viewing: fakeViewing() });
   const search = { name: 'search_properties', args: { query: 'x' }, result: { count: 1, results: [] } };
   const details = { name: 'listing_details', args: { listing_id: 'BONA-W014' }, result: { found: true } };
@@ -253,10 +256,10 @@ test('the safety net fires only with booking intent: a viewing tool in the turn,
     ['تم حجز كل الشقق بغرفتين، والمتاح الحين 3 غرف', 'ar'],
     ['The price is confirmed by the developer.', 'en'],
     ['Delivery is confirmed for 15 December 2027.', 'en'],
-    ['تم تأكيد السعر من المطور يوم الأحد', 'ar'],
   ];
+  const needs = { name: 'save_needs', args: { name: 'Sara Example' }, result: { saved: true } };
   for (const [text, lang] of untouched) {
-    for (const tools of [[], [search], [details]]) {
+    for (const tools of [[], [search], [details], [needs]]) {
       const out = await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools }), text, language: lang });
       assert.deepEqual(out, { bubbles: [{ kind: 'text', text }] }, `${text} (${tools.map((t) => t.name).join(',') || 'no tool'})`);
     }
@@ -319,4 +322,87 @@ test("a brochure document is only ever a PDF on Bona's site (https, the site's h
     assert.deepEqual((await c.afterPreSend({ lead: LEAD, turn: brainReply('Here.', { tools: [pdf(id)] }), text: 'Here.', language: 'en' })).bubbles.length, 1, id);
   }
   assert.equal((await c.afterPreSend({ lead: LEAD, turn: brainReply('Here.', { tools: [pdf('BONA-W965')] }), text: 'Here.', language: 'en' })).bubbles[1].url, 'https://www.bona-real-estate.com/b.pdf');
+});
+
+/* ---------------- PR-B4 r3 (the r2 reviews) ---------------- */
+
+const NEEDS = { name: 'save_needs', args: { name: 'Sara Example' }, result: { saved: true } };
+
+test('the safety net catches the realistic claims of the turn after the slots were offered: no viewing tool, or save_needs only (Claude r2 P1-1, Codex r2 P1)', async () => {
+  const c = commitWith({ viewing: fakeViewing() });
+  const claims = [
+    ['All confirmed, see you then!', 'en'],
+    ['Booked! See you on Sunday.', 'en'],
+    ["Done, you're booked for Sunday 10:00.", 'en'],
+    ['Great, your appointment is confirmed.', 'en'],
+    ['Your viewing is confirmed, Sara.', 'en'],
+    ['Perfect, it is booked for tomorrow at 10 am.', 'en'],
+    ['Your viewing is booked.', 'en'], // Codex r2: an affirmative claim with no time
+    ['تمام، تم الحجز ✅', 'ar'],
+    ['تم الحجز يوم الأحد الساعة 10', 'ar'],
+    ['تم تأكيد موعدك', 'ar'],
+    ['أبشري، حجزت لك الأحد الساعة 10 الصبح', 'ar'],
+    ['تم حجز المعاينة ✅', 'ar'],
+    ['تم تأكيد موعد المعاينة يوم الأحد', 'ar'],
+    ['تم حجز موعدك يوم الأحد الساعة ١٠ صباحاً', 'ar'],
+  ];
+  for (const [text, lang] of claims) {
+    for (const tools of [[], [NEEDS]]) {
+      const out = await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools }), text, language: lang });
+      assert.deepEqual(out, { bubbles: [{ kind: 'text', text: BOOKING_FAILED_LINE[lang] }], handover: { kind: 'booking_failed' } }, `${text} (${tools.length ? 'save_needs' : 'no tool'})`);
+    }
+  }
+});
+
+test('a negated claim is no claim: the need_name flow and "not booked yet" answers go as written, with no hand-over (Codex r2 P2)', async () => {
+  const viewing = fakeViewing();
+  const c = commitWith({ viewing });
+  const needName = book({ slot_id: SLOT, listing_id: 'BONA-W003' }, { reserved: false, need_name: true, reason: 'need_name' });
+  const slots = { name: 'viewing_slots', args: { listing_id: 'BONA-W003' }, result: { bookable: true, slots: [] } };
+  const denials = [
+    ["Your viewing isn't booked yet. What name should I use?", 'en'],
+    ['Your viewing is not confirmed yet; which name should I put it under?', 'en'],
+    ["It's not booked yet. Shall I book Sunday 10:00 for you?", 'en'],
+    ['The viewing is not yet confirmed: what is your name?', 'en'],
+    ['لم يتم الحجز بعد، إيش اسمك الكريم؟', 'ar'],
+    ['ما تم الحجز للحين، أي اسم أسجّله؟', 'ar'],
+    ['لسه ما تم الحجز، إيش اسمك؟', 'ar'],
+    ['بعد ما تأكد الحجز، أرسل لي اسمك وأكمّل لك', 'ar'],
+    ['حجزت لك الموعد مبدئياً، وهو غير مؤكد للحين. إيش اسمك؟', 'ar'],
+  ];
+  for (const [text, lang] of denials) {
+    for (const tools of [[needName], [slots], []]) {
+      const out = await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools }), text, language: lang });
+      assert.deepEqual(out, { bubbles: [{ kind: 'text', text }] }, `${text} (${tools.map((t) => t.name).join(',') || 'no tool'})`);
+    }
+  }
+  assert.equal(viewing.calls.length, 0);
+  // A denial next to a real claim in another sentence: the claim still counts.
+  const mixed = "Sorry, Monday isn't free. Your viewing is booked for Sunday at 10.";
+  assert.deepEqual((await c.afterPreSend({ lead: LEAD, turn: brainReply(mixed), text: mixed, language: 'en' })).handover, { kind: 'booking_failed' });
+  // And an affirmative claim after a refused book_viewing (Codex r2): caught.
+  const refused = await c.afterPreSend({ lead: LEAD, turn: brainReply('Your viewing is booked.', { tools: [needName] }), text: 'Your viewing is booked.', language: 'en' });
+  assert.deepEqual(refused.handover, { kind: 'booking_failed' });
+});
+
+test('a reserved book_viewing followed by one that never ran (the tool limit, a thrown tool) → no commit, and the line + a booking_failed hand-over, never the unbacked "booking it" text (Claude r2 P3-1)', async () => {
+  const sunday = book({ slot_id: SLOT, listing_id: 'BONA-W003' });
+  for (const later of [
+    { name: 'book_viewing', args: { slot_id: '2026-12-07T12:00+03:00', listing_id: 'BONA-W003' }, result: { error: 'tool_limit' }, ok: false },
+    { name: 'book_viewing', args: { slot_id: SLOT, listing_id: 'BONA-W003' }, result: { error: 'tool_failed', note: 'x' }, ok: false },
+  ]) {
+    const viewing = fakeViewing();
+    const text = "I'm booking Sunday at 10 for you now.";
+    const out = await commitWith({ viewing }).afterPreSend({ lead: LEAD, turn: brainReply(text, { tools: [sunday, later] }), text, language: 'en' });
+    assert.equal(viewing.calls.length, 0, 'the last call decides: nothing is committed');
+    assert.deepEqual(out, { bubbles: [{ kind: 'text', text: BOOKING_FAILED_LINE.en }], handover: { kind: 'booking_failed' } }, later.result.error);
+  }
+  // A last call that ran and was refused is the model's to answer (r1): its question goes as written.
+  const refusedLast = book({ slot_id: '2026-12-07T12:00+03:00', listing_id: 'BONA-W003' }, { reserved: false, reason: 'busy' });
+  const q = 'Monday at 12 is taken; shall I keep Sunday at 10?';
+  assert.deepEqual(await commitWith({ viewing: fakeViewing() }).afterPreSend({ lead: LEAD, turn: brainReply(q, { tools: [sunday, refusedLast] }), text: q, language: 'en' }), { bubbles: [{ kind: 'text', text: q }] });
+  // A failed call with nothing reserved before it: no claim, no hand-over (the model says it cannot check).
+  const onlyFailed = { name: 'book_viewing', args: { slot_id: SLOT, listing_id: 'BONA-W003' }, result: { error: 'tool_failed' }, ok: false };
+  const sorry = 'I cannot check that right now; a person from the team can help.';
+  assert.deepEqual(await commitWith({ viewing: fakeViewing() }).afterPreSend({ lead: LEAD, turn: brainReply(sorry, { tools: [onlyFailed] }), text: sorry, language: 'en' }), { bubbles: [{ kind: 'text', text: sorry }] });
 });
