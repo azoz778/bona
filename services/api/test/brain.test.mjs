@@ -1142,9 +1142,9 @@ test("Claude r21: a day write of unknown outcome from 23:59 settled after midnig
 
 test("Codex r20: a client's wa.me link never sends its number to the provider", async () => {
   const h = harness({ script: [reply('Sure.')] });
-  await h.brain.turn(turnArgs({ batchText: 'Please WhatsApp me at https://wa.me/12025550123 or https://api.whatsapp.com/send?phone=%2B13105550199', history: [{ role: 'user', content: 'or wa.me/447700900123' }] }));
+  await h.brain.turn(turnArgs({ batchText: 'Please WhatsApp me at https://wa.me/12025550123 or https://api.whatsapp.com/send?phone=%2B13105550199 or https://api.whatsapp.com/send?phone=%2B1%20(415)%20555-0147', history: [{ role: 'user', content: 'or wa.me/447700900123' }] }));
   const all = h.calls[0].body.messages.map((x) => x.content).join('\n');
-  for (const d of ['12025550123', '2025550123', '447700900123', '7700900123', '13105550199', '3105550199']) assert.equal(all.includes(d), false, d);
+  for (const d of ['12025550123', '2025550123', '447700900123', '7700900123', '13105550199', '3105550199', '4155550147', '555-0147']) assert.equal(all.includes(d), false, d);
 });
 
 test("Claude r20: the month alert goes once even when its own marker cannot be read now and then", async () => {

@@ -49,6 +49,12 @@ const ACCOUNT_DIGITS = 12;
 /** A phone whose first digits say so: 0 then 1-9 (10 digits), 00 then a country code, or 966. Never "000" (an amount's tail). */
 /** Text right before a WhatsApp link's number: wa.me/, api.whatsapp.com/send?phone=, whatsapp://send?phone=, with or without a "+" or its URL form %2B (Codex r21). */
 const WA_LINK_BEFORE_RE = /(?:wa\.me\/|[?&]phone=)(?:\+|%2B)?$/i;
+/**
+ * A WhatsApp link's whole number value, however it is written or encoded ("wa.me/12025550123",
+ * "send?phone=%2B1%20(202)%20555-0123"): everything after "wa.me/" or "?phone=" up to a space, "?", "&" or "#", when it
+ * holds a digit. Masked whole as [phone] before any number rule reads it (Codex r20-r22).
+ */
+const WA_VALUE_RE = /(?<=wa\.me\/|[?&]phone=)(?=[^\s&#?]*\d)[^\s&#?]+/gi;
 const CLEAR_PHONE_RE = /^(?:0[1-9]\d{8}|00[1-9]\d{8,12}|966\d{8,9})$/;
 /** A phone that is already whole: a Saudi number (0 + 9, 966 + 9, 00966 + 9) or a 00 international one (Claude r15). */
 const COMPLETE_PHONE_RE = /^(?:0[1-9]\d{8}|(?:00)?966\d{9}|00(?!966)[1-9]\d{8,12})$/;
@@ -459,7 +465,7 @@ export function minimiseParts(parts, sep = PART_SEP) {
   const list = (Array.isArray(parts) ? parts : []).map((x) => (typeof x === 'string' ? asciiDigits(x) : ''));
   const s = list.join(sep);
   const p = probe(s);
-  const cuts = [...takeMatches(p, EMAIL_RE, '[email]'), ...takeMatches(p, IBAN_RE, '[iban]'), ...numberCuts(p.text)].sort((x, y) => x.start - y.start);
+  const cuts = [...takeMatches(p, WA_VALUE_RE, '[phone]'), ...takeMatches(p, EMAIL_RE, '[email]'), ...takeMatches(p, IBAN_RE, '[iban]'), ...numberCuts(p.text)].sort((x, y) => x.start - y.start);
   // Each cut covers the original characters of its probe span (a mark inside it goes with it); a cut across a
   // boundary masks its piece in each part.
   const spans = cuts.map((c) => ({ start: p.from[c.start], end: p.to[c.end - 1], mask: c.mask }));
