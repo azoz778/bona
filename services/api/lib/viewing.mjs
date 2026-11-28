@@ -628,13 +628,15 @@ export function createViewing(deps = {}) {
       log({ level: 'warn', evt: 'viewing.worker_stopped', code: probe.code });
     }
     for (const r of probe?.ok ? pending : []) {
+      // The time the delete is asked, before any await: a 404 says only that the event was not there THEN (Codex r17).
+      const asked = now();
       const res = await gcal.delete(r.event_id);
       // 404 is "already gone" only in the calendar the event was made in: another calendar id (one the
       // robot can write to as well) says nothing about it, and the row waits for the right one.
       const elsewhere = res.ok && res.gone === true && madeElsewhere(r.event_id);
       // A 404 for a booking whose insert never answered ok (no task) may come before that insert lands: the row
       // waits, and the deletion is tried again, until INSERT_LAND_MS after the booking was made (Codex r16).
-      const mayLand = res.ok && res.gone === true && r.task_id === null && now() - r.created < INSERT_LAND_MS;
+      const mayLand = res.ok && res.gone === true && r.task_id === null && asked - r.created < INSERT_LAND_MS;
       if (mayLand) {
         prep("UPDATE viewing_bookings SET updated = ? WHERE booking_id = ? AND status = 'cancel_pending'").run(now(), r.booking_id);
         continue;

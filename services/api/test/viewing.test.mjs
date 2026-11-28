@@ -696,6 +696,19 @@ test("Codex r16: an insert that timed out may still land: a 404 for its event is
     clock.t += INSERT_LAND_MS;
     await h.viewing.tick();
     assert.deepEqual(h.rows().map((r) => r.status), ['cancelled', 'cancelled']);
+    // Codex r17: a delete asked a moment before the cutoff whose 404 arrives after it says nothing about the time
+    // after it was asked: the row waits for one more try.
+    const third = h.lead('LEAD-20261201-0000eeee');
+    const made = clock.t;
+    assert.equal((await h.viewing.commitBooking({ lead: third, listingId: 'BONA-W903', slotId: SLOT })).ok, false);
+    clock.t = made + INSERT_LAND_MS - 1;
+    const plain = h.gcal.delete;
+    h.gcal.delete = async (id) => { const out = await plain(id); clock.t = made + INSERT_LAND_MS + 500; return out; };
+    await h.viewing.tick();
+    assert.deepEqual(h.rows().map((r) => r.status), ['cancelled', 'cancelled', 'cancel_pending'], 'asked before the cutoff: not final');
+    h.gcal.delete = plain;
+    await h.viewing.tick();
+    assert.deepEqual(h.rows().map((r) => r.status), ['cancelled', 'cancelled', 'cancelled'], 'asked after it: final');
   } finally { h.db.close(); }
 });
 
