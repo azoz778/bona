@@ -579,3 +579,11 @@ test('"مليون دولار" is USD 1,000,000: refused against a published SAR 
   }
   assert.deepEqual(findAmounts('مليون دولار').map((a) => a.currency), ['USD']);
 });
+
+/* Claude r28 P3: a third or three quarters after a scale word is a fraction too. */
+test('"مليون وثلث" / "1 million and three quarters" are values the guard cannot read', () => {
+  const parts = { toolResults: ['{"p":"SAR 1,000,000"}'] };
+  for (const reply of ['مليون وثلث', 'مليون وثلاث ارباع', 'مليون وثلاثة أرباع', '1 million and three quarters SAR', 'مليون ريال وثلث']) {
+    assert.equal(checkReply(reply, parts).ok, false, reply);
+  }
+});

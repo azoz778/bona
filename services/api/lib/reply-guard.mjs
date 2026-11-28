@@ -103,8 +103,8 @@ const CURRENCY_AFTER_RE = new RegExp(String.raw`^\s{0,2}(?:${CUR})(?![\p{L}])`, 
 const DIGIT_BEFORE_RE = /\d\s{0,2}$/;
 /** A half or a quarter before a scale word ("نص مليون", "بربع مليون", "half a million", "a quarter of a million"). */
 const FRACTION_BEFORE_RE = /(?:^|[^\p{L}])[وفبكل]?(?:نص|نصف|ربع|ثلث|ثلاث\s?(?:أرباع|ارباع)|half|quarter|three\s+quarters)(?:[\s-]+of)?(?:[\s-]+an?)?[\s-]{1,2}$/iu;
-/** "and a half" / "and a quarter" after a scale word ("مليون ونص", "مليون و نصف", "مليون إلا ربع", "a million and a half"). */
-const FRACTION_AFTER_RE = /^[\s-]{0,2}(?:و|and[\s-]+(?:an?[\s-]+)?|(?:إلا|الا)\s{0,2})\s{0,2}(?:نص|نصف|ربع|half|quarter)(?![\p{L}])/iu;
+/** "and a half" / "and a quarter" / "and a third" after a scale word ("مليون ونص", "مليون و نصف", "مليون إلا ربع", "مليون وثلاث ارباع", "a million and a half"). */
+const FRACTION_AFTER_RE = /^[\s-]{0,2}(?:و|and[\s-]+(?:an?[\s-]+)?|(?:إلا|الا)\s{0,2})\s{0,2}(?:نص|نصف|ربع|ثلث|ثلاث[ةه]?\s?(?:أرباع|ارباع)|half|quarter|three[\s-]+quarters)(?![\p{L}])/iu;
 /** A currency word right after a scale word: the fraction may come after it ("مليون ريال ونص", "a million riyals and a half"). */
 const CURRENCY_FIRST_RE = new RegExp(String.raw`^[\s-]{0,2}(?:${CUR})(?![\p{L}])`, 'iu');
 /** Whether a half or a quarter follows a scale word, straight away or after a currency word (Codex r29). */
