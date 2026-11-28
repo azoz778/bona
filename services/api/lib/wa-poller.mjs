@@ -93,8 +93,10 @@
  *   - under the owner's test switch his own chat joins as a client's (`owner_test`), from the
  *     moment the switch went on, and Bona's own lines to him (notes, call alerts) never start or
  *     join it;
- *   - only a `fromMe` record of the owner's chat is ever dropped as our own note (its outbox key,
- *     else its header line: `isOwnerNote`): never stored, never a reply. An inbound record, his
+ *   - only a `fromMe` record of the owner's chat is ever dropped as our own note (a `note` outbox
+ *     row by its key; with no row by its key and no staff or Dana send of his chat matching its
+ *     text as ingest would, its header line: `isOwnerNote`): never stored, never a reply. A staff
+ *     or Dana send there is ingest's, whatever its first line says. An inbound record, his
  *     own included, and a record of any other chat never are (on the personal number today's
  *     new-enquiry belt stays, `PERSONAL_NOTE_RE`).
  * Before the team check, an owner `#dana …` command goes to `ownerTest.command`, which consumes
@@ -159,9 +161,11 @@ export const KEYWORD_RE = new RegExp(`${BONA_WORD_RE.source}|${LISTING_ID_RE.sou
  * It is the net under the outbox key, never a filter of its own (`isOwnerNote`): it is asked
  * only of a `fromMe` record in the owner's chat on Bona's number, the one place a note can be
  * (wa-send's `note` kind refuses any other recipient), and only when no outbox row names the
- * record's id as a note (a send that went uncertain recorded none). An inbound record, the
- * owner's own included, and a record of any other chat are never judged by it (Codex PR #96 r4:
- * a client's "Bona — email" + a new line + his question is his message).
+ * record's id (a send that went uncertain recorded none) and no staff or Dana send of his chat
+ * matches it by its exact text as ingest would (Codex PR #96 r5: a dashboard reply that opens
+ * with "Bona — email" is that reply). An inbound record, the owner's own included, and a
+ * record of any other chat are never judged by it (Codex PR #96 r4: a client's "Bona — email"
+ * + a new line + his question is his message).
  *
  * The WHOLE first line, as a note renders it: `*Bona — alert*` (the stars balanced, or none),
  * the command reply's `*Bona — test mode*` with its ` ON` / ` OFF`, then, on the same line, only
@@ -171,6 +175,14 @@ export const KEYWORD_RE = new RegExp(`${BONA_WORD_RE.source}|${LISTING_ID_RE.sou
  * plan" starts the same way (T06-9 pins both sides).
  */
 export const OWN_NOTE_RE = /^(\*?)Bona — (?:(?:new enquiry|hand-over|viewing booked|assistant stopped|daily summary|alert|email)\1|test mode\1(?: (?:ON|OFF))?)(?: · [^\r\n]*)?[ \t]*(?:\r?\n|$)/;
+/**
+ * Ingest's text match for a send whose key was never recorded (lib/inbox/ingest.mjs
+ * `RESOLVE_WINDOW_MS` and `SEND_SKEW_MS`, P2-17), which `isOwnerNote` asks before a header line
+ * may drop a record. Kept as copies so this file never loads ingest (ingest loads this one for
+ * `jidsOf`); inbox-own-number.test.mjs pins both edges against ingest's own values.
+ */
+const RESOLVE_WINDOW_MS = 120_000;
+const SEND_SKEW_MS = 5_000;
 /**
  * The personal number's belt (`ownNumberFrom` 'owner' or 'invalid'), main's byte for byte: there
  * every rule is today's (PLAN T06 test 7), and today an inbound record, or a `fromMe` one that
@@ -890,17 +902,40 @@ export function createPoller({
   }
 
   /**
+   * The open staff or Dana send of `lead`'s chat that ingest would reconcile an outbound record
+   * with by its exact text (lib/inbox/ingest.mjs `outboxRowFor`, P2-17), by ingest's own rule: a
+   * record with text and a time of its own that is not stored yet, and the oldest `pending` or
+   * `uncertain` row of the chat with no key and the identical text, written within
+   * `RESOLVE_WINDOW_MS` of the record and no more than `SEND_SKEW_MS` after it. A note's row
+   * keeps no text and no chat (lib/inbox/store.mjs), so it is never one.
+   */
+  function trackedSendByText(rec, lead) {
+    const body = typeof rec.text === 'string' ? rec.text : '';
+    if (!lead?.lead_id || !body || !Number.isFinite(rec.ts) || inboxStore.messageByKey?.(rec.id)) return null;
+    const row = inboxStore.resolveUncertain?.({ leadId: lead.lead_id, text: body, ts: rec.ts, windowMs: RESOLVE_WINDOW_MS }) ?? null;
+    return row && row.sender_kind !== 'note' && rec.ts >= row.created - SEND_SKEW_MS ? row : null;
+  }
+
+  /**
    * Our own note to the owner, read back as a `fromMe` record of his chat on Bona's number
    * (DESIGN §7.1): the only place a note can be, since a note goes from Bona's number to his
    * alone (wa-send's `note` kind refuses any other recipient). The tick asks it of nothing
-   * else. Known first by the outbox row the record's id names (`sender_kind` 'note', the key
-   * ingest refuses a note by), whatever its text says; only when no row names it (a send that
-   * went uncertain recorded no id, the daily upkeep prunes old note rows) by its first line
-   * (`OWN_NOTE_RE`). A key lookup that throws leaves the first line to decide.
+   * else; `lead` is the lead the tick found for the record's chat (his test chat's, or none).
+   *
+   * The outbox row the record's id names settles it, whatever the text says: a `note` row is
+   * our note (the key ingest refuses a note by); any other (a staff reply from the dashboard,
+   * Dana's answer in his test) is not, and goes to ingest like every record of his chat (Codex
+   * PR #96 r5). With no row by its id (a send that went uncertain recorded none), a staff or
+   * Dana send of his chat that ingest would reconcile it with by its exact text
+   * (`trackedSendByText`) says it is that send; only with none does its first line decide
+   * (`OWN_NOTE_RE`: an uncertain note, or one whose row the daily upkeep pruned). A lookup that
+   * throws leaves the first line to decide.
    */
-  function isOwnerNote(rec) {
+  function isOwnerNote(rec, lead) {
     try {
-      if (rec.id && inboxStore?.outboxByKey?.(rec.id)?.sender_kind === 'note') return true;
+      const byKey = rec.id ? inboxStore?.outboxByKey?.(rec.id) : null;
+      if (byKey) return byKey.sender_kind === 'note';
+      if (trackedSendByText(rec, lead)) return false;
     } catch {
       // the header line below decides
     }
@@ -1516,12 +1551,13 @@ export function createPoller({
             // there — the phone line's call alerts, notes, command replies — is no answer to his
             // test, so only a record ingest stored in his `in` test chat stamps it (ingest decides
             // what of that chat is kept, PR-A2). Before he writes, or while his chat is held,
-            // nothing does. Our own note there (`isOwnerNote`: its outbox key, else its header
-            // line) never even reaches the inbox steps: never his lead's, never stored, never a
-            // reply. That is the one place a record is dropped as a note on Bona's number.
+            // nothing does. Our own note there (`isOwnerNote`: a `note` row by its key; with no row
+            // by its key and no staff or Dana send of his chat matching its text as ingest would,
+            // its header line) never even reaches the inbox steps: never his lead's, never stored,
+            // never a reply. That is the one place a record is dropped as a note on Bona's number.
             const seen = findLead(jidsOf(rec));
             const ownerSide = bonaNumber && inboxOn && isOwnerChat(jidsOf(rec), seen);
-            const ownNote = !held && ownerSide && isOwnerNote(rec);
+            const ownNote = !held && ownerSide && isOwnerNote(rec, seen);
             let stored = false;
             if (held) tally.held += 1;
             else if (ownNote) tally.ignored += 1;

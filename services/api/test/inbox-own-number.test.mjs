@@ -15,7 +15,7 @@ import { createTeam, learnTeamLid, isExcludedLead } from '../lib/team.mjs';
 import { createAudit } from '../lib/audit.mjs';
 import * as pollerModule from '../lib/wa-poller.mjs';
 import { createBackfill, JOIN_HISTORY_MS } from '../lib/inbox/backfill.mjs';
-import { createIngest } from '../lib/inbox/ingest.mjs';
+import { createIngest, RESOLVE_WINDOW_MS, SEND_SKEW_MS } from '../lib/inbox/ingest.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
 import { createOwnerTest } from '../lib/owner-test.mjs';
 import { createOwnerNotes } from '../lib/owner-notes.mjs';
@@ -976,6 +976,126 @@ test('T06-9 our own note in the owner\'s chat on Bona\'s number is never his cha
   assert.equal(t2.ignored, 0);
   assert.deepEqual(h.rows('LEAD-own').map(([k, d]) => [k, d]), [['REAL', 'out']]);
   h.close();
+});
+
+/** Codex PR #96 r5: a dashboard reply (or Dana's) in the owner's test chat whose FIRST line is exactly a header line. */
+const REPLY_HEADER_FIRST = 'Bona — email\nWe will send the floor plan for BONA-W003 today';
+
+/** The owner's test chat, `in`, waiting for a person (`needs_human`), nobody handling it yet. */
+function ownerTestChat(h) {
+  h.db.insertLead({
+    lead_id: 'LEAD-own', created: NOW - DAY, updated: NOW - DAY, phone_e164: OWNER_DIGITS, wa_jid: OWNER, wa_lid: OWNER_LID,
+    channel: 'whatsapp', match_method: 'owner_test', stage: 'new', inbox_state: 'in', inbox_since: NOW - DAY, history_from: NOW - DAY,
+    inbox_via: 'owner_test', needs_human: 1,
+  });
+}
+
+test('T06-9 a staff reply in the owner\'s test chat that opens with a header line and whose send went uncertain is ingest\'s to reconcile by its exact text: stored as staff, the human-reply updates done', async () => {
+  for (const status of ['uncertain', 'pending']) {
+    const h = harness({ state: { active: true }, owner: true });
+    ownerTestChat(h);
+    const staff = h.team.addUser({ name: 'Mona', phone: COLLEAGUE_DIGITS, role: 'staff' });
+    // The dashboard writes its row before the HTTP call; the 2xx never came back (or has not yet), so no key.
+    h.setClock(NOW - 61_000);
+    h.inbox.insertOutbox({ send_id: 'SND-staff', lead_id: 'LEAD-own', jid: OWNER, text: REPLY_HEADER_FIRST, user_id: staff.user_id, sender_kind: 'staff' });
+    if (status === 'uncertain') h.inbox.updateOutbox('SND-staff', { status: 'uncertain' });
+    h.setClock(NOW);
+    h.push([msg({ id: 'STAFF1', jid: OWNER, fromMe: true, pushName: null, ts: NOW - 60_000, text: REPLY_HEADER_FIRST })]);
+    const tally = await h.tick(); // eslint-disable-line no-await-in-loop
+    assert.equal(tally.ignored, 0, `${status}: not our own note`);
+    assert.deepEqual(h.rows('LEAD-own'), [['STAFF1', 'out', 'staff']], `${status}: stored as the staff reply it is`);
+    const row = h.inbox.getOutbox('SND-staff');
+    assert.deepEqual([row.status, row.key_id], ['accepted', 'STAFF1'], `${status}: the send is resolved by its text`);
+    const lead = h.lead('LEAD-own');
+    assert.equal(lead.last_human_out_ts, NOW - 60_000, `${status}: a person answered`);
+    assert.equal(lead.needs_human, 0, `${status}: the hand-over flag is cleared`);
+    assert.equal(lead.handler_user_id, staff.user_id, `${status}: the one who answered handles it`);
+    assert.equal(tally.replies, 1, `${status}: the reply clock stamps`);
+    assert.equal(lead.first_reply_ts, NOW - 60_000);
+    h.close();
+  }
+});
+
+test('T06-9 an outbox row the record\'s key names settles it in the owner\'s chat: a staff or Dana send that opens with a header line is never dropped as a note', async () => {
+  const h = harness({ state: { active: true }, owner: true });
+  ownerTestChat(h);
+  const staff = h.team.addUser({ name: 'Mona', phone: COLLEAGUE_DIGITS, role: 'staff' });
+  h.setClock(NOW - 120_000);
+  h.inbox.insertOutbox({ send_id: 'SND-dana', lead_id: 'LEAD-own', jid: OWNER, text: REPLY_HEADER_FIRST, sender_kind: 'dana' });
+  h.inbox.updateOutbox('SND-dana', { status: 'accepted', key_id: 'DANA-K' });
+  h.inbox.insertOutbox({ send_id: 'SND-staff', lead_id: 'LEAD-own', jid: OWNER, text: '*Bona — alert*\nthe villa is still free', user_id: staff.user_id, sender_kind: 'staff' });
+  h.inbox.updateOutbox('SND-staff', { status: 'accepted', key_id: 'STAFF-K' });
+  h.setClock(NOW);
+  h.push([msg({ id: 'DANA-K', jid: OWNER, fromMe: true, pushName: null, ts: NOW - 110_000, text: REPLY_HEADER_FIRST })]);
+  const t1 = await h.tick();
+  assert.equal(t1.ignored, 0, 'Dana\'s answer is no note');
+  assert.deepEqual(h.rows('LEAD-own'), [['DANA-K', 'out', 'dana']]);
+  assert.equal(t1.replies, 0, 'Dana\'s own message is no human reply');
+  assert.equal(h.lead('LEAD-own').first_reply_ts, null);
+  assert.equal(h.lead('LEAD-own').needs_human, 1);
+  // By its key, even with no text match to fall back on (the record's text differs from the row's).
+  h.push([msg({ id: 'STAFF-K', jid: OWNER_LID, fromMe: true, pushName: null, ts: NOW - 100_000, text: '*Bona — alert*\nthe villa is still free (edited)' })]);
+  const t2 = await h.tick();
+  assert.equal(t2.ignored, 0, 'the staff reply is no note');
+  assert.deepEqual(h.rows('LEAD-own'), [['DANA-K', 'out', 'dana'], ['STAFF-K', 'out', 'staff']]);
+  assert.equal(t2.replies, 1);
+  assert.equal(h.lead('LEAD-own').needs_human, 0);
+  assert.equal(h.lead('LEAD-own').handler_user_id, staff.user_id);
+  h.close();
+});
+
+test('T06-9 guard: a note with no key in the owner\'s chat is still dropped by its header line when no open staff or Dana send of his chat matches it as ingest would', async () => {
+  const h = harness({ state: { active: true }, owner: true });
+  ownerTestChat(h);
+  const staff = h.team.addUser({ name: 'Mona', phone: COLLEAGUE_DIGITS, role: 'staff' });
+  const ts = NOW - 60_000;
+  const note = `*Bona — alert* · link down\n${SITE}/dashboard/inbox`;
+  const sends = [
+    // A different text, open.
+    ['SND-other', ts - 1_000, 'uncertain', `*Bona — alert* · link up\n${SITE}/dashboard/inbox`, null],
+    // The same text, but already resolved by another record's key.
+    ['SND-done', ts - 1_000, 'accepted', note, 'OTHER-K'],
+    // The same text, but failed: it never reached WhatsApp.
+    ['SND-failed', ts - 1_000, 'failed', note, null],
+    // The same text, open, but outside ingest's window either way (RESOLVE_WINDOW_MS, SEND_SKEW_MS).
+    ['SND-old', ts - RESOLVE_WINDOW_MS - 1_000, 'uncertain', note, null],
+    ['SND-late', ts + SEND_SKEW_MS + 1_000, 'uncertain', note, null],
+  ];
+  for (const [id, created, status, text, key] of sends) {
+    h.setClock(created);
+    h.inbox.insertOutbox({ send_id: id, lead_id: 'LEAD-own', jid: OWNER, text, user_id: staff.user_id, sender_kind: 'staff' });
+    if (status !== 'pending') h.inbox.updateOutbox(id, { status, ...(key ? { key_id: key } : {}) });
+  }
+  // A note's own row keeps no text (lib/inbox/store.mjs): an uncertain note is never found by it.
+  h.setClock(ts - 1_000);
+  h.inbox.insertOutbox({ send_id: 'SND-note', jid: OWNER, text: note, sender_kind: 'note' });
+  h.inbox.updateOutbox('SND-note', { status: 'uncertain' });
+  h.setClock(NOW);
+  h.push([msg({ id: 'NOTE1', jid: OWNER, fromMe: true, pushName: null, ts, text: note })]);
+  const tally = await h.tick();
+  assert.equal(tally.ignored, 1, 'our own note');
+  assert.equal(h.messages(), 0, 'nothing stored in his test chat');
+  assert.equal(tally.replies, 0);
+  assert.deepEqual(['SND-other', 'SND-old', 'SND-late'].map((id) => h.inbox.getOutbox(id).status), ['uncertain', 'uncertain', 'uncertain'], 'no send was resolved by it');
+  assert.equal(h.lead('LEAD-own').needs_human, 1);
+  assert.equal(h.lead('LEAD-own').first_reply_ts, null);
+  h.close();
+});
+
+test('T06-9 the edges of the text match are ingest\'s own (RESOLVE_WINDOW_MS, SEND_SKEW_MS): a send written exactly at either edge is reconciled, not dropped', async () => {
+  for (const offset of [-RESOLVE_WINDOW_MS, SEND_SKEW_MS]) {
+    const h = harness({ state: { active: true }, owner: true });
+    ownerTestChat(h);
+    const ts = NOW - 60_000;
+    h.setClock(ts + offset);
+    h.inbox.insertOutbox({ send_id: 'SND-staff', lead_id: 'LEAD-own', jid: OWNER, text: REPLY_HEADER_FIRST, sender_kind: 'staff', status: 'uncertain' });
+    h.setClock(NOW);
+    h.push([msg({ id: 'EDGE', jid: OWNER, fromMe: true, pushName: null, ts, text: REPLY_HEADER_FIRST })]);
+    const tally = await h.tick(); // eslint-disable-line no-await-in-loop
+    assert.equal(tally.ignored, 0, `offset ${offset}`);
+    assert.deepEqual(h.rows('LEAD-own'), [['EDGE', 'out', 'staff']], `offset ${offset}`);
+    h.close();
+  }
 });
 
 test('T06-9 on Bona\'s number a fromMe message in a client\'s chat is never a note by its text: it is stored, and joins, as any of his', async () => {
