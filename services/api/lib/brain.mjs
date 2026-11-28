@@ -385,6 +385,14 @@ export function createBrain(deps = {}) {
     if (!team) {
       return { ...p, dayMicro: state.spend.day === p.day ? state.spend.dayMicro : 0, monthMicro: state.spend.month === p.month ? state.spend.monthMicro : 0, readable: true };
     }
+    // Every read settles a write of unknown outcome first, so a charge its marker already holds is never added again
+    // (the post-response stop check included, Codex r19).
+    if (Object.keys(state.attempts).length && !settleAttempts()) {
+      if (!state.meterUnreadable) say({ level: 'error', evt: 'brain.meter_failed', kind: 'read' });
+      state.meterUnreadable = true;
+      const u0 = unsavedFor(p);
+      return { ...p, dayMicro: u0.day, monthMicro: u0.month, readable: false };
+    }
     const u = unsavedFor(p);
     const rd = readMarker('brain_usd_day');
     const rm = readMarker('brain_usd_month');
@@ -408,26 +416,26 @@ export function createBrain(deps = {}) {
    * twice). The totals (readSpend's shape) and `saved`: nothing is left unsaved.
    */
   function flushSpend(t = now()) {
-    if (team && !settleAttempts()) return { ...readSpend(t), readable: false, saved: false };
-    const cur = readSpend(t);
+    const cur = readSpend(t); // settles any write of unknown outcome first
     if (!team) return { ...cur, saved: true };
     const u = unsavedFor(cur);
     if (!cur.readable) return { ...cur, saved: false };
     // A write the store refused may still have committed (its read-back threw): the marker read back decides, so a
     // committed charge is never left unsaved and counted twice (Codex r17). When that read throws too, the value
     // tried is kept (state.attempts) and the next read settles it before anything is added (Codex r18).
-    const save = (k, v) => {
+    // Only the part of the unsaved spend a write carried is taken off when it is saved: a charge added since stays.
+    const save = (k, v, part) => {
       if (store(k, v)) return true;
       const back = readMarker(k);
       if (back === v) return true;
-      if (back === null) state.attempts[k] = v;
+      if (back === null) state.attempts[k] = { value: v, part };
       return false;
     };
     let ok = true;
-    if (u.day) { if (save('brain_usd_day', `${cur.day}:${cur.dayMicro}`)) state.unsaved.dayMicro = 0; else ok = false; }
+    if (u.day) { if (save('brain_usd_day', `${cur.day}:${cur.dayMicro}`, u.day)) state.unsaved.dayMicro -= u.day; else ok = false; }
     if (u.month) {
       // The month alert is checked as the charge is saved, also when it was metered while the total could not be read (Codex r17).
-      if (save('brain_usd_month', `${cur.month}:${cur.monthMicro}`)) { state.unsaved.monthMicro = 0; monthAlert(cur); } else ok = false;
+      if (save('brain_usd_month', `${cur.month}:${cur.monthMicro}`, u.month)) { state.unsaved.monthMicro -= u.month; monthAlert(cur); } else ok = false;
     }
     if (!ok && !state.meterBroken) say({ level: 'error', evt: 'brain.meter_failed', kind: 'write' });
     state.meterBroken = !ok;
@@ -457,12 +465,18 @@ export function createBrain(deps = {}) {
    * of the unsaved spend is saved; any other value did not. False while a marker still cannot be read.
    */
   function settleAttempts() {
-    for (const [k, v] of Object.entries(state.attempts)) {
+    for (const [k, a] of Object.entries(state.attempts)) {
       const back = readMarker(k);
       if (back === null) return false;
-      if (back === v) {
-        if (k === 'brain_usd_day') state.unsaved.dayMicro = 0;
-        else state.unsaved.monthMicro = 0;
+      if (back === a.value) {
+        // Its part is saved; a charge added after the attempt stays unsaved (never 'all of it', Codex r19).
+        if (k === 'brain_usd_day') state.unsaved.dayMicro = Math.max(0, state.unsaved.dayMicro - a.part);
+        else {
+          state.unsaved.monthMicro = Math.max(0, state.unsaved.monthMicro - a.part);
+          // A month charge confirmed here is checked against the alert as a save would be (Codex r19).
+          const [month, micro] = a.value.split(':');
+          monthAlert({ month, monthMicro: Number(micro) });
+        }
       }
       delete state.attempts[k];
     }
