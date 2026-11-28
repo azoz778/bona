@@ -855,7 +855,8 @@ export function createDana({
     if (!l || l.inbox_state !== 'in' || isExcludedLead(l)) return no('not_in_inbox');
     // An owed retry goes only while its own hold is still on the row and due: a send_failed set meanwhile, or a
     // back-off extended by another retry, stops a stale queued one (r8).
-    if (owed && (l.dana_hold_reason !== owed || Number(l.dana_hold_until) > t)) return no('hold');
+    // Due = its deadline (holdDeadline: its time or the 2-h mark, whichever first), the same clock the sweep wakes on (r9).
+    if (owed && (l.dana_hold_reason !== owed || holdDeadline(l, t) > t)) return no('hold');
     // A hold that waits for a person (send_failed, loop, booking_unconfirmed) stops a fixed line too (r8).
     if (fixed && l.dana_hold_reason && (l.dana_hold_until === null || l.dana_hold_until === undefined)) return no('hold');
     if (identityBlocked()) return no('identity');
@@ -993,13 +994,24 @@ export function createDana({
   async function sendOwed(leadId, reason) {
     const lead = db.getLead(leadId);
     if (!lead || lead.inbox_state !== 'in') return skip(leadId, 'not_in_inbox');
-    // A stale retry (its hold replaced or pushed back meanwhile) does nothing; the gate checks it again in the queue.
-    if (lead.dana_hold_reason !== reason || Number(lead.dana_hold_until) > now()) return skip(leadId, 'hold');
+    // A stale retry (its hold replaced meanwhile) does nothing; one not due yet waits. Due is the hold's deadline,
+    // the clock the sweep wakes on (r9: never the raw time, or the 2-h mark would be missed for hours).
+    if (lead.dana_hold_reason !== reason) return skip(leadId, 'hold');
+    const t = now();
+    if (holdDeadline(lead, t) > t) return skip(leadId, 'hold');
     const waiting = pendingFor(leadId, lead);
     if (!waiting.length) { endOwnHold(leadId, reason); return skip(leadId, 'nothing'); }
     const coversTs = waiting[waiting.length - 1].ts;
     const language = languageOf({ lead, texts: waiting.map((m) => m.text) });
     const auto = autoOf(lead);
+    // Past the 2-h mark: straight to `missed` (the hold ends, the task used reads missed, the note), no line (r9).
+    if (t - Number(coversTs) > FRESH_MS) {
+      endOwnHold(leadId, reason);
+      taskMissed(openTaskId(leadId));
+      if (auto) noteHandover(lead, { kind: 'missed', coversTs });
+      say({ evt: 'dana.owed_line', leadId, sent: false, missed: true });
+      return { handover: 'missed', sent: false };
+    }
     const closing = reason === 'owed_closing';
     const text = closing ? (auto ? CLOSING[language] : HANDOVER[language]) : (auto ? autoHandoverLine(language, now()) : HANDOVER[language]);
     const taskId = openTaskId(leadId);
@@ -1249,6 +1261,10 @@ export function createDana({
 
   async function run(leadId, ts, { wokeAt = null, owed = null } = {}) {
     if (owed) return sendOwed(leadId, owed);
+    // A chat that owes a line sends it (when due) before anything else, and starts no model turn in this run (r9): an
+    // inbound wake never answers over, or covers up, the owed hand-over or closing line. Not due yet: it waits.
+    const owing = db.getLead(leadId)?.dana_hold_reason;
+    if (isOwed(owing)) return sendOwed(leadId, owing);
     const started = now();
     // A legacy chat keeps main's freshness rule (the woken message, 30 min, a silent `old` skip); a brain
     // chat's is the batch's own (2 h, backlog, missed: below).

@@ -2673,7 +2673,7 @@ test('LEGACY GUARD (r8 N7): a legacy hand-over line refused rate_limited sets no
   assert.equal(h.calls.length, before, 'nothing is sent later');
 });
 
-test('T12 r8 2: an inbound wake never ends an owed closing line; the next sweep still sends it', async () => {
+test('T12 r8 2 (r9): an inbound wake never ends an owed closing line; it sends it first', async () => {
   let stable = false;
   const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
     turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'privacy' } }] }); }] });
@@ -2681,12 +2681,15 @@ test('T12 r8 2: an inbound wake never ends an owed closing line; the next sweep 
   await h.dana.answer(LEAD, { ts: T_IN - 30 * 60_000 + 1000 });
   assert.equal(h.lead().dana_hold_reason, 'owed_closing');
   h.set(h.lead().dana_hold_until + 1000);
-  assert.deepEqual(await ask(h, 'hello?'), { skipped: 'chat_off' }, 'the batch fires before the sweep');
-  assert.equal(h.lead().dana_hold_reason, 'owed_closing', 'the owed hold survives the wake');
+  // The batch fires before the sweep: since r9 the due owed line goes first (never discarded at chat_off).
+  assert.deepEqual(await ask(h, 'hello?'), { handover: 'owed', sent: true });
+  assert.equal(h.sent().length, 1);
+  assert.ok(h.sent()[0].endsWith(CLOSING.en));
+  assert.equal(h.lead().dana_hold_reason, null);
   stable = true;
   h.dana.sweep();
   await h.dana.flush();
-  assert.ok(h.sent().at(-1).endsWith(CLOSING.en));
+  assert.equal(h.sent().length, 1, 'once');
 });
 
 test('T12 r8 3: a stale queued owed retry re-reads its hold: after the first gets the second counted failure, the second does not send', async () => {
@@ -2719,4 +2722,56 @@ test('T12 r8 4: every missed hand-over marks the task actually used — a reused
   const r = await h.dana.answer(LEAD, { ts: T_IN - 2 * HOUR + 10_000 });
   assert.equal(r.handover, 'missed');
   assert.equal(h.s.db.prepare("SELECT reason FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff' AND status = 'open'").get(LEAD).reason, 'missed');
+});
+
+/* ======================================================================================
+ * PR-B3 r9 (Claude N8 = Codex P1-1, Codex P1-2): an owed line's due time is its hold's deadline (the 2-h mark
+ * included), and a due owed line goes before any new model turn.
+ * ====================================================================================== */
+
+test('T12 r9 1 (H1): an owed line deferred by cap_day with the day freeing in 20 h gets exactly one `missed` at 2 h', async () => {
+  const pacing = strictTier();
+  let raced = false;
+  const h = bh({ turns: [brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] })],
+    pacing: { ...pacing, fifo: async (fn) => { if (!raced) { raced = true; h.danaRow({ covers: T_IN - 1, created: T_IN - 1, id: 'LEAD-R058' }); } return fn(); } } });
+  fillDay(h, 59, T_IN - DAY + 20 * HOUR); // the 60th turn comes in the queue; the day frees only in 20 h
+  await ask(h, 'a person please');
+  assert.equal(h.lead().dana_hold_reason, 'owed_handover');
+  assert.ok(h.lead().dana_hold_until > T_IN + 19 * HOUR);
+  const wakes = await sweepFor(h, T_IN + 60_000, T_IN + 2 * HOUR + 3 * 60_000);
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['person', 'missed'], 'one missed, at the 2-h mark');
+  assert.ok(wakes <= 2, `${wakes} wakes`);
+  assert.equal(h.s.db.prepare("SELECT reason FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff' AND status = 'open'").get(LEAD).reason, 'missed');
+  assert.equal(h.lead().dana_hold_reason, null);
+  assert.equal(h.sent().length, 0);
+});
+
+test('T12 r9 1: a backlog deferral at 1h59m30s whose back-off is due at 2h00m30s is missed at the 2-h sweep', async () => {
+  let stable = true;
+  const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
+    turns: [async () => { stable = false; return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }] });
+  const ts = h.client('a person please', { ts: T_IN - 2 * HOUR + 30_000 });
+  await h.dana.answer(LEAD, { ts });
+  assert.deepEqual([h.lead().dana_hold_reason, h.lead().dana_hold_until], ['owed_handover', T_IN + 60_000]);
+  h.set(ts + 2 * HOUR + 1000);
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['person', 'missed']);
+  assert.equal(h.lead().dana_hold_reason, null);
+});
+
+test('T12 r9 2: a due owed hand-over line goes before any model turn when the client\'s follow-up wakes the chat first', async () => {
+  let stable = false;
+  const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
+    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }, brainReply('never')] });
+  h.client('a person please', { ts: T_IN - 30 * 60_000 + 1000 });
+  await h.dana.answer(LEAD, { ts: T_IN - 30 * 60_000 + 1000 });
+  assert.equal(h.lead().dana_hold_reason, 'owed_handover');
+  stable = true;
+  h.set(h.lead().dana_hold_until + 1000);
+  await ask(h, 'hello? anyone?');
+  assert.equal(h.sent().length, 1);
+  assert.ok(h.sent()[0].endsWith(HANDOVER.en), 'the owed line went');
+  assert.equal(h.brain.calls.length, 1, 'no new model turn');
+  assert.equal(h.lead().dana_hold_reason, null);
 });
