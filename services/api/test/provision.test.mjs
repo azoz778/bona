@@ -122,8 +122,12 @@ test('the LLM carries the persona, the begin message, the KB and the tools', () 
   assert.equal(llm.model, PREFERRED_MODEL);
   assert.equal(llm.start_speaker, 'agent');
   assert.equal(llm.begin_message, BEGIN_MESSAGE);
-  assert.match(llm.begin_message, /دانة/);
-  assert.match(llm.begin_message, /Dana/);
+  // PR-B4 (DESIGN-brain §6.3): the call's first words are nameless, and say AI and "recorded" in both languages.
+  assert.doesNotMatch(llm.begin_message, /(?<![\p{L}])(?:dana|دانة)(?![\p{L}])/iu);
+  assert.match(llm.begin_message, /بالذكاء الاصطناعي/);
+  assert.match(llm.begin_message, /AI assistant/);
+  assert.match(llm.begin_message, /مسجّلة/);
+  assert.match(llm.begin_message, /recorded/);
   assert.deepEqual(llm.knowledge_base_ids, ['kb_1']);
   assert.equal(llm.general_tools.length, TOOL_COUNT);
   assert.equal(llm.general_prompt, prompt);
@@ -894,4 +898,98 @@ test('ensureEnvFile never writes BONA_WA_INSTANCE_JID: its absence is the rollba
   } finally {
     cleanup();
   }
+});
+
+/* ---------------- PR-B4 (PLAN T13 test 3, concierge only): nameless, no per-unit "exact price", --site-only ---------------- */
+
+const NAME_RE = /(?<![\p{L}])(?:dana|دانة)(?![\p{L}])/iu;
+
+test("the site LLM's search_units description and BEGIN_MESSAGE carry no \"exact price\" and no \"Dana\"", () => {
+  const units = toolsPayload({ publicApi: PUBLIC_API, toolToken: TOKEN }).find((t) => t.name === 'search_units');
+  assert.doesNotMatch(units.description, /exact price/i);
+  assert.doesNotMatch(units.description, /B\d{2}-\d+/, 'no unit reference shape');
+  assert.doesNotMatch(units.description, /reference/i);
+  assert.match(units.description, /from/i);
+  assert.match(units.description, /not published/i);
+  assert.doesNotMatch(BEGIN_MESSAGE, /exact price/i);
+  assert.doesNotMatch(BEGIN_MESSAGE, NAME_RE);
+  const llm = llmPayload({ prompt, model: PREFERRED_MODEL, knowledgeBaseIds: ['kb_1'], publicApi: PUBLIC_API, toolToken: TOKEN });
+  assert.doesNotMatch(JSON.stringify(llm.general_tools), /exact price/i);
+  assert.doesNotMatch(JSON.stringify(llm.general_tools), NAME_RE);
+});
+
+test('the concierge prompt (retell/prompt.md) is nameless, and its search_units lines ask for no unit reference', () => {
+  assert.doesNotMatch(prompt, NAME_RE, 'no "Dana" anywhere in prompt.md');
+  assert.match(prompt, /no personal\s+name/i);
+  assert.match(prompt, /AI concierge/);
+  assert.doesNotMatch(prompt, /unit reference|B\d{2}-\d+/i, 'the tool returns no unit refs: the prompt must not ask for one');
+  assert.match(prompt, /starting prices? per bedroom/i);
+  // The call's opening line in the prompt says what BEGIN_MESSAGE says.
+  assert.match(prompt, /This is Bona's AI assistant\. This call is recorded to handle your enquiry\./);
+  assert.match(prompt, /معك مساعدة بونا بالذكاء الاصطناعي\. هذه المكالمة مسجّلة لمتابعة طلبك\./);
+});
+
+test('the legacy WhatsApp prompt stays frozen for the Retell agent (T27 deletes it)', () => {
+  assert.match(waPrompt, /^# Dana \(دانة\) — Bona on WhatsApp/, 'prompt-whatsapp.md is not edited by PR-B4');
+});
+
+test('--site-only: the site\'s four objects only; Dana\'s WhatsApp LLM and chat agent are never read, updated, created or published, and their ids stay', async () => {
+  const { home, cleanup } = tempHome();
+  const existing = { kb: { knowledge_base_id: 'kb_site', status: 'complete', knowledge_base_sources: urlSources('https://bona.azoz.uk') }, llmId: 'llm_site', voiceAgentId: 'agent_voice', chatAgentId: 'agent_chat', waLlmId: 'llm_wa_old', waChatAgentId: 'agent_wa_old' };
+  const client = fakeClient({ existing });
+  const touched = [];
+  const getLlm = client.getLlm.bind(client);
+  const getChatAgent = client.getChatAgent.bind(client);
+  client.getLlm = async (id) => { if (id === 'llm_wa_old') touched.push(['getLlm', id]); return getLlm(id); };
+  client.getChatAgent = async (id) => { if (id === 'agent_wa_old') touched.push(['getChatAgent', id]); return getChatAgent(id); };
+  const ids = { knowledgeBaseId: 'kb_site', llmId: 'llm_site', voiceAgentId: 'agent_voice', chatAgentId: 'agent_chat', waLlmId: 'llm_wa_old', waChatAgentId: 'agent_wa_old', waModel: 'claude-4.6-sonnet' };
+  const { result, ids: written } = await run({ argv: ['--site-only', '--publish'] }, { home, ids, client });
+  assert.deepEqual(touched, [], 'no read of her objects');
+  assert.equal(client.seen.created.some(([k]) => k.startsWith('wa-')), false);
+  assert.equal(client.seen.updated.some(([k]) => k.startsWith('wa-')), false);
+  assert.deepEqual(client.seen.updated.map(([k, id]) => [k, id]), [['llm', 'llm_site'], ['agent', 'agent_voice'], ['chat-agent', 'agent_chat']]);
+  assert.deepEqual(client.seen.published, ['agent_voice', 'agent_chat'], 'her agent is not published');
+  assert.equal(written.waLlmId, 'llm_wa_old');
+  assert.equal(written.waChatAgentId, 'agent_wa_old');
+  assert.equal(written.waModel, 'claude-4.6-sonnet');
+  assert.equal(result.siteOnly, true);
+  // The site LLM got the new nameless begin message and the reworded search_units.
+  const [, , body] = client.seen.updated.find(([k]) => k === 'llm');
+  assert.equal(body.begin_message, BEGIN_MESSAGE);
+  assert.doesNotMatch(JSON.stringify(body), /exact price/i);
+  cleanup();
+});
+
+test('--site-only --rebuild-kb keeps the old knowledge base while her WhatsApp LLM still reads it; --site-only with --whatsapp-only is refused', async () => {
+  const { home, cleanup } = tempHome();
+  const existing = { kb: { knowledge_base_id: 'kb_old', status: 'complete', knowledge_base_sources: urlSources(OLD_SITE) }, llmId: 'llm_site', voiceAgentId: 'agent_voice', chatAgentId: 'agent_chat', waLlmId: 'llm_wa_old', waChatAgentId: 'agent_wa_old' };
+  const client = fakeClient({ existing });
+  const lines = [];
+  const ids = { knowledgeBaseId: 'kb_old', llmId: 'llm_site', voiceAgentId: 'agent_voice', chatAgentId: 'agent_chat', waLlmId: 'llm_wa_old', waChatAgentId: 'agent_wa_old' };
+  const { ids: written } = await run({ argv: ['--site-only', '--rebuild-kb'], log: (l) => lines.push(l) }, { home, ids, client });
+  assert.deepEqual(client.seen.deleted, [], 'the old base stays: the legacy WhatsApp LLM is still on it');
+  assert.equal(written.knowledgeBaseId, 'kb_new');
+  assert.match(lines.join('\n'), /keeping the old knowledge base kb_old/);
+  await assert.rejects(run({ argv: ['--site-only', '--whatsapp-only'] }, { home, ids, client }), /--site-only and --whatsapp-only/);
+  cleanup();
+});
+
+test('--dry-run --site-only prints the site payloads only, with the nameless begin message, and calls nothing', async () => {
+  const { home, cleanup } = tempHome();
+  const lines = [];
+  const out = await provision({
+    argv: ['--dry-run', '--site-only'], home, log: (l) => lines.push(l),
+    env: { BONA_TOOL_TOKEN: TOKEN, BONA_PUBLIC_API: PUBLIC_API, BONA_SITE: 'https://bona.azoz.uk' },
+    idsFile: path.join(home, 'ids.json'),
+    clientFactory: () => { throw new Error('the dry run must not build a client that talks to Retell'); },
+  });
+  assert.equal(out.dryRun, true);
+  assert.equal(out.siteOnly, true);
+  const text = lines.join('\n');
+  assert.match(text, /create-retell-llm/);
+  assert.doesNotMatch(text, /WhatsApp \(model|— WhatsApp/, 'no WhatsApp payload printed');
+  assert.match(text, /--site-only: Dana's WhatsApp LLM and chat agent are not touched/);
+  assert.ok(text.includes(JSON.stringify(BEGIN_MESSAGE).slice(1, 40)), 'the begin message is in the printed payload');
+  assert.ok(!text.includes(TOKEN));
+  cleanup();
 });

@@ -38,6 +38,12 @@
  *   node services/api/retell/provision.mjs --rebuild-kb  # replace the KB after a site move
  *   node services/api/retell/provision.mjs --ensure-env  # only create ~/.secrets/bona-services.env
  *   node services/api/retell/provision.mjs --whatsapp-only  # only Dana's WhatsApp LLM + chat agent (the site's objects are not touched)
+ *   node services/api/retell/provision.mjs --site-only      # only the site's four objects (Dana's legacy WhatsApp agent is not touched)
+ *
+ * WHY --site-only (PR-B4, PLAN T13): a plain run also rewrites the legacy WhatsApp LLM and chat agent (step 6),
+ * from whatsappToolsPayload, whose search_units is the site's tool. The website concierge run (T17) must leave
+ * that legacy agent exactly as it is until T27 deletes it, so it runs with --site-only. With --rebuild-kb the
+ * old knowledge base is then kept, because the legacy WhatsApp LLM still reads it.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -46,6 +52,7 @@ import { fileURLToPath } from 'node:url';
 import { loadEnv, ensureServicesEnv, randomToken } from '../lib/env.mjs';
 import { readIds, writeIds, IDS_FILE } from '../lib/config.mjs';
 import { createRetellClient, isClientError } from '../lib/retell.mjs';
+import { disclosure } from '../lib/persona.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PROMPT_FILE = path.join(HERE, 'prompt.md');
@@ -134,16 +141,17 @@ export function whatsappChatAgentPayload({ llmId }) {
 }
 
 /**
- * What Dana says first on a CALL (`start_speaker: agent`): the PDPL disclosure — who she is
- * and that the call is recorded — in both languages, then the invitation. The chat panel's
+ * What the concierge says first on a CALL (`start_speaker: agent`): the PDPL disclosure — that it is
+ * Bona's AI assistant, with no personal name (lib/persona.mjs; "keep Dana" is that one constant), and
+ * that the call is recorded — in both languages, then the invitation. The chat panel's
  * greeting is NOT this string: `POST /create-chat` returns no begin message, so bona-api
  * uses its own `GREETING[locale]` (index.mjs) and the panel's "conversations are stored"
  * notice line covers chat. Changing this constant only reaches Retell through
- * `node services/api/retell/provision.mjs`.
+ * `node services/api/retell/provision.mjs --site-only` (T17).
  */
 export const BEGIN_MESSAGE =
-  'معك دانة، المساعدة الذكية لبونا. هذه المكالمة مسجّلة لمتابعة طلبك. كيف أقدر أساعدك؟ ' +
-  'This is Dana, Bona’s AI concierge. This call is recorded to handle your enquiry. How can I help?';
+  `معك ${disclosure('ar')}. هذه المكالمة مسجّلة لمتابعة طلبك. كيف أقدر أساعدك؟ ` +
+  `This is ${disclosure('en')}. This call is recorded to handle your enquiry. How can I help?`;
 
 /** Models Retell accepts (retell-sdk 5.64.0 `LlmCreateParams.model`). */
 export const PREFERRED_MODEL = 'claude-4.6-sonnet';
@@ -249,7 +257,7 @@ export function toolsPayload({ publicApi, toolToken }) {
       url: url('search_units'),
       headers,
       description:
-        "Look inside a project at the developer's per-unit stock list, and answer WHICH units are still available and at what price. Call this instead of search_properties as soon as the visitor asks about a specific project's apartments — how many bedrooms, which floor, which view, which building, what it costs, or what payment plans exist. Returns matching units with their reference (e.g. B08-19), floor, facing, area and exact price, plus an `availability` summary of the whole project. Quote these figures exactly; never estimate a price and never invent a unit number.",
+        "The published starting prices inside a project sold unit by unit (today: Darco Prime Waterfront, BONA-W014): one row per bedroom count with how many units are available, their area range and the lowest cash price, plus the expected delivery and the date of the developer's sheet. Call this instead of search_properties as soon as the visitor asks about that project's apartments — how many bedrooms, which sizes, what they cost. Quote each price as a 'from' price, exactly as returned. Unit-level prices, unit numbers and payment plans are not published: offer a Bona specialist for those, and never invent a unit or a price.",
       speak_during_execution: true,
       speak_after_execution: true,
       execution_message_type: 'prompt',
@@ -419,6 +427,9 @@ async function withModelFallback(fn, { preferred, fallback, log }) {
 export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE, home = os.homedir(), log = console.log, clientFactory = createRetellClient } = {}) {
   const dryRun = argv.includes('--dry-run');
   const whatsappOnly = argv.includes('--whatsapp-only');
+  // The website concierge only (PR-B4): Dana's legacy WhatsApp LLM and chat agent are never read or written.
+  const siteOnly = argv.includes('--site-only');
+  if (siteOnly && whatsappOnly) throw new Error('--site-only and --whatsapp-only cannot be combined');
   // The knowledge base is the site's: a WhatsApp-only run never replaces it.
   const rebuildKb = argv.includes('--rebuild-kb') && !whatsappOnly;
   if (whatsappOnly && argv.includes('--rebuild-kb')) log("~ --rebuild-kb is ignored with --whatsapp-only (the knowledge base is the site's)");
@@ -454,14 +465,16 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
   if (dryRun) {
     log('--- DRY RUN — nothing is sent to Retell. Tool token shown as <BONA_TOOL_TOKEN>. ---\n');
     if (whatsappOnly) log('# --whatsapp-only: the site\'s knowledge base, LLM and agents are not touched\n');
+    if (siteOnly) log("# --site-only: Dana's WhatsApp LLM and chat agent are not touched\n");
     if (!whatsappOnly && rebuildKb) {
       log(`# --rebuild-kb: the knowledge base would be REPLACED so it indexes ${siteUrl}, in this order:`);
       log('#   1. POST   /create-knowledge-base                       (the payload below)');
       log(`#   2. PATCH  /update-retell-llm/${ids.llmId ?? '<llm_id>'}   knowledge_base_ids: ["<new_knowledge_base_id>"]`);
-      log(`#      PATCH  /update-retell-llm/${ids.waLlmId ?? '<wa_llm_id>'}   knowledge_base_ids: ["<new_knowledge_base_id>"]   (Dana on WhatsApp)`);
+      if (!siteOnly) log(`#      PATCH  /update-retell-llm/${ids.waLlmId ?? '<wa_llm_id>'}   knowledge_base_ids: ["<new_knowledge_base_id>"]   (Dana on WhatsApp)`);
       log('#   3. PATCH  /update-agent + /update-chat-agent                 (so the live agents serve those LLMs)');
       log('#      … and POST /publish-agent-version for each, when --publish is given');
-      log(`#   4. DELETE /delete-knowledge-base/${ids.knowledgeBaseId ?? '<old_knowledge_base_id>'}   — last, once the agents are on the new base\n`);
+      if (siteOnly && ids.waLlmId) log(`#   4. the old knowledge base ${ids.knowledgeBaseId ?? '<old_knowledge_base_id>'} is KEPT: Dana's WhatsApp LLM still reads it (--site-only)\n`);
+      else log(`#   4. DELETE /delete-knowledge-base/${ids.knowledgeBaseId ?? '<old_knowledge_base_id>'}   — last, once the agents are on the new base\n`);
     }
     if (!whatsappOnly) {
       log(`# POST /create-knowledge-base  (multipart/form-data)\n${JSON.stringify(redactPayload(kbBody, toolToken), null, 2)}\n`);
@@ -470,11 +483,13 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
       if (separateChatAgent) log(`# POST /create-chat-agent\n${JSON.stringify(redactPayload(chatAgentPayload({ llmId: '<llm_id>', publicApi, toolToken }), toolToken), null, 2)}\n`);
       else log('# chat agent: disabled (BONA_RETELL_SEPARATE_CHAT_AGENT=0) — /create-chat would reuse the voice agent id\n');
     }
-    log(`# POST /create-retell-llm  — WhatsApp (model: "${preferred}")\n${JSON.stringify(redactPayload({ ...waLlmBody(preferred, [rebuildKb ? '<new_knowledge_base_id>' : (ids.knowledgeBaseId ?? '<knowledge_base_id>')]), general_prompt: `<prompt-whatsapp.md — ${waPrompt.length} chars>` }, toolToken), null, 2)}\n`);
-    log(`# POST /create-chat-agent  — WhatsApp\n${JSON.stringify(redactPayload(whatsappChatAgentPayload({ llmId: ids.waLlmId ?? '<wa_llm_id>' }), toolToken), null, 2)}\n`);
+    if (!siteOnly) {
+      log(`# POST /create-retell-llm  — WhatsApp (model: "${preferred}")\n${JSON.stringify(redactPayload({ ...waLlmBody(preferred, [rebuildKb ? '<new_knowledge_base_id>' : (ids.knowledgeBaseId ?? '<knowledge_base_id>')]), general_prompt: `<prompt-whatsapp.md — ${waPrompt.length} chars>` }, toolToken), null, 2)}\n`);
+      log(`# POST /create-chat-agent  — WhatsApp\n${JSON.stringify(redactPayload(whatsappChatAgentPayload({ llmId: ids.waLlmId ?? '<wa_llm_id>' }), toolToken), null, 2)}\n`);
+    }
     log(`# publish step: ${publish ? 'POST /publish-agent-version/{agent_id}' : 'skipped (drafts work for create-web-call / create-chat; pass --publish to force)'}`);
     log(`# ids file: ${idsFile}`);
-    return { dryRun: true, ids, model: preferred, rebuildKb, whatsappOnly };
+    return { dryRun: true, ids, model: preferred, rebuildKb, whatsappOnly, siteOnly };
   }
 
   if (!merged.RETELL_API_KEY) throw new Error('RETELL_API_KEY is missing — expected in ~/.secrets/retell.env');
@@ -603,41 +618,45 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
   if (waChatAgentId && (waChatAgentId === chatAgentId || waChatAgentId === voiceAgentId)) throw new Error('ids.json: waChatAgentId is a site agent');
   // Only a 404 means "gone — create it": any other failure is raised, never turned into a duplicate.
   const unlessMissing = (err) => { if (Number(err?.status) !== 404) throw err; return null; };
-  const existingWaLlm = waLlmId ? await client.getLlm(waLlmId).catch(unlessMissing) : null;
-  if (!existingWaLlm) waLlmId = null;
-  let waModel;
-  if (existingWaLlm) {
-    const updated = await withModelFallback((m) => client.updateLlm(waLlmId, waLlmBody(m, [knowledgeBaseId])), { preferred, fallback, log });
-    waModel = updated.model;
-    log(`= WhatsApp LLM "${WA_LLM_NAME}" updated (${waLlmId}, model ${waModel})`);
+  let waModel = ids.waModel ?? null;
+  if (siteOnly) {
+    log("~ --site-only: Dana's WhatsApp LLM and chat agent are not touched");
   } else {
-    const created = await withModelFallback((m) => client.createLlm(waLlmBody(m, [knowledgeBaseId])), { preferred, fallback, log });
-    waLlmId = created.result.llm_id;
-    waModel = created.model;
-    // Recorded at once, so a failure at the chat agent below does not orphan this LLM. A
-    // plain run records the site ids made or re-found above too: `kept` still holds the ones
-    // read at the start, which may be stale by now.
-    writeIds(whatsappOnly ? { ...kept, waLlmId } : { ...kept, knowledgeBaseId, llmId, voiceAgentId, chatAgentId, model, waLlmId }, idsFile);
-    log(`+ WhatsApp LLM "${WA_LLM_NAME}" created (${waLlmId}, model ${waModel})`);
-  }
-  const waAgentBody = whatsappChatAgentPayload({ llmId: waLlmId });
-  const existingWaAgent = waChatAgentId ? await client.getChatAgent(waChatAgentId).catch(unlessMissing) : null;
-  if (existingWaAgent) {
-    // Outside the lookup: a rejected update is raised, never turned into a second agent.
-    await client.updateChatAgent(waChatAgentId, waAgentBody);
-    log(`= WhatsApp chat agent updated (${waChatAgentId})`);
-  } else {
-    const agent = await client.createChatAgent(waAgentBody);
-    waChatAgentId = agent.agent_id;
-    log(`+ WhatsApp chat agent "${WA_CHAT_AGENT_NAME}" created (${waChatAgentId})`);
-  }
-  if (publish) {
-    try {
-      await client.publishAgent(waChatAgentId);
-      log(`+ published WhatsApp chat agent (${waChatAgentId})`);
-    } catch (err) {
-      publishFailed = true;
-      log(`  ! publish WhatsApp chat agent failed: ${err.message}`);
+    const existingWaLlm = waLlmId ? await client.getLlm(waLlmId).catch(unlessMissing) : null;
+    if (!existingWaLlm) waLlmId = null;
+    if (existingWaLlm) {
+      const updated = await withModelFallback((m) => client.updateLlm(waLlmId, waLlmBody(m, [knowledgeBaseId])), { preferred, fallback, log });
+      waModel = updated.model;
+      log(`= WhatsApp LLM "${WA_LLM_NAME}" updated (${waLlmId}, model ${waModel})`);
+    } else {
+      const created = await withModelFallback((m) => client.createLlm(waLlmBody(m, [knowledgeBaseId])), { preferred, fallback, log });
+      waLlmId = created.result.llm_id;
+      waModel = created.model;
+      // Recorded at once, so a failure at the chat agent below does not orphan this LLM. A
+      // plain run records the site ids made or re-found above too: `kept` still holds the ones
+      // read at the start, which may be stale by now.
+      writeIds(whatsappOnly ? { ...kept, waLlmId } : { ...kept, knowledgeBaseId, llmId, voiceAgentId, chatAgentId, model, waLlmId }, idsFile);
+      log(`+ WhatsApp LLM "${WA_LLM_NAME}" created (${waLlmId}, model ${waModel})`);
+    }
+    const waAgentBody = whatsappChatAgentPayload({ llmId: waLlmId });
+    const existingWaAgent = waChatAgentId ? await client.getChatAgent(waChatAgentId).catch(unlessMissing) : null;
+    if (existingWaAgent) {
+      // Outside the lookup: a rejected update is raised, never turned into a second agent.
+      await client.updateChatAgent(waChatAgentId, waAgentBody);
+      log(`= WhatsApp chat agent updated (${waChatAgentId})`);
+    } else {
+      const agent = await client.createChatAgent(waAgentBody);
+      waChatAgentId = agent.agent_id;
+      log(`+ WhatsApp chat agent "${WA_CHAT_AGENT_NAME}" created (${waChatAgentId})`);
+    }
+    if (publish) {
+      try {
+        await client.publishAgent(waChatAgentId);
+        log(`+ published WhatsApp chat agent (${waChatAgentId})`);
+      } catch (err) {
+        publishFailed = true;
+        log(`  ! publish WhatsApp chat agent failed: ${err.message}`);
+      }
     }
   }
 
@@ -649,7 +668,10 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
   // longer exists; deleting here, the worst case is an agent on a stale-but-populated base.
   // A delete that merely fails is reported, not raised: that costs a dashboard cleanup,
   // not a broken provisioning run.
-  if (retiredKnowledgeBaseId && publishFailed) {
+  if (retiredKnowledgeBaseId && siteOnly && waLlmId) {
+    log(`  ! keeping the old knowledge base ${retiredKnowledgeBaseId}: --site-only leaves Dana's WhatsApp LLM on it`);
+    log('  ! a run without --site-only (or T27, which removes her agent) retires it');
+  } else if (retiredKnowledgeBaseId && publishFailed) {
     log(`  ! keeping the old knowledge base ${retiredKnowledgeBaseId}: a publish failed, so a live agent may still be serving it`);
     log('  ! re-run once publishing works, and it will be retired then');
   } else if (retiredKnowledgeBaseId) {
@@ -668,7 +690,8 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
       knowledgeBaseId, llmId, voiceAgentId, chatAgentId, model,
       voiceId, publicApi, siteUrl, separateChatAgent, published: publish,
       note: 'Ids are not secrets. Regenerate with: node services/api/retell/provision.mjs',
-      waLlmId, waChatAgentId, waModel,
+      // --site-only leaves her ids exactly as `kept` has them.
+      ...(siteOnly ? {} : { waLlmId, waChatAgentId, waModel }),
     };
   const written = writeIds(record, idsFile);
   log(written.changed ? `\nwrote ${idsFile}` : `\n${idsFile} unchanged`);
@@ -676,7 +699,7 @@ export async function provision({ argv = [], env = loadEnv(), idsFile = IDS_FILE
   log(`  BONA_RETELL_VOICE_AGENT_ID=${voiceAgentId}`);
   log(`  BONA_RETELL_CHAT_AGENT_ID=${chatAgentId}`);
   log(`  BONA_RETELL_WA_CHAT_AGENT_ID=${waChatAgentId}`);
-  return record;
+  return siteOnly ? { ...record, siteOnly: true } : record;
 }
 
 const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
