@@ -3595,3 +3595,54 @@ test('T12 r23 3 (P3): a hand-over line decided on the brain route that the queue
   assert.ok(h.sent()[0].endsWith(HANDOVER.en), 'the client still gets the line');
   assert.equal(h.retell.completions.length, 0, 'the hand-over is open: no Retell answer');
 });
+
+/* ======================================================================================
+ * PR-B3 r24 (Codex P1s, Claude P3s): ONE commit point re-checks the route and the chat's own checks right before a
+ * turn writes state or sends (hand-over state, its line, every send, the legacy fallback).
+ * ====================================================================================== */
+
+test('T12 r24 1 (Codex P1-1): dana_brain flips during the hand-over\'s backfill for a Retell request_human: nothing written, the brain answers', async () => {
+  let h;
+  let flipped = false;
+  const backfill = { refresh: async () => { if (!flipped) { flipped = true; h.team.setSetting('dana_brain', '1'); } } };
+  h = bh({ auto: false, backfill, turns: [brainReply('From the brain.')], retellAnswer: () => retellAsksPerson() });
+  await ask(h, 'a person please');
+  await h.dana.flush();
+  assert.equal(flipped, true);
+  assert.equal(h.lead().needs_human, 0, 'no needs_human');
+  assert.equal(h.s.db.prepare('SELECT COUNT(*) AS n FROM lead_tasks WHERE lead_id = ?').get(LEAD).n, 0, 'no task');
+  assert.equal(h.pushed.length, 0, 'no alert');
+  assert.ok(!h.sent().some((t) => t.endsWith(HANDOVER.en)), 'no line');
+  assert.equal(h.brain.calls.length, 1);
+  assert.ok(h.sent().at(-1).endsWith('From the brain.'));
+});
+
+for (const [name, during] of [
+  ['a staff reply', (h) => h.staff('Hi Khalid, I am handling this.')],
+  ['dana_off for the chat', (h) => h.s.updateLead(LEAD, { dana_off: 1 })],
+  ['Dana switched off', (h) => h.team.setSetting('dana_enabled', '0')],
+]) {
+  test(`T12 r24 2 (Codex P1-2, U14): ${name} and a route flip in the same queue wait: no hand-over line at all`, async () => {
+    let h;
+    let flipped = false;
+    const pacing = { ...immediate, fifo: (fn) => { if (!flipped) { flipped = true; h.tick(5000); during(h); h.team.setSetting('dana_brain', '0'); } return fn(() => {}); } };
+    h = bh({ auto: false, brainOn: true, pacing, turns: [brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] })] });
+    await ask(h, 'hello');
+    await h.dana.flush();
+    assert.equal(h.sent().length, 0, h.sent().join(' | '));
+  });
+}
+
+test('T12 r24 3 (Claude P3-b, U18): a not_brain refusal from one transient read always re-queues: the batch is answered', async () => {
+  let h;
+  let throwNext = 0;
+  let armed = true;
+  const pacing = { ...immediate, fifo: (fn) => { if (armed) { armed = false; throwNext = 1; } return fn(() => {}); } };
+  h = bh({ auto: true, pacing, turns: [brainReply('First try.'), brainReply('Second try.')] });
+  const orig = h.ownerTest.autoMode;
+  h.ownerTest.autoMode = (l) => { if (throwNext) { throwNext = 0; throw new Error('transient'); } return orig(l); };
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.ok(h.sent().at(-1)?.endsWith('Second try.'), JSON.stringify(h.sent()));
+  assert.equal(h.sent().length, 1);
+});

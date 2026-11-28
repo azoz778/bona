@@ -1044,7 +1044,11 @@ export function createDana({
     });
     // A hand-over or closing line decided on the brain route whose chat left it while the line waited (r23 P3): it goes
     // the legacy way (main's line, at once), so the client is not left without it. Never an outage or owed line.
-    if (r.stopped === 'not_brain' && legacyText) return { ...(await send(db.getLead(lead.lead_id) ?? lead, legacyText, language, coversTs)), legacy: true };
+    if (r.stopped === 'not_brain' && legacyText) {
+      // Through the commit point first (r24): the legacy route still, and the chat's own checks, right before the send.
+      if (commitPoint(lead.lead_id, false, coversTs, { closing })) return { sent: false, stopped: 'not_brain', legacy: true };
+      return { ...(await send(db.getLead(lead.lead_id) ?? lead, legacyText, language, coversTs)), legacy: true };
+    }
     if (r.uncertain || (!r.sent && r.failure === 'evolution')) afterFailure(lead, { alert: true });
     return r;
   }
@@ -1069,8 +1073,6 @@ export function createDana({
     const no = (stopped, extra = {}) => ({ ok: false, stopped, ...extra });
     const l = db.getLead(leadId);
     if (!l || l.inbox_state !== 'in' || isExcludedLead(l)) return no('not_in_inbox');
-    // The chat left the brain path while the bubble was queued (dana_brain off, out of auto mode): nothing goes (r11).
-    if (!useBrain(l)) return no('not_brain');
     // A stop, privacy or deletion request stored after what this bubble covers wins (r11): the bubble does not go
     // (the closing line itself excepted), and the chat is woken so the stop flow runs.
     if (!closing) {
@@ -1089,15 +1091,17 @@ export function createDana({
     if (owed && (l.dana_hold_reason !== owed || holdDeadline(l, t) > t)) return no('hold');
     // A hold that waits for a person (send_failed, loop, booking_unconfirmed) stops a fixed line too (r8).
     if (fixed && l.dana_hold_reason && (l.dana_hold_until === null || l.dana_hold_until === undefined)) return no('hold');
-    if (identityBlocked()) return no('identity');
-    if (ruleOff(l)) return no('rule_off');
-    if (breakerOpen() || !(team.danaEnabled() || Number(l.dana_test) === 1)) return no('off');
-    if (!team.sendingEnabled()) return no('sending_off');
-    if (!closing && Number(l.dana_off) === 1) return no('chat_off');
-    if (inbox.humanOutboundAfter(leadId, coversTs)) return no('dropped_human');
+    // The chat's own checks, whatever its route (chatRefusal: identity, a rule off, Dana off, Sending off, the chat
+    // stopped, a person's answer after what this covers).
+    const refused = chatRefusal(l, coversTs, { closing });
+    if (refused) return no(refused);
     // A person active in the chat: no closing line over him (r16 G3), the same 24-h rule as stopFirst's.
     if (closing && personActive(l, t)) return no('human_recent');
     if (!replyJidFor(l)) return no('lid_only');
+    // The chat left the brain path while the bubble was queued (dana_brain off, out of auto mode; r11). Checked only
+    // AFTER the chat's own checks (r24), so not_brain (a re-queue, or a hand-over line's legacy fallback) means the
+    // chat could take a line on its new route.
+    if (!useBrain(l)) return no('not_brain');
     if (!openChat(leadId, coversTs, t)) return no('no_open_chat');
     const age = t - Number(coversTs);
     if ((first || fixed) && age > FRESH_MS) return no('missed');
@@ -1146,6 +1150,11 @@ export function createDana({
     }
     const fresh = db.getLead(leadId);
     if (!fresh || fresh.inbox_state !== 'in') return skip(leadId, 'not_in_inbox');
+    // THE commit point before any state write (r24): the route (a flip writes nothing and re-queues) and, on a brain
+    // chat, its own checks. A stop request is always recorded, on any route and with no line when they fail (r15).
+    // A legacy chat: the route only, so it is main's hand-over when nothing flips.
+    const cp = commitPoint(leadId, viaBrain, coversTs, { route: !stop, chat: viaBrain && !stop });
+    if (cp) return cp;
     // Past the 2-h mark a brain chat's message is a person's: the hand-over is `missed`, with no line (r5).
     // A stop request still stops the chat.
     if (viaBrain && !stop && why !== 'missed' && now() - Number(coversTs) > FRESH_MS) {
@@ -1362,6 +1371,9 @@ export function createDana({
     if (!pre.ok && HANDOVER_SKIPS.has(pre.reason)) return skip(leadId, pre.reason);
     const fresh = db.getLead(leadId);
     if (!fresh || fresh.inbox_state !== 'in') return skip(leadId, 'not_in_inbox');
+    // THE commit point before its writes (r24): a flip during preSend's refresh re-queues; the chat's own checks.
+    const cp = commitPoint(leadId, true, coversTs);
+    if (cp) return cp;
     const t = now();
     // The same outage: this chat's brain_out hold, ended within the last hold span (the sweep's retry).
     // One that ended long ago (a person answered, nothing woke it since) is a past outage: start again.
@@ -1553,6 +1565,38 @@ export function createDana({
     pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, Number(coversTs)));
     say({ evt: 'dana.route_changed', leadId, brain: routeNow });
     return skip(leadId, 'route_changed');
+  }
+
+  /**
+   * The chat's own checks, whatever its route (r24): out of the inbox, identity, a rule off, Dana off (the breaker),
+   * Sending off, the chat stopped (dana_off; a closing line excepted), a person's answer after the covered message.
+   * The reason, or null.
+   */
+  function chatRefusal(l, coversTs, { closing = false } = {}) {
+    if (!l || l.inbox_state !== 'in' || isExcludedLead(l)) return 'not_in_inbox';
+    if (identityBlocked()) return 'identity';
+    if (ruleOff(l)) return 'rule_off';
+    if (breakerOpen() || !(team.danaEnabled() || Number(l.dana_test) === 1)) return 'off';
+    if (!team.sendingEnabled()) return 'sending_off';
+    if (!closing && Number(l.dana_off) === 1) return 'chat_off';
+    if (coversTs !== null && coversTs !== undefined && inbox.humanOutboundAfter(l.lead_id, coversTs)) return 'dropped_human';
+    return null;
+  }
+  /**
+   * THE commit point (r24): a turn writes state or sends only after this, synchronously, with no await in between. It
+   * re-checks the route (routeFlip: a flip re-queues the batch on the new route) and, with `chat`, the chat's own
+   * checks (chatRefusal). Null when the turn may go on; else the skip it ends with. Used before handover()'s state
+   * writes (its line then goes through sendGate, or at once on a legacy chat), before lastResort's, before every
+   * legacy bubble (a brain bubble's is sendGate, in the queue), and before the legacy fallback of a hand-over line.
+   */
+  function commitPoint(leadId, viaBrain, coversTs, { route = true, chat = true, closing = false } = {}) {
+    if (route) {
+      const flipped = routeFlip(leadId, viaBrain, coversTs);
+      if (flipped) return flipped;
+    }
+    if (!chat) return null;
+    const why = chatRefusal(db.getLead(leadId), coversTs, { closing });
+    return why ? skip(leadId, why) : null;
   }
 
   /** What only delays a stop's closing line, never the stop (r14 I1): its line goes over them. */
@@ -1888,12 +1932,17 @@ export function createDana({
             say({ evt: 'dana.document_as_link', leadId });
             bubble = { kind: 'text', text: lim.text };
           }
-        } else if (i > 0) {
-          // A legacy chat, as before: only a later bubble is re-checked.
-          if (inbox.humanOutboundAfter(leadId, coversTs)) return { stopped: 'dropped_human' };
-          const again = eligible(leadId, { coversTs });
-          const cap = again.reason === 'cap_chat' || CAP_HANDOVERS.has(again.reason);
-          if (!again.ok && !cap) return { stopped: again.reason, cap: null };
+        } else {
+          // THE commit point of a legacy bubble (r24): the route only (a flip during the commit hook re-queues), so a
+          // legacy chat is main's when nothing flips.
+          if (commitPoint(leadId, false, coversTs, { chat: false })) return { stopped: 'route_changed' };
+          if (i > 0) {
+            // A legacy chat, as before: only a later bubble is re-checked.
+            if (inbox.humanOutboundAfter(leadId, coversTs)) return { stopped: 'dropped_human' };
+            const again = eligible(leadId, { coversTs });
+            const cap = again.reason === 'cap_chat' || CAP_HANDOVERS.has(again.reason);
+            if (!again.ok && !cap) return { stopped: again.reason, cap: null };
+          }
         }
         if (reserve) backlogReserved.add(leadId);
         try {
@@ -1925,7 +1974,11 @@ export function createDana({
         // The chat left the brain path while the reply waited in the queue (r23 N13): nothing went, so the batch is
         // re-queued on the new route. Once a bubble went, the new route sees nothing unanswered: nothing twice.
         if (r.stopped === 'not_brain' && !sentAny) {
-          outcome = routeFlip(leadId, viaBrain, coversTs) ?? skip(leadId, 'not_brain');
+          // Always re-queued (r24 P3-b), whatever a second read says: the re-run decides on a fresh read.
+          const id = String(leadId);
+          pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, Number(coversTs)));
+          say({ evt: 'dana.route_changed', leadId, brain: useBrain(db.getLead(leadId)) });
+          outcome = skip(leadId, 'route_changed');
           break;
         }
         if (!sentAny) outcome = r.cap ? await capped(leadId, language, r.cap, coversTs, viaBrain, { checked: true }) : skip(leadId, r.stopped);
