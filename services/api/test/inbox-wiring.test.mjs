@@ -1082,6 +1082,12 @@ function brainHome(root) {
   return home;
 }
 
+/** A POST /v1/responses answer with one text item (T25b: the brain is on the Responses API). */
+const aiText = (text, usage) => ({
+  object: 'response', status: 'completed', error: null, incomplete_details: null, usage,
+  output: [{ id: 'msg_1', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] }],
+});
+
 /**
  * createApp with the real modules, a moving clock, and one fake fetch for everything outside:
  * Evolution (sends recorded; the poller's window reads served from `evo.windows`), OpenAI (served from
@@ -1102,7 +1108,7 @@ function rig14({ env = {}, config = {}, openai = [], google = null, realBrain = 
     seen.push({ method: init.method ?? 'GET', url: u });
     if (u.startsWith('https://api.openai.com/')) {
       ai.calls.push({ url: u, body: init.body ? JSON.parse(init.body) : null });
-      const next = ai.queue.length ? ai.queue.shift() : { status: 200, json: { choices: [{ message: { role: 'assistant', content: 'Default answer.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } } };
+      const next = ai.queue.length ? ai.queue.shift() : { status: 200, json: aiText('Default answer.', { input_tokens: 10, output_tokens: 5 }) };
       const r = typeof next === 'function' ? await next(init) : next;
       return reply(r.status, r.json);
     }
@@ -1221,9 +1227,9 @@ test('T14 wiring: the team gets the owner test, so his own number is a client\'s
 test('T14 wiring: the brain\'s own alerts reach notes.alert exactly as the brain sent them (brain_out quota/auth, brain_spend 80, 100, day and month stop, brain_bug); quota/auth push the owners with reason brain', async () => {
   const QUOTA = { status: 429, json: { error: { type: 'insufficient_quota', code: 'insufficient_quota' } } };
   const AUTH = { status: 401, json: { error: { type: 'invalid_request_error', code: 'invalid_api_key' } } };
-  const BAD = { status: 200, json: { choices: [] } };
-  const USAGE = { prompt_tokens: 10_000, prompt_tokens_details: { cached_tokens: 8_000 }, completion_tokens: 300, completion_tokens_details: { reasoning_tokens: 100 } };
-  const OK = { status: 200, json: { choices: [{ message: { role: 'assistant', content: 'Which district do you like?' }, finish_reason: 'stop' }], usage: USAGE } };
+  const BAD = { status: 200, json: { object: 'response', status: 'completed' } };
+  const USAGE = { input_tokens: 10_000, input_tokens_details: { cached_tokens: 8_000 }, output_tokens: 300, output_tokens_details: { reasoning_tokens: 100 } };
+  const OK = { status: 200, json: aiText('Which district do you like?', USAGE) };
   const turnArgs = (leadId) => ({
     route: 'wa', leadId, language: 'en', autoMode: true, history: [], batchText: 'Hi', leadFacts: {}, turnContext: { firstReply: true },
     toolNames: ['search_properties', 'request_human'], earlierReplies: [],
@@ -1334,9 +1340,15 @@ test('T14 wiring: the brain runs its tools in-process (runTool → tools.runInPr
   assert.ok(listing, 'a bookable Jeddah home in listings.json');
   const toolCall = (name, args) => ({
     status: 200,
-    json: { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5 } },
+    json: {
+      object: 'response', status: 'completed', error: null, incomplete_details: null, usage: { input_tokens: 10, output_tokens: 5 },
+      output: [
+        { id: 'rs_1', type: 'reasoning', summary: [], encrypted_content: 'opaque-reasoning' },
+        { id: 'fc_1', type: 'function_call', status: 'completed', call_id: 'call_1', name, arguments: JSON.stringify(args) },
+      ],
+    },
   });
-  const done = { status: 200, json: { choices: [{ message: { role: 'assistant', content: 'Let me check that for you.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } } };
+  const done = { status: 200, json: aiText('Let me check that for you.', { input_tokens: 10, output_tokens: 5 }) };
   const h = rig14({
     realBrain: true,
     openai: [toolCall('book_viewing', { listing_id: listing.id, slot_id: 'not-a-slot', name: 'Example Client' }), done],
