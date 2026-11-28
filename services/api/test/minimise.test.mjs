@@ -400,6 +400,9 @@ test('the number in a WhatsApp link is masked, whatever its country', () => {
     ['wa.me/447700900123 thanks', 'wa.me/[phone] thanks'],
     ['https://api.whatsapp.com/send?phone=966501234567&text=hi', 'https://api.whatsapp.com/send?phone=[phone]&text=hi'],
     ['whatsapp://send?phone=971501234567', 'whatsapp://send?phone=[phone]'],
+    ['https://api.whatsapp.com/send?phone=%2B12025550123', 'https://api.whatsapp.com/send?phone=%2B[phone]'],
+    ['https://api.whatsapp.com/send?phone=%2b12025550123&text=hi', 'https://api.whatsapp.com/send?phone=%2b[phone]&text=hi'],
+    ['wa.me/+12025550123', 'wa.me/[phone]'],
   ]) assert.equal(minimise(input), want, input);
   assert.equal(minimise('see bona-real-estate.com/listings/BONA-W012'), 'see bona-real-estate.com/listings/BONA-W012', 'a listing link stays');
 });

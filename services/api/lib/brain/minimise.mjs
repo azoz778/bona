@@ -47,8 +47,8 @@ const MAX_DIGITS = 15;
 /** A run of this many digits or more that is not a phone or an ID: an account or a card number. */
 const ACCOUNT_DIGITS = 12;
 /** A phone whose first digits say so: 0 then 1-9 (10 digits), 00 then a country code, or 966. Never "000" (an amount's tail). */
-/** Text right before a WhatsApp link's number: wa.me/, api.whatsapp.com/send?phone=, whatsapp://send?phone=. */
-const WA_LINK_BEFORE_RE = /(?:wa\.me\/|[?&]phone=)$/i;
+/** Text right before a WhatsApp link's number: wa.me/, api.whatsapp.com/send?phone=, whatsapp://send?phone=, with or without a "+" or its URL form %2B (Codex r21). */
+const WA_LINK_BEFORE_RE = /(?:wa\.me\/|[?&]phone=)(?:\+|%2B)?$/i;
 const CLEAR_PHONE_RE = /^(?:0[1-9]\d{8}|00[1-9]\d{8,12}|966\d{8,9})$/;
 /** A phone that is already whole: a Saudi number (0 + 9, 966 + 9, 00966 + 9) or a 00 international one (Claude r15). */
 const COMPLETE_PHONE_RE = /^(?:0[1-9]\d{8}|(?:00)?966\d{9}|00(?!966)[1-9]\d{8,12})$/;
