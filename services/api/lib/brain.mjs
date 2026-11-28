@@ -469,10 +469,12 @@ export function createBrain(deps = {}) {
       const back = readMarker(k);
       if (back === null) return false;
       if (back === a.value) {
-        // Its part is saved; a charge added after the attempt stays unsaved (never 'all of it', Codex r19).
-        if (k === 'brain_usd_day') state.unsaved.dayMicro = Math.max(0, state.unsaved.dayMicro - a.part);
+        // Its part is saved; a charge added after the attempt stays unsaved (never 'all of it', Codex r19), and only
+        // while the unsaved amount is still for the attempt's own day or month (an attempt from 23:59, Claude r21).
+        const period = a.value.split(':')[0];
+        if (k === 'brain_usd_day') { if (state.unsaved.day === period) state.unsaved.dayMicro = Math.max(0, state.unsaved.dayMicro - a.part); }
         else {
-          state.unsaved.monthMicro = Math.max(0, state.unsaved.monthMicro - a.part);
+          if (state.unsaved.month === period) state.unsaved.monthMicro = Math.max(0, state.unsaved.monthMicro - a.part);
           // A month charge confirmed here is checked against the alert as a save would be (Codex r19).
           const [month, micro] = a.value.split(':');
           monthAlert({ month, monthMicro: Number(micro) });

@@ -1118,6 +1118,28 @@ test("Codex r19: a write of unknown outcome is settled by the very next read: th
   assert.deepEqual(a.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level), [{ code: 'brain_spend', meta: { level: 100 } }]);
 });
 
+test("Claude r21: a day write of unknown outcome from 23:59 settled after midnight takes nothing off the new day's unsaved spend", async () => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const h = harness({ script: [async () => { await held; return reply('A.'); }, reply('B.')] });
+  const realSet = h.team.setSetting.bind(h.team);
+  const realGet = h.team.getSetting.bind(h.team);
+  h.advance(Date.UTC(2026, 10, 26, 20, 59, 0) - T0); // 23:59 Riyadh
+  const a = h.brain.turn(turnArgs());
+  for (let i = 0; i < 200 && h.calls.length < 1; i += 1) await new Promise((resolve) => setImmediate(resolve));
+  // B at 23:59: its writes commit, and every read fails from then until after midnight, so they stay unknown.
+  let blind = false;
+  h.team.setSetting = (k, v, o) => { const out = realSet(k, v, o); if (String(k).startsWith('brain_usd_')) { blind = true; throw new Error('read-back failed'); } return out; };
+  h.team.getSetting = (k) => { if (blind && String(k).startsWith('brain_usd_')) throw new Error('read failed'); return realGet(k); };
+  await h.brain.turn(turnArgs());
+  h.advance(2 * 60_000); // 00:01
+  h.team.setSetting = realSet;
+  h.team.getSetting = realGet;
+  release(); // A's response is metered on the new day, and its read settles B's writes
+  await a;
+  assert.equal(realGet('brain_usd_day'), `2026-11-27:${MICRO}`, "the new day holds A's charge");
+});
+
 test("Claude r20: the month alert goes once even when its own marker cannot be read now and then", async () => {
   const h = harness({ env: { BONA_BRAIN_MONTH_ALERT_USD: '10' }, script: [reply('A.'), reply('B.'), reply('C.'), reply('D.')] });
   h.team.setSetting('brain_usd_month', '2026-11:8500000');
