@@ -3379,3 +3379,48 @@ test('T12 r18 2 (Codex P1-2): an e-mail address with Bona\'s domain is not the c
   assert.equal(h.sent().length >= 1, true);
   assert.equal((h.sent().join('\n').match(/https:\/\//g) ?? []).length, 0, 'a first reply: no link');
 });
+
+/* ======================================================================================
+ * PR-B3 r19 (Claude N11, Codex P1s): ONE rule for a bare host (a scheme or www.; a path or port with any letter
+ * TLD; no path with a listed TLD; 3+ labels ending in 2 letters), and links are removed by their position.
+ * ====================================================================================== */
+
+test('T12 r19: linksIn — abbreviations are text, every should-match row of links-probe-r19 is a link', () => {
+  const text = ['1200 sq.ft villa', 'about 1,200 sq.ft.', 'ref.no BONA-001', 'Tel.no 0126', 'Dr.Al Harbi will meet you', 'Mr.Al Saud', 'Sun.Mo',
+    'ok.so what next', 'Qty.ok', 'vs.us', 'Inc.co', 'Co.ltd', 'No.of rooms: 5', 'Bldg.no 4', 'flr.no 2', 'Rd.no 5', 'Apt.no 3', '3 B.R. villa', 'plot no.12',
+    'Ph.D holder', 'approx.20 km', 'St.Al-Andalus road', 'Blk.A', 'Ext.21', 'see pg.12', 'Al.Rawdah', 'Abhur.North', 'from 9 a.m.to 5 p.m.',
+    'e.g. a villa, i.e. detached, 9 a.m., U.S. buyers', 'info@bona-real-estate.com', '10.30 or 14.00', 'BONA-W005', 'Unit B08-19'];
+  for (const t of text) assert.deepEqual(linksIn(t), [], t);
+  for (const t of ['bona-real-estate.com.au/x', 'maps.bona-real-estate.com/abc', 'example.sa/villas/1', 'store.shop', 'example.estate', 'something.club',
+    'www.x.y', 'bit.ly/abc', 'WWW.EXAMPLE.COM', 'example.com:8080/a', 'example.finance/contact', 'x.com.au', 'example.co.uk', 'bona-real-estate.com.au',
+    'x.bona-real-estate.com.au', 'https://example.finance', 'Located in Al-Rawdah.in the north']) {
+    assert.equal(linksIn(t).length, 1, t);
+  }
+});
+
+test('T12 r19 (Claude N11, T1): a later reply with common abbreviations goes through unchanged', async () => {
+  for (const text of ['The villa is 1,200 sq.ft with a private pool.', 'Plot ref.no BONA-001 is in Obhur; Dr.Al Harbi will show it.', 'Viewing slots: Sun.Mo 10:00 or Tue 14:00.']) {
+    const h = bh({ turns: [brainReply('Hello! How can I help?'), brainReply(text)] });
+    await ask(h, 'hi');
+    h.tick(60_000);
+    await ask(h, 'tell me more');
+    assert.equal(h.sent()[1], text);
+  }
+});
+
+test('T12 r19 (Codex P1-1): links go by position — on a first reply the e-mail address stays whole and the standalone link goes', async () => {
+  const h = bh({ turns: [brainReply('Email info@bona-real-estate.com or visit bona-real-estate.com for more details.')] });
+  await ask(h, 'Hi');
+  const out = h.sent()[0];
+  assert.match(out, /info@bona-real-estate\.com/, out);
+  assert.equal((out.match(/bona-real-estate\.com/g) ?? []).length, 1, out);
+});
+
+test('T12 r19 (Codex P1-2): an off-site bare link with any TLD and a path is stripped', async () => {
+  const h = bh({ turns: [brainReply('Hello! How can I help?'), brainReply('See example.finance/contact for financing details. We can also help.')] });
+  await ask(h, 'Hi');
+  h.tick(60_000);
+  await ask(h, 'financing?');
+  assert.doesNotMatch(h.sent()[1], /example\.finance/);
+  assert.match(h.sent()[1], /We can also help\./);
+});

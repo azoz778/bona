@@ -172,23 +172,42 @@ const PLACEHOLDER_RE = /^\[[^\]\n]{1,40}\]$/;
 const LISTING_ID_RE = /\bBONA-W?\d{3}\b/i;
 const LINK_RE = /https?:\/\/[^\s<>"'`]+/giu;
 /**
- * A brain chat's links (r17, r18): a URL with a scheme, or a bare host with its port and path, matched by its WHOLE
- * host (every dot label, so `bona-real-estate.com.au` is never read as `bona-real-estate.com`). A bare host is a link
- * when it starts with `www.`, or its last label is a known TLD or any 2-letter country code and some label before it
- * has 2 characters or more (so "e.g.", "a.m.", "U.S." stay text). Never inside an e-mail address or another host
- * (the lookbehind), never a number ("3.5 million": a TLD is letters).
+ * A brain chat's links (r17-r19). A candidate is a URL with a scheme, or a bare host (every dot label, the WHOLE host,
+ * so `bona-real-estate.com.au` is never read as `bona-real-estate.com`) with its port and path; never inside an
+ * e-mail address or another host (the lookbehind). ONE rule (r19) makes a bare candidate a link when any holds:
+ *   (a) it starts with `www.`;
+ *   (b) it has a path or a port and its last label is 2-24 letters (any TLD: `example.finance/contact`);
+ *   (c) no path, and its last label is in LINK_TLDS (gTLDs and a curated ccTLD list that leaves out the codes that
+ *       collide with abbreviations and words: no, al, mo, so, ft, ok, us, co);
+ *   (d) 3+ labels ending in 2 letters (`x.com.au`, `example.co.uk`);
+ * and, for (b)-(d), some label before the last has 2+ characters ("e.g.", "a.m.to", "U.S." stay text). Otherwise
+ * it is text: `sq.ft`, `ref.no`, `Tel.no`, `Dr.Al`, `Sun.Mo`, `ok.so`, `vs.us`, `Inc.co`.
  */
-const LINK_TLDS = new Set(('com net org info biz io co me app dev ai gov edu xyz online site store tech link page realestate properties homes '
-  + 'shop estate club top live world group agency website space news blog cloud digital media house land').split(' '));
+const LINK_TLDS = new Set(('com net org info biz io me ai app dev gov edu xyz online site store tech link page realestate properties homes '
+  + 'shop estate club top live world group agency website space news blog cloud digital media house land '
+  + 'sa ae qa kw bh om eg jo uk eu de fr in au ca tv ly gl to cc ws').split(' '));
 const LINK_CANDIDATE_RE = new RegExp(String.raw`https?:\/\/[^\s<>"'\x60]+|(?<![@\w./-])[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?::\d{1,5})?(?:[/?#][^\s<>"'\x60]*)?`, 'giu');
 function bareLink(candidate) {
-  const labels = candidate.split(/[:/?#]/)[0].toLowerCase().split('.');
+  const host = candidate.split(/[:/?#]/)[0].toLowerCase();
+  const labels = host.split('.');
   if (labels[0] === 'www') return true;
-  const tld = labels[labels.length - 1];
-  return (LINK_TLDS.has(tld) || /^[a-z]{2}$/.test(tld)) && labels.slice(0, -1).some((l) => l.length >= 2);
+  const last = labels[labels.length - 1];
+  if (!labels.slice(0, -1).some((l) => l.length >= 2)) return false;
+  const pathOrPort = candidate.length > host.length;
+  if (pathOrPort && /^[a-z]{2,24}$/.test(last)) return true;
+  if (!pathOrPort && LINK_TLDS.has(last)) return true;
+  return labels.length >= 3 && /^[a-z]{2}$/.test(last);
 }
-/** Every link a brain chat's text carries (r17, r18), as written (a trailing stop included). */
-export const linksIn = (text) => (String(text ?? '').match(LINK_CANDIDATE_RE) ?? []).filter((c) => /^https?:\/\//i.test(c) || bareLink(c));
+/** Every link of a brain chat's text, with its position (r19: removed by position, never by its first occurrence). */
+function linkSpans(text) {
+  const out = [];
+  for (const m of String(text ?? '').matchAll(LINK_CANDIDATE_RE)) {
+    if (/^https?:\/\//i.test(m[0]) || bareLink(m[0])) out.push({ index: m.index, raw: m[0] });
+  }
+  return out;
+}
+/** Every link a brain chat's text carries (r17-r19), as written (a trailing stop included). */
+export const linksIn = (text) => linkSpans(text).map((l) => l.raw);
 const hasLink = (text) => linksIn(text).length > 0;
 /** The code-built maps link (DESIGN §4.1, §6.5): the one off-site URL a reply may carry. */
 const MAPS_RE = /^https:\/\/maps\.google\.com\/\?q=-?\d{1,3}(?:\.\d+)?,-?\d{1,3}(?:\.\d+)?$/;
@@ -1442,16 +1461,22 @@ export function createDana({
     let stripped = false;
     const orig = String(text).split('\n');
     const lines = orig.map((line) => {
-      let out = line;
+      // By position (r19): the very link the matcher found goes, never the first occurrence of its text (one inside
+      // an e-mail address).
+      let out = '';
+      let at = 0;
       let cut = false;
-      for (const url of linksIn(line)) {
-        const clean = url.replace(/[).,;:!?»”]+$/u, '');
+      for (const { index, raw } of linkSpans(line)) {
+        const clean = raw.replace(/[).,;:!?»”]+$/u, '');
         const codeMaps = MAPS_RE.test(clean) && !String(modelText).includes(clean);
-        if ((onSite(clean) || codeMaps) && kept < allowed) { kept += 1; continue; }
-        out = out.replace(url, ' ');
+        out += line.slice(at, index);
+        at = index + raw.length;
+        if ((onSite(clean) || codeMaps) && kept < allowed) { kept += 1; out += raw; continue; }
+        out += ' ';
         cut = true;
         stripped = true;
       }
+      out += line.slice(at);
       return cut ? trimWeakTail(out.replace(/\s{2,}/g, ' ').replace(/\s+([.,;:!?])/g, '$1')) : out;
     });
     const out = lines.filter((l, i) => l.trim() || !hasLink(orig[i])).join('\n').replace(/\n{3,}/g, '\n\n').trim();
