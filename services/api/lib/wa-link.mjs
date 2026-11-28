@@ -129,6 +129,7 @@ const codeOf = (err) => (PROBE_CODES.has(err?.code) ? err.code : 'bad_response')
 /**
  * @typedef {object} WaLink
  * @property {() => boolean} identityOk  the instance is Bona's own, checked number (false until a probe has answered)
+ * @property {() => boolean} identityMismatch  the newest probe answer named another number (an established mismatch)
  * @property {() => boolean} linkOk      WhatsApp answers through the instance (true until two probes in a row fail)
  * @property {() => boolean} linkStable  the link has answered for 10 min (DESIGN §6.4; false until two good probes of this run span it)
  * @property {() => void} start          forget the last run, probe now, then every 10 min (a second call does nothing)
@@ -358,6 +359,8 @@ export function createWaLink({
     stop,
     probe,
     flush,
+    // A probe's answer named another number (PR-INT r1): a mismatch established, not merely an identity unproven.
+    identityMismatch: () => setup.ok && identity?.match === false,
     health: () => ({ linkOk: linkUp === true, identityOk: identityOk() === true }),
   };
 }

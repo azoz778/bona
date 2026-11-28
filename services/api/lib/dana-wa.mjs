@@ -490,7 +490,7 @@ export function createDana({
   const pendingAgain = new Map(); // leadId → the newest ts woken while a run was in flight
   const backlog = new Map();      // leadId → the backlog message that waits for a stable link (DESIGN §6.4)
   const backlogReserved = new Set(); // leadIds whose backlog first bubble is on its way (the 10-an-hour race)
-  const latencies = [];           // the newest LATENCY_RING answers' latencies (ms)
+  const latencies = [];           // the newest LATENCY_RING answers: { at, ms } (at = when it went; latency() reads 24 h)
   const rateStreak = new Map();  // leadId → the sender refusals in a row (the rate hold's back-off)
   const owedStreak = new Map();  // leadId → an owed line's backlog deferrals in a row (its back-off)
   // leadId → the message an owed line was owed for (r10): it covers that one only, never a newer message. After a
@@ -1708,7 +1708,12 @@ export function createDana({
   async function refusedRun(leadId, e) {
     if (e.reason === 'identity') {
       const t = now();
-      if (t - identityAlertAt >= HOUR_MS) {
+      // An alert only for news (PR-INT r1, Codex P0-2): Dana on (the switch, or this chat's test flag) and a mismatch a
+      // probe established (lib/wa-link.mjs identityMismatch). An identity merely unproven (a 503, an error, before the
+      // first answer) refuses the send all the same and raises nothing; the link probe has its own Kuma line for it.
+      const lead = safely(() => db.getLead(leadId));
+      const on = safely(() => team.danaEnabled()) === true || Number(lead?.dana_test) === 1;
+      if (on && safely(() => link?.identityMismatch?.()) === true && t - identityAlertAt >= HOUR_MS) {
         identityAlertAt = t;
         safely(() => alerts?.notifyOwners?.({ reason: 'identity_mismatch' }));
       }
@@ -2161,7 +2166,7 @@ export function createDana({
     if (after?.dana_hold_reason && ends !== null && ends !== undefined && Number(ends) <= now()) clearHold(leadId);
     const doneAt = now();
     const latencyMs = Math.max(0, doneAt - coversTs);
-    latencies.push(latencyMs);
+    latencies.push({ at: now(), ms: latencyMs });
     if (latencies.length > LATENCY_RING) latencies.shift();
     const woke = Number.isFinite(wokeAt) ? wokeAt : started;
     const stages = {
@@ -2321,7 +2326,12 @@ export function createDana({
 
   const status = () => ({ configured, enabled: team.danaEnabled(), pending: timers.size, inflight: inflight.size });
   /** The answers' latency ring (DESIGN §15): p50 / p90 of the newest answers, in ms. */
-  const latency = () => ({ n: latencies.length, p50: percentile(latencies, 50), p90: percentile(latencies, 90) });
+  const latency = () => {
+    // DESIGN §5.4's "24 h ring" (PR-INT r1): an answer older than a day no longer speaks for the latency.
+    const since = now() - DAY_MS;
+    const ms = latencies.filter((x) => x.at >= since).map((x) => x.ms);
+    return { n: ms.length, p50: percentile(ms, 50), p90: percentile(ms, 90) };
+  };
   /** For /health (PR-INT): the breaker is the system's own switch-off (DESIGN §4.2). Booleans only. */
   function health() {
     return { breaker: breakerOpen() };

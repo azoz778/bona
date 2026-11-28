@@ -1094,6 +1094,7 @@ function rig14({ env = {}, config = {}, openai = [], google = null, realBrain = 
   const ai = { calls: [], queue: [...openai] };
   const gq = { calls: [], events: new Map() };
   const seen = [];
+  const evoState = { down: Boolean(options.evoDown), number: BONA14 };
   const fetchImpl = async (url, init = {}) => {
     const u = String(url);
     seen.push({ method: init.method ?? 'GET', url: u });
@@ -1118,8 +1119,8 @@ function rig14({ env = {}, config = {}, openai = [], google = null, realBrain = 
         return reply(201, { key: { id: `KEY-${evo.sends.length}` } });
       }
       if (u.includes('/instance/fetchInstances') || u.includes('/chat/whatsappNumbers/')) {
-        if (options.evoDown) return reply(503, {});
-        if (u.includes('/instance/fetchInstances')) return reply(200, [{ name: 'bona-test', ownerJid: jidOf(BONA14), connectionStatus: 'open' }]);
+        if (evoState.down) return reply(503, {});
+        if (u.includes('/instance/fetchInstances')) return reply(200, [{ name: 'bona-test', ownerJid: jidOf(evoState.number), connectionStatus: 'open' }]);
         return reply(200, [{ number: BONA14, exists: true }]);
       }
       if (u.includes('/chat/findMessages/')) {
@@ -1155,7 +1156,7 @@ function rig14({ env = {}, config = {}, openai = [], google = null, realBrain = 
     message: { conversation: text }, messageTimestamp: Math.floor(at / 1000),
   });
   const h = {
-    app, db, logs, evo, ai, gq, retell, root, seen,
+    app, db, logs, evo, ai, gq, retell, root, seen, evoState,
     get now() { return t; },
     advance(ms) { t += ms; },
     set(ms) { t = ms; },
@@ -1210,7 +1211,7 @@ test('T14 wiring: the team gets the owner test, so his own number is a client\'s
   }
 });
 
-test('T14 wiring: the brain\'s own alerts reach the owner notes unchanged (brain_out, brain_spend 80/100/stop, brain_bug), and quota/auth push the owners with reason brain', async () => {
+test('T14 wiring: the brain\'s own alerts reach notes.alert exactly as the brain sent them (brain_out quota/auth, brain_spend 80, 100, day and month stop, brain_bug); quota/auth push the owners with reason brain', async () => {
   const QUOTA = { status: 429, json: { error: { type: 'insufficient_quota', code: 'insufficient_quota' } } };
   const AUTH = { status: 401, json: { error: { type: 'invalid_request_error', code: 'invalid_api_key' } } };
   const BAD = { status: 200, json: { choices: [] } };
@@ -1220,69 +1221,104 @@ test('T14 wiring: the brain\'s own alerts reach the owner notes unchanged (brain
     route: 'wa', leadId, language: 'en', autoMode: true, history: [], batchText: 'Hi', leadFacts: {}, turnContext: { firstReply: true },
     toolNames: ['search_properties', 'request_human'], earlierReplies: [],
   });
-  const pushed = [];
-  const spy = (app) => { const orig = app.alerts.notifyOwners; app.alerts.notifyOwners = (o) => { pushed.push(o?.reason ?? null); return orig(o); }; };
-
-  // brain_out quota, then brain_out auth (a fresh app: one outage each).
+  /** The real brain in use (dana_brain '1'), with a spy on the sink: what notes.alert receives, and what is pushed. */
+  const wired = (o) => {
+    const h = rig14({ realBrain: true, ...o });
+    h.app.team.setSetting('dana_brain', '1');
+    const sink = [];
+    const pushed = [];
+    const alert = h.app.notes.alert;
+    h.app.notes.alert = (code, meta) => { sink.push([code, structuredClone(meta)]); return alert(code, meta); };
+    const owners = h.app.alerts.notifyOwners;
+    h.app.alerts.notifyOwners = (x) => { pushed.push(x?.reason ?? null); return owners(x); };
+    return { h, sink, pushed };
+  };
   for (const [res, code] of [[QUOTA, 'quota'], [AUTH, 'auth']]) {
-    pushed.length = 0;
-    const h = rig14({ realBrain: true, openai: [res, res, res] });
+    const { h, sink, pushed } = wired({ openai: [res, res, res] });
     try {
-      spy(h.app);
       assert.equal(h.app.brain.configured, true, 'the real brain, on the temp key');
-      const out = await h.app.brain.turn(turnArgs('LEAD-20261203-brain001'));
-      assert.deepEqual(out, { ok: false, code });
-      const rows = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_out');
-      assert.equal(rows.length, 1, `${code}: one brain_out alert row`);
-      assert.equal(rows[0].meta.code, code, 'the brain\'s code, unchanged');
-      assert.match(rows[0].dedupe_key, /^al:brain_out:\d+$/);
+      assert.deepEqual(await h.app.brain.turn(turnArgs('LEAD-20261203-brain001')), { ok: false, code });
+      assert.deepEqual(sink, [['brain_out', { code }]], `${code}: the brain's payload, unchanged`);
+      assert.equal(h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_out').length, 1);
       await h.app.alerts.flush();
       assert.deepEqual(pushed, ['brain'], `${code}: the owners' phones hear of it as reason brain`);
     } finally {
       await h.close();
     }
   }
-
-  // brain_spend at 100% of the month alert, then the day stop.
+  // Spend: one response costs $0.0192 (lib/brain/prices.mjs); a $0.022 month alert is crossed at 80% by the first, 100% by the second.
   {
-    pushed.length = 0;
-    const h = rig14({ realBrain: true, openai: [OK, OK], config: { brainMonthAlertUsd: 0.01, brainDayStopUsd: 1000, brainMonthStopUsd: 1000 } });
+    const { h, sink, pushed } = wired({ openai: [OK, OK], config: { brainMonthAlertUsd: 0.022, brainDayStopUsd: 1000, brainMonthStopUsd: 1000 } });
     try {
-      spy(h.app);
       assert.equal((await h.app.brain.turn(turnArgs('LEAD-20261203-brain002'))).ok, true);
-      const spend = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_spend');
-      assert.ok(spend.length >= 1, 'a spend alert row');
-      assert.ok(spend.every((r) => ['80', '100'].includes(r.meta.level)), JSON.stringify(spend));
-      assert.ok(spend.some((r) => r.meta.level === '100'));
+      assert.equal((await h.app.brain.turn(turnArgs('LEAD-20261203-brain004'))).ok, true);
+      assert.deepEqual(sink, [['brain_spend', { level: 80 }], ['brain_spend', { level: 100 }]]);
+      assert.deepEqual(h.notes("kind = 'alert'").map((r) => r.meta.level), ['80', '100']);
       assert.deepEqual(pushed, [], 'a spend alert is a note, not a push');
     } finally {
       await h.close();
     }
   }
-  {
-    const h = rig14({ realBrain: true, openai: [OK], config: { brainMonthAlertUsd: 1000, brainDayStopUsd: 0.001, brainMonthStopUsd: 1000 } });
+  for (const [config, stop] of [[{ brainDayStopUsd: 0.001, brainMonthStopUsd: 1000 }, 'day'], [{ brainDayStopUsd: 1000, brainMonthStopUsd: 0.001 }, 'month']]) {
+    const { h, sink } = wired({ openai: [OK], config: { brainMonthAlertUsd: 1000, ...config } });
     try {
       assert.deepEqual(await h.app.brain.turn(turnArgs('LEAD-20261203-brain003')), { ok: false, code: 'budget' });
-      const stop = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_spend');
-      assert.deepEqual(stop.map((r) => r.meta.level), ['stop'], 'the day stop, as the brain sent it');
-      assert.match(stop[0].dedupe_key, /^al:brain_spend:stop:\d+$/);
+      assert.deepEqual(sink, [['brain_spend', { level: 'stop', stop }]], `the ${stop} stop, meta.stop included`);
+      assert.match(h.notes("kind = 'alert'")[0].dedupe_key, /^al:brain_spend:stop:\d+$/);
     } finally {
       await h.close();
     }
   }
-  // brain_bug: bad responses (an unparsable body), three in the hour.
   {
-    const h = rig14({ realBrain: true, openai: Array(12).fill(BAD), config: { brainBackupMode: 'off' } });
+    const { h, sink } = wired({ openai: Array(12).fill(BAD), config: { brainBackupMode: 'off' } });
     try {
       for (let i = 0; i < 4; i += 1) {
         assert.equal((await h.app.brain.turn(turnArgs(`LEAD-20261203-brainb0${i}`))).code, 'bad_response');
         h.advance(1_000);
       }
-      const bug = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_bug');
-      assert.equal(bug.length, 1, 'one brain_bug alert');
+      assert.deepEqual(sink, [['brain_bug', {}]], 'one brain_bug alert');
     } finally {
       await h.close();
     }
+  }
+});
+
+test('T14 wiring: the brain\'s alerts are journal lines only while the brain is not in use: a staged key answering the probe 401 queues no note and pushes nobody', async () => {
+  const AUTH = { status: 401, json: { error: { code: 'invalid_api_key' } } };
+  const quiet = rig14({ realBrain: true, openai: [AUTH] });
+  try {
+    const pushed = [];
+    const owners = quiet.app.alerts.notifyOwners;
+    quiet.app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
+    await quiet.app.ticks.brainProbe();
+    assert.ok(quiet.ai.calls.some((c) => c.url.endsWith('/v1/models')), 'the probe tick asked GET /v1/models');
+    assert.deepEqual(quiet.notes(), [], 'no owner note');
+    await quiet.app.alerts.flush();
+    assert.deepEqual(pushed, [], 'no push');
+    assert.ok(quiet.logs.some((l) => l.evt === 'brain.alert_quiet' && l.code === 'brain_out' && l.why === 'auth'));
+    assert.equal(quiet.app.brain.health().ok, false, 'the brain itself still knows it is out');
+  } finally {
+    await quiet.close();
+  }
+  const used = rig14({ realBrain: true, openai: [AUTH] });
+  try {
+    used.app.team.setSetting('dana_brain', '1');
+    const pushed = [];
+    const owners = used.app.alerts.notifyOwners;
+    used.app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
+    await used.app.ticks.brainProbe();
+    assert.equal(used.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_out').length, 1, 'in use: the note');
+    await used.app.alerts.flush();
+    assert.deepEqual(pushed, ['brain']);
+  } finally {
+    await used.close();
+  }
+  const none = rig14({ turns: [] });
+  try {
+    await none.app.ticks.brainProbe();
+    assert.equal(none.ai.calls.length, 0, 'no key, no probe');
+  } finally {
+    await none.close();
   }
 });
 
@@ -1352,7 +1388,7 @@ test('T14 wiring: the tools get the notes and the fetch, Dana gets the link and 
     {
       const auto = h2.seedLead('LEAD-20261203-broc0001', '966500000035', { inbox_via: 'own_number', match_method: 'own_number', dana_introduced: 1 });
       const r = JSON.parse(await h2.app.tools.runInProcess('send_brochure', { args: { listing_id: withBrochure.id }, chat: { chat_id: 'w1', metadata: { source: 'bona-whatsapp', lead_id: auto.lead_id } } }));
-      if (r.reason !== 'not_on_site') assert.ok(h2.seen.some((c) => c.method === 'HEAD'), `the HEAD went through the app's fetch: ${JSON.stringify(r)}`);
+      assert.ok(h2.seen.some((c) => c.method === 'HEAD'), `the HEAD went through the app's fetch: ${JSON.stringify(r)}`);
     }
   } finally {
     await h2.close();
@@ -1367,7 +1403,7 @@ test('T14 timers: startTimers puts every worker on its clock (notes 5 s, summary
     const timers = [];
     const started = app.startTimers({ every: (ms, fn) => { const id = { ms, fn, cleared: false }; timers.push(id); return id; }, clear: (id) => { id.cleared = true; } });
     const by = Object.fromEntries(started.map((s) => [s.name, s.ms]));
-    assert.deepEqual(by, { notes: 5_000, summary: 60_000, sweep: 60_000, viewing: 300_000, brainProbe: 900_000, upkeep: 86_400_000 });
+    assert.deepEqual(by, { notes: 5_000, summary: 60_000, sweep: 60_000, viewing: 300_000, brainProbe: 900_000, upkeep: 86_400_000, identity: 30_000 });
     assert.equal(link.started, 1, 'the link probe starts (its own 10-min loop)');
     for (const tm of timers) await tm.fn(); // each tick never throws
     assert.equal(app.startTimers({ every: () => ({}), clear: () => {} }).length, 0, 'a second start starts nothing');
@@ -1439,7 +1475,12 @@ test('T14 e2e: the outage case: 429 then quota → one holding line, a brain_out
     const { app } = h;
     app.team.setSetting('dana_enabled', '1');
     const lead = h.seedLead('LEAD-20261203-out00001', '966500000042', { inbox_via: 'own_number', match_method: 'own_number' });
+    const order = [];
+    const { alert, handover } = app.notes;
+    app.notes.alert = (code, meta) => { order.push(['alert', code, { ...meta }]); return alert(code, meta); };
+    app.notes.handover = (l, o) => { order.push(['handover', o?.kind]); return handover(l, o); };
     await h.poll(h.rec('966500000042', 'C-1', 'Hello, is the villa available?'));
+    assert.deepEqual(order, [['alert', 'brain_out', { code: 'rate' }], ['handover', 'brain']], 'the alert with the turn\'s exact code, BEFORE the hand-over (T12 note)');
     assert.equal(app.brain.calls.length, 1, 'the 429 (rate) turn');
     assert.equal(danaOnly(h.sendsTo('966500000042')).length, 1, 'one holding line');
     assert.equal(h.db.getLead(lead.lead_id).dana_hold_reason, 'brain_out');
@@ -1457,9 +1498,8 @@ test('T14 e2e: the outage case: 429 then quota → one holding line, a brain_out
     assert.doesNotMatch(held[0].body.text, /We are back/);
     const out = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_out');
     assert.equal(out.length, 1, 'one brain_out note');
-    // The fake brain raises no alert of its own: the outage's first failure names it here (rate reads as down). The real
-    // brain's own quota alert through the same sink is the wiring test above.
-    assert.ok(['down', 'quota'].includes(out[0].meta.code), out[0].meta.code);
+    assert.equal(out[0].meta.code, 'down', 'the ledger keeps rate as down (owner-notes brainCode)');
+    assert.equal(order.filter(([k]) => k === 'alert').length, 1, 'the retry that met the quota raised no second alert (same outage)');
 
     h.advance(30_000);
     await h.poll(h.rec('966500000042', 'C-2', 'Hello??', { at: h.now - 1_000 }));
@@ -1870,5 +1910,166 @@ test('T14 boot: a first round that errors keeps T09/T12\'s fail-closed rule (the
   } finally {
     shared.app.stopTimers();
     await shared.close();
+  }
+});
+
+/* ---------------- PR-INT r1: the identity watch, the Greeting/Away wiring, the 24 h latency, the timers ---------------- */
+
+test('T14 identity: fetchInstances 503 while findMessages works → no push, no reply on the own number; the watch probes every 30 s until proven, then the waiting message is answered', async () => {
+  const h = rig14({ waLink: null, evoDown: true });
+  try {
+    const { app } = h;
+    app.team.setSetting('dana_enabled', '1');
+    const pushed = [];
+    const owners = app.alerts.notifyOwners;
+    app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
+    app.poller.start = () => true;
+    await app.start(noIntervals);
+    assert.equal(app.waLink.identityOk(), false);
+    h.seedLead('LEAD-20261203-idnt0001', '966500000064');
+    await h.poll(h.rec('966500000064', 'C-1', 'Is the villa still available?'));
+    await app.alerts.flush();
+    assert.equal(h.sendsTo('966500000064').length, 0, 'not proven: no reply (DESIGN §5.3)');
+    assert.ok(!pushed.includes('identity_mismatch'), 'unproven is not a mismatch: no push');
+    const probes = () => h.seen.filter((c) => c.url.includes('/instance/fetchInstances')).length;
+    const before = probes();
+    h.advance(30_000);
+    await app.ticks.identity();
+    assert.equal(probes(), before + 1, 'unproven: one probe a 30-s tick, not 10 min');
+    h.evoState.down = false;
+    h.advance(30_000);
+    assert.deepEqual(await app.ticks.identity(), { woken: 1 });
+    await app.dana.flush();
+    const sends = h.sendsTo('966500000064');
+    assert.equal(sends.length, 1, 'proven: the refused message is answered');
+    assert.match(sends[0].body.text, /Retell here/);
+    const after = probes();
+    h.advance(30_000);
+    await app.ticks.identity();
+    assert.equal(probes(), after, 'proven once: the tick probes no more (the probe\'s own 10-min loop)');
+    await app.alerts.flush();
+    assert.ok(!pushed.includes('identity_mismatch'));
+  } finally {
+    h.app.stopTimers();
+    await h.close();
+  }
+});
+
+test('T14 identity: a mismatch a probe established pushes the owners while Dana is on; with Dana off a refused message pushes nothing new', async () => {
+  for (const on of [true, false]) {
+    const h = rig14({ waLink: null });
+    try {
+      const { app } = h;
+      h.evoState.number = '966500000099';
+      if (on) app.team.setSetting('dana_enabled', '1');
+      app.poller.start = () => true;
+      await app.start(noIntervals);
+      assert.equal(app.waLink.identityMismatch(), true);
+      await app.waLink.flush?.();
+      const pushed = [];
+      const owners = app.alerts.notifyOwners;
+      app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
+      h.seedLead(`LEAD-20261203-mism000${on ? 1 : 2}`, '966500000065');
+      await h.poll(h.rec('966500000065', 'C-1', 'hello'));
+      await app.alerts.flush();
+      assert.equal(h.sendsTo('966500000065').length, 0);
+      assert.deepEqual(pushed, on ? ['identity_mismatch'] : [], on ? 'Dana refused a send: the owners hear why' : 'Dana off: nothing was refused');
+    } finally {
+      h.app.stopTimers();
+      await h.close();
+    }
+  }
+});
+
+test('T14 boot: a shutdown during app.start\'s first probe never starts the poller after it', async () => {
+  const link = { ...provenLink(), probe: () => new Promise(() => {}) };
+  const h = rig14({ waLink: link });
+  try {
+    let started = 0;
+    h.app.poller.start = () => { started += 1; return true; };
+    const p = h.app.start({ ...noIntervals, firstProbeMs: 50 });
+    h.app.stopTimers();
+    assert.deepEqual((await p).pollStarted, null);
+    assert.equal(started, 0);
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 wiring: the ingest gets the notes, so the Greeting/Away detector raises exactly one greeting_away alert for one untracked text in two chats', async () => {
+  const h = rig14();
+  try {
+    h.seedLead('LEAD-20261203-grta0001', '966500000066');
+    h.seedLead('LEAD-20261203-grta0002', '966500000067');
+    const away = 'Thanks for your message. We are away and will reply tomorrow.';
+    await h.poll(h.rec('966500000066', 'AWAY-1', away, { fromMe: true, at: h.now - 20_000 }), h.rec('966500000067', 'AWAY-2', away, { fromMe: true, at: h.now - 10_000 }));
+    h.advance(60_000);
+    await h.poll(h.rec('966500000066', 'AWAY-3', away, { fromMe: true, at: h.now - 5_000 }));
+    const rows = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'greeting_away');
+    assert.equal(rows.length, 1, 'exactly one al:greeting_away row');
+    assert.match(rows[0].dedupe_key, /^al:greeting_away:\d+$/);
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 Ops and /health: the latency reads the last 24 h only; the lid-only count is in Ops', async () => {
+  const h = rig14();
+  try {
+    const { app, db } = h;
+    app.team.setSetting('dana_enabled', '1');
+    for (let i = 0; i < 5; i += 1) {
+      h.seedLead(`LEAD-20261203-late000${i}`, `96650000007${i}`);
+      await h.poll(h.rec(`96650000007${i}`, `L-${i}`, 'hello?', { at: h.now - 70_000 }));
+    }
+    assert.equal(app.dana.latency().n, 5);
+    await new Promise((resolve) => app.server.listen(0, '127.0.0.1', resolve));
+    const health = async () => (await (await fetch(`http://127.0.0.1:${app.server.address().port}/health`)).json()).dana.latencyOk;
+    try {
+      assert.equal(await health(), false, 'five answers of 70 s: p90 over 60 s');
+      assert.match(String(app.ops()['Latency p50 / p90 (24 h)']), /^7\d s \/ 7\d s$/);
+      h.advance(25 * 3_600_000);
+      assert.equal(await health(), null, 'a day later those answers say nothing');
+      assert.equal(app.ops()['Latency p50 / p90 (24 h)'], 'no answers yet');
+    } finally {
+      await new Promise((resolve) => app.server.close(resolve));
+    }
+    assert.equal(app.ops()['Lid-only chats to check'], 0);
+    db.db.prepare("INSERT INTO inbox_candidates (cand_id, lid, first_ts, last_ts, updated) VALUES ('CAND-lid1', '101010101010101@lid', ?, ?, ?)").run(h.now, h.now, h.now);
+    assert.equal(app.ops()['Lid-only chats to check'], 1);
+  } finally {
+    await h.close();
+  }
+});
+
+test('T14 timers: the summary minute queues the 08:00 summary (not at 07:59), and the calendar reconcile runs from 05:00 and again before the summary; the probe tick probes', async () => {
+  const at = (hh, mm) => Date.parse(`2026-12-03T${hh}:${mm}:00+03:00`);
+  const h = rig14({ startAt: at('04', '59'), config: { gcalSaFile: '/nonexistent/example-sa.json', gcalCalendarId: 'test-calendar@example.com' } });
+  try {
+    const { app } = h;
+    app.team.setSetting('owner_as_client', '1');
+    let reconciled = 0;
+    const real = app.viewing.reconcile;
+    app.viewing.reconcile = async () => { reconciled += 1; return real(); };
+    await app.ticks.summary();
+    assert.equal(reconciled, 0, '04:59: no reconcile yet');
+    h.set(at('05', '00'));
+    await app.ticks.summary();
+    await app.ticks.summary();
+    assert.equal(reconciled, 1, '05:00: once a day');
+    h.set(at('07', '59'));
+    await app.ticks.summary();
+    assert.equal(h.notes("kind = 'summary'").length, 0, '07:59: no summary');
+    h.set(at('08', '00'));
+    await app.ticks.summary();
+    assert.equal(reconciled, 2, 'again before the summary builds');
+    const sum = h.notes("kind = 'summary'");
+    assert.equal(sum.length, 1);
+    assert.match(sum[0].dedupe_key, /^sum:2026-12-03$/);
+    await app.ticks.summary();
+    assert.equal(h.notes("kind = 'summary'").length, 1, 'one a day');
+    assert.equal(reconciled, 2);
+  } finally {
+    await h.close();
   }
 });

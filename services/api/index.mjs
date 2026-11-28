@@ -98,6 +98,9 @@ const HEALTH_ERROR_CODES = new Set(['auth', 'forbidden', 'not_found', 'timeout',
  */
 export const TIMERS = Object.freeze([
   ['notes', 5_000], ['summary', 60_000], ['sweep', 60_000], ['viewing', 5 * 60_000], ['brainProbe', 15 * 60_000], ['upkeep', INBOX_UPKEEP_EVERY_MS],
+  // The identity watch (PR-INT r1): a link probe every 30 s until the instance is proven once (then the probe's own
+  // 10-minute loop), and a wake for the chats Dana refused as `identity` meanwhile.
+  ['identity', 30_000],
 ]);
 /** The calendar's daily reconcile hour, Riyadh time (DESIGN §8.4); it also runs before the summary builds. */
 const RECONCILE_HOUR = 5;
@@ -389,7 +392,21 @@ export function createApp(options = {}) {
   // Bona's AI assistant on the OpenAI API (DESIGN-brain §3, PR-BR): its tools run in-process (`runInProcess`, the five
   // WhatsApp tools answer nothing else), and its own alerts go to the owner notes unchanged; an outage for credit or
   // the key also pushes the owners' phones (reason `brain`). Without ~/.secrets/bona-brain.env it is not configured.
+  // Only while the brain is in use (PR-INT r1, Codex P0-1): dana_brain '1', own_inbox '1', the owner's test, or an
+  // own-number chat on a proven instance (auto mode, DESIGN §2). A key staged before any of them (a revoked one that
+  // answers the models probe 401, say) is a journal line, never an owner note or a push.
+  const brainInUse = () => {
+    try {
+      if (team.danaBrainEnabled?.() === true || team.ownInboxEnabled?.() === true || ownerTest.active?.() === true) return true;
+      return ownerTest.ownNumberOk?.() === true
+        && Boolean(db.db.prepare("SELECT 1 FROM leads WHERE inbox_state = 'in' AND inbox_via = 'own_number' LIMIT 1").get());
+    } catch { return false; }
+  };
   const brainAlert = (code, meta) => {
+    if (!brainInUse()) {
+      log({ level: 'warn', evt: 'brain.alert_quiet', code: String(code).slice(0, 40), why: typeof meta?.code === 'string' ? meta.code.slice(0, 40) : null });
+      return;
+    }
     try { notes?.alert?.(code, meta); } catch (err) { log({ level: 'error', evt: 'brain.alert_failed', code: String(code), name: loggableName(err) }); }
     if (code === 'brain_out' && (meta?.code === 'quota' || meta?.code === 'auth')) alerts.notifyOwners?.({ reason: 'brain' });
   };
@@ -409,7 +426,7 @@ export function createApp(options = {}) {
   // PR-B2: the lead's owner_notes rows). A module without one has nothing to forget.
   purgeSubscribers.push((leadId) => viewing.onPurge?.(leadId), (leadId) => notes.onPurge?.(leadId));
   const given = options.ingest ?? createIngest({
-    db, inbox: inboxStore, ownerUserId, ownerPhone: selfDigits || null, isExcludedLead: excludedLead, ownerTest, log, now: clock,
+    db, inbox: inboxStore, ownerUserId, ownerPhone: selfDigits || null, isExcludedLead: excludedLead, ownerTest, notes, log, now: clock,
   });
   // The backfill and the poller take the one-record function. A test may hand in either
   // shape, as createPoller allows; any other fails here, not on every record the poller reads.
@@ -453,8 +470,11 @@ export function createApp(options = {}) {
   // starts them again. Her lines still go to the journal unchanged.
   const opsEvents = [];
   const OPS_EVENTS_MAX = 20_000;
+  // The chats Dana refused as `identity` (the instance not proven yet): woken once it is (the `identity` tick).
+  const identitySkipped = new Set();
   const danaLog = (e) => {
     try {
+      if (e?.evt === 'dana.skipped' && e.reason === 'identity' && typeof e.leadId === 'string') identitySkipped.add(e.leadId);
       const kind = e?.evt === 'dana.answered' ? 'answered' : e?.evt === 'dana.skipped' ? 'skipped' : e?.evt === 'dana.handover' ? 'handover' : null;
       if (kind) {
         const why = kind === 'skipped' ? e.reason : kind === 'handover' ? e.why : null;
@@ -758,6 +778,9 @@ export function createApp(options = {}) {
       out['Assistant turns this month'] = inboxStore.countDanaTurns({ sinceTs: monthStart });
     });
     part(() => {
+      out['Lid-only chats to check'] = db.db.prepare("SELECT COUNT(*) AS n FROM inbox_candidates WHERE state = 'open' AND phone_e164 IS NULL AND lid IS NOT NULL").get().n;
+    });
+    part(() => {
       out['Chats held by an AI outage'] = db.db.prepare("SELECT COUNT(*) AS n FROM leads WHERE inbox_state = 'in' AND dana_hold_reason = 'brain_out'").get().n;
     });
     part(() => {
@@ -814,7 +837,28 @@ export function createApp(options = {}) {
       ticking.delete(name);
     }
   };
+  /**
+   * The identity watch (PR-INT r1; DESIGN §5.3 stays: no send before the instance is proven). Until it has been
+   * proven once, one link probe a tick (30 s), not the probe's 10 minutes. Whenever it is proven, each chat Dana
+   * refused as `identity` meanwhile is woken for its newest client message; Dana's own rules (freshness included)
+   * decide from there, as on main. Nothing at all on a shared number, which the guard never reads.
+   */
+  let identityProven = false;
+  async function identityWatch() {
+    if (wa.ownNumberFrom !== 'instance') return { woken: 0 };
+    if (!identityProven) await waLink.probe?.();
+    if (waLink.identityOk?.() !== true) return { woken: 0 };
+    identityProven = true;
+    let woken = 0;
+    for (const leadId of [...identitySkipped]) {
+      identitySkipped.delete(leadId);
+      const ts = db.db.prepare("SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ? AND direction = 'in'").get(leadId)?.ts;
+      if (Number.isFinite(ts)) { dana.wake(leadId, ts); woken += 1; }
+    }
+    return { woken };
+  }
   app.ticks = {
+    identity: tick('identity', identityWatch),
     notes: tick('notes', () => notes.tick?.()),
     summary: tick('summary', summaryMinute),
     sweep: tick('sweep', () => dana.sweep?.()),
@@ -854,6 +898,9 @@ export function createApp(options = {}) {
     } finally {
       if (timer) clearTimeout(timer);
     }
+    if (waLink.identityOk?.() === true) identityProven = true;
+    // A shutdown meanwhile (SIGTERM inside the first ≤ 15 s) stopped the timers: the poller is not started after it.
+    if (!running) return { timers, pollStarted: null };
     const pollStarted = poller ? poller.start({ intervalMs: cfg.waPollMs }) : null;
     return { timers, pollStarted };
   };
