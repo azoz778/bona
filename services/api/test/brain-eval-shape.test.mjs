@@ -690,6 +690,8 @@ test('the guard metric (Codex r1 P1, Claude r3 P2-2): repairs, guard hand-overs 
   const r = await runner();
   const ctx = r.gradeContext({});
   const draft = (content) => ({ repair: false, content });
+  // The refusals as judged (r15 adds the currency read and the form excerpt, for the local report only).
+  const core = (rs) => rs.map(({ excerpt, currency, ...x }) => x);
   const repair = (content, results) => ({ repair: true, content, results });
   const tool = (price) => JSON.stringify({ count: 1, results: [{ id: 'BONA-W019', price_en: price }] });
   const counts = (x) => ({ repairs: x.repairs, handover: x.handover, event: x.event, falsePositives: x.falsePositives });
@@ -714,41 +716,41 @@ test('the guard metric (Codex r1 P1, Claude r3 P2-2): repairs, guard hand-overs 
   const w010 = JSON.stringify({ count: 1, results: [{ id: 'BONA-W010', price_en: 'SAR 950,000', area_sqm: 180, beds: 3 }] });
   const full = (text, results) => r.guardStats({ responses: [draft(text), repair('ok', results)], earlierReplies: [], ctx });
   let g = full('BONA-W010 سعرها 950 ألف ريال، والمشروع فيه أكثر من 12 ألف وحدة سكنية.', [w010]);
-  assert.deepEqual([g.falsePositives, g.refusals], [1, [{ reason: 'amount', amount: 12000, falseHit: true }]], 'a count of homes (12 ألف وحدة) is no money');
+  assert.deepEqual([g.falsePositives, core(g.refusals)], [1, [{ reason: 'amount', amount: 12000, falseHit: true }]], 'a count of homes (12 ألف وحدة) is no money');
   g = full('Rent is SAR 1,250 per month.', [onRequest]);
-  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'amount', amount: 1250, falseHit: false }]], 'a currency cue: a true hit, whatever area_sqm says');
+  assert.deepEqual([g.falsePositives, core(g.refusals)], [0, [{ reason: 'amount', amount: 1250, falseHit: false }]], 'a currency cue: a true hit, whatever area_sqm says');
   g = full('BONA-W010 is listed at SAR 950,000; the service charge is about 15 riyals per metre.', [w010]);
-  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'amount', amount: 15, falseHit: false }]], '"15 riyals per metre" is money');
+  assert.deepEqual([g.falsePositives, core(g.refusals)], [0, [{ reason: 'amount', amount: 15, falseHit: false }]], '"15 riyals per metre" is money');
   // Codex r12 P1: a refusal for a link (or a unit, or any reason but an amount) is a TRUE hit, never a false positive;
   // each refusal names the guard's own reason.
   const w019 = JSON.stringify({ count: 1, results: [{ id: 'BONA-W019', price_en: 'SAR 6,200,000', url: 'https://bona-real-estate.com/properties/private-villa-al-khalidiyah/' }] });
   g = r.guardStats({ responses: [draft('BONA-W019 is listed at SAR 6,200,000: https://homes-example.com/properties/private-villa-al-khalidiyah/'), repair('ok', [w019])], earlierReplies: [], siteUrl: ctx.siteUrl });
-  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'link', falseHit: false }]], 'a tool-backed price and an off-site home link, refused for the link');
+  assert.deepEqual([g.falsePositives, core(g.refusals)], [0, [{ reason: 'link', falseHit: false }]], 'a tool-backed price and an off-site home link, refused for the link');
   g = r.guardStats({ responses: [draft('Unit B12-07 is listed at SAR 950,000.'), repair('ok', [w010])], earlierReplies: [], siteUrl: ctx.siteUrl });
-  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'unit', unit: 'B12-07', falseHit: false }]], 'a unit refusal');
+  assert.deepEqual([g.falsePositives, core(g.refusals)], [0, [{ reason: 'unit', unit: 'B12-07', falseHit: false }]], 'a unit refusal');
   // Codex r13 P1: a denied amount is judged on the form the guard read it from (guardForms): Markdown between the currency
   // and the figure is no false hit; the plain twins are judged as before, and a count of homes stays a false hit.
   const noPrice = JSON.stringify({ count: 1, results: [{ id: 'BONA-W019', price_en: 'SAR 6,200,000' }] });
   for (const [text, amount, falseHit] of [['Rent is **SAR** 6,500 per month.', 6500, false], ['السعر **٦٬٥٠٠** ريال', 6500, false],
     ['Rent is SAR 6,500 per month.', 6500, false], ['السعر ٦٬٥٠٠ ريال', 6500, false]]) {
     g = full(text, [noPrice]);
-    assert.deepEqual([g.refusals, g.falsePositives], [[{ reason: 'amount', amount, falseHit }], falseHit ? 1 : 0], text);
+    assert.deepEqual([core(g.refusals), g.falsePositives], [[{ reason: 'amount', amount, falseHit }], falseHit ? 1 : 0], text);
   }
   g = full('BONA-W010 سعرها **950 ألف ريال**، والمشروع فيه أكثر من 12 ألف وحدة سكنية.', [w010]);
-  assert.deepEqual([g.falsePositives, g.refusals], [1, [{ reason: 'amount', amount: 12000, falseHit: true }]], 'a count of homes, Markdown or not');
+  assert.deepEqual([g.falsePositives, core(g.refusals)], [1, [{ reason: 'amount', amount: 12000, falseHit: true }]], 'a count of homes, Markdown or not');
   g = full('BONA-W010 سعرها 950 ألف ريال، والمشروع فيه أكثر من **12 ألف** وحدة سكنية.', [w010]);
-  assert.deepEqual([g.falsePositives, g.refusals], [1, [{ reason: 'amount', amount: 12000, falseHit: true }]], 'a bold count: judged on the form the client reads');
+  assert.deepEqual([g.falsePositives, core(g.refusals)], [1, [{ reason: 'amount', amount: 12000, falseHit: true }]], 'a bold count: judged on the form the client reads');
   // Codex r14 P1: every denied occurrence is its own, never keyed by its value: an invented SR price beside a count of the
   // same value is a true hit (the guard read a currency on it), and a draft is a false positive only when every one is no money.
   g = full('**SR** 12,000 upfront. The development has 12 thousand units.', [noPrice]);
-  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'amount', amount: 12000, falseHit: false }, { reason: 'amount', amount: 12000, falseHit: true }]], "Codex's draft");
+  assert.deepEqual([g.falsePositives, core(g.refusals)], [0, [{ reason: 'amount', amount: 12000, falseHit: false }, { reason: 'amount', amount: 12000, falseHit: true }]], "Codex's draft");
   g = full('SR 12,000 upfront. The development has 12 thousand units.', [noPrice]);
-  assert.deepEqual([g.falsePositives, g.refusals.map((x) => x.falseHit)], [0, [false, true]], 'its plain twin');
+  assert.deepEqual([g.falsePositives, core(g.refusals).map((x) => x.falseHit)], [0, [false, true]], 'its plain twin');
   g = full('The development has 12 thousand units, and **12 thousand** homes.', [noPrice]);
-  assert.deepEqual([g.falsePositives, g.refusals.map((x) => x.falseHit)], [1, [true, true]], 'two counts: a false positive');
+  assert.deepEqual([g.falsePositives, core(g.refusals).map((x) => x.falseHit)], [1, [true, true]], 'two counts: a false positive');
   // A refusal the guard's own check does not repeat on the draft names no reason the eval can judge: no false positive.
   g = r.guardStats({ responses: [draft('It is SAR 6.2 million.'), repair('It is SAR 6,200,000.', [tool('SAR 6,200,000')])], earlierReplies: [] });
-  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'unknown', falseHit: false }]], 'an unreproduced refusal');
+  assert.deepEqual([g.falsePositives, core(g.refusals)], [0, [{ reason: 'unknown', falseHit: false }]], 'an unreproduced refusal');
   // Codex r4 P2: an explicit currency makes the figure money before any year reading ("SAR 2000" is no year).
   // Claude r4 P3-1: a scale word or «بـ» before the figure is a money cue too, unless a count or an area follows.
   // Codex r5 P2: when the guard itself read a currency on the figure (SAR, SR, ر.س …: findAmounts' own parse), it is money.
@@ -761,13 +763,13 @@ test('the guard metric (Codex r1 P1, Claude r3 P2-2): repairs, guard hand-overs 
     // The scale word alone makes a figure under 100,000 money (no count or area after it).
     ['BONA-W010 سعرها 950 ألف ريال، والثانية 50 ألف.', 50000, false], ['BONA-W010 is listed at SAR 950,000, and the second one is 40 thousand.', 40000, false]]) {
     g = full(text, [w010]);
-    assert.deepEqual([g.refusals, g.falsePositives], [[{ reason: 'amount', amount, falseHit }], falseHit ? 1 : 0], text);
+    assert.deepEqual([core(g.refusals), g.falsePositives], [[{ reason: 'amount', amount, falseHit }], falseHit ? 1 : 0], text);
   }
   // More real refusals (the guard reads each as an amount): counts of people are false hits, an invented cash price a true one.
   for (const [text, amount, falseHit] of [['BONA-W010 is listed at SAR 950,000; the district welcomes about 300,000 visitors a year.', 300000, true],
     ['BONA-W010 سعرها 950,000 ريال، والحي فيه أكثر من 150 ألف ساكن.', 150000, true], ['BONA-W010 is listed at SAR 950,000, or 900,000 cash.', 900000, false]]) {
     g = full(text, [w010]);
-    assert.deepEqual([g.refusals, g.falsePositives], [[{ reason: 'amount', amount, falseHit }], falseHit ? 1 : 0], text);
+    assert.deepEqual([core(g.refusals), g.falsePositives], [[{ reason: 'amount', amount, falseHit }], falseHit ? 1 : 0], text);
   }
   const turn = (guard) => ({ ms: 10, g: { ok: true, code: null, hardFails: [], routing: [], register: [], registerApplies: false, style: [], guard } });
   const quiet = { repairs: 0, handover: false, event: false, falsePositives: 0, refusals: [] };
@@ -778,7 +780,8 @@ test('the guard metric (Codex r1 P1, Claude r3 P2-2): repairs, guard hand-overs 
   let s = run({ repairs: 1, handover: false, event: true, falsePositives: 0, refusals: [] });
   assert.deepEqual([s.repairs, s.guardHandovers, s.guardEvents, s.falsePositives, s.falseHitRate, r.passesBar(s)], [3, 0, 3, 0, 0, true]);
   s = run({ repairs: 1, handover: false, event: true, falsePositives: 1, refusals: [] });
-  assert.deepEqual([s.falsePositives, s.falseHitRate, r.passesBar(s)], [3, 0.06, false]);
+  // The r15 ruling: the false-hit rate is advisory: above 5% it is a read, never a bar fail by itself.
+  assert.deepEqual([s.falsePositives, s.falseHitRate, r.passesBar(s), r.guardNeedsRead(s)], [3, 0.06, true, true]);
 });
 
 test('the pass bar and the decision rule (PLAN T26): terra main only when it passes and is within 5 points of a complete sol run', async () => {
@@ -789,8 +792,25 @@ test('the pass bar and the decision rule (PLAN T26): terra main only when it pas
   const sol = 'gpt-5.6-sol';
   const terra = 'gpt-6.1-terra';
   assert.equal(r.passesBar(s(sol, 'low')), true);
-  for (const bad of [{ hardCases: 47 }, { routingRate: 0.89 }, { p90Ms: 15_001 }, { falseHitRate: 0.051 }, { complete: false }]) assert.equal(r.passesBar(s(sol, 'low', bad)), false, JSON.stringify(bad));
+  for (const bad of [{ hardCases: 47 }, { routingRate: 0.89 }, { p90Ms: 15_001 }, { complete: false }]) assert.equal(r.passesBar(s(sol, 'low', bad)), false, JSON.stringify(bad));
   assert.equal(r.passesBar(s(sol, 'low', { routingRate: 0.9, p90Ms: 15_000, falseHitRate: 0.05 })), true, 'the bar is inclusive');
+  // The r15 ruling: the guard's false-hit rate leaves the bar. Above 5% the run needs a read (exit 5, never pass), the
+  // same as a flag; at or under 5% the decision is unchanged; the note says the rate is advisory and the read decides.
+  assert.equal(r.passesBar(s(sol, 'low', { falseHitRate: 0.2 })), true, 'no bar fail by the rate');
+  let g = r.decide([s(sol, 'low', { falseHitRate: 0.051 }), s(terra, 'low', { hardCases: 47 })]);
+  assert.deepEqual([g.verdict, r.exitCode(g), g.main.model, g.flagged], ['needs_read', 5, sol, 0], 'above 5% and nothing else wrong: a read, not a fail');
+  assert.ok(g.notes.some((n) => /gpt-5\.6-sol:low|gpt-5\.6-sol at effort low/.test(n) && /5\.1%/.test(n) && /above 5%/.test(n)), g.notes.join(' | '));
+  assert.ok(g.notes.some((n) => /false-hit rate is advisory/.test(n) && /the read decides/.test(n)), 'the advisory note');
+  g = r.decide([s(sol, 'low', { falseHitRate: 0.051 }), s(terra, 'low', { falseHitRate: 0.051 })]);
+  assert.deepEqual([g.verdict, g.main.model], ['needs_read', terra], 'terra above 5% no longer loses the bar to that alone');
+  for (const rate of [0.05, 0.02, 0]) {
+    g = r.decide([s(sol, 'low', { falseHitRate: rate }), s(terra, 'low', { hardCases: 47 })]);
+    assert.deepEqual([g.verdict, r.exitCode(g), g.main.model], ['pass', 0, sol], `rate ${rate}: unchanged`);
+    assert.ok(g.notes.some((n) => /false-hit rate is advisory/.test(n)), 'the advisory note on every decision');
+  }
+  // A flag and a rate above 5% together: one needs_read.
+  g = r.decide([s(sol, 'low', { falseHitRate: 0.06, needsRead: 2 }), s(terra, 'low', { hardCases: 47 })]);
+  assert.deepEqual([g.verdict, g.flagged], ['needs_read', 2]);
 
   // terra passes and is within 5 points on routing and register: terra main, the sol effort with the lower p90 backs it.
   let d = r.decide([s(sol, 'low', { p90Ms: 12_000 }), s(sol, 'medium', { p90Ms: 9_000 }), s(terra, 'low', { routingRate: 0.91, registerRate: 0.86 })]);
@@ -913,7 +933,29 @@ test('flagged replies and guard refusals go to the local 0600 report file, never
     assert.ok(!report.join('\n').includes('Sunday at 10 it is'), 'stdout holds no reply text');
     // A probes run lists its guard refusals in the same file: case, amount, true or false hit.
     const res2 = await r.runEval({ mode: 'dry', fake: 'probes', candidates: r.parseCandidates('gpt-5.6-sol:low'), outDir: out, env: {} });
-    assert.ok(/gpt-5\.6-sol:low en-edge-clause turn 1 \[amount\]: 90000 true hit/.test(fs.readFileSync(res2.reportFile, 'utf8')), 'the clause form\'s refusal');
+    // r15: each refusal with its reason, its judged occurrence (the figure, and the currency the guard read) and the form
+    // the guard read, for the main session's read.
+    assert.ok(/gpt-5\.6-sol:low en-edge-clause turn 1 \[amount\] 90000 SAR: true hit \| .*90,000/.test(fs.readFileSync(res2.reportFile, 'utf8')), 'the clause form\'s refusal');
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('the r15 ruling: the guard false-hit rate is advisory: above 5% the run needs a read (exit 5), never a fail by itself, and every refusal is in the report', async () => {
+  const r = await runner();
+  const out = tmpDir('fp');
+  try {
+    const res = await r.runEval({ mode: 'dry', fake: 'guard-false-hits', candidates: r.parseCandidates('gpt-5.6-sol:low'), outDir: out, env: {} });
+    const [s] = res.summaries;
+    assert.ok(s.falseHitRate > 0.05 && s.falsePositives >= 3, `false hits ${s.falsePositives}, ${s.falseHitRate}`);
+    assert.deepEqual([r.passesBar(s), s.needsRead, s.hardCases, res.decision.verdict, r.exitCode(res.decision)], [true, 0, 48, 'needs_read', 5]);
+    const report = r.formatReport(res);
+    assert.ok(report.some((l) => l.startsWith('gpt-5.6-sol:low') && /needs read \(false hits above 5%\)$/.test(l)), 'the candidate line');
+    assert.ok(report.some((l) => /^decision: needs read/.test(l)) && report.some((l) => /false-hit rate is advisory/.test(l)), 'the decision and its note');
+    assert.ok(!report.join('\n').includes('visitors'), 'stdout holds no draft text');
+    const local = fs.readFileSync(res.reportFile, 'utf8');
+    const lines = local.split('\n').filter((l) => /\[amount\] 300000: false hit \| .*300,000 visitors/.test(l));
+    assert.equal(lines.length, s.falsePositives, 'every false hit listed, with the form the guard read');
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
   }

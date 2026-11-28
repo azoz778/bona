@@ -71,7 +71,7 @@
  *   the guard (Added 27 Nov; r1, r3): repair requests, guard hand-overs and false hits counted apart; a refused figure
  *     is a false hit when the eval's own reading of its clause says it is no money (no money cue, an area, a count, a
  *     phone, a postal / plot number, a year, a time); a refusal for any other reason (a link, a unit) is a true hit
- *     (r12); a turn with a false-hit draft counts, and > 5% of turns fails;
+ *     (r12); a turn with a false-hit draft counts, and > 5% of turns is a read, never a fail by itself (the r15 ruling);
  *   latency: per turn, p90 ≤ 15 s.
  */
 import fs from 'node:fs';
@@ -633,7 +633,7 @@ export function guardStats({ responses = [], code = null, earlierReplies = [], s
       // the eval's own reading judges only the figures the guard read without currency evidence.
       // An occurrence the guard read with a currency (findAmounts' own field, r5) is money; one without is judged by the
       // eval's reading of its clause. The draft is a false positive only when every occurrence is no money (below).
-      for (const a of deniedHere) judged.push({ reason: 'amount', amount: a.raw, falseHit: a.raw !== null && a.currency === null && notMoney(judgedForm, a) });
+      for (const a of deniedHere) judged.push({ reason: 'amount', amount: a.raw, currency: a.currency ?? null, falseHit: a.raw !== null && a.currency === null && notMoney(judgedForm, a) });
       // The guard refused an amount, yet no form holds one it denies (its check and ours disagree): a false hit.
       if (!deniedHere.length) judged.push({ reason: 'amount', amount: null, falseHit: true, kind: 'reading' });
     }
@@ -643,7 +643,9 @@ export function guardStats({ responses = [], code = null, earlierReplies = [], s
     }
     // The guard's check does not repeat the refusal on this draft: no reason the eval can judge, so no false hit.
     if (!judged.length) judged.push({ reason: 'unknown', falseHit: false });
-    refusals.push(...judged);
+    // r15: the form the guard read (for an amount, the one it was judged on), for the local report's read; never stdout.
+    const excerpt = (deniedHere.length ? judgedForm : forms.at(-1)).replace(/\s+/g, ' ').trim().slice(0, 400);
+    refusals.push(...judged.map((x) => ({ ...x, excerpt })));
     if (judged.every((x) => x.falseHit)) falsePositives += 1;
   }
   return { repairs, handover, event: repairs > 0 || handover, falsePositives, refusals };
@@ -946,10 +948,15 @@ export function summarise({ cand, results, usd = 0, usdUnknown = 0, aborted = nu
   };
 }
 
-/** PLAN T26: 100% of the hard rules, routing ≥ 90%, per-turn p90 ≤ 15 s, guard false positives ≤ 5% of turns, every case run. */
+/**
+ * PLAN T26: 100% of the hard rules, routing ≥ 90%, per-turn p90 ≤ 15 s, every case run. The guard's false-hit rate left
+ * the bar (the r15 ruling): above 5% it is a read (guardNeedsRead), never a fail by itself.
+ */
 export function passesBar(s) {
-  return Boolean(s && s.complete === true && s.hardCases === s.cases && s.routingRate >= BAR.routing && s.p90Ms <= BAR.p90Ms && s.falseHitRate <= BAR.falseHitRate);
+  return Boolean(s && s.complete === true && s.hardCases === s.cases && s.routingRate >= BAR.routing && s.p90Ms <= BAR.p90Ms);
 }
+/** The r15 ruling: a candidate whose guard false positives pass 5% of its turns needs a read (exit 5), like a flag. */
+export const guardNeedsRead = (s) => Boolean(s) && Number(s.falseHitRate) > BAR.falseHitRate;
 
 /** T26 re-sizes the day stop to ≥ 3 × PER_DAY (the top tier, 200) × the measured $/turn; null when the default covers it. */
 export function dayStopUsd(usdPerTurn) {
@@ -988,11 +995,13 @@ export function decide(summaries) {
   // The r3 ruling: a flagged reply on any candidate may be a claim the nets missed, and reading it can only turn a pass
   // into a fail; so a run with flags is "needs read" (exit 5), its decision tentative, until the main session reads them.
   const flagged = own.reduce((n, s) => n + (s.needsRead ?? 0), 0);
+  // The r15 ruling: the guard's false-hit rate is advisory: above 5% on any candidate, the run needs a read.
+  const guardReads = own.filter(guardNeedsRead);
   if (!main) {
     const why = !terraPick ? 'no model passes the bar'
       : !solRef ? 'terra passes the bar, but there is no complete sol run to compare it with: re-run sol before choosing terra'
         : 'terra passes the bar but is more than 5 points behind sol on routing or register, and sol fails the bar';
-    return { verdict: 'fail', main: null, backup: null, backupMode: null, env: [], flagged, notes: [`${why}: Phase 6 stays shut`] };
+    return { verdict: 'fail', main: null, backup: null, backupMode: null, env: [], flagged, guardReads: guardReads.length, notes: [`${why}: Phase 6 stays shut`] };
   }
   const backupMode = backup && backup.complete && backup.hardCases === backup.cases ? 'answer' : 'handover';
   const env = [];
@@ -1006,9 +1015,11 @@ export function decide(summaries) {
     if (s && s.effort !== REASONING_EFFORT) notes.push(`${role} ${s.model} at effort ${s.effort}: no env knob (lib/brain/openai.mjs sends '${REASONING_EFFORT}'), a code change`);
   }
   if (flagged) notes.push(`${flagged} flagged replies (a reply on an unbacked pick turn, with the eval's claim words, after an empty search, or with an unbacked figure or a magnitude word): read them in the local report before the model decision`);
+  for (const s of guardReads) notes.push(`${s.label ?? `${s.model} at effort ${s.effort}`}: guard false hits ${(100 * s.falseHitRate).toFixed(1)}% of turns, above 5%: read its guard refusals in the local report before the model decision`);
+  notes.push('the guard false-hit rate is advisory (the r15 ruling): above 5% the run needs a read; the read decides, never the rate');
   // The r10 decision rule: the grader cannot list every way a model misbehaves, so the main session reads every transcript.
   notes.push('the decision is final only after the main session reads every transcript of the chosen main and backup (the answers file), before any env line is written');
-  return { verdict: flagged ? 'needs_read' : 'pass', main: pick(main), backup: pick(backup), backupMode, env, flagged, notes };
+  return { verdict: flagged || guardReads.length ? 'needs_read' : 'pass', main: pick(main), backup: pick(backup), backupMode, env, flagged, guardReads: guardReads.length, notes };
 }
 
 /* ---------------- the run ---------------- */
@@ -1026,7 +1037,9 @@ function writeReport(file, { runId, read }) {
     `== needs read (${read.flags.length}): a reply on an unbacked pick turn (every reply but BOOKING_FAILED_LINE), with the eval's claim words, after an empty search, or with an unbacked figure or a magnitude word`,
     ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn} [${f.why === 'figure' ? `unbacked figure or magnitude word: ${f.figures.join(', ')}` : f.why === 'empty_search' ? 'after an empty search' : f.why === 'claim' ? "the eval's claim words" : `names the slot: ${f.namesSlot ? 'yes' : 'no'}`}]: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
     `== guard refusals (${read.refusals.length})`,
-    ...read.refusals.map((x) => `${x.candidate} ${x.case} turn ${x.turn} [${x.reason}]: ${x.amount ?? x.unit ?? x.kind ?? '-'} ${x.falseHit ? 'false hit' : 'true hit'}`), ''];
+    // r15: each refusal with its reason, its judged occurrence (the figure and the currency the guard read on it, the unit,
+    // or the kind) and the form the guard read, for the main session's read.
+    ...read.refusals.map((x) => `${x.candidate} ${x.case} turn ${x.turn} [${x.reason}] ${x.amount ?? x.unit ?? x.kind ?? '-'}${x.currency ? ` ${x.currency}` : ''}: ${x.falseHit ? 'false hit' : 'true hit'} | ${x.excerpt ?? ''}`), ''];
   const fd = fs.openSync(file, 'wx', 0o600);
   try { fs.fchmodSync(fd, 0o600); fs.writeSync(fd, lines.join('\n')); } finally { fs.closeSync(fd); }
 }
@@ -1219,7 +1232,8 @@ const FAKE_REPLY = {
  * says it is set), 'claim-pick-ask' (the same, then a follow-up question: r2), 'claim-pick-comma' (joined by a comma: r3),
  * 'claim-pick-allset' (names no slot) and 'claim-pick-spelled' (spells the hour: r4); 'units-lie' (a cue-less invented "from"
  * price on the units and guard-edge cases, Claude r10 P1) and 'wrong-listing' (books the picked slot on another home,
- * Codex r10 P1-1).
+ * Codex r10 P1-1); 'guard-false-hits' (drafts a count the guard refuses on the search and home-detail cases, then repairs
+ * cleanly: the r15 ruling's read).
  */
 export function fakeModel({ mode = 'good', state }) {
   const record = recorder(state);
@@ -1271,6 +1285,10 @@ export function fakeModel({ mode = 'good', state }) {
     } else if (mode === 'units-lie' && ['units', 'guard_edge'].includes(kase.category) && kase.id !== 'en-edge-clause') {
       const c = good();
       message = c.tool_calls ? c : reply(en ? 'They start from 75,000.' : 'تبدأ من ٧٥٬٠٠٠.');
+    } else if (mode === 'guard-false-hits' && ['search', 'home_detail'].includes(kase.category)) {
+      // r15: a count the guard refuses as an amount (a false hit), then a clean repair answer: nothing else wrong.
+      const last = Array.isArray(body.input) ? body.input.at(-1) : null;
+      message = last?.role === 'developer' && itemText(last.content) === REPAIR_NOTE ? reply(canned) : good('The district welcomes about 300,000 visitors a year.');
     } else if (mode === 'claim-pick' && spec?.expect?.booked) {
       message = reply(en ? 'Great, Sunday at 10 it is!' : 'تمام، يوم الأحد الساعة 10 الصبح إن شاء الله.');
     } else if (mode === 'claim-pick-allset' && spec?.expect?.booked) {
@@ -1646,12 +1664,13 @@ const sec = (ms) => `${(ms / 1000).toFixed(1)}s`;
 function barMisses(s) {
   return [
     ...(s.complete ? [] : ['incomplete']), ...(s.hardCases === s.cases ? [] : ['hard']), ...(s.routingRate >= BAR.routing ? [] : ['routing']),
-    ...(s.p90Ms <= BAR.p90Ms ? [] : ['p90']), ...(s.falseHitRate <= BAR.falseHitRate ? [] : ['false-hits']),
+    ...(s.p90Ms <= BAR.p90Ms ? [] : ['p90']),
   ];
 }
 function line(s, subset = false) {
   const errs = Object.entries(s.errors).map(([k, v]) => `${k} ${v}`).join(', ') || '0';
-  const verdict = s.baseline ? '' : subset ? '  subset' : !passesBar(s) ? `  FAIL (${barMisses(s).join(', ')})` : s.needsRead ? `  needs read (${s.needsRead} flagged)` : '  PASS';
+  const reads = [...(s.needsRead ? [`${s.needsRead} flagged`] : []), ...(guardNeedsRead(s) ? ['false hits above 5%'] : [])];
+  const verdict = s.baseline ? '' : subset ? '  subset' : !passesBar(s) ? `  FAIL (${barMisses(s).join(', ')})` : reads.length ? `  needs read (${reads.join(', ')})` : '  PASS';
   return `${s.label.padEnd(20)}hard ${s.hardCases}/${s.cases}  routing ${s.routingCases}/${s.cases} ${pct(s.routingRate)}  register ${s.registerOk}/${s.registerN}  `
     + `style ${s.styleOk}/${s.styleN}  guard repairs ${s.repairs}, hand-overs ${s.guardHandovers}, false hits ${s.falsePositives} ${pct(s.falseHitRate)}  errors ${errs}  p50 ${sec(s.p50Ms)}  p90 ${sec(s.p90Ms)}  `
     + `${s.baseline ? '' : `$/turn ${s.usdPerTurn.toFixed(4)}  $ ${s.usd.toFixed(2)}`}${verdict}`;
@@ -1671,7 +1690,7 @@ export function formatReport(res) {
   const d = res.decision;
   const tentative = d.main ? `main ${d.main.model} (effort ${d.main.effort}), backup ${d.backup ? `${d.backup.model} (effort ${d.backup.effort})` : 'none'}, backup mode ${d.backupMode}` : '';
   if (d.verdict === 'needs_read') {
-    out.push(`decision: needs read (${d.flagged} flagged), tentative: ${tentative}`);
+    out.push(`decision: needs read (${d.flagged} flagged${d.guardReads ? `, guard false hits above 5% on ${d.guardReads} candidate(s)` : ''}), tentative: ${tentative}`);
     out.push(...d.env.map((e) => `env (tentative): ${e}`));
   } else if (d.verdict === 'pass') {
     out.push(`decision: main ${d.main.model} (effort ${d.main.effort}), backup ${d.backup ? `${d.backup.model} (effort ${d.backup.effort})` : 'none'}, backup mode ${d.backupMode}`);
@@ -1686,7 +1705,7 @@ export function formatReport(res) {
 
 export const USAGE = [
   'usage: run.mjs [--dry-run] [--models model:effort,...] [--baseline retell] [--only id,...] [--cases file] [--out-dir dir] [--max-usd n]',
-  'exit: 0 pass, 1 fail, 2 refused or a bad option, 3 not configured, 4 subset (no decision), 5 needs read (flagged pick-turn replies: read them in the local report first)',
+  'exit: 0 pass, 1 fail, 2 refused or a bad option, 3 not configured, 4 subset (no decision), 5 needs read (flagged replies, or guard false hits above 5%: read them in the local report first)',
 ].join('\n');
 /** The exit code of a decision (USAGE). */
 export const exitCode = (d) => ({ pass: 0, subset: 4, needs_read: 5 }[d?.verdict] ?? 1);
