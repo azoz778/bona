@@ -977,11 +977,14 @@ export function createPoller({
     // (OWNER_METHODS), and his chat may be `in` only with its marker and his test's floor, which
     // `join` writes in one transaction. Undone in the creation's own transaction (re-entrant), so
     // a join that fails leaves no `in` chat a second message of his in the same window would be
-    // stored into (and wake Dana) unstamped.
+    // stored into (and wake Dana) unstamped. In his test he is the client, and his message is
+    // inbound: his reply clock starts at it (`first_inbound_ts`) and stays open until a person
+    // or the assistant answers, as a client's does, never stamped "answered" at birth as an
+    // owner-started chat is (Codex PR #96 r6).
     const { lead, created } = match.method !== 'owner_test' ? merge() : db.transaction(() => {
       const made = merge();
       if (!made.created) return made;
-      db.updateLead(made.lead.lead_id, { inbox_state: null, inbox_since: null, history_from: null });
+      db.updateLead(made.lead.lead_id, { inbox_state: null, inbox_since: null, history_from: null, first_inbound_ts: ts, first_reply_ts: null });
       return { ...made, lead: db.getLead(made.lead.lead_id) ?? made.lead };
     });
 

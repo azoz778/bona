@@ -566,6 +566,31 @@ test('T06-6 the owner joins only while the test is active: method owner_test, in
   h.close();
 });
 
+test("T06-6 the owner's test lead made by the poller starts his reply clock as a client's does: first_inbound_ts is his first message, first_reply_ts empty until a person answers (Codex PR #96 r6)", async () => {
+  const h = harness({ state: { active: false }, owner: true });
+  h.setClock(NOW - 120_000);
+  h.team.setSetting('owner_as_client', '1');
+  h.setClock(NOW);
+  h.state.active = true;
+  h.push([msg({ id: 'OW1', jid: OWNER, pushName: 'Owner Example', ts: NOW - 60_000, text: 'Hi' })]);
+  assert.equal((await h.tick()).joined, 1);
+  const [lead] = h.leads();
+  assert.equal(lead.match_method, 'owner_test');
+  assert.equal(lead.first_inbound_ts, NOW - 60_000, 'his first message starts the clock');
+  assert.equal(lead.first_reply_ts, null, 'nobody has answered yet');
+  // The first dashboard reply (its key recorded) stops it.
+  const staff = h.team.addUser({ name: 'Mona', phone: COLLEAGUE_DIGITS, role: 'staff' });
+  h.setClock(NOW - 31_000);
+  h.inbox.insertOutbox({ send_id: 'SND-first', lead_id: lead.lead_id, jid: OWNER, text: 'Hello, how can we help?', user_id: staff.user_id, sender_kind: 'staff' });
+  h.inbox.updateOutbox('SND-first', { status: 'accepted', key_id: 'STAFF1' });
+  h.setClock(NOW);
+  h.push([msg({ id: 'STAFF1', jid: OWNER, fromMe: true, pushName: null, ts: NOW - 30_000, text: 'Hello, how can we help?' })]);
+  const tally = await h.tick();
+  assert.equal(tally.replies, 1, 'the reply clock stamps');
+  assert.equal(h.lead(lead.lead_id).first_reply_ts, NOW - 30_000, 'the first staff reply stops it');
+  h.close();
+});
+
 test('T06-6 the owner never joins as own_number: with own_inbox on but the test off, he stays a colleague', async () => {
   const h = harness({ state: { ownInbox: true, active: false }, owner: true });
   h.push([msg({ id: 'OW1', jid: OWNER, pushName: 'Owner Example', text: 'Hi' })]);
