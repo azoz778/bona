@@ -45,6 +45,8 @@ const PHONE_GAP_MAX = 6;
 const MAX_DIGITS = 15;
 /** A run of this many digits or more that is not a phone or an ID: an account or a card number. */
 const ACCOUNT_DIGITS = 12;
+/** A phone whose first digits say so: 0 then 1-9 (10 digits), 00 then a country code, or 966. Never "000" (an amount's tail). */
+const CLEAR_PHONE_RE = /^(?:0[1-9]\d{8}|00[1-9]\d{8,12}|966\d{8,9})$/;
 /** A date (2026-11-29, 29-11-2026, 29.11.2026, 29/11/2026, 2026/11/29): its groups are never part of a phone or an ID. */
 const DATE_RE = /(?<!\d)(?:(?:19|20)\d{2}([-./])(?:0?[1-9]|1[0-2])\1(?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])([-./])(?:0?[1-9]|1[0-2])\2(?:19|20)\d{2})(?!\d)/g;
 
@@ -210,6 +212,9 @@ function numberCuts(s) {
       if (j > i) {
         const gap = s.slice(groups[j - 1].end, groups[j].start);
         if (groups[j].date || !PHONE_GAP_RE.test(gap)) break;
+        // A line break starts the next number (one message per line once a batch is joined): "+966 50 000 0000\n+44
+        // 7700 900000" is two phones, never one that took "44" (Codex r7).
+        if (/[\r\n\u2028\u2029]/.test(gap)) break;
         if (!GAP_RE.test(gap)) { if (tail) break; wide = true; }
         gaps.push(gap);
         if (wide || SOFT_GAP_RE.test(gap)) soft = true;
@@ -231,8 +236,9 @@ function numberCuts(s) {
       const at = best.j - i;
       const range = thousandsRange(groups.slice(i, i + gaps.length + 1), gaps);
       if (range && at >= range[0] && at <= range[1] && !(at === range[1] && best.mask === '[phone]')) {
-        const second = groups.slice(i + range[0], i + range[1] + 1).map((g) => g.digits).join('');
-        i += maskFor(second, false) ? range[0] : range[1] + 1;
+        // The second amount is read from its own start: it may be the start of a longer number ("20.000 - 55 123
+        // 4567"), never skipped past (Claude r12 F1).
+        i += range[0];
         continue;
       }
     }
@@ -243,6 +249,31 @@ function numberCuts(s) {
       best = { j: acctLast, mask: '[account-number]' };
     }
     if (!best) { i += 1; continue; }
+    {
+      // A number that starts inside this cut and runs past its end is one the cut would split: "500.000 055 123 4567"
+      // is 500000055 then "123 4567", "+966 50 000 0000 +44 7700 900000" took "44". From a group inside the cut, read
+      // on over the groups joined to it (as a phone is, never across a line break or a date): a phone with a clear
+      // prefix (CLEAR_PHONE_RE), or, after a `+` or after an amount the cut took whole (groups i..k-1 are one budget),
+      // any phone or ID shape. The cut goes on to that number's end; it only grows, so it never unmasks anything
+      // (Claude r12 F2, Codex r7). "551 234 567 - 1 000" is a phone and an amount: the amount stays.
+      // Read again from every group the cut took on, so a number that starts there is not split either.
+      let far = best.j;
+      for (let k = i + 1; k <= far; k += 1) {
+        const lead = s.slice(groups[k - 1].end, groups[k].start);
+        const weak = lead.includes('+') || isAmount(groups.slice(i, k), gaps.slice(0, k - 1 - i));
+        let d = '';
+        for (let m = k; m < groups.length; m += 1) {
+          if (m > k) {
+            const gap = s.slice(groups[m - 1].end, groups[m].start);
+            if (groups[m].date || !PHONE_GAP_RE.test(gap) || /[\r\n\u2028\u2029]/.test(gap)) break;
+          }
+          d += groups[m].digits;
+          if (d.length > MAX_DIGITS) break;
+          if (m > far && (CLEAR_PHONE_RE.test(d) || (weak && maskFor(d, lead.includes('+'))))) far = m;
+        }
+      }
+      if (far > best.j) best = { j: far, mask: best.mask === '[account-number]' ? best.mask : '[phone]' };
+    }
     let start = groups[i].start;
     if (plus) start = plusAt;
     else if (s[start - 1] === '(') start -= 1;

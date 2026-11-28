@@ -266,6 +266,55 @@ test('a 10-digit run that starts with "00" is no phone (a Saudi number starts 0 
   assert.equal(minimise('call 0130000000'), 'call [phone]');
 });
 
+/* Codex r7 P0 + Claude r12 F1/F2: a number next to another number or an amount is never split so its tail stays in clear. */
+test('a line break starts the next number; a range\'s second amount is read from its start; a cut never splits a number that runs past it (a "+" one, or one after a budget it took)', () => {
+  for (const [input, want] of [
+    ['+966 50 000 0000\n+44 7700 900000', '[phone]\n[phone]'],
+    ['+966 50 000 0000 +44 7700 900000', '[phone]'], // one mask over both: the second is never left half in clear
+    ['+966 50 000 0000\n44 7700 900000', '[phone]\n[account-number]'],
+    ['ميزانيتي 500.000\n055 123 4567', 'ميزانيتي 500.000\n[phone]'],
+    ['budget 500.000\n012 654 3210', 'budget 500.000\n[phone]'],
+    ['budget 20.000\n966 55 123 4567', 'budget 20.000\n[phone]'],
+    ['- 20.000\n- 55 123 4567', '- 20.000\n- [phone]'],
+    ['0500000000\n0511111111', '[phone]\n[phone]'],
+  ]) assert.equal(minimise(input), want, input);
+  // Same line: the budget may go with the number (errs toward masking), the number never shows.
+  for (const [input, num] of [
+    ['budget 20.000 - 55 123 4567', '551234567'], ['budget 500.000 - 101 234 5678', '1012345678'],
+    ['budget 500 000 - 966 551 - 234 567', '966551234567'], ['شقة - 20.000 - 55 123 4567', '551234567'],
+    ['budget 500.000 055 123 4567', '0551234567'], ['budget 500.000 - 550.000 055 123 4567', '0551234567'],
+  ]) assert.equal(sevenOf(minimise(input), num), null, input);
+  assert.equal(minimise('budget 500.000 - 600.000\n0500000000'), 'budget 500.000 - 600.000\n[phone]');
+});
+
+/** The first 7-digit run of `num` still readable in `out` (digits only), else null. */
+function sevenOf(out, num) {
+  const ds = String(out).replace(/\D/g, '');
+  for (let k = 0; k + 7 <= num.length; k += 1) if (ds.includes(num.slice(k, k + 7))) return num.slice(k, k + 7);
+  return null;
+}
+
+test('property: a phone or ID next to a budget (before or after it, on a joiner or a line break) leaves no 7-digit run of the number (Claude r12 F3)', () => {
+  const rand = prng(0x5eed);
+  const pick = (a) => a[Math.floor(rand() * a.length)];
+  const AMOUNTS = ['500 000', '500.000', '1 500 000', '20.000', '550 000', '1.000', '120 000', '2.950.000'];
+  const JOINERS = [' - ', '-', ' / ', ' + ', '\n', '\n+', ' +', ' – ', '\n- ', '  -  ', ' (', ') - ('];
+  const NUMS = ['0551234567', '551234567', '966551234567', '966512345678', '1012345678', '2123456789', '966126543210', '0126543210'];
+  const group = (d) => {
+    let out = d[0];
+    for (let k = 1; k < d.length; k += 1) { if (rand() < 0.3) out += pick([' ', ' ', '-', '.']); out += d[k]; }
+    return out;
+  };
+  const leaks = [];
+  for (let t = 0; t < 3000; t += 1) {
+    const num = pick(NUMS);
+    const g = rand() < 0.5 ? num : group(num);
+    const input = rand() < 0.5 ? `budget ${pick(AMOUNTS)}${pick(JOINERS)}${g} thanks` : `call ${g}${pick(JOINERS)}${pick(AMOUNTS)} riyals`;
+    if (sevenOf(minimise(input), num)) leaks.push(input);
+  }
+  assert.deepEqual(leaks.slice(0, 5), [], `${leaks.length} inputs leak`);
+});
+
 /** A small deterministic PRNG (mulberry32), so the property test reads the same formats on every run. */
 function prng(seed) {
   let a = seed >>> 0;
