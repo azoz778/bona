@@ -279,6 +279,10 @@ const HOLD_REASON = {
   send_failed: 'a message to the client failed to send',
   booking_unconfirmed: 'a booked viewing was not confirmed to the client',
   brain_out: 'the AI service was down',
+  // PR-B3's other timed holds (lib/dana-wa.mjs), worded here by PR-INT (PLAN T14).
+  cap_day: 'it reached the day’s message limit',
+  owed_handover: 'its hand-over message to the client is waiting to go',
+  owed_closing: 'its closing message to the client is waiting to go',
 };
 const TZ_OFFSET_MS = 3 * 3_600_000;
 

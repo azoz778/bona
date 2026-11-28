@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { layout, loginPage, esc } from '../lib/dashboard/render.mjs';
 import { teamPage, fundsBanner, opsPanel } from '../lib/dashboard/render-team.mjs';
+import { threadPage } from '../lib/dashboard/render-inbox.mjs';
+import { leadTasksPanel } from '../lib/dashboard/render-tasks.mjs';
 
 const OWNER = { user_id: 'USR-o', name: 'Abdulaziz Zidan', role: 'owner', phone_e164: '966593296933', active: 1, last_login: null };
 const STAFF = { user_id: 'USR-s', name: 'Sara <b>', role: 'staff', phone_e164: '966500000001', active: 1, last_login: 1_790_500_000_000 };
@@ -311,7 +313,7 @@ test('the Ops panel renders an injected ops() result: a placeholder while it is 
   assert.doesNotMatch(html, /No counts yet/);
   assert.match(html, /<td>answers_24h<\/td><td>12<\/td>/);
   assert.match(html, /<td>p90 &lt;s&gt;<\/td><td>41 s<\/td>/);
-  assert.match(html, /<td>brain<\/td><td>\{&quot;turns&quot;:3\}<\/td>/);
+  assert.match(html, /<td>brain<\/td><td>turns 3<\/td>/, 'a flat object of counts reads as words (PR-INT)');
   assert.match(html, /<td>none<\/td><td>—<\/td>/);
   assert.equal(opsPanel({}), opsPanel(undefined), 'the stub and nothing at all render the same');
 });
@@ -342,4 +344,59 @@ test('an ops() result that throws while it is read is still no thrown page: a ge
   assert.doesNotThrow(() => teamPage({ me: OWNER, users: [OWNER], ops: getter }));
   // A nested value whose toJSON throws is a dash too.
   assert.match(opsPanel({ odd: { toJSON() { throw new Error('no'); } } }), /<td>odd<\/td><td>—<\/td>/);
+});
+
+/* ---------------- PR-INT (PLAN T14): the labels T12's holds and missed hand-overs need on T08's pages ---------------- */
+
+test('T14 the thread names the T12 holds in words: cap_day, owed_handover and owed_closing', () => {
+  const NOW = Date.UTC(2026, 11, 3, 9, 0);
+  const lead = {
+    lead_id: 'LEAD-20261203-hold0001', name: 'Example', phone_e164: '966500000051', wa_jid: '966500000051@s.whatsapp.net', stage: 'new',
+    match_method: 'own_number', inbox_state: 'in', inbox_since: NOW - 86_400_000, handler_user_id: null, needs_human: 0, last_msg_ts: NOW - 60_000,
+    created: NOW - 86_400_000, stage_ts: NOW - 86_400_000, channel: 'whatsapp',
+  };
+  const EXAMPLE_OWNER = { user_id: 'USR-example', name: 'Owner Example', role: 'owner', phone_e164: '966500000008', active: 1, last_login: null };
+  const page = (reason) => threadPage({
+    me: EXAMPLE_OWNER, lead: { ...lead, dana_hold_reason: reason, dana_hold_until: NOW + 3_600_000 }, messages: [], gaps: [], outbox: [], users: [EXAMPLE_OWNER],
+    sendId: 'SND-abcdefghijklmnop', seenTs: NOW, seenRev: 1, sendingEnabled: true, canReply: true, repliesEnabled: true, now: NOW,
+    danaEnabled: true, danaConfigured: true,
+  });
+  const want = {
+    cap_day: /The AI is paused in this chat \(it reached the day’s message limit\) until /,
+    owed_handover: /The AI is paused in this chat \(its hand-over message to the client is waiting to go\) until /,
+    owed_closing: /The AI is paused in this chat \(its closing message to the client is waiting to go\) until /,
+  };
+  for (const [reason, re] of Object.entries(want)) {
+    const html = page(reason);
+    assert.match(html, re, reason);
+    const line = /The AI is paused in this chat[^<]*/.exec(html)[0];
+    assert.doesNotMatch(line, /Dana|دانة/, `${reason}: nameless`);
+  }
+  // The earlier labels are unchanged.
+  assert.match(page('brain_out'), /\(the AI service was down\)/);
+});
+
+test('T14 a task card never prints the missed hand-over\'s internal keys (missed_rid, missed_at); the rest of its details still show', () => {
+  const task = {
+    task_id: 'TSK-1', lead_id: 'LEAD-20261203-miss0001', kind: 'handoff', status: 'open', reason: 'Missed while the AI was off', due_ts: null,
+    telegram_status: null, details: { missed_rid: 4242, missed_at: 1_796_000_000_000, budget: '2 million', area: 'Al Shati' },
+  };
+  const html = leadTasksPanel(task.lead_id, [task], true, []);
+  assert.doesNotMatch(html, /missed_rid|missed_at|4242|1796000000000/);
+  assert.match(html, /<dt>Budget<\/dt><dd dir="auto">2 million<\/dd>/);
+  assert.match(html, /<dt>Preferred area<\/dt><dd dir="auto">Al Shati<\/dd>/);
+});
+
+test('T14 the Ops panel shows grouped counts as rows of their own, owner copy only: the latency, answers, skips and the AI rows', () => {
+  const html = opsPanel({
+    'Latency p50 / p90 (24 h)': '12 s / 31 s',
+    'Answers (24 h)': 3,
+    'Skips (24 h)': { human_recent: 2, hold: 1 },
+    'AI turns by model (24 h)': { 'gpt-test': 3 },
+    'AI $ today / month': '$0.12 / $3.40',
+  });
+  assert.match(html, /<td>Latency p50 \/ p90 \(24 h\)<\/td><td>12 s \/ 31 s<\/td>/);
+  assert.match(html, /<td>Skips \(24 h\)<\/td><td>human_recent 2 · hold 1<\/td>/, 'a flat object of counts reads as words, not JSON');
+  assert.match(html, /<td>AI turns by model \(24 h\)<\/td><td>gpt-test 3<\/td>/);
+  assert.match(opsPanel({ 'Skips (24 h)': {} }), /<td>Skips \(24 h\)<\/td><td>none<\/td>/);
 });

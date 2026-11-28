@@ -13,6 +13,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import { createApp } from '../index.mjs';
 import { openDb, tokenHash } from '../lib/db.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
@@ -542,4 +543,34 @@ test('funds: the app wires the watch into Dana — a 402 from Retell flags the o
     assert.equal((await (await fetch(h.base + '/health')).json()).dana.fundsOut, true);
     assert.ok(h.logs.some((l) => l.evt === 'dana.funds_out'));
   });
+});
+
+/* ---------------- PR-INT (PLAN T14): the push text for the AI service (reason brain) ---------------- */
+
+test('T14 the worker shows the AI-service text for a push whose kind is brain; the Retell funds text stays for the website chat', async () => {
+  const src = fs.readFileSync(new URL('../lib/dashboard/assets/sw.js', import.meta.url), 'utf8');
+  const run = async (kind) => {
+    const shown = [];
+    const handlers = {};
+    const self = {
+      addEventListener(name, fn) { handlers[name] = fn; },
+      registration: { async showNotification(title, options) { shown.push([title, options]); } },
+      clients: { async claim() {}, async matchAll() { return []; }, async openWindow() { return null; } },
+      skipWaiting() {},
+    };
+    const fetch = async () => ({ ok: true, json: async () => ({ kind }) });
+    vm.runInNewContext(src, { self, URL, MessageChannel, setTimeout, clearTimeout, AbortSignal, fetch }, { filename: 'sw.js' });
+    let pending = Promise.resolve();
+    handlers.push({ waitUntil(p) { pending = Promise.resolve(p); } });
+    await pending;
+    return shown;
+  };
+  const brain = await run('brain');
+  assert.equal(brain.length, 1);
+  assert.equal(brain[0][0], 'Bona: the AI assistant is not answering (OpenAI credit or key)');
+  assert.equal(brain[0][1].tag, 'bona-brain', 'its own tag: it hides no other kind');
+  assert.doesNotMatch(JSON.stringify(brain), /Dana|Retell/);
+  const funds = await run('funds');
+  assert.equal(funds[0][0], 'Bona: Dana is out of Retell credit', 'the website chat\'s Retell text, unchanged until T28');
+  assert.equal((await run('something-else'))[0][0], 'New Bona message');
 });

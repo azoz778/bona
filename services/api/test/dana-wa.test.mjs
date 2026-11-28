@@ -1008,7 +1008,8 @@ const ask = async (h, text, o = {}) => { const ts = h.client(text, o); return h.
 /* ---------- 1. gates ---------- */
 
 test('T12 gates: identity (only once the link is wired), rule_off for own_number and owner_test, needs_human in legacy mode only, holds', async () => {
-  const idBad = bh({ wa: { ownNumberFrom: 'instance' }, link: { identityOk: () => false, linkStable: () => true } });
+  // A mismatch a probe established (PR-INT r1: an identity merely unproven raises no alert; see inbox-wiring T14 identity).
+  const idBad = bh({ wa: { ownNumberFrom: 'instance' }, link: { identityOk: () => false, identityMismatch: () => true, linkStable: () => true } });
   idBad.client('hello');
   assert.deepEqual(idBad.dana.eligible(LEAD), { ok: false, reason: 'identity' });
   assert.deepEqual(await idBad.dana.answer(LEAD, { ts: idBad.now() }), { skipped: 'identity' });
