@@ -770,33 +770,40 @@ export function createDana({
     return until === null ? null : { ok: false, reason: 'cap_chat', until };
   }
 
-  function eligible(leadId, { ts = null, coversTs = null } = {}) {
+  /** The gates (DESIGN §4.1). Its result only: eligibleRead() also says which route it read (r30). */
+  function eligible(leadId, opts = {}) {
+    return eligibleRead(leadId, opts).e;
+  }
+  function eligibleRead(leadId, { ts = null, coversTs = null } = {}) {
     const lead = db.getLead(leadId);
-    if (autoState(lead) === null) return { ok: false, reason: 'not_configured' };
+    if (autoState(lead) === null) return { e: { ok: false, reason: 'not_configured' }, route: null };
     const viaBrain = useBrain(lead);
-    if (!(viaBrain ? brainConfigured : retellConfigured)) return { ok: false, reason: 'not_configured' };
-    if (identityBlocked()) return { ok: false, reason: 'identity' };
-    if (!lead || lead.inbox_state !== 'in' || isExcludedLead(lead)) return { ok: false, reason: 'not_in_inbox' };
-    if (ruleOff(lead)) return { ok: false, reason: 'rule_off' };
-    if (breakerOpen() || !(team.danaEnabled() || Number(lead.dana_test) === 1)) return { ok: false, reason: 'off' };
-    if (Number(lead.dana_off) === 1) return { ok: false, reason: 'chat_off' };
+    // The mode, read once with the provider (r30): the route this call read, and its auto gate, are the same read.
+    const auto = autoOf(lead);
+    const route = !viaBrain ? 'legacy' : auto ? 'auto' : 'brain';
+    const out = (e) => ({ e, route });
+    if (!(viaBrain ? brainConfigured : retellConfigured)) return out({ ok: false, reason: 'not_configured' });
+    if (identityBlocked()) return out({ ok: false, reason: 'identity' });
+    if (!lead || lead.inbox_state !== 'in' || isExcludedLead(lead)) return out({ ok: false, reason: 'not_in_inbox' });
+    if (ruleOff(lead)) return out({ ok: false, reason: 'rule_off' });
+    if (breakerOpen() || !(team.danaEnabled() || Number(lead.dana_test) === 1)) return out({ ok: false, reason: 'off' });
+    if (Number(lead.dana_off) === 1) return out({ ok: false, reason: 'chat_off' });
     // Every send stops with the Sending switch; asking for an answer that cannot go would only
     // spend money and end in a hand-over.
-    if (!team.sendingEnabled()) return { ok: false, reason: 'sending_off' };
-    const auto = autoOf(lead);
+    if (!team.sendingEnabled()) return out({ ok: false, reason: 'sending_off' });
     // In auto mode an open hand-over is the dashboard's flag, not a gate (DESIGN §4.2).
-    if (!auto && Number(lead.needs_human) === 1) return { ok: false, reason: 'needs_human' };
+    if (!auto && Number(lead.needs_human) === 1) return out({ ok: false, reason: 'needs_human' });
     const t = now();
     // Holds gate the brain route only (r29): a legacy chat writes none and main has none, so a brain-route hold an owner
     // switch left behind never gates Retell.
-    if (viaBrain && activeHold(lead, t)) return { ok: false, reason: 'hold' };
-    if (Number.isFinite(lead.last_human_out_ts) && t - lead.last_human_out_ts < HUMAN_QUIET_MS) return { ok: false, reason: 'human_recent' };
-    if (!replyJidFor(lead)) return { ok: false, reason: 'lid_only' };
-    if (coversTs !== null && coversTs !== undefined && !openChat(lead.lead_id, coversTs, t)) return { ok: false, reason: 'no_open_chat' };
-    if (ts != null && Number.isFinite(Number(ts)) && Number(ts) < t - (viaBrain ? FRESH_MS : LEGACY_FRESH_MS)) return { ok: false, reason: 'old' };
+    if (viaBrain && activeHold(lead, t)) return out({ ok: false, reason: 'hold' });
+    if (Number.isFinite(lead.last_human_out_ts) && t - lead.last_human_out_ts < HUMAN_QUIET_MS) return out({ ok: false, reason: 'human_recent' });
+    if (!replyJidFor(lead)) return out({ ok: false, reason: 'lid_only' });
+    if (coversTs !== null && coversTs !== undefined && !openChat(lead.lead_id, coversTs, t)) return out({ ok: false, reason: 'no_open_chat' });
+    if (ts != null && Number.isFinite(Number(ts)) && Number(ts) < t - (viaBrain ? FRESH_MS : LEGACY_FRESH_MS)) return out({ ok: false, reason: 'old' });
     const cap = capFor(lead, t, viaBrain);
-    if (cap) return cap;
-    return { ok: true, lead, brain: viaBrain, auto };
+    if (cap) return out(cap);
+    return out({ ok: true, lead, brain: viaBrain, auto });
   }
 
   /* ---------------- Retell (legacy chats, until PR-RX) ---------------- */
@@ -1122,10 +1129,13 @@ export function createDana({
     // A person active in the chat: no closing line over him (r16 G3), the same 24-h rule as stopFirst's.
     if (closing && personActive(l, t)) return no('human_recent');
     if (!replyJidFor(l)) return no('lid_only');
-    // The chat left the brain path while the bubble was queued (dana_brain off, out of auto mode; r11). Checked only
-    // AFTER the chat's own checks (r24), so not_brain (a re-queue, or a hand-over line's legacy fallback) means the
-    // chat could take a line on its new route.
-    if (!useBrain(l)) return no('not_brain');
+    // The chat left the turn's route while the bubble was queued (dana_brain off, out of auto mode; r11), the mode
+    // included (r30: an auto-only line, the outage line, the auto closing or NEUTRAL line, never goes once the chat is
+    // 'brain'). Checked only AFTER the chat's own checks (r24), so not_brain (a re-queue, or a hand-over line's legacy
+    // fallback, which checks its own route) means the chat could take a line on its new route.
+    const turnKey = turnRoute.get(String(leadId));
+    const nowKey = routeKey(l);
+    if (nowKey === 'legacy' || (turnKey && turnKey !== 'legacy' && nowKey !== turnKey)) return no('not_brain');
     if (!openChat(leadId, coversTs, t)) return no('no_open_chat');
     const age = t - Number(coversTs);
     if ((first || fixed) && age > FRESH_MS) return no('missed');
@@ -1439,8 +1449,17 @@ export function createDana({
       sent = Boolean(r.sent);
     }
     // A line owed (refused here, or no phone jid for now): a short hold, so the sweep tries the line again soon.
-    // The short hold after the line's await goes through the commit point (r28): a flip re-queues instead.
-    if (!sent && !commitPoint(leadId, true, coversTs, { chat: false })) setTimedHold(leadId, 'brain_out', t + RATE_HOLD_MS);
+    // The short hold after the line's await goes through the commit point (r28): a flip re-queues instead, and the
+    // outage hold this step set for the auto route ends with it (r30: it must not gate the new route). The flag and
+    // the task stay (facts).
+    if (!sent) {
+      const flipped = commitPoint(leadId, true, coversTs, { chat: false });
+      if (flipped) {
+        endOwnHold(leadId, 'brain_out');
+        return flipped;
+      }
+      setTimedHold(leadId, 'brain_out', t + RATE_HOLD_MS);
+    }
     if (lined === undefined) await notifyHandoff(leadId);
     say({ evt: 'dana.brain_out', leadId, code, line: sent });
     return { held: 'brain_out', sent };
@@ -1747,14 +1766,9 @@ export function createDana({
 
   async function run(leadId, ts, { wokeAt = null, owed = null } = {}) {
     // The route this turn is made on, with its mode (r27): every routeFlip of this run compares against it.
+    // The route, read ONCE for this run (r30): the owed-line choice and the eligibility below go by it.
     const route = routeKey(db.getLead(leadId));
     turnRoute.set(String(leadId), route);
-    // A chat that runs on legacy loses a brain-only TIMED hold an owner switch left behind (r29: no stale "paused
-    // until…" on the dashboard); a person-wait hold (no time) stays with its flag. A legacy chat has none otherwise.
-    if (route === 'legacy') {
-      const l = db.getLead(leadId);
-      if (l?.dana_hold_reason && l.dana_hold_until !== null && l.dana_hold_until !== undefined) clearHold(leadId);
-    }
     // Stop first (r14 I1), before an owed line and before every other check.
     const stopped = await stopFirst(leadId);
     if (stopped) return stopped;
@@ -1767,8 +1781,16 @@ export function createDana({
     const started = now();
     // A legacy chat keeps main's freshness rule (the woken message, 30 min, a silent `old` skip); a brain
     // chat's is the batch's own (2 h, backlog, missed: below).
-    const peek = db.getLead(leadId);
-    const e = eligible(leadId, useBrain(peek) ? {} : { ts });
+    const { e, route: read } = eligibleRead(leadId, route !== 'legacy' ? {} : { ts });
+    // Eligibility read another route than the run's first read (a flip, or a read that failed once; r30): re-queued,
+    // nothing written. So hygiene never clears a brain hold, and an owed line is never lost, on one bad read.
+    if (read !== null && read !== route) return requeue(leadId, ts, read !== 'legacy');
+    // A chat that runs on legacy, by both reads, loses a brain-only TIMED hold an owner switch left behind (r29: no
+    // stale "paused until…" on the dashboard); a person-wait hold (no time) stays with its flag. None otherwise.
+    if (route === 'legacy' && read === 'legacy') {
+      const l = db.getLead(leadId);
+      if (l?.dana_hold_reason && l.dana_hold_until !== null && l.dana_hold_until !== undefined) clearHold(leadId);
+    }
     if (!e.ok) {
       // An ended brain_out hold of a chat refused for another reason (Dana off, the chat stopped, Sending off,
       // lid-only, a rule off): the outage is over for it, so the sweep stops waking it every minute (r2 N2).

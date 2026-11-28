@@ -3957,3 +3957,46 @@ test('T12 r29 1 (Codex P1): a second counted failure while the chat leaves auto 
   await h.dana.flush();
   assert.equal(h.retell.completions.length, 1);
 });
+
+/* ======================================================================================
+ * PR-B3 r30 (Codex P1, Claude U48): the send gate's route check knows the mode; the run reads its route once and a
+ * later read that disagrees is a flip (no hygiene, no lost owed line).
+ * ====================================================================================== */
+
+test('T12 r30 1 (Codex P1): #dana live off (dana_brain on) while an auto outage line waits in the queue: no outage line, no brain_out hold left', async () => {
+  let h;
+  let armed = true;
+  const pacing = { ...immediate, fifo: (fn) => { if (armed) { armed = false; h.ownerTest.setAuto(LEAD, false); } return fn(() => {}); } };
+  h = bh({ auto: true, brainOn: true, pacing, turns: [brainError('quota')] });
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.equal(armed, false, 'the outage line reached the queue');
+  assert.equal(h.sent().length, 0, 'no outage line');
+  assert.notEqual(h.lead().dana_hold_reason, 'brain_out', 'no auto-route hold gates the new route');
+  assert.ok(h.logs.some((l) => l.evt === 'dana.route_changed'));
+  // The non-auto brain re-run ran: the outage escalation (a fact) is open, so it is the person's, as on main.
+  assert.ok(h.logs.some((l) => l.evt === 'dana.skipped' && l.reason === 'needs_human'));
+});
+
+for (const [name, hold, auto, expect] of [
+  ['a cap_chat hold, non-auto brain', { dana_hold_reason: 'cap_chat', dana_hold_until: 40 * 60_000 }, false, { hold: 'cap_chat', sent: 0 }],
+  ['a brain_out hold, auto', { dana_hold_reason: 'brain_out', dana_hold_until: 5 * 60_000 }, true, { hold: 'brain_out', sent: 0 }],
+  ['a due owed_handover, auto, flagged', { dana_hold_reason: 'owed_handover', dana_hold_until: -1, needs_human: 1 }, true, { hold: null, sent: 1 }],
+]) {
+  test(`T12 r30 2 (Claude U48): the run's first route read fails closed once (${name}): no hygiene, no lost owed line`, async () => {
+    const h = bh({ auto, brainOn: !auto, turns: [brainReply('Brain answered.')] });
+    h.client('question');
+    h.s.updateLead(LEAD, { ...hold, dana_hold_until: h.now() + hold.dana_hold_until });
+    const origGet = h.team.getSetting.bind(h.team);
+    const origAuto = h.ownerTest.autoMode;
+    let fail = 1;
+    h.team.getSetting = (k) => (k === 'dana_brain' && fail > 0 && !auto ? (fail -= 1, '0') : origGet(k));
+    h.ownerTest.autoMode = (l) => (auto && fail > 0 ? (fail -= 1, false) : origAuto(l));
+    await h.dana.answer(LEAD, { ts: h.now() });
+    await h.dana.flush();
+    assert.equal(h.brain.calls.length, 0, 'the brain never answers over the hold or the owed line');
+    assert.equal(h.retell.completions.length, 0);
+    assert.equal(h.lead().dana_hold_reason, expect.hold);
+    assert.equal(h.sent().length, expect.sent);
+  });
+}
