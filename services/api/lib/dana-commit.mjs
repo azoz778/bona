@@ -1,28 +1,491 @@
 /**
- * What Dana's answer becomes once preSend has passed (DESIGN §2, §8.3). STUB (PR-F2b): today an
- * answer is its text and nothing else, one text bubble. PR-B4 (task T13) replaces this file
- * (the brochure document, the code-built booking confirmation through viewing.commitBooking,
- * the booking note), and PR-B3 (task T12) is the one that calls it from lib/dana-wa.mjs; the
- * interface below is the seam they fill.
+ * What the assistant's answer becomes once preSend has passed (DESIGN §4.3 "commit after preSend",
+ * §8.3; PLAN T13, PR-B4). It replaces the PR-F2b stub behind the same seam: PR-B3 (T12, lib/dana-wa.mjs)
+ * calls `afterPreSend` after preSend passes and sends the bubbles it answers, in order (text, then
+ * any document), then calls `afterSend` once the confirmation bubble's send has an answer.
  *
- * `turn` is the brain's turn (lib/brain.mjs `turn()`), or the Retell completion for a legacy
- * lead until PR-RX (T27) removes that path. Both carry Retell-shaped `messages`; the brain turn
- * also carries `toolCalls`. The stub reads neither.
+ * `turn` is the brain's turn (lib/brain.mjs `turn()`: `toolCalls:[{name, args, result, ok}]`), or the
+ * Retell completion for a legacy lead until PR-RX (T27) removes that path (the same calls as Retell-shaped
+ * `tool_call_invocation` / `tool_call_result` messages). The tools only read, validate or save needs;
+ * everything that is sent or booked is done here, from the SAME turn's calls and results (no intent store,
+ * no held rows: nothing of a dropped turn is ever committed later):
+ *   - book_viewing: the LAST invocation decides. Only when its result says `reserved: true` →
+ *     viewing.commitBooking(); ok → the code-built confirmation REPLACES the model's text (only code states a
+ *     booked time); a failure → BOOKING_FAILED_LINE and a `booking_failed` hand-over for the caller
+ *     (non-sticky). An earlier reserved call never books when a later one was refused (the client moved on),
+ *     and with two homes in one turn only the last is booked: a lead has one active booking (DESIGN §8.4);
+ *   - send_brochure with `will_send: 'pdf'` → a document bubble after the text, its URL read again from the
+ *     inventory (never the model's string), only https on Bona's site, never a held brochure (BLOCKED_BROCHURES);
+ *   - send_location with `precision: 'exact'` (and an exact pin in the inventory) → a maps link at the end of
+ *     the text, only while the text has fewer than MAX_LINKS links and not with a booking (the confirmation
+ *     carries its own);
+ *   - a reserved book_viewing followed by one that never ran (the brain's tool limit, a thrown tool): the outcome
+ *     is unknown, so nothing is committed and the model's "booking it" never goes out alone: BOOKING_FAILED_LINE
+ *     and the hand-over;
+ *   - the safety net: with no successful commit, a brain answer with a booking claim → BOOKING_FAILED_LINE and
+ *     the hand-over (claimsABooking; every sentence the reviews raised is a row of the corpus test in
+ *     test/dana-commit.test.mjs). Sentence by sentence (. ! ? ; ؟ ؛ newline):
+ *       0. future, conditional and general forms are cut out ("once it's scheduled", "can be booked", "viewings
+ *          are scheduled …", «يتم / بيتم الحجز», «يتأكد الحجز», «راح يكون محجوز»): how booking works, or a slot
+ *          offer that mentions the confirmation, is no claim;
+ *       1. a denial is cut out only where it governs the claim word ("isn't booked", "I haven't reserved it yet",
+ *          "hasn't been confirmed", «لم يتم الحجز», «ما تم الحجز», «ما حجزت لك», «الحجز غير مؤكد»); a negative word
+ *          about anything else ("the meeting point isn't set yet", «ولسه ما أرسلت لك الموقع», «وهذا ما تم الاتفاق
+ *          عليه») cuts nothing, and «بعد ما» + a past verb is "after", never "not";
+ *       2. a personal claim form fires on its own ("you're booked", "see you on Sunday", «تم الحجز», «تم التأكيد»,
+ *          «حجزت لك», «ثبتنا لك», «انحجز لك», «نشوفك الأحد»), at a word start;
+ *       3. a claim word (booked, confirmed, reserved, scheduled, locked in, set for, محجوز, انحجز, تم تأكيد …, or
+ *          "you're all set") fires with a booking sign in its own sentence (a viewing word, a weekday or tomorrow, a
+ *          clock time, a second-person object such as "booked you in", "your slot", or "today"), or with a viewing
+ *          tool in the turn or a sign anywhere in the answer unless its own sentence is about stock, price, delivery
+ *          or the home's features ("Sunday at 10 works. It's booked!" fires; «الشقة محجوزة» does not). Office hours
+ *          ("Sunday to Thursday, 10:00–19:00") are no sign.
+ *     The claim usually comes in the turn after the slots were offered, with no viewing tool in it. "The developer
+ *     has confirmed delivery in Q4 2027", "fully booked" or "You're all set: I've sent you the brochure" is no
+ *     claim. A needless hand-over is the accepted cost; a phantom booking is not. Only on a brain turn: a legacy
+ *     Retell completion has no booking tool and keeps today's behaviour (the same-release rule).
+ * The hand-over itself (needs_human, the alert, notes.handover) stays dana-wa's: `afterPreSend` answers it as
+ * `handover: { kind }`, and dana-wa applies it as any other.
+ *
+ * After the send (`afterSend`, DESIGN §8.3 steps 8-9): the confirmation accepted → viewing.markTold and the
+ * booking note (notes.booking told); not accepted (failed or uncertain) → the event stays, the "client NOT
+ * told" note, and a `booking_unconfirmed` hand-over for the caller.
+ *
+ * INERT until a lead is in auto mode: the tools commit nothing outside it (they answer reserved:false,
+ * will_send:false, precision none), and before D1 only the owner's test chat is answered by the brain.
+ * Logs carry lead ids, booking ids and codes only, never the text.
  */
+import { claimsBooking } from './reply-guard.mjs';
+import { exactListing, pinOf, toAsciiDigits } from './inventory.mjs';
+import { BLOCKED_BROCHURES, brochureUrlOn } from './tools.mjs';
+// Not lib/dana-wa.mjs: dana-wa imports BOOKING_FAILED_LINE from here, so the link cap comes in through deps.
+
+/** Instead of a model text, when a booking could not be made or was claimed without one (DESIGN §4.3, §8.3 step 5). */
+export const BOOKING_FAILED_LINE = Object.freeze({
+  en: 'Thank you — the Bona team will confirm a time for your viewing with you here.',
+  ar: 'شكراً لك، فريق بونا بيأكد معك موعد المعاينة هنا.',
+});
+/** Brochure documents one answer may carry: one PDF per chat per day (DESIGN §6.3); send_brochure answers 'link' for the rest. */
+export const MAX_DOCUMENTS = 1;
+/** Links one answer may carry when the caller passes no `maxLinks` (DESIGN §6.5: MAX_LINKS goes from 3 to 2). */
+export const DEFAULT_MAX_LINKS = 2;
+
+/** A word that names a viewing (the booking intent of a claim with no viewing tool in the turn). */
+const VIEWING_WORD_RE = /(?<![\p{L}])(?:viewings?|visits?|appointments?|bookings?)(?![\p{L}])|معاين|زيار|موعدك|حجزك/iu;
+/**
+ * A weekday or tomorrow (Arabic weekdays only with the article: «أحد» alone is "someone"). Not "today": viewings
+ * are booked from tomorrow (lib/slots.mjs), and "fully booked today" is about stock.
+ */
+const DAY_RE = /(?<![\p{L}])(?:(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow)(?![\p{L}])|(?<![\p{L}])ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس|جمعة|جمعه|سبت)(?![\p{L}])|(?<![\p{L}])(?:بكرة|بكره|غدا|غداً)(?![\p{L}])/iu;
+/** A clock time: 10 am, 2:00 pm, 14:00, at 10, noon, الساعة 2, 2 ظهراً. */
+const TIME_RE = /(?<![\d:])\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)(?![\p{L}])|(?<![\d:])\d{1,2}:\d{2}(?![\d:])|(?<![\p{L}])at\s+\d{1,2}(?!\d|[,.]\d)|(?<![\p{L}])(?:noon|o'clock)(?![\p{L}])|الساعة\s*\d|(?<![\d:])\d{1,2}\s*(?:صباح|مساء|ظهر|عصر|الصبح|الظهر|العصر)/iu;
+const WEEKDAY_AR = String.raw`ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس)`;
+/** "today" is a sign only in a sentence that is not about stock: a claim for today is itself a phantom (no viewing is same-day). */
+const TODAY_RE = /(?<![\p{L}])(?:today|tonight)(?![\p{L}])|(?<![\p{L}])اليوم(?![\p{L}])/iu;
+/* ---------------- the claim lexicon (Codex r8: swept once, every form a corpus row) ----------------
+ * One table for every claim, denial, future, general and object form, so a new word is added in one place:
+ *   English done-forms  booked, confirmed, reserved, scheduled, arranged, sorted, fixed, set, locked in (+ "put you down")
+ *   Arabic roots        ح-ج-ز  حجزت/حجزنا لك, تم (ال)حجز, محجوز(ة), انحجز
+ *                       أ-ك-د  أكدت/أكدنا لك, تأكد الموعد|الحجز, تم (ال)تأكيد, مؤكد(ة), الموعد متأكد
+ *                       ث-ب-ت  ثبتت/ثبتنا لك, تم (ال)تثبيت, مثبت(ة)
+ *                       س-ج-ل  سجلت/سجلنا لك موعد, تم تسجيل الموعد, الموعد مسجل
+ *                       ر-ت-ب  رتبت/رتبنا لك موعد, تم ترتيب الموعد, الموعد مرتب
+ *                       ع-م-د  اعتمدت/اعتمدنا لك الموعد, تم اعتماد الموعد
+ *   "booking someone in" (Codex r10, the last lexicon pass): got / put / pencilled / slotted / added / signed / lined /
+ *                       fitted / squeezed + you | it | the viewing + down | in | up | on; "you're down|in|on|good for";
+ *                       "you've got the slot"; "it's yours"; "the slot is yours"; "that's you sorted"; "all done for";
+ *                       «سجلتك / حطيتك / ضفتك / دخلتك» + a booking noun, a day or a time; «الموعد صار لك»;
+ *                       «خلاص موعدك»; «الموعد لك» (never «الموعد لك تختاره»)
+ * Every form goes through the same denial, future and stock handling. A new single phrase goes to the T26 eval, not here:
+ * the regex is the safety net; the prompt and the code-only commit are the control.
+ */
+const EN_DONE = String.raw`booked|confirmed|reserved|scheduled|arranged|sorted|fixed|set|locked\s+in`;
+const EN_BASE = String.raw`book|confirm|reserve|schedule|arrange|sort|fix|set|lock\s+in|put\s+you\s+down`;
+/**
+ * "Booking someone in" (Codex r10; the last lexicon pass, later single phrases go to the T26 eval): got / put / pencil(l)ed /
+ * slotted / added / signed / lined / fitted / squeezed + you | it | the viewing + down | in | up | on, at the end of the
+ * clause or before for / on / at / a day / a time ("I've put it in the brochure" is none).
+ */
+const EN_PHRASAL_DONE = String.raw`(?:got|put|pencil(?:l)?ed|slotted|added|signed|lined|fitted|squeezed)\s+(?:you|it|the\s+viewing)\s+(?:down|in|up|on)`;
+/** A clock time: a one- or two-digit hour, never "3-bedroom", "3 bedrooms", "2 million" or a count of homes. */
+const TIME_DIGIT = String.raw`\d{1,2}(?::\d{2})?(?![\d\-‑])(?!\s*(?:bed|bath|sq|m²|million|thousand|k(?![\p{L}])|units?|villas?|apartments?|homes?))`;
+/**
+ * A booking noun, a day or a time right after "for" ("signed you up for Sunday", "you're in for the viewing"), never "for
+ * updates", "for a treat" or "for a 3-bedroom"; for "signed / lined you up" also "at | on" + a day or a time (Codex r12:
+ * "I've lined you up at 10 on Sunday").
+ */
+const FOR_BOOKING = String.raw`\s+for\s+(?:the\s+|your\s+|a\s+)?(?:viewing|visit|appointment|slot|booking|(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|${TIME_DIGIT})`;
+const AT_ON_BOOKING = String.raw`\s+(?:at|on)\s+(?:the\s+)?(?:(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|${TIME_DIGIT})`;
+const EN_PHRASAL_BASE = String.raw`(?:get|put|pencil|slot|add|sign|line|fit|squeeze)\s+(?:you|it|the\s+viewing)\s+(?:down|in|up|on)`;
+const EN_PHRASAL_END = String.raw`(?=\s*(?:$|[.!?,;:—–)]|for(?![\p{L}])|on(?![\p{L}])|at(?![\p{L}])|(?:sun|mon|tues|wednes|thurs|fri|satur)day|tomorrow|\d))`;
+/** The done-verbs said to the client («… لك»). */
+const AR_VERB = String.raw`حجزت|حجزنا|أكدت|أكدنا|اكدت|اكدنا|ثبتت|ثبتنا|ثبت|رتبت|رتبنا|سجلت|سجّلت|سجلنا|سجّلنا|اعتمدت|اعتمدنا`;
+/** "I entered you" forms («سجلتك», «حطيتك», «ضفتك», «دخلتك»): a claim only with a booking noun, a day or a time after them. */
+const AR_ENTERED_YOU = String.raw`سجلتك|سجّلتك|سجلتكم|حطيتك|حطيتكم|ضفتك|ضفتكم|دخلتك|دخلتكم`;
+/** The nouns after «تم» / «يتم». */
+const AR_NOUN = String.raw`حجز|تأكيد|تثبيت|تسجيل|ترتيب|اعتماد`;
+/** The adjectives («موعدك مؤكد»). */
+const AR_ADJ = String.raw`محجوز|مؤكد|مثبت|مسجل|مرتب|متأكد`;
+/** What a booking is in Arabic: the viewing, the appointment, the booking, the visit, a tour. */
+const AR_THING = String.raw`(?:ال)?(?:موعد|معاين|حجز|زيار|جولة)`;
 
 /**
+ * A second-person object on the claim word, addressed to the client (a sign, never stock): "booked you (in)", "reserved
+ * you a place", "booked it for you", "the villa is booked for you", "put you down", «حجزنا لك», «الشقة محجوزة لك».
+ */
+const OBJECT_RE = new RegExp([
+  String.raw`(?<![\p{L}])(?:booked|confirmed|reserved|scheduled)\s+(?:you(?:r)?|(?:it|this|that|one)\s+for\s+you|for\s+you)(?![\p{L}])`,
+  String.raw`(?<![\p{L}])put\s+you\s+down(?![\p{L}])`,
+  String.raw`(?<![\p{L}])(?:got|put|pencil(?:l)?ed|slotted|fitted|squeezed|added)\s+you\s+(?:down|in)(?![\p{L}])`,
+  String.raw`(?:${AR_VERB})\s*(?:لك|لكم|عليك)`,
+  String.raw`(?:${AR_ADJ})(?:ة|ه)?\s*(?:لك|لكم)`,
+].join('|'), 'iu');
+/** The client's own slot: "your slot / place / spot / appointment / viewing time / time slot" (Codex r5), never a bare "your time". */
+const YOUR_SLOT_RE = /(?<![\p{L}])your\s+(?:slot|place|spot|appointment|viewing\s+time|time\s+slot)(?![\p{L}])/iu;
+const ANY_WEEKDAY_EN = String.raw`(?:sun|mon|tues|wednes|thurs|fri|satur)day`;
+const ANY_WEEKDAY_AR = String.raw`ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس|جمعة|جمعه|سبت)`;
+/** A weekday range ("Sunday to Thursday", «من الأحد إلى الخميس»): office hours, never a viewing (Claude r5 P3-2). */
+const WEEKDAY_RANGE_RE = new RegExp(String.raw`(?<![\p{L}])(?:from\s+)?${ANY_WEEKDAY_EN}\s*(?:to|through|till|until|-|–|—)\s*${ANY_WEEKDAY_EN}(?![\p{L}])|(?:من\s+)?(?:يوم\s+)?${ANY_WEEKDAY_AR}\s*(?:إلى|الى|لين|لغاية|حتى|-|–|—)\s*(?:يوم\s+)?${ANY_WEEKDAY_AR}`, 'giu');
+/** A time range ("10:00–19:00", "10 am to 7 pm"); only one longer than two hours is dropped (a viewing is one hour). */
+const TIME_RANGE_RE = /(?<![\d:])(\d{1,2})(?::\d{2})?\s*(am|pm)?\s*(?:-|–|—|to|till|until|إلى|الى|لين|حتى)\s*(\d{1,2})(?::\d{2})?\s*(am|pm)?(?![\d:])/giu;
+const hour24 = (h, ap) => {
+  const n = Number(h) % 12;
+  return ap && ap.toLowerCase() === 'pm' ? n + 12 : (ap ? n : Number(h));
+};
+/** The sentence without office-hours ranges, for the sign check. */
+function withoutRanges(s) {
+  return s.replace(WEEKDAY_RANGE_RE, ' ').replace(TIME_RANGE_RE, (m, h1, a1, h2, a2) => {
+    const from = hour24(h1, a1);
+    let to = hour24(h2, a2);
+    if (to <= from) to += 12;
+    return to - from > 2 ? ' ' : m;
+  });
+}
+/**
+ * Future, conditional and modal forms of every claim word, cut out before the claim check like a denial (Claude r5
+ * P2-1, Codex r6 P2, r8): how booking works, or a slot offer that mentions the confirmation, is no claim.
+ * «يتم / بيتم / ويتم / راح يتم / سيتم + الحجز|التأكيد|التثبيت|التسجيل|الترتيب», «يتأكد / يتثبت / يترتب الموعد»,
+ * «يكون / بيكون / راح يكون (الموعد) محجوز|مؤكد|مثبت|مسجل|مرتب», "once / when / after / until / if it's (your viewing
+ * is) <done>", "will / can / could / may / should / must be <done>". «وتم الحجز» (and) stays a claim.
+ */
+const FUTURE_RE = new RegExp([
+  String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي|حي|سي)تم\s+(?:ال)?(?:${AR_NOUN})\S*`,
+  String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي)(?:تأكد|تثبت|تسجل|ترتب|نحجز|تحجز)\s+${AR_THING}\S*`,
+  String.raw`(?<![\p{L}])[وفل]?(?:ي|بي|راح\s+ي|رح\s+ي|حي|سي)كون\s+(?:\S+\s+){0,2}?(?:${AR_ADJ})\S*`,
+  String.raw`(?<![\p{L}])(?:once|when|after|as\s+soon\s+as|until|if)\s+(?:it['’]s|it\s+is|it\s+has\s+been|(?:a|the|your)\s+(?:\w+\s+)?(?:is|has\s+been))\s+(?:${EN_DONE})(?![\p{L}])`,
+  // a modal offer with the phrasal class ("I can fit you in on Sunday — shall I?", "I'll get you down once …")
+  String.raw`(?:(?<![\p{L}])(?:will|would|can|could|may|might|should|must|shall)|['’]ll)\s+(?:${EN_PHRASAL_BASE})(?![\p{L}])`,
+  // a condition the client still has to meet: "Once you sign the contract, it's yours" (Claude r11 P3)
+  String.raw`(?<![\p{L}])(?:once|when|after|as\s+soon\s+as|if)\s+you\s+[^.!?;]*?,\s*it['’]s\s+yours(?![\p{L}])`,
+  // "'ll" after any word ("You'll", "it’ll", "we'll": Codex r9)
+  String.raw`(?:(?<![\p{L}])(?:will|would|can|could|may|might|should|must)|['’]ll)\s+be\s+(?:${EN_DONE})(?![\p{L}])`,
+  // "sorted / arranged (it|them|the …) (for you) by|according to|in order|as a" is how a list is laid out, no booking (Claude r9 P3-1)
+  String.raw`(?<![\p{L}])(?:arranged|sorted)(?:\s+(?:it|them|these|the\s+\S+))?(?:\s+for\s+you)?\s+(?:by|according\s+to|in\s+order|as\s+an?)(?![\p{L}])`,
+].join('|'), 'giu');
+/**
+ * How viewings work, in general ("Viewings are scheduled Sunday to Thursday"), never "your viewings are booked": cut
+ * out only from a sentence with no booking sign of its own ("Both viewings are booked for Sunday at 10" stays a claim).
+ */
+const GENERAL_RE = new RegExp(String.raw`(?<![\p{L}])(?<!your\s+)(?:viewings|visits|appointments|bookings)\s+(?:are|get)\s+(?:usually\s+|normally\s+|only\s+)?(?:${EN_DONE})(?![\p{L}])`, 'giu');
+/** Clauses inside a sentence: the stock test reads the claim's own clause (, ، — – " - " "and" «و»). The delimiter is kept. */
+const CLAUSE_DELIM_RE = /(\s*(?:[,،—–]|\s-\s)\s*|\s*(?<![\p{L}])and(?![\p{L}])\s*|\sو(?=\S))/iu;
+const AND_RE = /(?<![\p{L}])and(?![\p{L}])|و/iu;
+/**
+ * A clause about stock, price, delivery or the home's features: a claim in it needs its sign in its own sentence, even
+ * with a viewing tool in the turn ("fully booked", "confirmed delivery", "the private pool is confirmed"). Read on the
+ * claim's clause only: "I've booked it, and visitor parking is available" is a booking.
+ */
+const STOCK_RE = /(?<![\p{L}])(?:units?|apartments?|flats?|villas?|homes?|price|prices|delivery|handover|completion|project|pools?|gardens?|parking|elevators?|lifts?|terraces?|balcon(?:y|ies)|amenities|finish(?:ing|es)?|specifications?|gyms?)(?![\p{L}])|الشقق|الشقة|الوحدات|الوحدة|السعر|الأسعار|التسليم|المشروع|الفلل|مسبح|حديقة|موقف|مواقف|مصعد|التشطيب|النادي|الجيم/iu;
+/**
+ * Claim words beyond reply-guard claimsBooking (booked, confirmed, تم الحجز, تم تأكيد, حجزت لك, تأكد الحجز): they need
+ * a booking sign. The adjectives «مؤكد / مسجل / مرتب / متأكد» count only next to the booking («موعدك مؤكد», «الموعد
+ * مسجل»): «إيه مؤكد», «الصك مسجل», «البيت مرتب» and «أنا متأكدة» are no claims. A first-person past verb is a claim with a
+ * booking noun as its object («حجزنا موعدك»), never with another one («رتبت لك الخيارات», «سجلت لك طلبك»).
+ */
+const EXTRA_CLAIM_RE = new RegExp([
+  String.raw`(?<![\p{L}])(?:reserved|scheduled|arranged|sorted|locked\s+in|set\s+for|fixed\s+for|put\s+you\s+down)(?![\p{L}])`,
+  String.raw`(?<![\p{L}])[وف]?(?:محجوز|مثبت)(?:ة|ه)?(?![\p{L}])|(?<![\p{L}])[وف]?انحجز(?:ت)?(?![\p{L}])`,
+  String.raw`(?:الموعد|موعدك|المعاينة|معاينتك|الزيارة|زيارتك|الحجز|حجزك)\s+(?:\S+\s+)?(?:مؤكد|مسجل|مرتب|متأكد)(?:ة|ه)?(?![\p{L}])`,
+  String.raw`(?<![\p{L}])(?:مؤكد|مسجل|مرتب|متأكد)(?:ة|ه)?\s+${AR_THING}`,
+  // the phrasal class (Codex r10): "I've got you down for …", "you're down|in|on|good for …", "it's yours" (not "… to keep"),
+  // "all done for …", «الموعد لك» (not «الموعد لك تختاره»)
+  // "signed / lined you up" only before a booking noun, a day or a time (Claude r11 P3)
+  String.raw`(?<![\p{L}])(?:got|put|pencil(?:l)?ed|slotted|added|fitted|squeezed)\s+(?:you|it|the\s+viewing)\s+(?:down|in|up|on)${EN_PHRASAL_END}`,
+  String.raw`(?<![\p{L}])(?:signed|lined)\s+(?:you|it|the\s+viewing)\s+up(?=${FOR_BOOKING}|${AT_ON_BOOKING})`,
+  String.raw`(?<![\p{L}])you(?:['’]re|\s+are)\s+(?:down|in|on|good)(?=${FOR_BOOKING})`,
+  String.raw`(?<![\p{L}])it['’]s\s+yours(?![\p{L}])(?!\s+to(?![\p{L}]))`,
+  String.raw`(?<![\p{L}])all\s+done\s+for(?![\p{L}])(?!\s+(?:now|today|the\s+day)(?![\p{L}]))`,
+  String.raw`(?:الموعد|المعاينة|موعدك)\s+(?:لك|لكم)(?![\p{L}])(?!\s+(?:(?:ت|ي)?(?:ختار|حدد|قرر)|مجان))`,
+  // a first-person past verb with a booking noun as its object, «لك» or not («حجزنا موعدك», «أكدنا المعاينة»: Codex r9)
+  String.raw`(?<![\p{L}])[وف]?(?:${AR_VERB})\s+(?:لك(?:م)?\s+)?(?:ال)?(?:موعد|معاين|حجز|زيار)`,
+  String.raw`(?<![\p{L}])[وف]?تأكد\s+${AR_THING}`,
+].join('|'), 'iu');
+/**
+ * A personal claim form: a claim AND a booking sign on its own (Codex r3, Claude r4). "you're / you are (all)
+ * booked|confirmed", "see(ing) you then|on|at|there|tomorrow|<weekday>" (never "see you soon"), at a word start (with
+ * «و» / «ف»; «يتم الحجز» is not «تم الحجز»): «تم الحجز», «تم التأكيد», «تم التثبيت», «تم تأكيد الحجز», «تأكد الحجز»,
+ * «تم تثبيت|تسجيل|ترتيب الموعد», «حجزت / حجزنا لك», «أكدت / ثبتت / رتبت / سجلت لك الموعد» (never «ثبتنا لك السعر»,
+ * «رتبت لك الخيارات»), «انحجز لك», and «(ب)نشوفك» + up
+ * to three words + a weekday, tomorrow, a time, «هناك» or «في المعاينة|الموعد» (never «نشوفك على خير»).
+ */
+const PERSONAL_CLAIM_RE = new RegExp([
+  String.raw`(?<![\p{L}])you(?:'re|’re|\s+are)\s+(?:all\s+)?(?:booked|confirmed)(?![\p{L}])`,
+  String.raw`(?<![\p{L}])see(?:ing)?\s+you\s+(?:then|on|at|there|tomorrow|(?:sun|mon|tues|wednes|thurs|fri|satur)day)(?![\p{L}])`,
+  String.raw`(?<![\p{L}])[وف]?(?:تم\s+الحجز|تم\s+التأكيد|تم\s+التثبيت|تم\s+تأكيد\s+الحجز|تأكد\s+(?:ال)?حجز|تم\s+(?:ال)?(?:تثبيت|تسجيل|ترتيب)\s+${AR_THING}|(?:حجزت|حجزنا)\s*لك|(?:أكدت|أكدنا|اكدت|اكدنا|ثبتت|ثبتنا|ثبت|رتبت|رتبنا|سجلت|سجّلت|سجلنا|سجّلنا)\s*لك\s+${AR_THING}|انحجز\s*لك)`,
+  String.raw`(?<![\p{L}])ب?نشوفك(?:م)?(?:\s+\S+){0,3}?\s+(?:يوم\s+)?(?:${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة|هناك|في\s+(?:المعاينة|الموعد))`,
+  // the phrasal class (Codex r10): "you've got the slot", "the slot is yours", "that's you sorted", «سجلتك / حطيتك / ضفتك /
+  // دخلتك» + up to three words + a booking noun, a day or a time (never «ضفتك على قائمة التحديثات»), «اعتمدت لك الموعد»,
+  // «تم اعتماد الموعد», «الموعد صار لك», «خلاص موعدك»
+  String.raw`(?<![\p{L}])you(?:['’]ve|\s+have)\s+got\s+(?:the|your)\s+(?:slot|viewing|appointment|spot)(?![\p{L}])`,
+  String.raw`(?<![\p{L}])the\s+(?:slot|time|spot|appointment)\s+is\s+yours(?![\p{L}])`,
+  String.raw`(?<![\p{L}])that['’]s\s+you\s+sorted(?![\p{L}])`,
+  String.raw`(?<![\p{L}])[وف]?(?:${AR_ENTERED_YOU})(?:\s+(?!و)\S+){0,3}?\s+و?(?:يوم\s+)?(?:${AR_THING}|${WEEKDAY_AR}|بكرة|بكره|غدا|غداً|الساعة)`,
+  String.raw`(?<![\p{L}])[وف]?(?:(?:اعتمدت|اعتمدنا)\s*(?:لك\s+)?${AR_THING}|تم\s+(?:ال)?اعتماد\s+${AR_THING})`,
+  String.raw`(?:الموعد|المعاينة|موعدك)\s+(?:صار|صارت)\s+(?:لك|لكم)|(?:صار|صارت)\s+(?:الموعد|المعاينة)\s+(?:لك|لكم)`,
+  String.raw`(?<![\p{L}])خلاص\s*[،,]?\s*(?:موعدك|معاينتك|حجزك)`,
+].join('|'), 'iu');
+/** "You're all set": a claim, but it needs a booking sign ("You're all set: I've sent you the brochure" is no booking). */
+const ALL_SET_RE = /(?<![\p{L}])you(?:'re|’re|\s+are)\s+all\s+set(?![\p{L}])/iu;
+/**
+ * A denial that governs the claim word, cut out before the claim check (Claude r3, r4; Codex r4, r5, r8): "isn't /
+ * aren't / wasn't / is not / not (yet) / haven't / hasn't / have not / has not (been) / didn't / did not … <done or
+ * base form> (it|this|the …) (yet)", «لم يتم / ما تم / لسه ما (تم) / للحين ما (تم) + الحجز|التأكيد|التثبيت|التسجيل|
+ * الترتيب», «ما + حجزت|أكدت|ثبتت|سجلت|رتبت|انحجز|تأكد», «الموعد لسه ما تأكد», «(لسه) مو / غير / مش + محجوز|مؤكد|مثبت|
+ * مسجل|مرتب». «بعد ما» is "after" in Hijazi, so «بعد ما تم الحجز» / «بعد ما حجزت لك» are no denials (the lookbehinds),
+ * and «ما تم الاتفاق عليه» ("what was agreed") is none either.
+ */
+const GOVERNED_DENIAL_RE = new RegExp([
+  String.raw`(?<![\p{L}])(?:isn['’]t|aren['’]t|wasn['’]t|(?:hasn['’]t|haven['’]t|has\s+not|have\s+not)(?:\s+been)?|didn['’]t|did\s+not|(?:is|are|was)\s+not|not)\s+(?:yet\s+|been\s+|fully\s+|actually\s+)?(?:${EN_PHRASAL_DONE}|${EN_PHRASAL_BASE}|${EN_DONE}|${EN_BASE})(?![\p{L}])(?:\s+(?:it|this|that|the\s+\S+|your\s+\S+))?(?:\s+yet)?`,
+  String.raw`(?<![\p{L}])you(?:['’]re|\s+are)\s+not\s+(?:yet\s+)?(?:down|in|on|good)\s+for(?![\p{L}])`,
+  String.raw`(?:لم\s+يتم|(?<!بعد\s+)(?<![\p{L}])ما\s+تم|(?:لسه|لسا|للحين)\s+ما(?:\s+تم)?)\s+(?:ال)?(?:${AR_NOUN}|تأكد|انحجز)\S*`,
+  String.raw`(?<!بعد\s+)(?<![\p{L}])ما\s+(?:${AR_VERB}|${AR_ENTERED_YOU}|انحجز|تأكد)\S*`,
+  String.raw`(?:الحجز|موعدك|الموعد|المعاينة)\s+(?:(?:لسه|لسا|للحين)\s+ما\s+(?:تأكد|تم|تثبت|ترتب|تسجل))`,
+  String.raw`(?<![\p{L}])(?:(?:لسه|لسا|للحين)\s+)?(?:مو|مب|مش|غير|ليس|ليست|مهو|ماهو|مهي|ماهي)\s+(?:${AR_ADJ})\S*`,
+].join('|'), 'giu');
+/** Sentences: a denial and a claim are read one sentence at a time. */
+const SENTENCE_SPLIT_RE = /[.!?;؟؛\n]+/u;
+
+/**
+ * A booking sign in one sentence: a viewing word, a weekday or tomorrow, a clock time, a second-person object, "your
+ * slot", or today (not about stock). Office-hours ranges are no sign.
+ */
+const signIn = (sentence) => {
+  const s = withoutRanges(sentence);
+  return VIEWING_WORD_RE.test(s) || DAY_RE.test(s) || TIME_RE.test(s) || OBJECT_RE.test(s) || YOUR_SLOT_RE.test(s) || (TODAY_RE.test(s) && !STOCK_RE.test(s));
+};
+
+/**
+ * Whether the answer claims a booking (the safety net; Claude's r4 rule, Codex r1-r4). Sentence by sentence, after the
+ * governed denials are cut out: a personal claim form fires on its own; a claim word (or "you're all set") fires with
+ * a viewing tool anywhere in the turn, a booking sign in its own sentence, or a sign anywhere in the answer when its
+ * own sentence is not about stock, price or delivery ("Sunday at 10 works. It's booked!").
+ */
+function claimsABooking(calls, body) {
+  const viewingTool = calls.some((c) => c.name === 'viewing_slots' || c.name === 'book_viewing');
+  const sentences = String(body ?? '').split(SENTENCE_SPLIT_RE)
+    .map((x) => toAsciiDigits(x.replace(FUTURE_RE, ' ').replace(GOVERNED_DENIAL_RE, ' ')))
+    .map((x) => (signIn(x.replace(GENERAL_RE, ' ')) ? x : x.replace(GENERAL_RE, ' ')));
+  const answerSign = sentences.some(signIn);
+  return sentences.some((s) => {
+    if (PERSONAL_CLAIM_RE.test(s)) return true;
+    if (!claimsBooking(s) && !EXTRA_CLAIM_RE.test(s) && !ALL_SET_RE.test(s)) return false;
+    // A claim about stock needs its own sign, with a viewing tool in the turn too (Claude r6 P3-1), judged on the claim's
+    // own clause: a feature clause next to it never switches the sign off (Claude r7 P2-1, Codex r7 P1).
+    // A claim clause of one or two words joined by "and" / «و» («النادي جاهز ومؤكد») is read with the clause before it;
+    // never across a comma or a dash ("The villa — confirmed!" is a claim of its own: Claude r9 P3-2).
+    const parts = s.split(CLAUSE_DELIM_RE);
+    const clauses = [];
+    for (let i = 0; i < parts.length; i += 2) clauses.push({ text: parts[i], joined: i > 0 && AND_RE.test(parts[i - 1]) });
+    const claimClauses = clauses
+      .filter((cl) => claimsBooking(cl.text) || EXTRA_CLAIM_RE.test(cl.text) || ALL_SET_RE.test(cl.text))
+      .map((cl) => {
+        const i = clauses.indexOf(cl);
+        return i > 0 && cl.joined && cl.text.trim().split(/\s+/u).length <= 2 ? `${clauses[i - 1].text} ${cl.text}` : cl.text;
+      });
+    const stock = claimClauses.length ? claimClauses.every((cl) => STOCK_RE.test(cl)) : STOCK_RE.test(s);
+    return signIn(s) || ((viewingTool || answerSign) && !stock);
+  });
+}
+
+const LINK_RE = /https?:\/\/[^\s<>"'`]+/giu;
+
+/** A tool result or arguments as an object: JSON parsed once or twice (a Retell result may be encoded twice). */
+function parsed(v) {
+  let x = v;
+  for (let i = 0; i < 2 && typeof x === 'string'; i += 1) {
+    try { x = JSON.parse(x); } catch { return null; }
+  }
+  return x && typeof x === 'object' ? x : null;
+}
+
+/**
+ * The turn's tool calls, in order, as `{ name, args, result, ok }` (args `{}` and result `null` when
+ * unreadable): the brain's `toolCalls`, else the Retell-shaped messages paired by `tool_call_id`.
+ */
+export function turnToolCalls(turn) {
+  if (Array.isArray(turn?.toolCalls)) {
+    return turn.toolCalls.filter((c) => c && typeof c.name === 'string')
+      .map((c) => ({ name: c.name, args: parsed(c.args) ?? {}, result: parsed(c.result), ok: c.ok !== false }));
+  }
+  const messages = Array.isArray(turn?.messages) ? turn.messages : [];
+  const results = new Map();
+  for (const m of messages) if (m?.role === 'tool_call_result') results.set(m.tool_call_id, m.content);
+  return messages.filter((m) => m?.role === 'tool_call_invocation' && typeof m.name === 'string')
+    .map((m) => ({ name: m.name, args: parsed(m.arguments) ?? {}, result: parsed(results.get(m.tool_call_id)), ok: results.has(m.tool_call_id) }));
+}
+
+const text = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+const errClass = (err) => (err && typeof err === 'object' && typeof err.name === 'string' ? err.name : typeof err);
+
+/**
+ * @typedef {{ kind: 'text', text: string, bookingId?: string }
+ *   | { kind: 'document', url: string, caption: string, fileName: string, mediaKind: 'document', listingId: string }} Bubble
  * @typedef {object} DanaCommit
- * @property {(o: { lead: object, turn: object, text: string, language: 'ar'|'en', coversTs: number })
- *   => Promise<{ bubbles: Array<{ kind: 'text', text: string }> }>} afterPreSend
+ * @property {(o: { lead: object, turn: object, text: string, language: 'ar'|'en', coversTs?: number })
+ *   => Promise<{ bubbles: Bubble[], booking?: { bookingId: string, listingId: string, startTs: number }, handover?: { kind: 'booking_failed' } }>} afterPreSend
+ *   no tool call and no claim: exactly `{ bubbles: [{ kind: 'text', text }] }` (the stub's answer)
+ * @property {(o: { lead: object, booking: { bookingId: string }|null, accepted: boolean })
+ *   => Promise<{ told?: boolean, handover?: { kind: 'booking_unconfirmed' } }>} afterSend
  */
 
 /**
- * @param {object} [deps]  what the real module will need (viewing, notes, inventory, sender); the stub reads none
+ * @param {{ viewing?: object, notes?: object, inventory?: object, sender?: object, maxLinks?: number,
+ *           siteUrl?: string, blockedBrochures?: string[], log?: Function }} [deps]  `sender` is unused: dana-wa
+ *   sends the bubbles; `maxLinks` is the caller's link cap (dana-wa MAX_LINKS), DEFAULT_MAX_LINKS without it;
+ *   `siteUrl` (or inventory.siteUrl) is the one host a brochure may have besides bona-real-estate.com
  * @returns {DanaCommit}
  */
 export function createDanaCommit(deps = {}) {
-  void deps;
-  return {
-    afterPreSend: async ({ text } = {}) => ({ bubbles: [{ kind: 'text', text }] }),
+  const { viewing = null, notes = null, inventory = null, maxLinks = DEFAULT_MAX_LINKS, log = () => {} } = deps;
+  const siteUrl = deps.siteUrl ?? inventory?.siteUrl ?? null;
+  const blocked = new Set(deps.blockedBrochures ?? BLOCKED_BROCHURES);
+  const exact = (ref) => {
+    if (typeof inventory?.exact === 'function') return inventory.exact(ref);
+    return exactListing(typeof inventory?.all === 'function' ? inventory.all() ?? [] : [], ref);
   };
+  const say = (o) => { try { log(o); } catch { /* a log sink never stops a send */ } };
+
+  async function commit(lead, call, lang) {
+    if (!viewing || typeof viewing.commitBooking !== 'function') return { ok: false, reason: 'off' };
+    try {
+      return await viewing.commitBooking({
+        lead, listingId: text(call.args.listing_id)?.toUpperCase() ?? null, slotId: text(call.args.slot_id),
+        name: text(call.args.name) ?? undefined, language: lang,
+      });
+    } catch (err) {
+      say({ level: 'error', evt: 'dana.commit_error', leadId: lead?.lead_id ?? null, error: errClass(err) });
+      return { ok: false, reason: 'error' };
+    }
+  }
+
+  /**
+   * The brochure documents the turn's send_brochure calls asked for as PDFs, by the inventory's URL: at most
+   * MAX_DOCUMENTS (one PDF per chat per day); every other one comes back in `extra`, to go as its link (Codex r11).
+   */
+  function brochures(calls) {
+    const docs = [];
+    const extra = [];
+    for (const c of calls) {
+      if (c.name !== 'send_brochure' || !c.ok || c.result?.will_send !== 'pdf') continue;
+      const listing = exact(c.args.listing_id);
+      const url = listing ? brochureUrlOn(listing.brochureUrl, siteUrl) : null;
+      if (!url || blocked.has(listing.id) || [...docs, ...extra].some((d) => d.listingId === listing.id)) continue;
+      if (docs.length < MAX_DOCUMENTS) {
+        docs.push({ kind: 'document', url, caption: `${listing.id} brochure`, fileName: `${listing.id}-brochure.pdf`, mediaKind: 'document', listingId: listing.id });
+      } else {
+        extra.push({ listingId: listing.id, url });
+      }
+    }
+    return { docs, extra };
+  }
+
+  /** The extra brochures as links at the end of the text, inside the link allowance; one that does not fit is journalled, never silent. */
+  function withBrochureLinks(body, extra, lang, leadId) {
+    let s = String(body ?? '');
+    for (const e of extra) {
+      if (s.includes(e.url)) continue;
+      if ((s.match(LINK_RE) ?? []).length >= maxLinks) {
+        say({ level: 'warn', evt: 'dana.commit_brochure_link_cap', leadId, listingId: e.listingId });
+        continue;
+      }
+      s = `${s.trimEnd()}\n\n${lang === 'en' ? `${e.listingId} brochure` : `بروشور ${e.listingId}`}: ${e.url}`;
+    }
+    return extra.length ? s : body;
+  }
+
+  /** The text with the exact pin's maps link of the last send_location that said `exact`, within MAX_LINKS. */
+  function withLocation(body, calls, lang) {
+    const call = calls.filter((c) => c.name === 'send_location' && c.ok && c.result?.precision === 'exact').at(-1);
+    if (!call) return body;
+    const listing = exact(call.args.listing_id);
+    if (!listing || pinOf(listing) !== 'exact') return body;
+    const link = `https://maps.google.com/?q=${Number(listing.map.lat)},${Number(listing.map.lng)}`;
+    const s = String(body ?? '');
+    if (s.includes(link) || (s.match(LINK_RE) ?? []).length >= maxLinks) return body;
+    return `${s.trimEnd()}\n\n${lang === 'en' ? 'Location' : 'الموقع'}: ${link}`;
+  }
+
+  async function afterPreSend({ lead = null, turn = null, text: answer = '', language = 'ar' } = {}) {
+    const lang = language === 'en' ? 'en' : 'ar';
+    const calls = turnToolCalls(turn);
+    const brainTurn = Array.isArray(turn?.toolCalls);
+    const leadId = lead?.lead_id ?? null;
+    let body = answer;
+    let booking = null;
+    let handover = null;
+    // The LAST book_viewing decides (Codex + Claude r1): a refused later call never books an earlier slot.
+    const books = calls.filter((c) => c.name === 'book_viewing');
+    const last = books.at(-1);
+    const book = last && last.ok && last.result?.reserved === true ? last : null;
+    // A reserved call, then one that never ran or answered (the tool limit, a throw): nothing is committed, and the
+    // model's "booking it" is not sent unbacked (Claude r2 P3-1). A last call that ran and refused is the model's to answer.
+    const unbacked = !book && Boolean(last) && !last.ok && books.some((c) => c.ok && c.result?.reserved === true);
+    if (book) {
+      const r = await commit(lead, book, lang);
+      if (r?.ok === true && typeof r.text === 'string' && r.text) {
+        body = r.text;
+        booking = { bookingId: r.bookingId, listingId: r.listingId, startTs: r.startTs };
+        say({ evt: 'dana.commit', leadId, booking: 'ok', bookingId: r.bookingId });
+      } else {
+        body = BOOKING_FAILED_LINE[lang];
+        handover = { kind: 'booking_failed' };
+        say({ evt: 'dana.commit', leadId, booking: 'failed', reason: typeof r?.reason === 'string' ? r.reason : 'error' });
+      }
+    } else if (unbacked) {
+      body = BOOKING_FAILED_LINE[lang];
+      handover = { kind: 'booking_failed' };
+      say({ evt: 'dana.commit', leadId, booking: 'unbacked' });
+    } else if (brainTurn && claimsABooking(calls, body)) {
+      // The safety net (DESIGN §4.3): only a commit may say a viewing is booked.
+      body = BOOKING_FAILED_LINE[lang];
+      handover = { kind: 'booking_failed' };
+      say({ evt: 'dana.commit', leadId, booking: 'claim' });
+    }
+    if (!booking && !handover) body = withLocation(body, calls, lang);
+    const { docs, extra } = brochures(calls);
+    body = withBrochureLinks(body, extra, lang, leadId);
+    const first = booking ? { kind: 'text', text: body, bookingId: booking.bookingId } : { kind: 'text', text: body };
+    return {
+      bubbles: [first, ...docs],
+      ...(booking ? { booking } : {}),
+      ...(handover ? { handover } : {}),
+    };
+  }
+
+  async function afterSend({ lead = null, booking = null, accepted = false } = {}) {
+    const id = typeof booking?.bookingId === 'string' && booking.bookingId ? booking.bookingId : null;
+    if (!id) return {};
+    const leadId = lead?.lead_id ?? null;
+    if (accepted === true) {
+      try { viewing?.markTold?.(id); } catch (err) { say({ level: 'error', evt: 'dana.commit_told_failed', bookingId: id, error: errClass(err) }); }
+      try { notes?.booking?.(id, { told: true }); } catch (err) { say({ level: 'error', evt: 'dana.commit_note_failed', bookingId: id, error: errClass(err) }); }
+      return { told: true };
+    }
+    // The event stays (DESIGN §8.3 step 9): the owner is told the client was not.
+    try { notes?.booking?.(id, { told: false }); } catch (err) { say({ level: 'error', evt: 'dana.commit_note_failed', bookingId: id, error: errClass(err) }); }
+    say({ level: 'warn', evt: 'dana.commit_untold', leadId, bookingId: id });
+    return { told: false, handover: { kind: 'booking_unconfirmed' } };
+  }
+
+  return { afterPreSend, afterSend };
 }

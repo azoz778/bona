@@ -115,38 +115,19 @@ test('prices (R3 §2e, $ per 1M tokens): uncached input at the higher of input a
   assert.equal(costMicroUsd('gpt-5.6-sol', null), 0);
 });
 
-test("tool schemas: today's three WhatsApp tools, descriptions word for word from provision.mjs, strict, no Retell-only field", () => {
-  assert.deepEqual(ROUTE_TOOLS, { wa: ['search_properties', 'search_units', 'request_human'] });
-  assert.deepEqual(routeToolNames('wa'), ['search_properties', 'search_units', 'request_human']);
-  assert.deepEqual(routeToolNames('mail'), []);
-  assert.deepEqual(routeToolNames('web'), []);
-  const retell = whatsappToolsPayload({ publicApi: 'https://api.example.com', toolToken: 't' });
-  const tools = toolsFor('wa');
-  assert.deepEqual(tools.map((t) => t.function.name), ['search_properties', 'search_units', 'request_human']);
-  for (const tool of tools) {
-    const r = retell.find((x) => x.name === tool.function.name);
-    assert.equal(tool.type, 'function');
-    assert.equal(tool.function.description, r.description, `${r.name}: the description is word for word`);
-    assert.equal(tool.function.strict, true);
-    const p = tool.function.parameters;
-    assert.equal(p.type, 'object');
-    assert.equal(p.additionalProperties, false);
-    assert.deepEqual(Object.keys(p.properties), Object.keys(r.parameters.properties).sort(), `${r.name}: the same arguments, keys sorted`);
-    assert.deepEqual(p.required, Object.keys(p.properties), 'strict: every property is required');
-    for (const [k, spec] of Object.entries(p.properties)) {
-      const orig = r.parameters.properties[k];
-      assert.equal(spec.description, orig.description, `${r.name}.${k}: the description is word for word`);
-      const optional = !(r.parameters.required ?? []).includes(k);
-      assert.deepEqual(spec.type, optional ? [orig.type, 'null'] : orig.type, `${r.name}.${k}: optional = nullable`);
-      if (orig.enum) assert.deepEqual(spec.enum, optional ? [...orig.enum, null] : orig.enum);
-    }
-    const json = JSON.stringify(tool);
-    for (const f of ['"url"', '"headers"', 'timeout_ms', 'speak_', 'execution_message', 'X-Bona-Token']) assert.equal(json.includes(f), false, `${r.name}: no ${f}`);
+// The PR-BR seed test that pinned today's three WhatsApp tools word for word to retell/provision.mjs
+// whatsappToolsPayload moved to test/tool-schemas.test.mjs (PLAN T13 test 3: the route lists, strict mode, no
+// Retell-only field). PR-B4 changed the list and two descriptions; the legacy Retell payload stays as it was.
+test('search_properties is still the Retell tool word for word; an optional enum also takes null in strict mode', () => {
+  const retell = whatsappToolsPayload({ publicApi: 'https://api.example.com', toolToken: 't' }).find((x) => x.name === 'search_properties');
+  const tool = toolsFor('wa').find((t) => t.function.name === 'search_properties');
+  assert.equal(tool.function.description, retell.description);
+  for (const [k, spec] of Object.entries(tool.function.parameters.properties)) {
+    const orig = retell.parameters.properties[k];
+    assert.equal(spec.description, orig.description, k);
+    if (orig.enum) assert.deepEqual(spec.enum, [...orig.enum, null], k);
   }
-  assert.deepEqual(toolsFor('wa', ['search_properties', 'create_lead', 'show_property']).map((t) => t.function.name), ['search_properties'], 'only offered and known');
-  assert.deepEqual(toolsFor('mail'), []);
-  assert.equal(JSON.stringify(toolsFor('wa')), JSON.stringify(toolsFor('wa')), 'byte-stable');
-  assert.deepEqual(Object.keys(TOOL_SCHEMAS).sort(), ['request_human', 'search_properties', 'search_units']);
+  assert.ok(Object.keys(TOOL_SCHEMAS).length > 0 && routeToolNames('wa').length === ROUTE_TOOLS.wa.length);
 });
 
 test('the prompt: nameless identity, the channel, the channel section only, the site facts; an unfilled {{ is refused', () => {

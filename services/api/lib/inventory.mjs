@@ -239,10 +239,29 @@ export function toCard(listing, { siteUrl = 'https://bona.azoz.uk' } = {}) {
   };
 }
 
-/** Compact row handed to the LLM by `search_properties` (kept small on purpose). */
-export function toToolRow(listing, { siteUrl = 'https://bona.azoz.uk' } = {}) {
+/**
+ * How a listing's location may be shown (DESIGN §4.1, §4.3): `exact` (a pin somebody published, with valid
+ * coordinates: a maps link is allowed), `district` (a district centroid: words only, never a pin) or `none`.
+ * The same rule as lib/viewing.mjs pinOf (the booking confirmation); a test keeps the two equal.
+ */
+export function pinOf(listing) {
+  const lat = Number(listing?.map?.lat);
+  const lng = Number(listing?.map?.lng);
+  const valid = listing?.map != null && Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  if (listing?.mapPrecision === 'exact' && valid) return 'exact';
+  if (listing?.mapPrecision === 'district') return 'district';
+  return 'none';
+}
+
+/**
+ * Compact row handed to the LLM by `search_properties` (kept small on purpose). With `assistant` (PR-B4: the
+ * brain's in-process route only) it also carries `has_brochure` (listings.json has the URL only, no size:
+ * send_brochure measures it, critic round 2 #18), `pin`, and the coordinates only for an exact pin. Without it,
+ * the row is exactly today's, for the concierge, the legacy WhatsApp agent and the phone line (PLAN §2 row 8).
+ */
+export function toToolRow(listing, { siteUrl = 'https://bona.azoz.uk', assistant = false } = {}) {
   const card = toCard(listing, { siteUrl });
-  return {
+  const row = {
     id: card.id,
     slug: card.slug,
     title_en: card.title.en,
@@ -260,6 +279,99 @@ export function toToolRow(listing, { siteUrl = 'https://bona.azoz.uk' } = {}) {
     url_en: card.url.en,
     url_ar: card.url.ar,
   };
+  if (assistant !== true) return row;
+  const pin = pinOf(listing);
+  return {
+    ...row,
+    has_brochure: typeof listing.brochureUrl === 'string' && listing.brochureUrl.trim() !== '',
+    pin,
+    ...(pin === 'exact' ? { lat: Number(listing.map.lat), lng: Number(listing.map.lng) } : {}),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* listing_details (PR-B4; brain/DESIGN-brain.md §5.2)                  */
+/* ------------------------------------------------------------------ */
+
+/** listing_details answers at most this many characters of JSON (the tool result cap is 4,000). */
+export const DETAILS_MAX_CHARS = 3800;
+/** A FAQ answer the site fills from the developer's unit sheet (src/lib/units-summary.mjs FAQ_PLACEHOLDERS). */
+const SHEET_PLACEHOLDER_RE = /\{\w+\}/;
+
+const textIn = (o, lang) => {
+  const v = o?.[lang] ?? o?.en;
+  return typeof v === 'string' ? v.trim() : '';
+};
+const listIn = (o, lang) => {
+  const v = Array.isArray(o?.[lang]) && o[lang].length ? o[lang] : o?.en;
+  return Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()) : [];
+};
+/** Cut at a word in the second half, with an ellipsis: whole characters only. */
+function clipText(s, max) {
+  if (s.length <= max) return s;
+  let cut = '';
+  for (const ch of s) {
+    if (cut.length + ch.length > max - 1) break;
+    cut += ch;
+  }
+  const at = cut.lastIndexOf(' ');
+  return `${(at > max / 2 ? cut.slice(0, at) : cut).trimEnd()}…`;
+}
+
+/**
+ * What one published home is like, for the assistant (listing_details): in the conversation language, from
+ * listings.json ONLY, never units.json. A FAQ answer that needs the unit sheet's figures (`{sheetDate}`,
+ * `{cashFrom}`, …) is dropped whole, as the site drops it when there is no sheet (units-summary.mjs localFaq):
+ * a half-filled answer is worse than none, and those figures come from search_units. Clipped to
+ * DETAILS_MAX_CHARS of JSON: the FAQ's last answers go first, then the lists' last items, then the
+ * description is cut; the title, the place, the kind and the link always stay.
+ * @returns {object} `{ found: true, id, title, district, city, kind, status, description, highlights,
+ *   amenities, projectFacts, nearby, faq, url }`, or `{ found: false }` for a listing with no page
+ */
+export function listingDetails(listing, lang = 'en', { siteUrl = 'https://bona.azoz.uk' } = {}) {
+  if (!listing || typeof listing !== 'object' || !listing.id || !listing.slug) return { found: false };
+  const l = lang === 'ar' ? 'ar' : 'en';
+  const facts = {};
+  for (const [k, v] of Object.entries(listing.projectFacts && typeof listing.projectFacts === 'object' ? listing.projectFacts : {})) {
+    if ((typeof v === 'number' && Number.isFinite(v)) || (typeof v === 'string' && v.trim())) facts[k] = v;
+  }
+  const faq = [];
+  for (const item of Array.isArray(listing.faq) ? listing.faq : []) {
+    const q = textIn(item?.q, l);
+    const parts = listIn(item?.a, l);
+    const a = parts.join(' ');
+    if (q && a && !SHEET_PLACEHOLDER_RE.test(q) && !SHEET_PLACEHOLDER_RE.test(a)) faq.push({ q, a });
+  }
+  const out = {
+    found: true,
+    id: listing.id,
+    title: textIn(listing.title, l) || listing.id,
+    district: textIn(listing.location?.district, l),
+    city: textIn(listing.location?.city, l),
+    kind: kindOf(listing),
+    status: typeof listing.status === 'string' ? listing.status : null,
+    description: textIn(listing.description, l),
+    highlights: listIn(listing.highlights, l),
+    amenities: listIn(listing.amenities, l),
+    projectFacts: facts,
+    nearby: listIn(listing.nearby, l),
+    faq,
+    url: `${String(siteUrl).replace(/\/+$/, '')}${propertyPath(listing.slug, l)}`,
+  };
+  const size = () => JSON.stringify(out).length;
+  while (size() > DETAILS_MAX_CHARS && out.faq.length) out.faq.pop();
+  // The description keeps at least a real part before the lists give way.
+  if (size() > DETAILS_MAX_CHARS) out.description = clipText(out.description, Math.max(600, out.description.length - (size() - DETAILS_MAX_CHARS)));
+  for (const k of ['nearby', 'amenities', 'highlights']) while (size() > DETAILS_MAX_CHARS && out[k].length) out[k].pop();
+  if (size() > DETAILS_MAX_CHARS) out.description = clipText(out.description, Math.max(0, out.description.length - (size() - DETAILS_MAX_CHARS)));
+  return out;
+}
+
+/** The listing with exactly this id or slug (case-insensitive), never a loose title match. */
+export function exactListing(listings, ref) {
+  const want = String(ref ?? '').trim().toLowerCase();
+  if (!want) return null;
+  return listings.find((l) => String(l?.id ?? '').toLowerCase() === want || String(l?.slug ?? '').toLowerCase() === want) ?? null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -455,6 +567,11 @@ export function createInventory({ file, siteUrl = 'https://bona.azoz.uk', reload
     search(q) { return search(maybeReload(), q); },
     find(ref) { return findOne(maybeReload(), ref); },
     card(listing) { return toCard(listing, { siteUrl }); },
-    row(listing) { return toToolRow(listing, { siteUrl }); },
+    /** `{ assistant: true }`: the brain route's row (PR-B4); otherwise today's. */
+    row(listing, { assistant = false } = {}) { return toToolRow(listing, { siteUrl, assistant }); },
+    /** The listing with exactly this id or slug, or null (no loose title match). */
+    exact(ref) { return exactListing(maybeReload(), ref); },
+    /** listing_details (PR-B4): one published listing by its exact id or slug, in `lang`; `{ found: false }` otherwise. */
+    details(ref, lang = 'en') { return listingDetails(exactListing(maybeReload(), ref), lang, { siteUrl }); },
   };
 }
