@@ -53,7 +53,7 @@ const COMPLETE_PHONE_RE = /^(?:0[1-9]\d{8}|(?:00)?966\d{9}|00(?!966)[1-9]\d{8,12
 /** Between two of a client's messages (minimiseParts): a paragraph separator, so a message boundary is told from a line break inside one. */
 const PART_SEP = '\u2029';
 /** A date (2026-11-29, 29-11-2026, 29.11.2026, 29/11/2026, 2026/11/29): its groups are never part of a phone or an ID. */
-const DATE_RE = /(?<!\d)(?:(?:19|20)\d{2}([-./])(?:0?[1-9]|1[0-2])\1(?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])([-./])(?:0?[1-9]|1[0-2])\2(?:19|20)\d{2})(?!\d)/g;
+const DATE_RE = /(?<!\d)(?:(?:19|20|13|14)\d{2}([-./])(?:0?[1-9]|1[0-2])\1(?:0?[1-9]|[12]\d|3[01])|(?:0?[1-9]|[12]\d|3[01])([-./])(?:0?[1-9]|1[0-2])\2(?:19|20|13|14)\d{2})(?!\d)/g;
 
 /* ---------------- digits and the probe ---------------- */
 const ND_RE = /^\p{Nd}$/u;
@@ -280,7 +280,9 @@ function numberCuts(s) {
             || (plus && digits.length < 11 && digits.length + groups[j].digits.length <= MAX_DIGITS));
           // Two of a client's messages that are each an amount in thousands groups stay two amounts ("ميزانيتي
           // 500.000", our question, "600.000", Claude r15 F2); a line break inside one message joins as before.
-          const apart = gap.includes(PART_SEP) && !plus && thousandsEnd(groups.slice(i, j), gaps, 0) === j - 1 - i && startsThousands(s, groups, j);
+          // A whole clear phone the two make together wins ("966.551" then "234.567", Codex r13).
+          const apart = gap.includes(PART_SEP) && !plus && thousandsEnd(groups.slice(i, j), gaps, 0) === j - 1 - i && startsThousands(s, groups, j)
+            && !lineCompletes(s, groups, j, digits);
           if (lineStartsNumber(s, groups, j, gap.includes('+')) || (best && !goesOn) || apart) break;
         }
         if (!GAP_RE.test(gap)) { if (tail) break; wide = true; }
@@ -362,12 +364,15 @@ function numberCuts(s) {
   return residual(s, groups, cuts);
 }
 
-/** Groups joined to `groups[k]` from it on, as a phone joins them, within one line, never across a date: their indexes. */
-function joinedRun(s, groups, k) {
+/**
+ * Groups joined to `groups[k]` from it on, as a phone joins them, within one line, never across a date or into a
+ * group a cut covers (`cov`): their indexes.
+ */
+function joinedRun(s, groups, k, cov) {
   const run = [k];
   for (let m = k + 1; m < groups.length; m += 1) {
     const gap = s.slice(groups[m - 1].end, groups[m].start);
-    if (groups[m].date || !PHONE_GAP_RE.test(gap) || /[\r\n\u2028\u2029]/.test(gap)) break;
+    if (cov[m] || groups[m].date || !PHONE_GAP_RE.test(gap) || /[\r\n\u2028\u2029]/.test(gap)) break;
     run.push(m);
   }
   return run;
@@ -377,29 +382,43 @@ function joinedRun(s, groups, k) {
  * The net under the cuts (Codex r10): what a number split elsewhere (across messages, a clip, a cut that took only
  * part of it) leaves in clear is masked too:
  *   - R1: digits no cut took, joined as a phone is, 7 or more and starting with 0 (no amount starts with 0);
- *   - R2: 4 or more digits joined to a phone or ID mask's end, unless they are one amount in thousands groups
- *     ("[phone] 234 5678" goes; "551 234 567 - 1 000" keeps its amount).
- * It only adds masks.
+ *   - R2: what can be a phone's tail right after a phone, ID or account mask: 4-8 digits that are no amount (one in
+ *     thousands groups, one bare group led by 1-9) and do not start with one (a range): "[phone] 234 5678" goes;
+ *     "551 234 567 - 1 000", "0551234567 - 500.000 - 600.000", "- 1500000 riyals", "- 1200 sqm" keep theirs (Claude r16).
+ * It only adds masks, in one pass over the sorted cuts (linear time).
  */
 function residual(s, groups, cuts) {
-  const covered = (g) => cuts.some((c) => g.start < c.end && g.end > c.start);
-  const out = cuts.slice();
-  const isThousands = (idx) => idx.length >= 2 && isAmount(idx.map((k) => groups[k]), idx.slice(1).map((k) => s.slice(groups[k - 1].end, groups[k].start)));
+  const n = groups.length;
+  const cov = new Array(n).fill(false);
+  for (let k = 0, ci = 0; k < n; k += 1) {
+    while (ci < cuts.length && cuts[ci].end <= groups[k].start) ci += 1;
+    cov[k] = ci < cuts.length && cuts[ci].start < groups[k].end;
+  }
+  const isThousands = (rg, rgaps) => rg.length >= 2 && isAmount(rg, rgaps);
   // R2: the digits right after a phone, ID or account mask.
+  let k0 = 0;
   for (const c of cuts) {
-    if (c.mask === '[email]' || c.mask === '[iban]') continue;
-    const k = groups.findIndex((g) => g.start >= c.end && !g.date);
-    if (k < 0 || covered(groups[k])) continue;
+    while (k0 < n && groups[k0].start < c.end) k0 += 1;
+    let k = k0;
+    while (k < n && groups[k].date) k += 1;
+    if (k >= n || cov[k]) continue;
     const gap = s.slice(c.end, groups[k].start);
     if (!PHONE_GAP_RE.test(gap) || /[\r\n\u2028\u2029]/.test(gap)) continue;
-    const run = joinedRun(s, groups, k).filter((m) => !covered(groups[m]));
-    const digits = run.map((m) => groups[m].digits).join('');
-    if (digits.length >= 4 && !isThousands(run)) c.end = groups[run.at(-1)].end;
+    const run = joinedRun(s, groups, k, cov);
+    const rg = run.map((m) => groups[m]);
+    const rgaps = run.slice(1).map((m) => s.slice(groups[m - 1].end, groups[m].start));
+    const digits = rg.map((g) => g.digits).join('');
+    const amountish = isThousands(rg, rgaps) || (run.length === 1 && /^[1-9]/.test(digits)) || thousandsEnd(rg, rgaps, 0) >= 0;
+    if (digits.length >= 4 && digits.length <= 8 && !amountish) {
+      c.end = groups[run.at(-1)].end;
+      for (const m of run) cov[m] = true;
+    }
   }
   // R1: a run no cut took, 7+ digits, starting with 0.
-  for (let k = 0; k < groups.length;) {
-    if (groups[k].date || covered(groups[k])) { k += 1; continue; }
-    const run = joinedRun(s, groups, k).filter((m) => !covered(groups[m]));
+  const out = cuts.slice();
+  for (let k = 0; k < n;) {
+    if (groups[k].date || cov[k]) { k += 1; continue; }
+    const run = joinedRun(s, groups, k, cov);
     const digits = run.map((m) => groups[m].digits).join('');
     if (digits.length >= 7 && digits.startsWith('0')) out.push({ start: groups[run[0]].start, end: groups[run.at(-1)].end, mask: '[phone]' });
     k = run.at(-1) + 1;

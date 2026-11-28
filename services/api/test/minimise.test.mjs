@@ -370,6 +370,29 @@ test('a number already whole keeps the next line to itself; two messages that ar
   assert.deepEqual(minimiseParts(['my number is 055 123', '4567']), ['my number is [phone]', '[phone]'], 'a phone split across two messages still joins');
 });
 
+/* Codex r13 P0: a whole phone in dot groups split across two messages is no pair of budgets. */
+test('two messages that look like thousands amounts but make a whole clear phone together are that phone', () => {
+  assert.deepEqual(minimiseParts(['966.551', '234.567']), ['[phone]', '[phone]']);
+  assert.deepEqual(minimiseParts(['call 966 551', '234 567 thanks']), ['call [phone]', '[phone] thanks']);
+  assert.deepEqual(minimiseParts(['ميزانيتي 500.000', '600.000']), ['ميزانيتي 500.000', '600.000'], 'two budgets still stay two');
+});
+
+/* Claude r16: the net masks only what can be a phone's tail, and a Hijri date is a date. */
+test('after a phone the net keeps an amount, an area or a year; a Hijri date is no number; a short tail that is no amount still goes', () => {
+  for (const [input, want] of [
+    ['رقمي 0551234567 - 500.000 - 600.000', 'رقمي [phone] - 500.000 - 600.000'],
+    ['0551234567 - 1500000 riyals', '[phone] - 1500000 riyals'],
+    ['+966 55 123 4567 - 1200 sqm', '[phone] - 1200 sqm'],
+    ['1012345678 2026', '[id-number] 2026'],
+    ['ممكن معاينة يوم 05/06/1447؟', 'ممكن معاينة يوم 05/06/1447؟'],
+    ['05/06/1447 0551234567', '05/06/1447 [phone]'],
+    ['1447/06/05', '1447/06/05'],
+  ]) assert.equal(minimise(input), want, input);
+  const t = performance.now();
+  minimise('0551234567 12 3456 '.repeat(3_500));
+  assert.ok(performance.now() - t < 2000, 'the net is linear');
+});
+
 /** The first 7-digit run of `num` still readable in `out` (digits only), else null. */
 function sevenOf(out, num) {
   const ds = String(out).replace(/\D/g, '');

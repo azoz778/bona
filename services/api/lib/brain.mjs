@@ -568,6 +568,8 @@ export function createBrain(deps = {}) {
           messages.push({ role: 'tool', tool_call_id: d.id, content: d.result });
           reported.push(d);
           if (d.ran) results.push(d.result);
+          // A hand-over the model asked for is kept for the turn, so a backup restart still carries it (Codex r13).
+          if (d.ran && d.name === HANDOVER_TOOL && ctx.handover && !ctx.handover.includes(d)) ctx.handover.push(d);
         }
         continue;
       }
@@ -610,8 +612,8 @@ export function createBrain(deps = {}) {
       clearOutAfter(outTrial);
       // Only the half-open trial closes an open breaker: any other answer while it is open came from a request sent
       // before it opened (Codex r11).
-      if (wasTrial) { b.open = false; b.fails = []; }
-      b.trial = false;
+      // ...and only the trial frees its slot: a late answer from before must not let a second trial in (Claude r16).
+      if (wasTrial) { b.open = false; b.fails = []; b.trial = false; }
       return;
     }
     if (OUT_CODES.has(code)) enterOut(code);
@@ -722,6 +724,8 @@ export function createBrain(deps = {}) {
     const client = clientRows(input.history, Array.isArray(input.batchParts) ? input.batchParts : [String(input.batchText ?? '')]);
     const ctx = {
       route, language, leadId, logLead, outTrial, trial,
+      // request_human calls that ran in any attempt of this turn (attempt()): the result always carries them.
+      handover: [],
       deadline: started + turnMs,
       // The per-turn caps (§2.4), shared by the main attempt and the backup restart.
       allow: { answer: limits.answerCalls, repair: limits.repairCalls, tools: limits.tools },
@@ -759,10 +763,12 @@ export function createBrain(deps = {}) {
     }
     settle(null, wasTrial, outTrial);
     state.lastTurnBackup = backup;
+    // A hand-over the main model asked for before it failed stays in the backup's result (dana-wa hands over on it).
+    const calls = [...ctx.handover.filter((c) => !res.calls.includes(c)), ...res.calls];
     return end({
       ok: true, model, backup, rounds: res.rounds, ms: now() - started, usd: acc.micro / 1e6, usage: acc.usage,
-      toolCalls: res.calls.map(({ id, name, args, result, ok }) => ({ id, name, args, result, ok })),
-      messages: retellMessages(res.calls.filter((c) => c.ran), res.text),
+      toolCalls: calls.map(({ id, name, args, result, ok }) => ({ id, name, args, result, ok })),
+      messages: retellMessages(calls.filter((c) => c.ran), res.text),
       guard: { repaired: res.repaired },
     });
   }

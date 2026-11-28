@@ -802,6 +802,15 @@ test("Codex r12: while the breaker is open, a turn whose first request went out 
   assert.equal(h.calls.length, n, 'no paid request while open');
 });
 
+test("Codex r13 P1: a hand-over the main model asked for survives its failure: the backup's answer carries the request_human call, so the team is still alerted", async () => {
+  const h = harness({ backupMode: 'answer', script: [toolCalls(['request_human', { reason: 'wants a person' }]), http(503, {}), reply('Of course, a colleague will call you.')] });
+  const r = await h.brain.turn(turnArgs({ batchText: 'I want to talk to a person' }));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.backup, true);
+  assert.equal(r.toolCalls.some((c) => c.name === 'request_human'), true, 'the hand-over call is in the result');
+  assert.equal(r.messages.some((m) => m.role === 'tool_call_invocation' && m.name === 'request_human'), true, 'and in the Retell-shaped messages dana-wa reads');
+});
+
 test('a turn that throws during the half-open trial frees the trial: the next turn is the trial again, never a stuck breaker', async () => {
   let throwing = false;
   const h = harness({ backupMode: 'handover', script: [http(500, {}), http(500, {}), http(500, {}), reply('Draft.'), reply('Fine now.')] });
