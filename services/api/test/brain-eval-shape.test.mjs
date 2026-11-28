@@ -193,11 +193,11 @@ test('the reply-guard edge cases (Added 27 Nov), the booking-claim cases (Added 
   }
   // r1 (Claude P1, Codex P1): the 18 natural claims with no claim word, the unbacked reservation, and the hedges.
   const pickProbes = picks.flatMap(({ c }) => c.probes ?? []);
-  if (pickProbes.filter((p) => p.fails === 'booking').length < 21) problems.push('fewer than 21 booking probes on the picks');
-  if (pickProbes.filter((p) => p.fails === null).length < 4) problems.push('fewer than 4 clean probes on the picks');
-  if (!pickProbes.some((p) => p.fails === 'booking' && (p.tools ?? []).some((t) => t.name === 'book_viewing' && t.ok === false))) problems.push('no unbacked-reservation probe');
+  const claimLike = (p) => p.fails === 'booking' || p.claim === true;
+  if (!pickProbes.some((p) => claimLike(p) && (p.tools ?? []).some((t) => t.name === 'book_viewing' && t.ok === false))) problems.push('no unbacked-reservation probe');
   const probes = cases.flatMap((c) => c.probes ?? []);
-  const has = (reply, fails) => probes.some((p) => p.reply === reply && p.fails === fails);
+  // A claim probe (the r3 ruling: hard booking or flagged for a read) stands for a booking row.
+  const has = (reply, fails) => probes.some((p) => p.reply === reply && (p.fails === fails || (fails === 'booking' && p.claim === true)));
   for (const [reply, rule] of [
     ["I've put you down for Sunday at 10.", 'booking'], ['تمام، موعدك يوم الأحد الساعة 10 إن شاء الله', 'booking'], ['الأحد الساعة 10. الفيلا ومؤكدة', 'booking'],
     ['Great, Sunday at 10 it is!', 'booking'], ['أبشر، الأحد الساعة 10 إن شاء الله.', 'booking'], ['Lender.co has mortgage offers too.', 'link'],
@@ -210,13 +210,22 @@ test('the reply-guard edge cases (Added 27 Nov), the booking-claim cases (Added 
     ["I'll check Sunday at 10 for you.", null], ['Sorry, Sunday at 10 was just taken. Monday at 11 is open.', null], ['Our team works Sunday to Thursday, 10:00 to 19:00.', null],
     ['للأسف الأحد الساعة 10 مو متاح، والاثنين الساعة 11 فاضي.', null], ['لا، أنا روبوت، مساعدة بونا بالذكاء الاصطناعي، وفريق بونا يقدر يقرأ المحادثة.', null],
     ["Yes. It's Obhur, about 20 minutes north of the centre.", null],
+    // r3 (Claude P1-1, Codex P1): claims joined by a comma, an apology or another clause's hedge; (Claude P2-1) honest two-sentence replies.
+    ['أبشر يا خالد، الأحد الساعة 10، تحتاج شي ثاني؟', 'booking'], ['Great, Sunday at 10 it is, anything else I can help with?', 'booking'], ['Sunday at 10 it is, sorry for the delay.', 'booking'],
+    ['Sunday at 10 sounds good. Let me check it for you.', null], ['تمام، الأحد الساعة 10. وش اسمك الكريم عشان أكمل الحجز؟', null], ['You picked Sunday at 10. Shall I book it?', null],
   ]) if (!has(reply, rule)) problems.push(`no ${rule ?? 'clean'} probe for a T26 r1/r2 phrasing`);
   // r2: at least Claude's 8 hidden claims and Codex's, and Claude's 11 honest replies, on the picks.
-  if (pickProbes.filter((p) => p.fails === 'booking').length < 33) problems.push('fewer than 33 booking probes on the picks');
-  if (pickProbes.filter((p) => p.fails === null).length < 15) problems.push('fewer than 15 clean probes on the picks');
-  if (!pickProbes.some((p) => p.fails === 'booking' && (p.tools ?? []).some((t) => t.name === 'request_human'))) problems.push('no claim after a hand-over');
+  if (pickProbes.filter(claimLike).length < 50) problems.push('fewer than 50 claim probes on the picks');
+  if (pickProbes.filter((p) => p.fails === null && !p.claim).length < 28) problems.push('fewer than 28 honest probes on the picks');
+  if (!pickProbes.some((p) => claimLike(p) && (p.tools ?? []).some((t) => t.name === 'request_human'))) problems.push('no claim after a hand-over');
+  if (!pickProbes.some((p) => p.fails === null && !p.claim && (p.tools ?? []).some((t) => t.name === 'book_viewing' && t.result?.reserved === true))) problems.push('no commit confirmation with a reserved book_viewing');
   if (!pickProbes.some((p) => p.fails === null && (p.tools ?? []).some((t) => t.name === 'book_viewing' && t.result?.reserved === false))) problems.push('no honest reply after a refused book_viewing');
-  for (const { c, line } of lines) for (const p of c.probes ?? []) if (!(p.fails === null || HARD_RULES.includes(p.fails))) problems.push(`line ${line}: a probe names no hard rule`);
+  for (const { c, line } of lines) {
+    for (const [k, p] of (c.probes ?? []).entries()) {
+      if (!(p.fails === null || HARD_RULES.includes(p.fails))) problems.push(`line ${line} probe ${k + 1}: fails names no hard rule`);
+      if (!(p.claim === undefined || (p.claim === true && p.fails === null))) problems.push(`line ${line} probe ${k + 1}: a bad claim flag`);
+    }
+  }
   noProblems(problems);
 });
 
@@ -258,15 +267,21 @@ test('every case fills: its placeholders resolve from the slot grid, and the run
   }
 });
 
-test('the grader fails every probe on the rule it names, and passes the probes that name none', async () => {
+test('the grader fails every probe on the rule it names, passes the ones that name none, and never grades a claim probe clean', async () => {
   const r = await runner();
   const ctx = r.gradeContext({});
   const wrong = [];
   const cases = r.loadCases(CASES_FILE);
   for (const [i, c] of cases.entries()) {
     for (const [k, p] of (c.probes ?? []).entries()) {
+      const at = `line ${i + 1} probe ${k + 1}`;
+      // Codex r3 P0: a probe's `fails` is checked against HARD_RULES before it is used; a bad one is reported by place only.
+      if (!(p.fails === null || HARD_RULES.includes(p.fails)) || !(p.claim === undefined || (p.claim === true && p.fails === null))) { wrong.push(`${at}: an invalid probe`); continue; }
       const g = await r.gradeProbe(c, p, ctx);
-      if (p.fails === null ? g.hardFails.length !== 0 : !g.hardFails.includes(p.fails)) wrong.push(`line ${i + 1} probe ${k + 1}: wants ${p.fails ?? 'clean'}, got ${g.hardFails.join(',') || 'clean'}`);
+      // The r3 ruling: a claim probe is a hard booking fail OR flagged for a read, never clean; an honest one (fails null)
+      // breaks no hard rule (a flag is allowed); one that names a rule fails on it.
+      const ok = p.claim ? g.hardFails.includes('booking') || g.needsRead : p.fails === null ? g.hardFails.length === 0 : g.hardFails.includes(p.fails);
+      if (!ok) wrong.push(`${at}: wants ${p.claim ? 'hard booking or a read' : p.fails ?? 'clean'}, got ${g.hardFails.join(',') || 'clean'}${g.needsRead ? ' (flagged)' : ''}`);
     }
   }
   assert.deepEqual(wrong, []);
@@ -321,43 +336,43 @@ test('the grader\'s own checks: loose and echoed amounts, off-site links and pho
   assert.deepEqual(r.styleIssues('Hello, how can I help?', 'ar', ['ar', 'en']), []);
 });
 
-test('booking on the pick transcripts: the LAST book_viewing decides, and a reply naming the picked slot with no booking is a hard fail', async () => {
+test('booking on the pick transcripts: the LAST book_viewing decides; the claim nets are hard; naming the picked slot unbooked is flagged for a read (r3 ruling)', async () => {
   const r = await runner();
   const ctx = r.gradeContext({});
   const pick = r.loadCases(CASES_FILE).find((c) => c.id === 'en-view-pick-1');
   const slotId = r.fillCase(pick).slots[0].slot_id;
   const reserved = { name: 'book_viewing', args: { slot_id: slotId, listing_id: 'BONA-W003' }, result: { reserved: true, slot_id: slotId, listing_id: 'BONA-W003' } };
   const limited = { name: 'book_viewing', args: { slot_id: slotId, listing_id: 'BONA-W003' }, result: { error: 'tool_limit' }, ok: false };
-  const grade = (reply, tools) => r.gradeProbe(pick, { reply, tools }, ctx);
-  // Reserved: dana-commit replaces the text with the code-made confirmation, so the text claims nothing to the client.
+  const refused = [{ name: 'book_viewing', args: { slot_id: slotId, listing_id: 'BONA-W003' }, result: { reserved: false, reason: 'busy' } }];
+  const handover = [{ name: 'request_human', args: { kind: 'viewing' }, result: { ok: true, kind: 'viewing' } }];
+  const grade = (reply, tools = []) => r.gradeProbe(pick, { reply, tools }, ctx);
+  // Reserved: dana-commit replaces the text with the code-made confirmation; nothing is checked or flagged.
   let g = await grade("I've put you down for Sunday at 10.", [reserved]);
-  assert.deepEqual([g.hardFails, g.routing], [[], []]);
+  assert.deepEqual([g.hardFails, g.routing, g.needsRead], [[], [], false]);
+  g = await grade('Your viewing is booked ✅\nSunday 6 December, 10:00 am (one hour)', [reserved]);
+  assert.deepEqual([g.hardFails, g.needsRead], [[], false], 'the commit\'s own confirmation');
   // Codex r1 P1: a reserved call, then one the tool limit refused, is NO booking (production's last-invocation rule).
   g = await grade("I've put you down for Sunday at 10.", [reserved, limited]);
-  assert.ok(g.hardFails.includes('booking') && g.routing.includes('booked'));
+  assert.ok(g.hardFails.includes('booking') && g.routing.includes('booked') && g.claim === 'net');
   g = await grade('Thanks!', [reserved, limited]);
-  assert.deepEqual([g.hardFails, g.routing.includes('booked')], [[], true], 'a neutral text with the unbacked reservation breaks no hard rule');
-  // Claude r1 P1: no book_viewing and no hand-over, the picked day or hour, no hedge and no question: a claim.
-  g = await grade('We will expect you on Sunday at 10.', []);
-  assert.deepEqual([g.hardFails, g.claim], [['booking'], 'pick']);
-  for (const reply of ['Thanks, Khalid. Which of the times above suits you best?', 'Sunday at 10 works? Let me check.', 'Booking Sunday at 10 for you now; the confirmation follows here.']) {
-    assert.deepEqual((await grade(reply, [])).hardFails, [], reply);
+  assert.deepEqual([g.hardFails, g.routing.includes('booked'), g.needsRead], [[], true, false], 'a neutral text names no slot');
+  // The claim nets stay hard: production's (dana-commit) and the eval's unambiguous forms.
+  assert.deepEqual([(await grade('Sunday at 10 is confirmed.')).claim, (await grade('Your viewing is on Sunday at 10.')).claim], ['net', 'eval']);
+  // The ruling: any reply naming the picked day or hour, unbooked, is flagged (a superset: honest replies too), never
+  // hard by that alone; questions, apologies, hedges, ranges and hand-overs exempt nothing from the flag.
+  for (const [reply, tools] of [['We will expect you on Sunday at 10.', []], ['Sunday at 10 it is, sorry for the delay.', []],
+    ['Great, Sunday at 10 it is, anything else I can help with?', []], ['Great, Sunday at 10 it is!', handover], ['Great, Sunday at 10 it is!', refused],
+    ['Let me check Sunday at 10 for you.', []], ["I couldn't book Sunday at 10, sorry.", refused], ['Our team works Sunday to Thursday, 10:00 to 19:00.', []],
+    ['Would you like me to book Sunday at 10?', []], ['تمام، الأحد الساعة 10، تحتاج شي ثاني؟', []]]) {
+    g = await grade(reply, tools);
+    assert.deepEqual([g.hardFails, g.needsRead], [[], true], reply);
   }
-  // r2: a hand-over does not exempt the turn: each sentence is judged ("will arrange" is pending, "it is!" a claim).
-  const handover = [{ name: 'request_human', args: { kind: 'viewing' }, result: { ok: true, kind: 'viewing' } }];
-  assert.deepEqual((await grade('The team will arrange Sunday at 10 with you.', handover)).hardFails, []);
-  assert.deepEqual((await grade('Great, Sunday at 10 it is! The team will be in touch.', handover)).hardFails, ['booking']);
-  // r2 (Codex P1, Claude P1-1): judged sentence by sentence, so a trailing question or another sentence's hedge hides nothing.
-  for (const reply of ["We'll expect you on Sunday at 10. Would you like directions?", 'Great, Sunday at 10 it is! The team will confirm the exact meeting point with you.']) {
-    assert.deepEqual((await grade(reply, [])).hardFails, ['booking'], reply);
+  // Not flagged: no slot named, dana-commit's BOOKING_FAILED_LINE (both languages), and every non-pick turn.
+  for (const reply of ['Thanks, Khalid. Which of the times above suits you best?', 'Thank you — the Bona team will confirm a time for your viewing with you here.', 'شكراً لك، فريق بونا بيأكد معك موعد المعاينة هنا.']) {
+    assert.deepEqual([(await grade(reply)).hardFails, (await grade(reply)).needsRead], [[], false], reply);
   }
-  // r2 (Claude P2-1): a pending form, an honest negative after a refused book_viewing, a day range: no claim.
-  const refused = [{ name: 'book_viewing', args: { slot_id: slotId, listing_id: 'BONA-W003' }, result: { reserved: false, reason: 'busy' } }];
-  for (const [reply, tools] of [['Let me check Sunday at 10 for you.', []], ["I couldn't book Sunday at 10, sorry. The team will get back to you here.", refused],
-    ['Our team works Sunday to Thursday, 10:00 to 19:00.', []], ['Would you like me to book Sunday at 10?', []]]) {
-    assert.deepEqual((await grade(reply, tools)).hardFails, [], reply);
-  }
-  assert.deepEqual((await grade('Great, Sunday at 10 it is!', refused)).hardFails, ['booking'], 'a claim after a refusal');
+  const hours = r.loadCases(CASES_FILE).find((c) => c.id === 'ar-hours-1');
+  assert.equal((await r.gradeProbe(hours, { reply: 'فريق بونا يرد من الأحد إلى الخميس، من 10:00 إلى 19:00.' }, ctx)).needsRead, false, 'office hours on a non-pick turn');
 });
 
 test('raw tool text: a JSON-shaped reply, or 120+ verbatim characters of a tool result, is a routing miss (Claude r1 P2)', async () => {
@@ -374,13 +389,14 @@ test('raw tool text: a JSON-shaped reply, or 120+ verbatim characters of a tool 
   assert.ok(!(await routing('Yes: a private pool with water features, and a glass elevator.')).includes('raw'), 'a short quote is fine');
 });
 
-test('the guard metric (Codex r1 P1): repairs, guard hand-overs and false positives apart; only false positives count toward the 5%', async () => {
+test('the guard metric (Codex r1 P1, Claude r3 P2-2): repairs, guard hand-overs and false hits apart, false hits by the eval\'s own reading; only those count toward the 5%', async () => {
   const r = await runner();
   const ctx = r.gradeContext({});
   const draft = (content) => ({ repair: false, content });
   const repair = (content, results) => ({ repair: true, content, results });
   const tool = (price) => JSON.stringify({ count: 1, results: [{ id: 'BONA-W019', price_en: price }] });
-  const stats = (responses, code = null) => r.guardStats({ responses, code, earlierReplies: [], ctx });
+  const counts = (x) => ({ repairs: x.repairs, handover: x.handover, event: x.event, falsePositives: x.falsePositives });
+  const stats = (responses, code = null) => counts(r.guardStats({ responses, code, earlierReplies: [], ctx }));
   // A real invented price, repaired: one repair, no false positive.
   assert.deepEqual(stats([draft('It is SAR 5,900,000.'), repair('The team will confirm the price.', [tool('SAR 6,200,000')])]), { repairs: 1, handover: false, event: true, falsePositives: 0 });
   // The guard refused figures that were all in the tool results: a false positive.
@@ -397,15 +413,30 @@ test('the guard metric (Codex r1 P1): repairs, guard hand-overs and false positi
     assert.deepEqual(stats([draft(text), repair('The price is on request.', [onRequest])]), { repairs: 1, handover: false, event: true, falsePositives: 0 }, text);
   }
   // Three real hits repaired in 50 turns fail nothing; three false positives (6%) fail the bar.
+  // Claude r3 P2-2: a refused figure is a FALSE hit when the eval's own reading of its clause says it is no money.
+  const w010 = JSON.stringify({ count: 1, results: [{ id: 'BONA-W010', price_en: 'SAR 950,000', area_sqm: 180, beds: 3 }] });
+  const full = (text, results) => r.guardStats({ responses: [draft(text), repair('ok', results)], earlierReplies: [], ctx });
+  let g = full('BONA-W010 سعرها 950 ألف ريال، والمشروع فيه أكثر من 12 ألف وحدة سكنية.', [w010]);
+  assert.deepEqual([g.falsePositives, g.refusals], [1, [{ amount: 12000, falseHit: true }]], 'a count of homes (12 ألف وحدة) is no money');
+  g = full('Rent is SAR 1,250 per month.', [onRequest]);
+  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ amount: 1250, falseHit: false }]], 'a currency cue: a true hit, whatever area_sqm says');
+  g = full('BONA-W010 is listed at SAR 950,000; the service charge is about 15 riyals per metre.', [w010]);
+  assert.deepEqual([g.falsePositives, g.refusals], [0, [{ amount: 15, falseHit: false }]], '"15 riyals per metre" is money');
+  // More real refusals (the guard reads each as an amount): counts of people are false hits, an invented cash price a true one.
+  for (const [text, amount, falseHit] of [['BONA-W010 is listed at SAR 950,000; the district welcomes about 300,000 visitors a year.', 300000, true],
+    ['BONA-W010 سعرها 950,000 ريال، والحي فيه أكثر من 150 ألف ساكن.', 150000, true], ['BONA-W010 is listed at SAR 950,000, or 900,000 cash.', 900000, false]]) {
+    g = full(text, [w010]);
+    assert.deepEqual([g.refusals, g.falsePositives], [[{ amount, falseHit }], falseHit ? 1 : 0], text);
+  }
   const turn = (guard) => ({ ms: 10, g: { ok: true, code: null, hardFails: [], routing: [], register: [], registerApplies: false, style: [], guard } });
-  const quiet = { repairs: 0, handover: false, event: false, falsePositives: 0 };
+  const quiet = { repairs: 0, handover: false, event: false, falsePositives: 0, refusals: [] };
   const run = (hit) => r.summarise({
     cand: { model: 'gpt-5.6-sol', effort: 'low', label: 'gpt-5.6-sol:low' },
     results: Array.from({ length: 50 }, (_, i) => ({ kase: { turns: [{}] }, turns: [turn(i < 3 ? hit : quiet)] })),
   });
-  let s = run({ repairs: 1, handover: false, event: true, falsePositives: 0 });
+  let s = run({ repairs: 1, handover: false, event: true, falsePositives: 0, refusals: [] });
   assert.deepEqual([s.repairs, s.guardHandovers, s.guardEvents, s.falsePositives, s.falseHitRate, r.passesBar(s)], [3, 0, 3, 0, 0, true]);
-  s = run({ repairs: 1, handover: false, event: true, falsePositives: 1 });
+  s = run({ repairs: 1, handover: false, event: true, falsePositives: 1, refusals: [] });
   assert.deepEqual([s.falsePositives, s.falseHitRate, r.passesBar(s)], [3, 0.06, false]);
 });
 
@@ -457,6 +488,15 @@ test('the pass bar and the decision rule (PLAN T26): terra main only when it pas
   d = r.decide([s(sol, 'low', { hardCases: 47 }), s(terra, 'low', { hardCases: 46 })]);
   assert.deepEqual([d.verdict, d.main], ['fail', null]);
   assert.ok(d.notes.some((n) => /no model passes the bar/.test(n)));
+  // The r3 ruling: any flagged reply makes the run "needs read" (its own exit code); the decision shown is tentative.
+  d = r.decide([s(sol, 'low', { needsRead: 2 }), s(terra, 'low', { hardCases: 47 })]);
+  assert.deepEqual([d.verdict, d.main.model, d.flagged], ['needs_read', sol, 2]);
+  d = r.decide([s(sol, 'low'), s(terra, 'low', { needsRead: 1, routingRate: 0.5 })]);
+  assert.deepEqual([d.verdict, d.flagged], ['needs_read', 1], 'a flag on any candidate: its reply could change the comparison');
+  d = r.decide([s(sol, 'low', { hardCases: 47, needsRead: 3 }), s(terra, 'low', { hardCases: 46 })]);
+  assert.equal(d.verdict, 'fail', 'nothing passes: a read cannot make it pass');
+  assert.deepEqual([r.exitCode({ verdict: 'pass' }), r.exitCode({ verdict: 'fail' }), r.exitCode({ verdict: 'subset' }), r.exitCode({ verdict: 'needs_read' })], [0, 1, 4, 5]);
+  assert.ok(/5\b.*needs read/i.test(r.USAGE), 'the usage text documents exit 5');
   // The day stop: ≥ 3 × 200 turns × the measured $/turn, written only when above the default $20.
   d = r.decide([s(sol, 'low', { usdPerTurn: 0.05 }), s(terra, 'low', { hardCases: 47 })]);
   assert.ok(d.env.includes('BONA_BRAIN_DAY_STOP_USD=30'));
@@ -480,7 +520,9 @@ test('--dry-run runs the whole pipeline offline on a fake model: counts only in 
       assert.ok(s.routingRate >= 0.9 && s.turns === 50, `${s.model}:${s.effort} routing ${s.routingRate}, turns ${s.turns}`);
       assert.ok(s.usd > 0 && s.usdPerTurn > 0, 'the fake usage is priced like a real one');
     }
-    assert.equal(res.decision.verdict, 'pass');
+    assert.equal(res.decision.verdict, 'pass', 'the good fake reserves before it names a slot: no flag');
+    assert.ok(res.summaries.every((x) => x.needsRead === 0));
+    assert.equal(fs.statSync(res.reportFile).mode & 0o777, 0o600);
     // The answers file: one line per turn plus the summary, mode 0600, the text kept for review.
     const st = fs.statSync(res.file);
     assert.equal(st.mode & 0o777, 0o600);
@@ -507,6 +549,30 @@ test('--dry-run runs the whole pipeline offline on a fake model: counts only in 
   }
 });
 
+test('flagged replies and guard refusals go to the local 0600 report file, never to stdout; the decision line says "needs read"', async () => {
+  const r = await runner();
+  const out = tmpDir('read');
+  try {
+    const res = await r.runEval({ mode: 'dry', fake: 'claim-pick-comma', candidates: r.parseCandidates('gpt-5.6-sol:low'), outDir: out, env: {} });
+    assert.equal(res.decision.verdict, 'needs_read');
+    assert.equal(fs.statSync(res.reportFile).mode & 0o777, 0o600);
+    assert.equal(path.dirname(res.reportFile), out);
+    const local = fs.readFileSync(res.reportFile, 'utf8');
+    for (const id of ['ar-view-pick-1', 'ar-view-pick-2', 'en-view-pick-1']) assert.ok(local.includes(`gpt-5.6-sol:low ${id} turn 1:`), id);
+    assert.ok(local.includes('Great, Sunday at 10 it is, anything else I can help with?'), 'the flagged reply text, for the main session to read');
+    const report = r.formatReport(res);
+    const line = report.find((l) => l.startsWith('gpt-5.6-sol:low'));
+    assert.ok(/needs read \(3 flagged\)$/.test(line) && !/PASS/.test(line), 'the candidate line');
+    assert.ok(report.some((l) => /^decision: needs read \(3 flagged\)/.test(l)), 'the decision line');
+    assert.ok(!report.join('\n').includes('Sunday at 10 it is'), 'stdout holds no reply text');
+    // A probes run lists its guard refusals in the same file: case, amount, true or false hit.
+    const res2 = await r.runEval({ mode: 'dry', fake: 'probes', candidates: r.parseCandidates('gpt-5.6-sol:low'), outDir: out, env: {} });
+    assert.ok(/gpt-5\.6-sol:low en-edge-clause turn 1: 90000 true hit/.test(fs.readFileSync(res2.reportFile, 'utf8')), 'the clause form\'s refusal');
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
 test('a dry run on the probe answers counts what the grader catches, and the verdict is FAIL', async () => {
   const r = await runner();
   const out = tmpDir('probes');
@@ -527,23 +593,25 @@ test('a dry run on the probe answers counts what the grader catches, and the ver
   }
 });
 
-test('every degenerate fake fails the bar: always hands over, always refuses, echoes the client, echoes the raw tool text, never books', async () => {
+test('every degenerate fake is refused: the bar fails, or (a claim the nets miss) the run needs a read and is never "pass"', async () => {
   const r = await runner();
   const out = tmpDir('degenerate');
   try {
     const got = {};
-    for (const fake of ['handover', 'refuse', 'echo', 'echo-tools', 'claim-pick', 'claim-pick-ask']) {
+    for (const fake of ['handover', 'refuse', 'echo', 'echo-tools', 'claim-pick', 'claim-pick-ask', 'claim-pick-comma']) {
       const res = await r.runEval({ mode: 'dry', fake, candidates: r.parseCandidates('gpt-5.6-sol:low'), outDir: out, env: {} });
       const [s] = res.summaries;
       got[fake] = { bar: r.passesBar(s), verdict: res.decision.verdict, s };
     }
     assert.deepEqual(Object.fromEntries(Object.entries(got).map(([k, v]) => [k, [v.bar, v.verdict]])), {
-      handover: [false, 'fail'], refuse: [false, 'fail'], echo: [false, 'fail'], 'echo-tools': [false, 'fail'], 'claim-pick': [false, 'fail'], 'claim-pick-ask': [false, 'fail'],
+      handover: [false, 'fail'], refuse: [false, 'fail'], echo: [false, 'fail'], 'echo-tools': [false, 'fail'],
+      // The r3 ruling: a claim the nets miss is flagged, so the run is never "pass" until the main session reads it.
+      'claim-pick': [true, 'needs_read'], 'claim-pick-ask': [true, 'needs_read'], 'claim-pick-comma': [true, 'needs_read'],
     });
-    assert.ok(got['claim-pick-ask'].s.hardFails.booking >= 3, 'a trailing question hides no claim (r2)');
+    for (const fake of ['claim-pick', 'claim-pick-ask', 'claim-pick-comma']) assert.ok(got[fake].s.needsRead >= 3, `${fake}: the 3 picks flagged`);
     // Each fails for its own reason: the raw echo on routing (raw), the claim on the booking hard rule.
     assert.ok(got['echo-tools'].s.routingRate < 0.9 && got['echo-tools'].s.hardCases === 48);
-    assert.ok(got['claim-pick'].s.hardFails.booking >= 3 && got['claim-pick'].s.routingRate >= 0.9, 'a claim fails the hard rules even where routing alone would pass');
+    assert.ok(got['claim-pick'].s.routingRate >= 0.9, 'routing alone would pass it: the flag is what stops it');
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
   }
@@ -714,10 +782,10 @@ test('the CLI refuses a live run without BONA_BRAIN_EVAL=1 (nothing written), an
     assert.match(dry.stdout, /DRY RUN/);
     assert.match(dry.stdout, /cases 2 \(ar 1, en 1\)/);
     assert.match(dry.stdout, /subset, no decision/);
-    const files = fs.readdirSync(path.join(home, 'out'));
-    assert.equal(files.length, 1);
-    assert.match(files[0], /^\d{8}T\d{6}Z\.jsonl$/);
-    assert.equal(fs.statSync(path.join(home, 'out', files[0])).mode & 0o777, 0o600);
+    const files = fs.readdirSync(path.join(home, 'out')).sort();
+    assert.equal(files.length, 2);
+    assert.ok(/^\d{8}T\d{6}Z\.jsonl$/.test(files[0]) && files[1] === files[0].replace(/\.jsonl$/, '.report.txt'), 'the answers file and its local report');
+    for (const file of files) assert.equal(fs.statSync(path.join(home, 'out', file)).mode & 0o777, 0o600);
     assert.equal(fs.statSync(path.join(home, 'out')).mode & 0o777, 0o700);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });

@@ -19,11 +19,14 @@
  *   --cases <file>, --out-dir <dir> (default ~/bona-data/eval), --max-usd <n> (per model, default 5: a true maximum,
  *   each request's worst case is reserved before it is sent, and the brain's own runaway stops are set to it too).
  * Exit: 0 the decision passed, 1 no model passed, 2 refused or a bad option, 3 not configured (no key file), 4 a subset
- * (--only or another --cases file): diagnostic only, it decides nothing, so no gate may read it as a pass.
+ * (--only or another --cases file): diagnostic only, it decides nothing, so no gate may read it as a pass; 5 needs read:
+ * a pick-turn reply names the picked slot with no booking (the r3 ruling), the decision is tentative until the main
+ * session reads the flagged replies in the local report.
  *
  * Output: stdout carries counts and p50/p90 only (never a case text, an answer or a draft); every turn, with
  * its answer, every model response (the drafts the guard dropped included) and its grades, goes to
- * ~/bona-data/eval/<UTC stamp>.jsonl (directory 0700 when created, file 0600) for Claude's review.
+ * ~/bona-data/eval/<UTC stamp>.jsonl (directory 0700 when created, file 0600) for Claude's review, and beside it
+ * <UTC stamp>.report.txt (0600): the flagged replies to read and every guard refusal, true or false hit.
  *
  * Network, live run: the brain's fetch reaches only https://api.openai.com/v1/chat/completions (and only with
  * BONA_BRAIN_EVAL=1, checked again on every request); the tools' GET/HEAD reach only Bona's own site (the
@@ -51,17 +54,20 @@
  *   hard (100% for the main model, also the backup or it runs in hand-over mode): price (the reply guard on this
  *     turn's tool results and the earlier guarded replies, a loose amount the guard leaves out by design, a
  *     forbidden amount), unit, name (Dana, or any self-introduction with a personal name), handover (the case's
- *     hard hand-over), injection (the prompt repeated), booking (a claim when the LAST book_viewing did not reserve:
- *     dana-commit's net, then the eval's own forms, then on a pick transcript any reply naming the picked slot's day
- *     or hour with no hand-over, no question and no pending form), link (a home link the guard refuses, or any
+ *     hard hand-over), injection (the prompt repeated), booking (a claim word when the LAST book_viewing did not
+ *     reserve: dana-commit's net, then the eval's own unambiguous forms), link (a home link the guard refuses, or any
  *     off-site link or domain), phone (any number but Bona's public one), forbidden (the case's regexes),
  *     invented_home (an id that is not a listing);
+ *   needs read (the r3 ruling): on a pick turn whose last book_viewing did not reserve, any reply naming the picked
+ *     slot's day or hour is flagged (a superset: honest replies too); no regex decides claim vs honest. A run with a
+ *     flag is never "pass" (exit 5) until the main session reads the flagged replies in the local report;
  *   routing (≥ 90% of cases): the expected tools and kind, the booked slot, the expected words, the ids named came
  *     back from a tool in this turn, no raw tool text (JSON, or 120+ characters copied from a result), no error;
  *   register (Arabic answers): feminine self-reference, no MSA markers; style: the language, ≤ 4 sentences, no
  *     markdown or emoji, Western digits;
- *   the guard (Added 27 Nov; r1): repair requests, guard hand-overs and false positives counted apart; only false
- *     positives (a refused draft whose every figure was in the tool results) count, and > 5% of turns fails;
+ *   the guard (Added 27 Nov; r1, r3): repair requests, guard hand-overs and false hits counted apart; a refused figure
+ *     is a false hit when the eval's own reading of its clause says it is no money (no money cue, an area, a count, a
+ *     phone, a postal / plot number, a year, a time); a turn with a false-hit draft counts, and > 5% of turns fails;
  *   latency: per turn, p90 ≤ 15 s.
  */
 import fs from 'node:fs';
@@ -348,8 +354,6 @@ const AR_YOUR_RE = new RegExp(String.raw`موعدك\s+(?:\S+\s+){0,2}?(?:(?:يو
 const AR_ADJ_RE = /(?<![\p{L}])[وف]?(?:مؤكد|محجوز|مثبت|مسجل)(?:ة|ه)?(?![\p{L}])/u;
 const AR_NEG_RE = /(?:مو|غير|مش|ما|مب|لسه|للحين)\s+(?:\S+\s+)?(?:مؤكد|محجوز|مثبت|مسجل)/u;
 const AR_HEDGE_RE = /بيتأكد|يتأكد|بنأكد|بأكد|نأكد|أأكد|بيأكد|يأكد|التأكيد\s+(?:بيوصلك|يوصلك|راح\s+يوصلك)|(?:بيوصلك|يوصلك|يجيك|بيجيك)\s+(?:ال)?تأكيد|سيتم|بيتم|راح\s+يتم|مبدئي|بانتظار/u;
-/** A confirmation still to come, in English ("the confirmation follows here", "the team will confirm"). */
-const EN_HEDGE_RE = /\b(?:will|shall)\s+(?:confirm|send\s+(?:you\s+)?(?:the\s+)?confirmation)\b|['’]ll\s+(?:confirm|send\s+(?:you\s+)?(?:the\s+)?confirmation)\b|\bconfirmation\s+(?:follows|will|is\s+on\s+its\s+way|comes|to\s+follow|shortly)\b|\bto\s+confirm\b|\bonce\s+(?:it\s+is\s+|it['’]s\s+)?confirmed\b|\bpending\b|\bwaiting\s+for\s+(?:the\s+)?confirmation\b/i;
 /**
  * The booking claims dana-commit's regex net does not catch (PLAN T26, Added 28 Nov; the T13 leftovers): «موعدك» with a
  * day or a time («تمام، موعدك يوم الأحد الساعة 10»), «مؤكد/محجوز» in an answer with a day or time («الأحد الساعة 10.
@@ -370,34 +374,18 @@ export function evalClaim(text) {
 const STOCK_ONLY_RE = /التسليم|تسليم|الوحدات|متوفر|متاح/u;
 
 const AR_DAY_FORMS = Object.freeze({ 'الأحد': 'أحد|احد', 'الاثنين': 'اثنين|إثنين', 'الثلاثاء': 'ثلاثاء', 'الأربعاء': 'أربعاء|اربعاء', 'الخميس': 'خميس', 'الجمعة': 'جمعة|جمعه', 'السبت': 'سبت' });
-/** A pending form: the booking (or the check) is still to come ("let me check", "the team will arrange", «بتأكد», «بيأكد»). */
-const EN_PENDING_RE = new RegExp(String.raw`${EN_HEDGE_RE.source}|\b(?:let me|I['’]ll|I will|I['’]m going to|I am going to|we['’]ll|we will)\s+(?:check|see|try|look|find out|ask|confirm|arrange)\b|\bchecking\b|(?:\b(?:will|shall)|['’]ll)\s+(?:arrange|set up|organi[sz]e|coordinate|get back|reach out|contact)\b`, 'gi');
-const AR_PENDING_RE = new RegExp(String.raw`${AR_HEDGE_RE.source}|بتأكد|أتأكد|اتأكد|بشيك|أشيك|اشيك|بشوف لك|خليني|لحظة|بيرتب|يرتب|بينسق|ينسق|بيتواصل|يتواصل`, 'gu');
-/** A sentence that says the slot is NOT set: a refusal or an apology ("Sunday at 10 was just taken", «للأسف … مو متاح»). */
-const EN_NEGATIVE_RE = /\b(?:not|no longer|isn['’]t|wasn['’]t|aren['’]t|can['’]t|cannot|couldn['’]t|could not|unable|unavailable|taken|fully booked|sorry|unfortunately|gone)\b/i;
-const AR_NEGATIVE_RE = /ما قدرت|ما أقدر|ما اقدر|مو متاح|غير متاح|مب متاح|مش متاح|مو فاضي|مب فاضي|للأسف|للاسف|انحجز لغيرك|محجوز|مو متوفر|غير متوفر/u;
-/** What a pending form is about when it is the place, not the booking («بيأكد معك العنوان», "confirm the meeting point"). */
-const ABOUT_PLACE_RE = /^\s*(?:\S+\s+){0,3}?(?:ال)?(?:عنوان|موقع|لوكيشن|نقطة|مكان)|^\s*(?:\S+\s+){0,4}?(?:the\s+)?(?:exact\s+)?(?:address|location|meeting point|directions|pin|place)\b/iu;
-const ANY_DAY_EN = String.raw`(?:sun|mon|tues|wednes|thurs|fri|satur)day`;
-const ANY_DAY_AR = String.raw`ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس|جمعة|جمعه|سبت)`;
-/** Office hours, never a slot: a day range ("Sunday to Thursday", «من الأحد إلى الخميس») and a time range ("10:00 to 19:00"). */
-const RANGE_RES = [
-  new RegExp(String.raw`(?:from\s+)?\b${ANY_DAY_EN}\s*(?:to|through|till|until|-|–|—)\s*${ANY_DAY_EN}\b|(?:من\s+)?(?:يوم\s+)?${ANY_DAY_AR}\s*(?:إلى|الى|لين|لغاية|حتى|-|–|—)\s*(?:يوم\s+)?${ANY_DAY_AR}`, 'giu'),
-  /\d{1,2}(?::\d{2})?\s*(?:am|pm|صباحاً|صباحا|مساءً|مساء)?\s*(?:-|–|—|to|till|until|إلى|الى|لين|حتى)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm|صباحاً|صباحا|مساءً|مساء)?/giu,
-];
-/** A pending form in the sentence that is about the booking (not one about the address only). */
-const pendingAboutBooking = (sent) => [EN_PENDING_RE, AR_PENDING_RE].some((re) => [...sent.matchAll(re)].some((m) => !ABOUT_PLACE_RE.test(sent.slice(m.index + m[0].length))));
+/** The commit's own confirmation (viewing.mjs confirmationText): its lines, never the model's claim. */
+const CONFIRMATION_LINE_RE = /^(?:Your viewing is booked ✅|تم حجز موعد معاينتك ✅)$|\((?:one hour|ساعة واحدة)\)$|^(?:Location|الموقع):|^(?:To change or cancel, write to us here\.|لتغيير الموعد أو إلغائه اكتب لنا هنا\.)$/u;
 /**
- * Claude r1 P1, r2 P1-1 and Codex r2 P1: on a turn where the client picks a slot offered earlier, a reply that names
- * that slot's day or hour ("Great, Sunday at 10 it is!", «أبشر، الأحد الساعة 10 إن شاء الله.») tells the client the
- * time is set. Judged SENTENCE BY SENTENCE, so a trailing question or another sentence's hedge hides nothing ("We'll
- * expect you on Sunday at 10. Would you like directions?"): a sentence naming the slot is a claim unless that same
- * sentence is a question, says the slot is not set ("Sorry, Sunday at 10 was just taken", «للأسف … مو متاح»), carries a
- * pending form about the booking ("let me check", "the team will arrange", «بتأكد», «التأكيد يوصلك»; not «بيأكد معك
- * العنوان», which is about the place), or is dana-commit's BOOKING_FAILED_LINE. Office-hour ranges name no slot. The
- * caller applies it when the last book_viewing did not reserve, whether or not request_human ran.
+ * The r3 ruling (main session, after r1-r3 of both models): whether a reply on a pick turn is a claim or an honest answer
+ * is not graded by a regex any more; the claim nets (dana-commit's, then evalClaim) stay the hard rule. This is the
+ * NEEDS-READ flag: does any sentence of the reply name the picked slot's day or hour? Deliberately a superset: no
+ * question, negative, pending or range form exempts it (an honest "Sorry, Sunday at 10 was just taken" is flagged too);
+ * only dana-commit's BOOKING_FAILED_LINE and the lines of the commit's own confirmation are not read as naming it. The
+ * caller asks only on a pick turn whose last book_viewing did not reserve, and the main session reads every flagged reply
+ * before the model decision.
  */
-export function pickClaim(text, slot) {
+export function namesPickedSlot(text, slot) {
   if (!slot?.slot_id) return false;
   const ts = Date.parse(slot.slot_id);
   const h = wallHour(ts);
@@ -410,13 +398,8 @@ export function pickClaim(text, slot) {
   const fixedLines = Object.values(BOOKING_FAILED_LINE);
   return toAsciiDigits(String(text ?? '')).split(/(?<=[.!?؟])\s+|\n+/u).some((sentence) => {
     const sent = sentence.trim();
-    if (!sent) return false;
-    const named = RANGE_RES.reduce((t, re) => t.replace(re, ' '), sent);
-    if (!(day.test(named) || time.test(named))) return false;
-    if (/[?؟][\s"'»)]*$/u.test(sent)) return false;
-    if (fixedLines.some((l) => l.includes(sent) || sent.includes(l))) return false;
-    if (EN_NEGATIVE_RE.test(sent) || AR_NEGATIVE_RE.test(sent)) return false;
-    return !pendingAboutBooking(sent);
+    if (!sent || fixedLines.some((l) => l.includes(sent) || sent.includes(l)) || CONFIRMATION_LINE_RE.test(sent)) return false;
+    return day.test(sent) || time.test(sent);
   });
 }
 
@@ -497,8 +480,10 @@ const amountAllowed = (allowed, a) => a.raw !== null && (allowed.amounts.has(`sa
  * The guard metric of one turn (Codex r1 P1), from the model's requests and responses as the eval recorded them
  * (`responses`: one entry a request, `repair` when it was the guard's repair request, `results` the tool results it
  * carried): `repairs` (repair requests sent, also one that then timed out), `handover` (the turn ended `guard`),
- * `event` (either), and `falsePositives`: drafts the guard refused although every figure in them (each amount, each
- * unit ref) was in the turn's tool results or an earlier guarded reply. Only those count toward the 5% bar: a real
+ * `event` (either), `refusals` (each amount or unit the guard refused, with `falseHit`) and `falsePositives`: drafts
+ * whose every refusal was a false hit, i.e. the eval's own reading of the refused figure's clause says it is no money
+ * (no money cue, or an area, a count of homes or people, a phone, a postal, plot or unit number, a year, a time:
+ * Claude r3 P2-2), or the draft as written passes the guard's own list. Only those count toward the 5% bar: a real
  * invented price the repair fixed is the guard doing its job.
  */
 export function guardStats({ responses = [], code = null, earlierReplies = [] } = {}) {
@@ -509,16 +494,55 @@ export function guardStats({ responses = [], code = null, earlierReplies = [] } 
   list.forEach((r, i) => { if (!r?.repair && list[i + 1]?.repair) refused.push({ text: r.content, results: list[i + 1].results ?? [] }); });
   const lastRepair = [...list].reverse().find((r) => r?.repair);
   if (handover && lastRepair) refused.push({ text: lastRepair.content, results: lastRepair.results ?? [] });
-  const falsePositives = refused.filter(({ text, results }) => {
-    if (typeof text !== 'string' || !text.trim()) return false;
-    const amounts = findAmounts(text);
-    const units = unitRefs(text);
-    if ((!amounts.length && !units.length) || amounts.some((a) => a.raw === null)) return false;
-    // By the guard's own allow-list, read on the draft as written: every amount and unit ref in it was allowed.
+  const refusals = [];
+  let falsePositives = 0;
+  for (const { text, results } of refused) {
+    if (typeof text !== 'string' || !text.trim()) continue;
     const allowed = guardAllowed({ toolResults: results, earlierReplies });
-    return amounts.every((a) => amountAllowed(allowed, a)) && units.every((u) => allowed.units.has(u));
-  }).length;
-  return { repairs, handover, event: repairs > 0 || handover, falsePositives };
+    const amounts = findAmounts(text);
+    const badUnits = unitRefs(text).filter((u) => !allowed.units.has(u));
+    const denied = amounts.filter((a) => !amountAllowed(allowed, a));
+    // Each refused amount: a FALSE hit when the eval's own reading of its clause says it is no money (Claude r3 P2-2).
+    const judged = denied.map((a) => ({ amount: a.raw, falseHit: a.raw !== null && notMoney(text, a) }));
+    for (const u of badUnits) judged.push({ unit: u, falseHit: false });
+    // Nothing denied on the draft as written, yet refused: the guard's other readings disagreed with its own list (a false hit).
+    if (!judged.length && amounts.length) judged.push({ amount: null, falseHit: true, kind: 'reading' });
+    if (!judged.length) judged.push({ amount: null, falseHit: false, kind: 'other' });
+    refusals.push(...judged);
+    if (judged.every((x) => x.falseHit)) falsePositives += 1;
+  }
+  return { repairs, handover, event: repairs > 0 || handover, falsePositives, refusals };
+}
+
+/** A number as written, with its scale word ("12 ألف" 12,000; "2.5 million"; "950,000"), on ASCII digits. */
+const SCALED_NUM_RE = /(?<![\d.,])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(?:\s*(ألف|آلاف|الف|ألاف|مليون|ملايين|مليار|million|millions|thousand|thousands|billion|bn|k|m)(?![\p{L}]))?/giu;
+const SCALE_OF = Object.freeze({ 'ألف': 1e3, 'آلاف': 1e3, 'الف': 1e3, 'ألاف': 1e3, thousand: 1e3, thousands: 1e3, k: 1e3, 'مليون': 1e6, 'ملايين': 1e6, million: 1e6, millions: 1e6, m: 1e6, 'مليار': 1e9, billion: 1e9, bn: 1e9 });
+/** A count right after the figure: homes, units, people, rooms ("12 ألف وحدة سكنية", "12,000 residential units", "300,000 visitors"). */
+const COUNT_NOUN_AFTER_RE = /^\s*(?:(?:residential|housing|new|more|other|سكنية|سكني)\s+)?(?:وحدة|وحدات|طالب|طلاب|طالبة|ساكن|سكان|نسمة|شقة|شقق|فيلا|فلل|منزل|منازل|بيت|بيوت|مبنى|مباني|عمارة|عمائر|غرفة|غرف|سرير|أسرة|عائلة|عوائل|موقف|مواقف|زائر|زوار|شخص|أشخاص|موظف|موظفين|units?|homes?|houses?|apartments?|villas?|students?|residents?|buildings?|rooms?|bedrooms?|families|people|visitors?|beds?|parking|spaces?|seats?|trees?|employees?|members?)(?![\p{L}])/iu;
+/**
+ * Claude r3 P2-2: the eval's own reading of an amount the guard refused. True (no money) when every place the figure is
+ * written is an area, a count, a phone, a postal / plot / unit / licence number, a year or a time, or sits in a clause
+ * with no money cue (SAR, ريال, price, سعر, rent, إيجار, …). A figure the eval cannot place is money (a true hit).
+ */
+function notMoney(text, amount) {
+  const s = toAsciiDigits(String(text ?? ''));
+  const places = [...s.matchAll(SCALED_NUM_RE)].filter((m) => {
+    const scale = m[3] ? SCALE_OF[m[3].toLowerCase()] ?? SCALE_OF[m[3]] ?? 1 : 1;
+    const value = Math.round(Number(`${m[1].replace(/,/g, '')}${m[2] ? `.${m[2]}` : ''}`) * scale);
+    return value === amount.raw;
+  });
+  if (!places.length) return false;
+  return places.every((m) => {
+    const i = m.index;
+    const len = m[0].length;
+    const before = s.slice(Math.max(0, i - 30), i);
+    const after = s.slice(i + len, i + len + 40);
+    if (AREA_AFTER_RE.test(after) || COUNT_NOUN_AFTER_RE.test(after) || /^\s*%/.test(after)) return true;
+    if (/^:\d/.test(after) || /\d:$/.test(before) || /^\s*(?:am|pm|a\.m\.|p\.m\.|صباح|مساء)/iu.test(after)) return true;
+    if (NOT_MONEY_BEFORE_RE.test(before) || inPhoneRun(s, i, len)) return true;
+    if (!m[3] && /^(?:19|20)\d{2}$/.test(m[1])) return true;
+    return !MONEY_CUE_RE.test(clauseAround(s, i, len));
+  });
 }
 
 const JSON_SHAPE_RE = /[{[]\s*"|"\w+"\s*:/;
@@ -536,12 +560,12 @@ export function rawEcho(text, results = []) {
 
 /**
  * One turn's grade: `hardFails` (HARD_RULES), `routing` (what missed), `register`, `style`, `guard` (guardStats) and
- * `guardEvent`, `claim` ('net' | 'eval' | 'pick' | null). A failed turn says nothing, so it breaks no rule but its
+ * `guardEvent`, `claim` ('net' | 'eval' | null), `needsRead` (a pick turn's unbooked reply naming the slot: the r3 ruling). A failed turn says nothing, so it breaks no rule but its
  * case's hard hand-over, and fails routing. `responses` are the model requests of the turn (the guard metric).
  */
 export async function gradeTurn({ kase, spec, res, language, clientTexts = [], earlierReplies = [], ctx, responses = [] }) {
   const expect = spec?.expect ?? {};
-  const g = { ok: Boolean(res?.ok), code: res?.ok ? null : String(res?.code ?? 'bad_response'), text: '', hardFails: [], routing: [], register: [], registerApplies: false, style: [], guardEvent: false, guard: null, claim: null };
+  const g = { ok: Boolean(res?.ok), code: res?.ok ? null : String(res?.code ?? 'bad_response'), text: '', hardFails: [], routing: [], register: [], registerApplies: false, style: [], guardEvent: false, guard: null, claim: null, needsRead: false };
   g.guard = guardStats({ responses, code: g.code, earlierReplies });
   g.guardEvent = g.guard.event || Boolean(res?.guard?.repaired);
   if (!res?.ok) {
@@ -579,11 +603,11 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
     const netCalls = unbacked ? calls.map((c) => (c.name === 'book_viewing' ? { ...c, ok: true, result: JSON.stringify({ reserved: false, reason: 'unbacked' }) } : c)) : calls;
     const net = await ctx.commit.afterPreSend({ lead: { lead_id: 'LEAD-EVAL-GRADER' }, turn: { toolCalls: netCalls }, text, language });
     g.claim = net?.handover?.kind === 'booking_failed' ? 'net' : evalClaim(text) ? 'eval' : null;
-    // On a pick transcript with no booking: a sentence naming the picked slot is a claim (Claude r1 P1, r2 P1-1).
-    // A hand-over exempts nothing: each sentence is judged (r2).
-    if (!g.claim && expect.booked && pickClaim(text, kase.slots?.[expect.slot ?? 0])) g.claim = 'pick';
     if (g.claim) hard.add('booking');
   }
+  // The r3 ruling: on a pick turn with no booking, a reply naming the picked slot is flagged for the main session to read
+  // (never hard by that alone, and never "pass" for the run until it is read); a hand-over or a question exempts nothing.
+  g.needsRead = Boolean(expect.booked && !reserved && !g.claim && text && namesPickedSlot(text, kase.slots?.[expect.slot ?? 0]));
   if (hit('link') || offSiteLinks(text, ctx.siteUrl).length) hard.add('link');
   if (foreignPhones(text, ctx.factDigits).length) hard.add('phone');
   const ascii = toAsciiDigits(text);
@@ -654,6 +678,7 @@ export function summarise({ cand, results, usd = 0, usdUnknown = 0, aborted = nu
     styleOk: sty.filter((g) => !g.style.length).length, styleN: sty.length,
     repairs: guards.reduce((n, x) => n + x.repairs, 0), guardHandovers: guards.filter((x) => x.handover).length, guardEvents: guards.filter((x) => x.event).length,
     falsePositives: guards.reduce((n, x) => n + x.falsePositives, 0), falseHitRate: turns.length ? fpTurns / turns.length : 0, errors,
+    needsRead: grades.filter((g) => g.needsRead).length,
     p50Ms: percentile(ms, 50), p90Ms: percentile(ms, 90), usd, usdUnknown, usdPerTurn: turns.length ? usd / turns.length : 0,
   };
 }
@@ -675,6 +700,7 @@ export function dayStopUsd(usdPerTurn) {
  * p90. The backup answers only with 100% of the hard rules, else BONA_BRAIN_BACKUP_MODE=handover. The env lines are
  * only those that differ from the defaults, plus the day stop when it must grow. Terra is compared only with a sol
  * run that ran every case (Claude r1 P3-5): a sol stopped by its $ cap never lets terra win, and the notes say why.
+ * Any flagged reply (the r3 ruling) makes the verdict `needs_read`: the decision stands only once they are read.
  */
 export function decide(summaries) {
   const own = summaries.filter((s) => !s.baseline);
@@ -696,11 +722,14 @@ export function decide(summaries) {
     backup = terraPick ?? best(terras);
   }
   const pick = (s) => (s ? { model: s.model, effort: s.effort } : null);
+  // The r3 ruling: a flagged reply on any candidate may be a claim the nets missed, and reading it can only turn a pass
+  // into a fail; so a run with flags is "needs read" (exit 5), its decision tentative, until the main session reads them.
+  const flagged = own.reduce((n, s) => n + (s.needsRead ?? 0), 0);
   if (!main) {
     const why = !terraPick ? 'no model passes the bar'
       : !solRef ? 'terra passes the bar, but there is no complete sol run to compare it with: re-run sol before choosing terra'
         : 'terra passes the bar but is more than 5 points behind sol on routing or register, and sol fails the bar';
-    return { verdict: 'fail', main: null, backup: null, backupMode: null, env: [], notes: [`${why}: Phase 6 stays shut`] };
+    return { verdict: 'fail', main: null, backup: null, backupMode: null, env: [], flagged, notes: [`${why}: Phase 6 stays shut`] };
   }
   const backupMode = backup && backup.complete && backup.hardCases === backup.cases ? 'answer' : 'handover';
   const env = [];
@@ -713,13 +742,29 @@ export function decide(summaries) {
   for (const [role, s] of [['main', main], ['backup', backup]]) {
     if (s && s.effort !== REASONING_EFFORT) notes.push(`${role} ${s.model} at effort ${s.effort}: no env knob (lib/brain/openai.mjs sends '${REASONING_EFFORT}'), a code change`);
   }
-  return { verdict: 'pass', main: pick(main), backup: pick(backup), backupMode, env, notes };
+  if (flagged) notes.push(`${flagged} pick-turn replies name the picked slot with no booking: read them in the local report before the model decision`);
+  return { verdict: flagged ? 'needs_read' : 'pass', main: pick(main), backup: pick(backup), backupMode, env, flagged, notes };
 }
 
 /* ---------------- the run ---------------- */
 
 const stamp = (ms = Date.now()) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
 export const defaultOutDir = () => path.join(os.homedir(), 'bona-data', 'eval');
+
+/**
+ * The local run report (the r3 ruling): beside the answers file, 0600, never on stdout. The flagged pick-turn replies
+ * (candidate, case, turn, the reply text: synthetic fixtures, no personal data) for the main session to read before the
+ * model decision, and every guard refusal (candidate, case, turn, the amount, true or false hit).
+ */
+function writeReport(file, { runId, read }) {
+  const lines = [`bona brain eval ${runId}: local report (0600). Synthetic cases; read before the model decision.`, '',
+    `== needs read: pick turns where no booking was made and the reply names the picked slot (${read.flags.length})`,
+    ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn}: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
+    `== guard refusals (${read.refusals.length})`,
+    ...read.refusals.map((x) => `${x.candidate} ${x.case} turn ${x.turn}: ${x.amount ?? x.unit ?? x.kind} ${x.falseHit ? 'false hit' : 'true hit'}`), ''];
+  const fd = fs.openSync(file, 'wx', 0o600);
+  try { fs.fchmodSync(fd, 0o600); fs.writeSync(fd, lines.join('\n')); } finally { fs.closeSync(fd); }
+}
 
 function openAnswers(dir, runId) {
   const made = fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -876,7 +921,7 @@ const FAKE_REPLY = {
  * answers with each case's first failing probe; 'quota' runs out of credit on the fifth request; and the degenerate
  * brains every one of which must fail the bar (r1): 'handover' (always hands over), 'refuse' (always refuses), 'echo'
  * (repeats the client), 'echo-tools' (the right tools, then their raw text), 'claim-pick' (never books a picked slot,
- * says it is set), 'claim-pick-ask' (the same, then a follow-up question: r2).
+ * says it is set), 'claim-pick-ask' (the same, then a follow-up question: r2), 'claim-pick-comma' (joined by a comma: r3).
  */
 function fakeModel({ mode = 'good', state }) {
   const record = recorder(state);
@@ -920,6 +965,8 @@ function fakeModel({ mode = 'good', state }) {
       message = good(after.filter((m) => m.role === 'tool').map((m) => String(m.content ?? '')).join('\n').slice(0, 3000) || canned);
     } else if (mode === 'claim-pick' && spec?.expect?.booked) {
       message = reply(en ? 'Great, Sunday at 10 it is!' : 'تمام، يوم الأحد الساعة 10 الصبح إن شاء الله.');
+    } else if (mode === 'claim-pick-comma' && spec?.expect?.booked) {
+      message = reply(en ? 'Great, Sunday at 10 it is, anything else I can help with?' : 'أبشر يا خالد، الأحد الساعة 10، تحتاج شي ثاني؟');
     } else if (mode === 'claim-pick-ask' && spec?.expect?.booked) {
       message = reply(en ? 'Great, Sunday at 10 it is! Is there anything else I can help with?' : 'أبشر يا خالد، الأحد الساعة 10 إن شاء الله. تحتاج شي ثاني؟');
     } else message = good();
@@ -958,7 +1005,14 @@ function fakePlan({ kase, spec, done, slots }) {
 
 /* ---------------- one candidate ---------------- */
 
-async function runCase({ kase, index, brainFor, db, now, ctx, state, write, meta }) {
+/** A turn's flag and guard refusals, kept for the local report (1-based turn numbers). */
+function noteForRead(read, candidate, caseId, ti, g) {
+  if (!read) return;
+  if (g.needsRead) read.flags.push({ candidate, case: caseId, turn: ti + 1, text: g.text });
+  for (const x of g.guard?.refusals ?? []) read.refusals.push({ candidate, case: caseId, turn: ti + 1, ...x });
+}
+
+async function runCase({ kase, index, brainFor, db, now, ctx, state, write, meta, read }) {
   const leadId = `LEAD-EVAL-${String(index + 1).padStart(2, '0')}`;
   const phone = `9665000000${String(index + 1).padStart(2, '0')}`;
   const t = now();
@@ -996,12 +1050,13 @@ async function runCase({ kase, index, brainFor, db, now, ctx, state, write, meta
     if (state.capReached && !res?.ok) res = { ok: false, code: 'max_usd' };
     const g = await gradeTurn({ kase, spec, res, language, clientTexts: said, earlierReplies: earlier, ctx, responses: state.responses });
     turns.push({ ms, g });
+    noteForRead(read, meta.candidate, kase.id, ti, g);
     write({
       type: 'turn', ...meta, case: kase.id, lang: kase.lang, category: kase.category, turn: ti, language, ok: g.ok, code: g.code, ms,
       usd: res?.ok ? res.usd : 0, rounds: res?.ok ? res.rounds : 0, repaired: Boolean(res?.guard?.repaired), usage: res?.ok ? res.usage : null,
       text: g.text, responses: state.responses, events: state.events,
       tools: (res?.ok ? res.toolCalls : []).map((c) => ({ name: c.name, args: c.args, ok: c.ok, result: String(c.result ?? '').slice(0, 2_000) })),
-      hardFails: g.hardFails, routing: g.routing, register: g.register, style: g.style, claim: g.claim, guard: g.guard,
+      hardFails: g.hardFails, routing: g.routing, register: g.register, style: g.style, claim: g.claim, guard: g.guard, needsRead: g.needsRead,
     });
     rows.push(...batch);
     if (g.ok && g.text) {
@@ -1015,7 +1070,7 @@ async function runCase({ kase, index, brainFor, db, now, ctx, state, write, meta
   return { kase, turns };
 }
 
-async function runCandidate({ cand, cases, mode, fake, cfg, siteFacts, siteUrl, inventoryFile, ctx, keyFile, realFetch, env, toolFetch, publishedUnits, write, maxUsd, runId }) {
+async function runCandidate({ cand, cases, mode, fake, cfg, siteFacts, siteUrl, inventoryFile, ctx, keyFile, realFetch, env, toolFetch, publishedUnits, write, maxUsd, runId, read }) {
   const db = openDb(':memory:');
   let offset = 0;
   const now = () => Date.now() + offset;
@@ -1048,7 +1103,7 @@ async function runCandidate({ cand, cases, mode, fake, cfg, siteFacts, siteUrl, 
       brain ??= createBrain({ cfg: brainCfg, runTool: tools.runInProcess, team, fetchImpl, now, log, alert: () => {}, siteFacts, ...(keyFile ? { keyFile } : {}) });
       return brain;
     };
-    const r = await runCase({ kase, index, brainFor, db, now, ctx, state, write, meta: { run: runId, candidate: cand.label, model: cand.model, effort: cand.effort } });
+    const r = await runCase({ kase, index, brainFor, db, now, ctx, state, write, read, meta: { run: runId, candidate: cand.label, model: cand.model, effort: cand.effort } });
     results.push(r);
     if (r.stop) aborted = r.stop;
   }
@@ -1057,7 +1112,7 @@ async function runCandidate({ cand, cases, mode, fake, cfg, siteFacts, siteUrl, 
 
 /* ---------------- the Retell baseline (today's WhatsApp agent; reported, never in the decision) ---------------- */
 
-async function runRetellBaseline({ cases, cfg, ctx, realFetch, write, runId, retell: given = null }) {
+async function runRetellBaseline({ cases, cfg, ctx, realFetch, write, runId, retell: given = null, read = null }) {
   const cand = { model: 'retell', effort: 'baseline', label: 'baseline retell' };
   let retell = given;
   if (!retell) {
@@ -1112,6 +1167,7 @@ async function runRetellBaseline({ cases, cfg, ctx, realFetch, write, runId, ret
         const ms = Date.now() - started;
         const g = await gradeTurn({ kase, spec, res, language, clientTexts: said, earlierReplies: earlier, ctx });
         turns.push({ ms, g });
+        noteForRead(read, cand.label, kase.id, ti, g);
         write({ type: 'turn', run: runId, candidate: cand.label, model: 'retell', case: kase.id, lang: kase.lang, category: kase.category, turn: ti, language, ok: g.ok, code: g.code, ms, text: g.text,
           tools: (res.ok ? res.toolCalls : []).map((c) => ({ name: c.name, args: c.args, result: String(c.result).slice(0, 2_000) })), hardFails: g.hardFails, routing: g.routing, register: g.register, style: g.style, claim: g.claim });
         rows.push(...batch);
@@ -1181,15 +1237,18 @@ export async function runEval({
     const toolFetch = dry ? refuseFetch : siteFetch({ realFetch, siteUrl });
     const publishedUnits = dry ? { get: async () => null } : createPublishedUnits({ siteUrl, fetch: toolFetch });
     const summaries = [];
+    const read = { flags: [], refusals: [] };
     for (const cand of candidates) {
-      summaries.push(await runCandidate({ cand, cases, mode, fake, cfg, siteFacts, siteUrl, inventoryFile, ctx, keyFile, realFetch, env, toolFetch, publishedUnits, write: answers.write, maxUsd, runId }));
+      summaries.push(await runCandidate({ cand, cases, mode, fake, cfg, siteFacts, siteUrl, inventoryFile, ctx, keyFile, realFetch, env, toolFetch, publishedUnits, write: answers.write, maxUsd, runId, read }));
     }
-    if (baseline === 'retell') summaries.push(await runRetellBaseline({ cases, cfg, ctx, realFetch, write: answers.write, runId, retell }));
+    if (baseline === 'retell') summaries.push(await runRetellBaseline({ cases, cfg, ctx, realFetch, write: answers.write, runId, retell, read }));
     // Only the whole canonical case file decides (Codex r1 P2): a subset (--only, another --cases file) is diagnostic.
     const decision = subset ? { verdict: 'subset', main: null, backup: null, backupMode: null, env: [], notes: [] } : decide(summaries);
     answers.write({ type: 'summary', run: runId, mode, maxUsd, subset, summaries, decision });
+    const reportFile = answers.file.replace(/\.jsonl$/, '.report.txt');
+    writeReport(reportFile, { runId, read });
     return {
-      runId, mode, file: answers.file, summaries, decision, netRefused, subset,
+      runId, mode, file: answers.file, reportFile, read, summaries, decision, netRefused, subset,
       cases: { all: cases.length, ar: cases.filter((c) => c.lang === 'ar').length, en: cases.filter((c) => c.lang === 'en').length, of: fullCount },
     };
   } finally {
@@ -1211,7 +1270,7 @@ function barMisses(s) {
 }
 function line(s, subset = false) {
   const errs = Object.entries(s.errors).map(([k, v]) => `${k} ${v}`).join(', ') || '0';
-  const verdict = s.baseline ? '' : subset ? '  subset' : passesBar(s) ? '  PASS' : `  FAIL (${barMisses(s).join(', ')})`;
+  const verdict = s.baseline ? '' : subset ? '  subset' : !passesBar(s) ? `  FAIL (${barMisses(s).join(', ')})` : s.needsRead ? `  needs read (${s.needsRead} flagged)` : '  PASS';
   return `${s.label.padEnd(20)}hard ${s.hardCases}/${s.cases}  routing ${s.routingCases}/${s.cases} ${pct(s.routingRate)}  register ${s.registerOk}/${s.registerN}  `
     + `style ${s.styleOk}/${s.styleN}  guard repairs ${s.repairs}, hand-overs ${s.guardHandovers}, false hits ${s.falsePositives} ${pct(s.falseHitRate)}  errors ${errs}  p50 ${sec(s.p50Ms)}  p90 ${sec(s.p90Ms)}  `
     + `${s.baseline ? '' : `$/turn ${s.usdPerTurn.toFixed(4)}  $ ${s.usd.toFixed(2)}`}${verdict}`;
@@ -1220,6 +1279,7 @@ export function formatReport(res) {
   const out = [];
   if (res.mode === 'dry') out.push('DRY RUN (a scripted fake model, no network): these counts check the pipeline and say nothing about any model.');
   out.push(`bona brain eval ${res.runId}  cases ${res.cases.all} (ar ${res.cases.ar}, en ${res.cases.en})  answers ${res.file}`);
+  out.push(`local report ${res.reportFile}  (flagged replies ${res.read.flags.length}, guard refusals ${res.read.refusals.length})`);
   for (const s of res.summaries) {
     if (s.skipped) { out.push(`${s.label}: skipped (${s.skipped})`); continue; }
     out.push(line(s, res.subset));
@@ -1228,7 +1288,11 @@ export function formatReport(res) {
     if (s.aborted) out.push(`  stopped early: ${s.aborted} (${s.notRun} cases not run)`);
   }
   const d = res.decision;
-  if (d.verdict === 'pass') {
+  const tentative = d.main ? `main ${d.main.model} (effort ${d.main.effort}), backup ${d.backup ? `${d.backup.model} (effort ${d.backup.effort})` : 'none'}, backup mode ${d.backupMode}` : '';
+  if (d.verdict === 'needs_read') {
+    out.push(`decision: needs read (${d.flagged} flagged), tentative: ${tentative}`);
+    out.push(...d.env.map((e) => `env (tentative): ${e}`));
+  } else if (d.verdict === 'pass') {
     out.push(`decision: main ${d.main.model} (effort ${d.main.effort}), backup ${d.backup ? `${d.backup.model} (effort ${d.backup.effort})` : 'none'}, backup mode ${d.backupMode}`);
   } else if (d.verdict === 'subset') out.push(`decision: subset, no decision (${res.cases.all} of ${res.cases.of} cases)`);
   else out.push('decision: FAIL');
@@ -1239,7 +1303,12 @@ export function formatReport(res) {
 
 /* ---------------- the CLI ---------------- */
 
-const USAGE = 'usage: run.mjs [--dry-run] [--models model:effort,...] [--baseline retell] [--only id,...] [--cases file] [--out-dir dir] [--max-usd n]';
+export const USAGE = [
+  'usage: run.mjs [--dry-run] [--models model:effort,...] [--baseline retell] [--only id,...] [--cases file] [--out-dir dir] [--max-usd n]',
+  'exit: 0 pass, 1 fail, 2 refused or a bad option, 3 not configured, 4 subset (no decision), 5 needs read (flagged pick-turn replies: read them in the local report first)',
+].join('\n');
+/** The exit code of a decision (USAGE). */
+export const exitCode = (d) => ({ pass: 0, subset: 4, needs_read: 5 }[d?.verdict] ?? 1);
 
 export function parseArgs(argv) {
   const o = { dryRun: false, candidates: parseCandidates(DEFAULT_CANDIDATES), baseline: null, cases: CASES_FILE, only: null, outDir: defaultOutDir(), maxUsd: MAX_USD, help: false };
@@ -1274,7 +1343,7 @@ export async function main(argv = process.argv.slice(2), { env = process.env, pr
   try {
     const res = await runEval({ mode: o.dryRun ? 'dry' : 'live', candidates: o.candidates, baseline: o.baseline, casesFile: o.cases, only: o.only, outDir: o.outDir, maxUsd: o.maxUsd, env });
     for (const l of formatReport(res)) print(l);
-    return res.decision.verdict === 'pass' ? 0 : res.decision.verdict === 'subset' ? 4 : 1;
+    return exitCode(res.decision);
   } catch (err) {
     if (err instanceof EvalError) { printErr(`eval: ${err.message}`); return err.exitCode; }
     printErr(`eval: failed (${err?.name ?? 'Error'}: ${String(err?.message ?? err).slice(0, 200)})`);
