@@ -614,6 +614,7 @@ test('ownerSummary(): a legacy (unguarded) answer counts on every turn, not only
   send(from + 200_000, from + 203_000, HANDOVER.en);
   send(from + 300_000, from + 303_000, `${DISCLOSURE.en}\n\n${HANDOVER.en}`);
   send(from + 400_000, from + 403_000, HANDOVER.ar);
+  send(from + 500_000, from + 503_000, `${DISCLOSURE.ar}\n\n${HANDOVER.ar}`); // the Arabic first-contact hand-over (multi-byte substr)
   const s = stats.ownerSummary({ from, to });
   assert.deepEqual(s.ai, { answers: 2, handovers: 0, medianReplyMs: 25_000 }, 'the two answers: 15 s and 35 s');
   db.close();

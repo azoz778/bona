@@ -619,7 +619,8 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     // r10): rows from a day before the window are read so a turn is grouped whole before it is placed.
     // store.countDanaTurns stays as it is: the pacing cap must count every send that may have gone.
     const notLine = NOT_ANSWER_LINES.map(() => '(o.text <> ? AND substr(o.text, -?) <> ?)').join(' AND ');
-    const lineArgs = NOT_ANSWER_LINES.flatMap((t) => [t, t.length + 2, `\n\n${t}`]);
+    // SQLite's substr counts characters (code points), so the length is too, never UTF-16 units (Claude r12 P3).
+    const lineArgs = NOT_ANSWER_LINES.flatMap((t) => [t, [...t].length + 2, `\n\n${t}`]);
     const turns = all(`SELECT MIN(CASE WHEN o.lead_id IS NULL THEN o.created ELSE o.updated END) AS at, o.covers_ts FROM wa_outbox o
                        WHERE o.sender_kind = 'dana' AND o.status = 'accepted' AND o.created >= ? AND o.created < ?
                          AND (o.guarded = 1 OR (o.text IS NOT NULL AND ${notLine}))

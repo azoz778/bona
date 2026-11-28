@@ -394,8 +394,16 @@ function createLedgerNotes({
 
   /* ---------------- the ledger ---------------- */
 
+  /**
+   * When a note queued at `t`, due at `due`, should have gone (meta.since, health()): a new enquiry's from when it
+   * was queued (its wait for the AI's answer counts), any other from when it is due (a note scheduled later). Set
+   * as a note becomes queued or is scheduled again on purpose, never by a retry or a hold (Codex r10, r11).
+   */
+  const sinceOf = (kind, due, t) => (kind === 'new_client' ? Math.min(Math.trunc(due), t) : Math.trunc(due));
+
   function enqueue({ kind, leadId = null, key, due, meta = {} }) {
     const t = now();
+    meta = { ...meta, since: sinceOf(kind, due, t) };
     const status = notesOn() ? 'queued' : 'dropped';
     const id = `NOTE-${t.toString(36)}-${randomId(6)}`;
     const ins = prep(`INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, send_id, meta, created, updated)
@@ -452,7 +460,7 @@ function createLedgerNotes({
     const t = now();
     const key = `al:brain_out:${alertHour}`;
     const id = `NOTE-${t.toString(36)}-${randomId(6)}`;
-    const meta = JSON.stringify({ alert: 'brain_out', code: brainCode(code), hour: alertHour, ...(asked ? { asked: 1 } : {}) });
+    const meta = JSON.stringify({ alert: 'brain_out', code: brainCode(code), hour: alertHour, ...(asked ? { asked: 1 } : {}), since: Math.trunc(due) });
     const r = prep(`INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, send_id, meta, created, updated)
                     VALUES (?, 'alert', NULL, ?, ?, 'queued', NULL, ?, ?, ?)
                     ON CONFLICT(dedupe_key) DO UPDATE SET status = 'queued', due_ts = excluded.due_ts, meta = excluded.meta, updated = excluded.updated
@@ -896,7 +904,7 @@ function createLedgerNotes({
       openBrainAlert(alertHour, due, latestBrainCause() ?? row?.meta.code);
       if (byKey(`al:brain_out:${alertHour}`)?.status === 'queued') {
         prep("UPDATE owner_notes SET due_ts = ?, meta = ?, updated = ? WHERE note_id = ? AND status = 'queued'")
-          .run(Math.trunc(due), JSON.stringify({ ...h.meta, alertHour }), t, h.note_id);
+          .run(Math.trunc(due), JSON.stringify({ ...h.meta, alertHour, since: Math.trunc(due) }), t, h.note_id);
       } else {
         settle([h], 'dropped', t);
         dropped += 1;
@@ -1082,7 +1090,7 @@ function createLedgerNotes({
       const hoMeta = { ...meta, alertHour };
       if (seen) {
         const up = prep("UPDATE owner_notes SET status = 'queued', due_ts = ?, meta = ?, updated = ? WHERE note_id = ? AND status = 'dropped' AND send_id IS NULL")
-          .run(Math.trunc(due), JSON.stringify(hoMeta), t, seen.note_id);
+          .run(Math.trunc(due), JSON.stringify({ ...hoMeta, since: Math.trunc(due) }), t, seen.note_id);
         if (up.changes !== 1) return { queued: false, reason: 'duplicate' };
       } else {
         const r = enqueue({ kind: 'handover', leadId: l.lead_id, key, due, meta: hoMeta });
@@ -1215,11 +1223,14 @@ function createLedgerNotes({
     const enabled = notesOn();
     if (!db) return { enabled, ok: true };
     try {
-      // Stuck = still queued 15 min after it was queued (DESIGN §7.1): a new enquiry's note from when it was
-      // queued, its wait for the AI's answer (FIRST_MESSAGE_WAIT_MS) included (Codex r10); any other from when
-      // it is due, so a note scheduled for later (the next hour's brain alert) or retried counts from then.
+      // Stuck = still queued 15 min after it should have gone (DESIGN §7.1): meta.since (sinceOf()), which a
+      // retry or a hold never moves (Codex r11): a new enquiry's note from when it was queued, its wait for the
+      // AI's answer included (Codex r10); any other from when it is due, so a note scheduled for later (the next
+      // hour's brain alert) counts from then. A row written before meta.since existed falls back to the same
+      // rule on its columns.
       const stuck = prep(`SELECT 1 FROM owner_notes WHERE status = 'queued'
-                            AND CASE WHEN kind = 'new_client' THEN MIN(due_ts, created) ELSE due_ts END <= ? LIMIT 1`).get(now() - STUCK_MS);
+                            AND COALESCE(CASE WHEN json_valid(meta) THEN json_extract(meta, '$.since') END,
+                                         CASE WHEN kind = 'new_client' THEN MIN(due_ts, created) ELSE due_ts END) <= ? LIMIT 1`).get(now() - STUCK_MS);
       return { enabled, ok: !stuck };
     } catch {
       return { enabled, ok: false };

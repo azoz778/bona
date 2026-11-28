@@ -1854,6 +1854,29 @@ test('health: enabled follows owner_notes; ok is false once a queued note is 15 
   assert.deepEqual(createOwnerNotes().health(), { enabled: true, ok: true }, 'no ledger: nothing can be stuck');
 });
 
+test("health: a retry or a hold never restarts a note's 15 min; a note scheduled for the next hour counts from then (Codex r11)", async () => {
+  const h = harness({ env: ENV });
+  h.team.setSetting('sending_enabled', '0');
+  h.notes.alert('breaker');
+  await h.notes.tick();
+  h.at(NOW + 16 * MIN);
+  assert.deepEqual(h.notes.health(), { enabled: true, ok: false }, 'held 16 min');
+  // A retry moves the note's due time; its clock stays.
+  const [row] = h.rows().filter((r) => r.kind === 'alert' && r.status === 'queued');
+  h.db.db.prepare('UPDATE owner_notes SET due_ts = ?, updated = ? WHERE note_id = ?').run(NOW + 18 * MIN, NOW + 16 * MIN, row.note_id);
+  assert.deepEqual(h.notes.health(), { enabled: true, ok: false }, 'a retry at 09:18 does not clear it');
+  // A note scheduled an hour ahead on purpose (the next hour's brain alert) is not stuck before then.
+  const k = harness({ env: ENV });
+  k.team.setSetting('sending_enabled', '0');
+  k.db.db.prepare(`INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, send_id, meta, created, updated)
+                   VALUES ('NOTE-later', 'alert', NULL, 'al:brain_out:later', ?, 'queued', NULL, ?, ?, ?)`)
+    .run(NOW + 60 * MIN, JSON.stringify({ alert: 'brain_out', code: 'down', since: NOW + 60 * MIN }), NOW, NOW);
+  k.at(NOW + 70 * MIN);
+  assert.deepEqual(k.notes.health(), { enabled: true, ok: true }, 'due 10 min ago');
+  k.at(NOW + 75 * MIN);
+  assert.deepEqual(k.notes.health(), { enabled: true, ok: false }, 'due 15 min ago');
+});
+
 test("health: a new enquiry's note is stuck 15 min after it was queued, its wait for the AI's answer included (Codex r10)", async () => {
   const h = harness({ env: ENV });
   h.team.setSetting('sending_enabled', '0');
