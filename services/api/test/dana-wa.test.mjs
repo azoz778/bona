@@ -3794,3 +3794,59 @@ test('T12 r26 3 (Claude P3, U28): a stop request 3 h old: no closing line past 2
     assert.equal(h.lead().dana_off, 1, `flip=${flip}: the stop recorded`);
   }
 });
+
+/* ======================================================================================
+ * PR-B3 r27 (Codex P1s, Claude P3): the route before every Retell request; the mode (auto or not) is part of the
+ * route; the pre-model check sits right after the expired block, and refusedRun checks before its cap hold.
+ * ====================================================================================== */
+
+test('T12 r27 1 (Codex P1-1): #dana brain on while Retell createChat is in flight: no completion with client text, the brain answers on the re-run', async () => {
+  const h = bh({ auto: false, turns: [brainReply('From the brain.')] });
+  const create = h.retell.createChat;
+  h.retell.createChat = async function (body) { h.team.setSetting('dana_brain', '1'); return create.call(this, body); };
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.equal(h.retell.completions.length, 0, 'nothing with client text reached Retell');
+  assert.equal(h.brain.calls.length, 1);
+  assert.equal(h.sent().length, 1);
+  assert.ok(h.sent()[0].endsWith('From the brain.'));
+});
+
+test('T12 r27 2 (Codex P1-2): an auto chat (dana_brain 1) leaves auto mode while the brain runs, then quota: no outage line, no brain_out hold, re-queued non-auto', async () => {
+  let h;
+  h = bh({ auto: true, brainOn: true, turns: [async () => { h.ownerTest.setAuto(LEAD, false); return brainError('quota'); }, brainReply('Hello from the brain.')] });
+  await ask(h, 'hello');
+  await h.dana.flush();
+  assert.equal(h.s.db.prepare("SELECT COUNT(*) AS n FROM wa_outbox WHERE error LIKE 'outage_line%'").get().n, 0, 'no outage line');
+  assert.notEqual(h.lead().dana_hold_reason, 'brain_out');
+  assert.equal(h.brain.calls.length, 2, 're-run on the non-auto brain route');
+  assert.equal(h.brain.calls[1].autoMode, false);
+  assert.ok(h.sent().at(-1).endsWith('Hello from the brain.'));
+});
+
+test('T12 r27 3 (Claude P3, U34): auto mode off during the missed notifier and the sender day full: no brain-route hold lands on the legacy chat', async () => {
+  let h;
+  let n = 0;
+  h = bh({ auto: true, notifyHandoff: async () => { n += 1; if (n === 1) { h.ownerTest.setAuto(LEAD, false); h.sender.dayFull = () => true; } }, turns: [brainReply('never')] });
+  h.client('an old question', { ts: T_IN - 3 * HOUR });
+  const r = await ask(h, 'a new question');
+  await h.dana.flush();
+  assert.equal(n >= 1, true);
+  assert.deepEqual(r, { skipped: 'route_changed' });
+  assert.equal(h.lead().dana_hold_reason, null, 'no cap_chat rate hold');
+  assert.equal(h.brain.calls.length, 0);
+});
+
+test('T12 r27 3: refusedRun re-checks after the missed notifier before its cap hold (a flip writes no cap_chat hold)', async () => {
+  let h;
+  let n = 0;
+  h = bh({ auto: true, pacing: strictTier(), notifyHandoff: async () => { n += 1; if (n === 1) h.ownerTest.setAuto(LEAD, false); }, turns: [] });
+  // The chat's own cap is full (a cap_chat refusal), with an expired message and a fresh one waiting.
+  for (let i = 0; i < 20; i += 1) h.danaRow({ covers: T_IN - 5 * HOUR + i, created: T_IN - 50 * 60_000 + i * 1000 });
+  h.client('an old question', { ts: T_IN - 3 * HOUR });
+  const r = await ask(h, 'a new question');
+  await h.dana.flush();
+  assert.equal(n >= 1, true, 'the missed hand-over ran');
+  assert.deepEqual(r, { skipped: 'route_changed' });
+  assert.equal(h.lead().dana_hold_reason, null, 'no cap_chat hold');
+});

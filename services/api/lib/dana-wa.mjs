@@ -501,6 +501,9 @@ export function createDana({
   // leadIds whose needs_human this very run set with no line (the expired set's `missed`, r15): the fresh batch's own
   // hand-over still owes the client its line, so that flag is not "a hand-over line went already".
   const silentFlag = new Set();
+  // leadId → the route the running turn was made on (r27): 'legacy', 'brain' (not in auto mode) or 'auto'. The mode is
+  // part of the route: an auto chat that leaves auto mode mid-turn is a flip, like a provider change.
+  const turnRoute = new Map();
   let identityAlertAt = -Infinity;
   let stopped = false;            // stop() is final: no wake arms a run after it
   const stmts = {};
@@ -516,6 +519,8 @@ export function createDana({
   const brainSwitch = () => safely(() => team.getSetting('dana_brain')) === '1';
   /** DESIGN-brain §3.5: never `brain.configured` in it, so a missing key file is `not_configured`, not Retell. */
   const useBrain = (lead) => autoOf(lead) || brainSwitch();
+  /** A chat's route with its mode (r27): 'legacy' (Retell), 'brain' (the brain, not in auto mode) or 'auto'. */
+  const routeKey = (lead) => (!useBrain(lead) ? 'legacy' : autoOf(lead) ? 'auto' : 'brain');
   const tierAt = (t) => ({ ...TIERS[0], ...(safely(() => pace.tier(t)) ?? {}) });
 
   function ruleOff(lead) {
@@ -806,9 +811,12 @@ export function createDana({
    * The Retell chat for this WhatsApp chat: the stored one while fresh, else a new one (P4-8).
    * `fresh` forces a new one (the stored chat just failed). `created` says a chat was made.
    */
-  async function session(lead, batch, language, { fresh = false } = {}) {
+  async function session(lead, batch, language, { fresh = false, gate = null } = {}) {
     const t = now();
     if (!fresh && lead.dana_chat_id && Number.isFinite(lead.dana_chat_ts) && t - lead.dana_chat_ts < SESSION_IDLE_MS) return { chatId: lead.dana_chat_id, created: false };
+    // The route before the Retell request (r27): nothing goes to Retell once the chat left this route.
+    const gated = gate?.();
+    if (gated) return { gated };
     if (budget && !budget.take('chats')) return { error: 'budget' };
     try {
       const exclude = new Set(batch.map((m) => m.key_id));
@@ -835,27 +843,35 @@ export function createDana({
   }
 
   /** Ask the model; a reused chat that fails (ended on Retell's side, say) is replaced once. */
-  async function complete(lead, batch, language) {
+  async function complete(lead, batch, language, gate = null) {
     const content = batchText(batch);
     const ask = async (chatId) => {
       const completion = await retell.createChatCompletion({ chat_id: chatId, content });
       funded();
       return completion;
     };
+    // THE route and eligibility, synchronously before every Retell request (r27): createChat, the completion, and the
+    // retry with a new session. `gated` ends the turn with nothing sent to Retell.
     const failed = (err) => {
       refused(err);
       say({ level: 'warn', evt: 'dana.retell_failed', leadId: lead.lead_id, ...failure(err) });
     };
-    let s = await session(lead, batch, language);
-    if (s.error) return s;
+    let s = await session(lead, batch, language, { gate });
+    if (s.error || s.gated) return s;
+    const g1 = gate?.();
+    if (g1) return { gated: g1 };
     try {
       return { completion: await ask(s.chatId), newChat: s.created };
     } catch (err) {
       failed(err);
       if (s.created) return { error: 'retell_error' };
     }
-    s = await session(lead, batch, language, { fresh: true });
-    if (s.error) return s;
+    const g2 = gate?.();
+    if (g2) return { gated: g2 };
+    s = await session(lead, batch, language, { fresh: true, gate });
+    if (s.error || s.gated) return s;
+    const g3 = gate?.();
+    if (g3) return { gated: g3 };
     try {
       return { completion: await ask(s.chatId), newChat: true };
     } catch (err) {
@@ -1569,9 +1585,13 @@ export function createDana({
    * Null when the route held.
    */
   function routeFlip(leadId, viaBrain, coversTs) {
-    const routeNow = useBrain(db.getLead(leadId));
-    if (routeNow === Boolean(viaBrain)) return null;
-    return requeue(leadId, coversTs, routeNow);
+    // The turn's route with its mode (turnRoute, captured at the run's start) when it is the same provider as
+    // `viaBrain`; else the provider alone (a legacy fallback of a brain line checks 'legacy').
+    const k = turnRoute.get(String(leadId));
+    const expected = k && (k !== 'legacy') === Boolean(viaBrain) ? k : viaBrain ? null : 'legacy';
+    const nowKey = routeKey(db.getLead(leadId));
+    if (expected === null ? nowKey !== 'legacy' : nowKey === expected) return null;
+    return requeue(leadId, coversTs, nowKey !== 'legacy');
   }
   /**
    * Re-queue a chat's batch on its new route (r22-r25): woken at the newest of the covered message and the chat's newest
@@ -1682,6 +1702,17 @@ export function createDana({
       if (viaBrain) {
         const m = await missedExpired(leadId, lead, built, viaBrain);
         if (m?.skipped === 'route_changed') return m;
+        // The route and eligibility after that await, before capped writes its hold (r27): a flip re-queues; a refusal
+        // that is no cap any more skips; a cap that freed meanwhile is answered by a re-run.
+        const f = routeFlip(leadId, viaBrain, built.coversTs ?? built.expiredTs);
+        if (f) return f;
+        const eNow = eligible(leadId);
+        if (eNow.ok) {
+          const id = String(leadId);
+          pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, Number(built.coversTs ?? built.expiredTs) || 0));
+          return skip(leadId, 'nothing');
+        }
+        if (eNow.reason !== 'cap_chat' && !CAP_HANDOVERS.has(eNow.reason)) return skip(leadId, eNow.reason);
       }
       // A cap acts only for a client who is waiting: with nothing unanswered (a wake for a
       // batch another run answered) there is nobody to hand over — no flag, alert or line.
@@ -1703,6 +1734,8 @@ export function createDana({
   }
 
   async function run(leadId, ts, { wokeAt = null, owed = null } = {}) {
+    // The route this turn is made on, with its mode (r27): every routeFlip of this run compares against it.
+    turnRoute.set(String(leadId), routeKey(db.getLead(leadId)));
     // Stop first (r14 I1), before an owed line and before every other check.
     const stopped = await stopFirst(leadId);
     if (stopped) return stopped;
@@ -1743,6 +1776,14 @@ export function createDana({
       if (m && !e.auto) return m;
       if (m?.handover && !flagged) silentFlag.add(String(leadId));
     }
+    // THE route (with its mode) and eligibility right after the expired block's await (r26, r27), before anything this
+    // run writes (a backlog entry, the loop hold and note, a rate hold) or the model call: no await from here to the
+    // model. A flip re-queues; a refusal ends the run as at its start. (A legacy chat has no await before it: the same
+    // answer as its start, so main's when nothing flips.)
+    const flippedBefore = routeFlip(leadId, viaBrain, built.coversTs ?? built.expiredTs);
+    if (flippedBefore) return flippedBefore;
+    const eNow = eligible(leadId, viaBrain ? {} : { ts });
+    if (!eNow.ok) return refusedRun(leadId, eNow);
     if (!batch.length) {
       backlog.delete(leadId);
       if (viaBrain && e.lead.dana_hold_reason) clearHold(leadId);
@@ -1799,14 +1840,7 @@ export function createDana({
       return skip(leadId, 'cap_chat');
     }
 
-    // The model. THE route and eligibility right before the call (r26), with no await in between: every window that
-    // opens before it (the missed notifier, a backfill, the typing floor, any future await) closes here. A flip
-    // re-queues with no model call; a refusal ends the run as at its start. (A legacy chat has no await before it:
-    // the same answer as its start, so main's when nothing flips.)
-    const flippedBefore = routeFlip(leadId, viaBrain, coversTs);
-    if (flippedBefore) return flippedBefore;
-    const eNow = eligible(leadId, viaBrain ? {} : { ts });
-    if (!eNow.ok) return refusedRun(leadId, eNow);
+    // The model. (The route and eligibility were checked right after the expired block, with no await since; r26, r27.)
     const thinkAt = now();
     let turn;
     let newChat = false;
@@ -1831,7 +1865,10 @@ export function createDana({
       }
       // (An outage hold ends only once a reply of this turn was accepted: the post-send clear below, r4 A.)
     } else {
-      const c = await complete(lead, batch, language);
+      // The gate before each Retell request (r27): the route (routeFlip re-queues) and eligibility, as at the start.
+      const gate = () => routeFlip(leadId, false, coversTs) ?? (() => { const eNow = eligible(leadId, { ts }); return eNow.ok ? null : { refused: eNow }; })();
+      const c = await complete(lead, batch, language, gate);
+      if (c.gated) return c.gated.refused ? refusedRun(leadId, c.gated.refused) : c.gated;
       // The same check on a Retell turn (r23): a flip to the brain while Retell answered writes and sends nothing.
       const flipped = routeFlip(leadId, viaBrain, coversTs);
       if (flipped) return flipped;
@@ -2098,7 +2135,7 @@ export function createDana({
   function answer(leadId, { ts = null, wokeAt = null, owed = null } = {}) {
     const id = String(leadId ?? '');
     const prev = inflight.get(id) ?? Promise.resolve();
-    const p = prev.then(() => run(id, ts, { wokeAt, owed })).finally(() => silentFlag.delete(id)).catch((err) => {
+    const p = prev.then(() => run(id, ts, { wokeAt, owed })).finally(() => { silentFlag.delete(id); turnRoute.delete(id); }).catch((err) => {
       say({ level: 'error', evt: 'dana.failed', name: errName(err) });
       return { error: 'failed' };
     });
