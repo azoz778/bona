@@ -7,8 +7,9 @@
  * makes one same-origin request of its own, `GET /dashboard/push/latest` with the member's
  * cookie (2026-10-04 design, U3), to learn which of its three fixed notifications to show:
  * "Bona: Dana is out of Retell credit" for an owner while Retell refuses Dana for lack of
- * credit (2026-10-05 design, R2), "Bona: new chat to check" for an owner's new Unsure chat,
- * else "New Bona message". The
+ * credit (2026-10-05 design, R2; the website chat's, until T28), "Bona: the AI assistant is not
+ * answering (OpenAI credit or key)" for the AI service's outage (alerts reason `brain`, PR-INT),
+ * "Bona: new chat to check" for an owner's new Unsure chat, else "New Bona message". The
  * answer is a kind, never a name or a text. Any failure — signed out, a non-2xx answer, no
  * answer within 2 s, a throw — shows the generic one, so every push always shows exactly
  * one notification whenever `showNotification` itself succeeds (iOS withdraws the subscription of a worker that receives a push
@@ -31,18 +32,22 @@ self.addEventListener('install', () => { self.skipWaiting(); });
 self.addEventListener('activate', (event) => { event.waitUntil(self.clients.claim()); });
 
 /**
- * The worker's three fixed notifications (U3, R2). No `badge`: Android draws it as a
+ * The worker's fixed notifications (U3, R2, PR-INT). No `badge`: Android draws it as a
  * monochrome blob and iOS ignores it. Each kind has its own tag, so no kind hides another.
  */
 const NOTIFICATIONS = {
   funds: ['Bona: Dana is out of Retell credit', { body: 'Dana can’t answer until Retell is topped up. A client may be waiting — tap to open.', icon: '/dashboard/icon-192.png', tag: 'bona-funds', renotify: true }],
+  brain: ['Bona: the AI assistant is not answering (OpenAI credit or key)', { body: 'Clients get a line saying the team will reply. Check the OpenAI credit or key — tap to open.', icon: '/dashboard/icon-192.png', tag: 'bona-brain', renotify: true }],
   check: ['Bona: new chat to check', { body: 'Someone new wrote to you. Tap to decide.', icon: '/dashboard/icon-192.png', tag: 'bona-check', renotify: true }],
   inbound: ['New Bona message', { body: 'A client wrote in the Bona inbox.', icon: '/dashboard/icon-192.png', tag: 'bona-inbox', renotify: true }],
 };
 
+/** The kinds the server may name; anything else is `'inbound'`. */
+const KNOWN = new Set(['funds', 'brain', 'check']);
+
 /**
- * Which notification this push is: `'funds'` or `'check'` only when the server answers 2xx
- * with that kind; anything else — another kind, a non-2xx answer, a timeout, a throw —
+ * Which notification this push is: `'funds'`, `'brain'` or `'check'` only when the server answers
+ * 2xx with that kind; anything else — another kind, a non-2xx answer, a timeout, a throw —
  * `'inbound'`.
  */
 const latestKind = async () => {
@@ -50,14 +55,14 @@ const latestKind = async () => {
     const res = await fetch('/dashboard/push/latest', { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(2000) });
     if (!res.ok) return 'inbound';
     const body = await res.json();
-    return body && (body.kind === 'funds' || body.kind === 'check') ? body.kind : 'inbound';
+    return body && KNOWN.has(body.kind) ? body.kind : 'inbound';
   } catch {
     return 'inbound';
   }
 };
 
 const show = (kind) => {
-  const [title, options] = NOTIFICATIONS[kind === 'funds' || kind === 'check' ? kind : 'inbound'];
+  const [title, options] = NOTIFICATIONS[KNOWN.has(kind) ? kind : 'inbound'];
   return self.registration.showNotification(title, options);
 };
 
