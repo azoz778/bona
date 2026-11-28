@@ -2373,13 +2373,16 @@ test('T12 r5 N6 P-a: "Let the AI answer again" after a stop-word false positive 
   assert.ok(h.sent()[0].endsWith(CLOSING.en));
   h.tick(60_000);
   assert.deepEqual(await ask(h, 'no, I meant is there a bus stop near the villa'), { skipped: 'chat_off' });
-  h.s.updateLead(LEAD, { dana_off: 0, dana_hold_until: null, dana_hold_reason: null }); // the dashboard button
+  h.tick(30_000);
+  answerAgain(h); // the dashboard button: the lead row and its audit row (r16: the stop scope starts at it)
   h.tick(60_000);
   await ask(h, 'so?');
   assert.equal(h.sent().filter((t) => t.endsWith(CLOSING.en)).length, 1, 'no second closing line');
   assert.equal(h.sent().at(-1), 'Yes, there is a bus stop two minutes from the villa.');
   assert.equal(h.lead().dana_off, 0);
-  assert.deepEqual(h.brain.calls[0].batchParts, ['no, I meant is there a bus stop near the villa', 'so?'], 'the closing line answered "next stop?"');
+  // r16 G2 (Claude N10): what was sent before the button is the person's judged past, history only, never the batch.
+  assert.deepEqual(h.brain.calls[0].batchParts, ['so?']);
+  assert.ok(h.brain.calls[0].history.some((x) => /bus stop near the villa/.test(x.content)), 'still in the history');
 });
 
 test('T12 r5 N6 P-b: after an auto hand-over the handed-over request is not shown again as unanswered', async () => {
@@ -3149,4 +3152,124 @@ test('T12 r15 2: after a restart the expired set is not handed over again (read 
   await r.dana.answer(LEAD, { ts: T_IN - 3 * HOUR });
   assert.equal(r.notes.of('handover').length, 0, 'no repeat after the restart');
   assert.equal(r.brain.calls.length, 0);
+});
+
+/* ======================================================================================
+ * PR-B3 r16 (Codex P0 + P1s, Claude N10), four general rules: G1 masking in true send order; G2 the stop scope is
+ * every client message of 24 h after the last "answer again" (never coverage or a staff reply), and pendingFor takes
+ * the same bound; G3 a person active means no closing line, whatever the hold; G4 a `missed` records the messages it
+ * covered (rowid), and the dedupe reads that.
+ * ====================================================================================== */
+
+test('T12 r16 G1 (P0): a backfilled middle message is masked next to its neighbours (true send order, not history then batch)', async () => {
+  const { brain, bodies } = realBrain([reply200('Of course.')]);
+  const h = bh({ brain });
+  h.client('please call me on 050', { ts: T_IN - 10 * 60_000 });
+  h.client('Is the villa available?', { ts: T_IN - 8 * 60_000 });
+  const ridC = h.s.db.prepare('SELECT MAX(rowid) AS r FROM wa_messages WHERE lead_id = ?').get(LEAD).r;
+  h.danaRow({ covers: T_IN - 8 * 60_000, created: T_IN - 7 * 60_000, error: `cov:${ridC}` });
+  // The middle message arrives late (a backfill): its rowid is the newest, its ts between the two.
+  const b = h.client('123 4567 thanks', { ts: T_IN - 9 * 60_000 });
+  await h.dana.answer(LEAD, { ts: b });
+  assert.equal(bodies.length, 1);
+  const raw = JSON.stringify(bodies[0].messages.filter((x) => x.role !== 'system'));
+  assert.match(raw, /villa/, 'the history reached the model');
+  assert.doesNotMatch(raw, /050|123|4567/, 'no digit run of the number in the request');
+});
+
+test('T12 r16 G2 (Codex P1-1): a stop request and a staff reply both stored before the batch fires: the stop is still recorded', async () => {
+  const h = bh({ turns: [brainReply('never')] });
+  const ts = h.client('delete my data');
+  h.staff('We will look into it.', ts + 1000);
+  h.tick(2000);
+  await h.dana.answer(LEAD, { ts });
+  assert.equal(h.sent().length, 0, 'a person is active: no closing line');
+  assert.deepEqual([h.lead().dana_off, h.lead().needs_human], [1, 1]);
+  assert.deepEqual(h.notes.of('stopped').map((c) => c[2]), ['deletion']);
+  assert.equal(h.brain.calls.length, 0);
+});
+
+/** The dashboard's "Let the AI answer again" (routes.mjs inboxAnswerAgain): the lead row and its audit row, nothing else. */
+function answerAgain(h, ts = h.now(), id = 'AUD-1') {
+  h.s.updateLead(LEAD, { dana_off: 0, dana_hold_until: null, dana_hold_reason: null });
+  h.s.db.prepare("INSERT INTO audit_log (id, ts, user_id, action, target, meta) VALUES (?, ?, 'USR-x', 'dana_chat', ?, ?)")
+    .run(id, ts, LEAD, JSON.stringify({ dana_off: 0, dana_hold_until: null, dana_hold_reason: null }));
+}
+
+test('T12 r16 G2 (Claude N10, R3a): after the button, a stop-honouring model never sees the pre-button stop again', async () => {
+  const seen = [];
+  const honouring = (input) => {
+    const parts = input.batchParts ?? [input.batchText];
+    seen.push(parts);
+    return parts.some((p) => /stop/i.test(p)) ? brainReply('Okay.', { tools: [{ name: 'request_human', args: { kind: 'stop' } }] }) : brainReply('Hello! How can I help?');
+  };
+  const h = bh({ enabled: false, turns: [honouring, honouring] });
+  await ask(h, 'please stop replying to me');
+  assert.equal(h.lead().dana_off, 1);
+  h.team.setSetting('dana_enabled', '1');
+  h.tick(5 * 60_000);
+  answerAgain(h);
+  h.tick(60_000);
+  await ask(h, 'hello?');
+  assert.deepEqual(seen, [['hello?']], 'the model saw only what came after the button');
+  assert.equal(h.lead().dana_off, 0);
+  assert.equal(h.notes.of('stopped').length, 1, 'no second stopped note');
+  assert.equal(h.sent().length, 1);
+  assert.ok(h.sent()[0].endsWith('Hello! How can I help?'), 'no closing line');
+});
+
+test('T12 r16 G2 (R3c): a stop sent in the same second as the button, after it, still trips (second precision)', async () => {
+  const h = bh({ turns: [brainReply('never')] });
+  const second = Math.floor(h.now() / 1000) * 1000 + 1000;
+  answerAgain(h, second + 500);
+  h.set(second + 900);
+  await h.dana.answer(LEAD, { ts: h.client('stop', { ts: second }) });
+  assert.equal(h.lead().dana_off, 1);
+  assert.equal(h.brain.calls.length, 0);
+});
+
+test('T12 r16 G3 (Codex P1-2): staff wrote during a brain_out hold, then the client says "stop": no closing line, the stop recorded', async () => {
+  const h = bh({ turns: [brainReply('never')], lead: { dana_hold_reason: 'brain_out', dana_hold_until: T_IN + 5 * 60_000, last_human_out_ts: T_IN - 60_000 } });
+  h.staff('I am here to help.', T_IN - 60_000);
+  h.tick(1000);
+  await ask(h, 'stop');
+  assert.equal(h.sent().length, 0, 'no line while a person is active');
+  assert.deepEqual([h.lead().dana_off, h.lead().needs_human], [1, 1]);
+  assert.deepEqual(h.notes.of('stopped').map((c) => c[2]), ['stop']);
+});
+
+test('T12 r16 G3: the FIFO gate of a closing line applies the same 24-h person check', async () => {
+  let stopTs;
+  const h = bh({ turns: [brainReply('never')], pacing: { ...immediate, fifo: async (fn) => {
+    h.staff('On it.', stopTs - 5000);
+    h.s.updateLead(LEAD, { last_human_out_ts: stopTs - 5000 });
+    return fn();
+  } } });
+  stopTs = h.client('stop');
+  await h.dana.answer(LEAD, { ts: stopTs });
+  assert.equal(h.sent().length, 0, 'the person found in the queue stops the closing line');
+  assert.equal(h.lead().dana_off, 1, 'the stop stays recorded');
+});
+
+test('T12 r16 G4 (Codex P1-3): a newly backfilled older message gets its own `missed` after an earlier missed task was closed', async () => {
+  const h = bh({ turns: [] });
+  // 09:30 when it is 12:00: missed.
+  h.client('first question', { ts: T_IN - 2.5 * HOUR });
+  await h.dana.answer(LEAD, { ts: T_IN - 2.5 * HOUR });
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['missed']);
+  // Staff closes the task without a WhatsApp reply.
+  h.tick(5 * 60_000);
+  h.s.db.prepare("UPDATE lead_tasks SET status = 'done', updated = ?, done_by = 'USR-x' WHERE lead_id = ? AND kind = 'handoff'").run(h.now(), LEAD);
+  h.s.updateLead(LEAD, { needs_human: 0 });
+  // A later poll stores a message sent at 09:45 that was never seen.
+  h.tick(5 * 60_000);
+  const late = h.client('second question', { ts: T_IN - 2.25 * HOUR });
+  await h.dana.answer(LEAD, { ts: late });
+  assert.deepEqual(h.notes.of('handover').map((c) => c[2].kind), ['missed', 'missed'], 'its own missed');
+  const open = h.s.db.prepare("SELECT reason FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff' AND status = 'open'").get(LEAD);
+  assert.equal(open?.reason, 'missed', 'an open task again');
+  // And nothing repeats for what is recorded.
+  h.tick(60_000);
+  await h.dana.answer(LEAD, { ts: late });
+  assert.equal(h.notes.of('handover').length, 2);
 });

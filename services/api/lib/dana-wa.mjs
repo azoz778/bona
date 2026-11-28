@@ -253,14 +253,18 @@ export function batchText(messages) {
  * out when there is no batch row at all: turn() takes an array over batchText even when it is empty.
  */
 export function brainInput({ rows = [], batch = [], pending = batch } = {}) {
-  // History and batch from one list (r14 I2): the history rows the caller read (pending ones are never history), then
-  // EVERY pending message, masked as ONE series before any cap (r15: "mask before any clip"), so a number split across
-  // the batch cap is masked in both pieces; then the batch is taken from the masked parts, whole, never a partial read.
-  const all = [...(Array.isArray(pending) ? pending : []), ...batch.filter((b) => !(pending ?? []).some((p) => p?.key_id === b?.key_id))]
-    .filter(Boolean).sort((a, b) => Number(a.ts) - Number(b.ts) || Number(a.rid ?? 0) - Number(b.rid ?? 0));
-  const exclude = new Set(all.map((m) => m?.key_id));
+  // Every pending message (the batch, past the cap, expired) is never history (r14 I2).
+  const pend = new Map();
+  for (const m of [...(Array.isArray(pending) ? pending : []), ...batch]) if (m && !pend.has(m.key_id)) pend.set(m.key_id, m);
+  const exclude = new Set(pend.keys());
   const history = (Array.isArray(rows) ? rows : []).filter((m) => m && !exclude.has(m.key_id));
-  const series = [...history, ...all];
+  // The masking series in TRUE SEND ORDER (r16 G1): the history window's rows and every pending message, by (ts,
+  // rowid), never history then batch, so a backfilled middle message stays next to its neighbours and a number split
+  // across them is masked in every piece (and across the batch cap, r15). History and batch are taken from it only
+  // after masking.
+  const series = [...history, ...pend.values()].map((m, i) => ({ m, i }))
+    .sort((a, b) => Number(a.m.ts) - Number(b.m.ts) || (Number(a.m.rid ?? NaN) - Number(b.m.rid ?? NaN)) || a.i - b.i)
+    .map(({ m }) => m);
   const t = inboxTurn(series, { exclude });
   const masked = new Map();
   series.filter((m) => exclude.has(m.key_id) && m.direction === 'in').forEach((m, i) => masked.set(m.key_id, t.batchParts[i]));
@@ -552,6 +556,23 @@ export function createDana({
         AND (error = ? OR error LIKE ?) AND created >= ? AND created > ? LIMIT 1`).get(id, OUTAGE_MARK, `${OUTAGE_MARK}|%`, outageWindow(t), lastAnswer));
   }
 
+  /** The newest stored message of a person in this chat (staff, the owner's number), or null. */
+  function humanTs(leadId) {
+    const v = prep('humanTs', `SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ? AND direction = 'out'
+        AND sender_kind IN ('staff','owner_number')`).get(String(leadId))?.ts;
+    return v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v);
+  }
+  /**
+   * A person active in the chat (r16 G3): the human_recent rule, a person wrote in the last 24 h (HUMAN_QUIET_MS), by
+   * the lead's stamp or a stored message of his. Then no closing line goes, whatever hold the chat is on.
+   */
+  function personActive(lead, t = now()) {
+    if (!lead) return false;
+    if (Number.isFinite(lead.last_human_out_ts) && t - lead.last_human_out_ts < HUMAN_QUIET_MS) return true;
+    const h = humanTs(lead.lead_id);
+    return h !== null && t - h < HUMAN_QUIET_MS;
+  }
+
   /**
    * THE waiting messages of a chat (r4 A): every reader takes them from here (the run's batch, refusedRun, the
    * sweep, a hold's deadline). A legacy chat: the store's rule, as on main. A brain chat: its client messages of
@@ -569,9 +590,12 @@ export function createDana({
     // ts a person's answer, a staff send or an unmarked row reaches (the store's rule). Waiting = after both, in 24 h.
     let ridBound = 0;
     let tsBound = t - DAY_MS;
-    const human = prep('humanTs', `SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ? AND direction = 'out'
-        AND sender_kind IN ('staff','owner_number')`).get(id)?.ts;
-    if (Number.isFinite(Number(human))) tsBound = Math.max(tsBound, Number(human));
+    const human = humanTs(id);
+    if (human !== null) tsBound = Math.max(tsBound, human);
+    // "Let the AI answer again" (r16 G2, Claude N10): the person who pressed it judged everything before it, so nothing
+    // sent before its second is waiting again (nor shown to the model again as the batch).
+    const again = againFloor(id);
+    if (again !== null) tsBound = Math.max(tsBound, again - 1);
     const window = outageWindow(t);
     for (const r of prep('outRows', `SELECT sender_kind, covers_ts, created, error FROM wa_outbox WHERE lead_id = ?
         AND sender_kind IN ('staff','dana') AND status <> 'failed' AND created >= ?`).all(id, t - DAY_MS)) {
@@ -780,7 +804,10 @@ export function createDana({
   async function think(lead, batch, language, auto, pendingAll = batch) {
     // History never holds a pending message (one past the cap included); the batch is passed whole (r14 I2).
     const pendingKeys = new Set(pendingAll.map((m) => m.key_id));
-    const rows = inbox.messagesFor(lead.lead_id, { limit: CONTEXT_MESSAGES + pendingAll.length }).filter((m) => !pendingKeys.has(m.key_id));
+    // The history window with each row's rowid, so the masking series is in true send order (r16 G1).
+    const rows = prep('ctxRows', 'SELECT rowid AS rid, * FROM wa_messages WHERE lead_id = ? ORDER BY ts DESC, rowid DESC LIMIT ?')
+      .all(String(lead.lead_id), Math.min(200, CONTEXT_MESSAGES + pendingAll.length)).map((r) => ({ ...r })).reverse()
+      .filter((m) => !pendingKeys.has(m.key_id));
     const input = brainInput({ rows, batch, pending: pendingAll });
     try {
       const turn = await brain.turn({
@@ -996,6 +1023,8 @@ export function createDana({
     if (!team.sendingEnabled()) return no('sending_off');
     if (!closing && Number(l.dana_off) === 1) return no('chat_off');
     if (inbox.humanOutboundAfter(leadId, coversTs)) return no('dropped_human');
+    // A person active in the chat: no closing line over him (r16 G3), the same 24-h rule as stopFirst's.
+    if (closing && personActive(l, t)) return no('human_recent');
     if (!replyJidFor(l)) return no('lid_only');
     if (!openChat(leadId, coversTs, t)) return no('no_open_chat');
     const age = t - Number(coversTs);
@@ -1038,7 +1067,7 @@ export function createDana({
    * hand-over open) or 'none'. `stop` also sets dana_off; `note` is what the owner's note is
    * (`{ kind, reason }` for a hand-over note, `{ stopped }` for a stopped one; auto mode only).
    */
-  async function handover(leadId, language, why, coversTs, { checked = false, details = {}, line = 'handover', stop = false, note = null, viaBrain = false } = {}) {
+  async function handover(leadId, language, why, coversTs, { checked = false, details = {}, line = 'handover', stop = false, note = null, viaBrain = false, rid = null } = {}) {
     if (!checked) {
       const pre = await preSend(leadId, coversTs);
       if (!pre.ok && HANDOVER_SKIPS.has(pre.reason)) return skip(leadId, pre.reason);
@@ -1057,7 +1086,7 @@ export function createDana({
       if (!already) inbox.setNeedsHuman(leadId, 1);
       taskId = ensureHandoff(db, { leadId, source: 'dana', reason: why, details, now: now() })?.task_id ?? null;
       // A `missed` hand-over marks the task actually used, a reused open one included (r8).
-      if (why === 'missed') taskMissed(taskId);
+      if (why === 'missed') taskMissed(taskId, { leadId, rid: rid ?? coverRid(leadId, coversTs) });
       if (stop) db.updateLead(leadId, { dana_off: 1 });
       // A run that ends in a hand-over ends an outage hold: no re-run of a paid turn every minute (r5 N5).
       endOwnHold(leadId, 'brain_out');
@@ -1077,7 +1106,7 @@ export function createDana({
     if (r.stopped === 'missed') {
       // The line reached the queue past the 2-h mark: recorded as missed (the task too, r6), no line (r5).
       outcome = 'missed';
-      taskMissed(taskId);
+      taskMissed(taskId, { leadId, rid: rid ?? coverRid(leadId, coversTs) });
       if (auto) noteHandover(fresh, { kind: 'missed', coversTs });
     } else if (viaBrain) {
       // Deferred by the backlog gate, a cap or the sender's rate limit: the line is OWED (r6), like an outage line; the
@@ -1090,42 +1119,69 @@ export function createDana({
   }
 
   /**
-   * Was this expired set handed over as `missed` already (r15)? A hand-off task of the chat (open or closed) reads
-   * missed since the 2-h mark of the set's newest message: from the database, so a restart repeats nothing.
+   * Was this expired set handed over as `missed` already (r16 G4)? By the messages a `missed` covered, never by a
+   * task's update time: each hand-off task of the chat (open or closed) keeps the highest rowid its `missed` covered
+   * and when (details.missed_rid, missed_at; taskMissed). A message is recorded when one of them covers its rowid and
+   * it was already past its 2-h mark then. A message stored later (a backfill) has a higher rowid, so it gets its own
+   * `missed`; one that was still fresh then too. From the database: a restart repeats nothing.
    */
-  function missedRecorded(leadId, expiredTs) {
-    return Boolean(prep('missedSince', `SELECT 1 FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff' AND reason = 'missed'
-        AND updated >= ? LIMIT 1`).get(String(leadId), Number(expiredTs) + FRESH_MS));
+  function missedRecorded(leadId, expired) {
+    const recs = prep('missedRecs', "SELECT details FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff'").all(String(leadId)).map((r) => {
+      try { const d = JSON.parse(r.details ?? '{}') ?? {}; return { rid: Number(d.missed_rid), at: Number(d.missed_at) }; } catch { return null; }
+    }).filter((r) => r && Number.isFinite(r.rid) && Number.isFinite(r.at));
+    return expired.every((m) => recs.some((r) => Number(m.rid) <= r.rid && Number(m.ts) + FRESH_MS <= r.at));
   }
   /**
    * The messages past their 2-h mark (batchOf's `expired`, r15) are a person's: handed over as `missed` once (the open
    * task reused and marked, the note, no line), never answered. Null when there are none, or they were already.
    */
   async function missedExpired(leadId, lead, built, viaBrain) {
-    if (!viaBrain || !built.expired?.length || missedRecorded(leadId, built.expiredTs)) return null;
+    if (!viaBrain || !built.expired?.length || missedRecorded(leadId, built.expired)) return null;
     const language = languageOf({ lead, texts: built.expired.map((m) => m.text) });
-    return handover(leadId, language, 'missed', built.expiredTs, { line: 'none', note: { kind: 'missed' }, viaBrain });
+    const rid = Math.max(...built.expired.map((m) => Number(m.rid)));
+    return handover(leadId, language, 'missed', built.expiredTs, { line: 'none', note: { kind: 'missed' }, viaBrain, rid });
   }
   /**
    * When a person last let the assistant answer this chat again (dana_off set to 0 on the dashboard: "Let the AI
-   * answer again", or the chat's switch), from the audit log. A stop request sent before it was a person's to judge,
-   * and he judged it (r15): it never stops the chat again, so a stop recorded with no line (nothing covered the
-   * message) is undone for good. -Infinity when never.
+   * answer again", or the chat's switch), from the audit log, floored to its second (r16 G2): WhatsApp stamps whole
+   * seconds, so a message of that same second counts as after it. Null when never.
    */
-  function answeredAgainAt(leadId) {
+  function againFloor(leadId) {
     const r = safely(() => prep('again', `SELECT MAX(ts) AS ts FROM audit_log WHERE action = 'dana_chat' AND target = ?
         AND meta LIKE '%"dana_off":0%'`).get(String(leadId)));
-    return Number.isFinite(Number(r?.ts)) && r?.ts !== null ? Number(r.ts) : -Infinity;
+    return r?.ts !== null && r?.ts !== undefined && Number.isFinite(Number(r.ts)) ? Math.floor(Number(r.ts) / 1000) * 1000 : null;
   }
-  /** The first stop, privacy or deletion request among waiting messages sent after the last "answer again". */
-  function stopRequestIn(leadId, rows) {
-    const again = answeredAgainAt(leadId);
-    return rows.filter((m) => Number(m.ts) > again).map((m) => (typeof m.text === 'string' ? matchStopWords(m.text) : null)).find(Boolean) ?? null;
+  /**
+   * THE stop scope (r16 G2): every client message of the last 24 h sent at or after the last "answer again", in
+   * insertion order. Never bounded by coverage or by a staff reply: a stop request a person answered, or one an answer
+   * covered, is still a stop request. (stopFirst runs only while dana_off = 0.)
+   */
+  function firstStop(leadId) {
+    const again = againFloor(leadId);
+    const rows = prep('stopScope', `SELECT rowid AS rid, * FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts > ? AND ts >= ?
+        ORDER BY rowid`).all(String(leadId), now() - DAY_MS, again ?? -Infinity);
+    for (const m of rows) {
+      const hit = typeof m.text === 'string' ? matchStopWords(m.text) : null;
+      if (hit) return { row: m, kind: hit.kind };
+    }
+    return null;
   }
 
   /** The hand-off task actually used becomes `missed` (the queue crossed 2 h; by its id, whatever its reason: r6, r7). */
-  function taskMissed(taskId) {
-    if (taskId) prep('taskMissed', "UPDATE lead_tasks SET reason = 'missed', updated = ? WHERE task_id = ?").run(now(), String(taskId));
+  function taskMissed(taskId, { leadId = null, rid = null } = {}) {
+    const t = now();
+    if (taskId) prep('taskMissed', "UPDATE lead_tasks SET reason = 'missed', updated = ? WHERE task_id = ?").run(t, String(taskId));
+    // What it covered (r16 G4): the highest rowid and when, with the task (the chat's newest hand-off task when no
+    // task is open: one a person closed meanwhile), so missedRecorded dedupes by the messages, never by a time.
+    const target = taskId ?? (leadId === null ? null : prep('lastTask', `SELECT task_id FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff'
+        ORDER BY created DESC, rowid DESC LIMIT 1`).get(String(leadId))?.task_id);
+    if (!target || rid === null || !Number.isFinite(Number(rid))) return;
+    const row = prep('taskDetails', 'SELECT details FROM lead_tasks WHERE task_id = ?').get(String(target));
+    let d = {};
+    try { d = JSON.parse(row?.details ?? '{}') ?? {}; } catch { d = {}; }
+    d.missed_rid = Math.max(Number(d.missed_rid) || 0, Number(rid));
+    d.missed_at = t;
+    prep('taskDetailsSet', 'UPDATE lead_tasks SET details = ? WHERE task_id = ?').run(JSON.stringify(d), String(target));
   }
   const openTaskId = (leadId) => prep('openTask', "SELECT task_id FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff' AND status = 'open'")
     .get(String(leadId))?.task_id ?? null;
@@ -1169,7 +1225,7 @@ export function createDana({
     if (!waiting.length) { forget(); return skip(leadId, 'nothing'); }
     // A stop, privacy or deletion request among the waiting messages wins over an owed hand-over, before it is due or
     // after (r10): the stop flow (closing line, dana_off, the stopped note) replaces it; it is never sent first.
-    const stopHit = reason === 'owed_handover' ? stopRequestIn(leadId, waiting) : null;
+    const stopHit = reason === 'owed_handover' ? firstStop(leadId) : null;
     if (stopHit) {
       forget();
       return stopChat(lead, languageOf({ lead, texts: waiting.map((m) => m.text) }), stopHit.kind, waiting[waiting.length - 1].ts, { viaBrain: true });
@@ -1187,7 +1243,7 @@ export function createDana({
     // Past the 2-h mark: straight to `missed` (the hold ends, the task used reads missed, the note), no line (r9).
     if (t - Number(coversTs) > FRESH_MS) {
       forget(coversTs); // newer messages get their own run (r11)
-      taskMissed(openTaskId(leadId));
+      taskMissed(openTaskId(leadId), { leadId, rid: Number(target.rid) });
       if (auto) noteHandover(lead, { kind: 'missed', coversTs });
       say({ evt: 'dana.owed_line', leadId, sent: false, missed: true });
       return { handover: 'missed', sent: false };
@@ -1209,7 +1265,7 @@ export function createDana({
     if (oweLine(leadId, reason, r)) return skip(leadId, r.stopped ?? r.error);
     forget(coversTs);
     if (r.stopped === 'missed') {
-      taskMissed(taskId);
+      taskMissed(taskId, { leadId, rid: Number(target.rid) });
       if (auto) noteHandover(lead, { kind: 'missed', coversTs });
     }
     return skip(leadId, r.stopped ?? r.error ?? 'nothing');
@@ -1415,26 +1471,31 @@ export function createDana({
    * closing line, preSend's refresh and person check run; the line goes only when nothing but a delay (STOP_OVERRIDES)
    * stands in the way. A person active in the chat (an answer found by the refresh, or a recent one), Dana or Sending
    * off, the breaker, a rule off, identity, not configured, no phone jid: the stop is recorded with no line. Only a
-   * chat out of the inbox (or excluded) is left alone. "Let the AI answer again" undoes a false positive
-   * (answeredAgainAt). Null when there is no stop request.
+   * chat out of the inbox (or excluded) is left alone. A person active in the last 24 h means no line whatever the
+   * hold (r16 G3). The scan is firstStop's scope (r16 G2): every client message of 24 h after the last "answer again",
+   * never bounded by coverage or a staff reply; "Let the AI answer again" undoes a false positive. Null when there is
+   * no stop request.
    */
   async function stopFirst(leadId) {
     const lead = db.getLead(leadId);
     if (!lead || !useBrain(lead) || Number(lead.dana_off) === 1) return null;
     const outOfInbox = (l) => !l || l.inbox_state !== 'in' || isExcludedLead(l);
     if (outOfInbox(lead)) return null;
-    const all = pendingFor(leadId, lead, { all: true });
-    const hit = stopRequestIn(leadId, all);
+    const hit = firstStop(leadId);
     if (!hit) return null;
     if (isOwed(lead.dana_hold_reason)) endHold(leadId, { own: lead.dana_hold_reason });
-    const coversTs = Math.max(...all.map((m) => Number(m.ts)));
-    turnCover.set(String(leadId), { ts: coversTs, rid: Math.max(...all.map((m) => Number(m.rid))) });
-    const language = languageOf({ lead, texts: all.map((m) => m.text) });
+    // It covers everything waiting and the request itself (one a staff reply or an answer covered included).
+    const covered = [...pendingFor(leadId, lead, { all: true }), hit.row];
+    const coversTs = Math.max(...covered.map((m) => Number(m.ts)));
+    turnCover.set(String(leadId), { ts: coversTs, rid: Math.max(...covered.map((m) => Number(m.rid))) });
+    const language = languageOf({ lead, texts: covered.map((m) => m.text) });
     // The refresh and the person check before the closing line (r15): a person who answered meanwhile gets no line
     // over him, but the stop is still recorded.
     const pre = await preSend(leadId, coversTs);
-    if (outOfInbox(db.getLead(leadId))) return skip(leadId, 'not_in_inbox');
-    const line = pre.ok || STOP_OVERRIDES.has(pre.reason) ? 'closing' : 'none';
+    const fresh = db.getLead(leadId);
+    if (outOfInbox(fresh)) return skip(leadId, 'not_in_inbox');
+    // A person active in the last 24 h: no line, whatever the hold (r16 G3).
+    const line = !personActive(fresh) && (pre.ok || STOP_OVERRIDES.has(pre.reason)) ? 'closing' : 'none';
     return handover(leadId, language, hit.kind, coversTs, { checked: true, line, stop: true, note: { stopped: hit.kind }, viaBrain: true });
   }
 
