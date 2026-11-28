@@ -718,6 +718,17 @@ const CORPUS = [
   ['claim', 'Your time slot is reserved.', 'en', true, true],
   ['claim', 'Your viewing time is confirmed.', 'en', true, true],
   ['claim', 'Your viewings are booked for Sunday and Monday.', 'en', true, true],
+  // r7 (Claude P2-1, Codex P1): a feature clause never switches off another clause's booking sign; "for you" is client-directed
+  ['split', 'Sunday at 10 works. It is booked, and parking is at the gate.', 'en', true, true],
+  ['split', 'Sunday at 10 works. Booked — the pool and garden are ready to see.', 'en', true, true],
+  ['claim', 'Both viewings are booked for Sunday at 10 and 11.', 'en', true, true],
+  ['claim', 'The viewings are booked for Sunday at 10 and 11.', 'en', true, true],
+  ['split', 'Sunday at 10 works. The villa is booked for you!', 'en', true, true],
+  ['split', 'Sunday at 10 works. The apartment is reserved for you.', 'en', true, true],
+  ['split', 'تمام، الأحد الساعة 10. الشقة محجوزة لك ✅', 'ar', true, true],
+  ['split', 'الأحد الساعة 10. محجوز لك، والمسبح والحديقة جاهزين تشوفهم', 'ar', true, true],
+  ['split', "Sunday at 10 works. I've booked it, and visitor parking is available.", 'en', true, true],
+  ['split', 'Sunday at 10 works. I’ve booked it, and visitor parking is available.', 'en', true, true],
 ].map(([kind, text, lang, trips, viewing]) => ({ kind, text, lang, trips, viewing }));
 
 test(`the claim corpus: ${CORPUS.filter((r) => r.trips).length} claims trip and ${CORPUS.filter((r) => !r.trips).length} non-claims pass, with no tool, with save_needs only, and with a viewing tool where the row says`, async () => {

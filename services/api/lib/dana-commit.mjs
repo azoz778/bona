@@ -82,8 +82,11 @@ const TIME_RE = /(?<![\d:])\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)(?![\p{L}
 const WEEKDAY_AR = String.raw`ال(?:أحد|احد|اثنين|إثنين|ثلاثاء|أربعاء|اربعاء|خميس)`;
 /** "today" is a sign only in a sentence that is not about stock: a claim for today is itself a phantom (no viewing is same-day). */
 const TODAY_RE = /(?<![\p{L}])(?:today|tonight)(?![\p{L}])|(?<![\p{L}])اليوم(?![\p{L}])/iu;
-/** A second-person object on the claim word: "booked you (in)", "reserved you a place", "booked it for you", «حجزنا لك». */
-const OBJECT_RE = /(?<![\p{L}])(?:booked|confirmed|reserved|scheduled)\s+you(?:r)?(?![\p{L}])|(?<![\p{L}])(?:booked|confirmed|reserved|scheduled)\s+(?:it|this|that|one)\s+for\s+you(?![\p{L}])|(?:حجزت|حجزنا|أكدت|أكدنا|اكدت|اكدنا)\s*(?:لك|لكم|عليك)/iu;
+/**
+ * A second-person object on the claim word, addressed to the client (a sign, never stock): "booked you (in)", "reserved
+ * you a place", "booked it for you", "the villa is booked for you", «حجزنا لك», «الشقة محجوزة لك».
+ */
+const OBJECT_RE = /(?<![\p{L}])(?:booked|confirmed|reserved|scheduled)\s+you(?:r)?(?![\p{L}])|(?<![\p{L}])(?:booked|confirmed|reserved|scheduled)\s+(?:it|this|that|one)\s+for\s+you(?![\p{L}])|(?<![\p{L}])(?:booked|confirmed|reserved|scheduled)\s+for\s+you(?![\p{L}])|(?:حجزت|حجزنا|أكدت|أكدنا|اكدت|اكدنا)\s*(?:لك|لكم|عليك)|محجوز(?:ة|ه)?\s*(?:لك|لكم)/iu;
 /** The client's own slot: "your slot / place / spot / appointment / viewing time / time slot" (Codex r5), never a bare "your time". */
 const YOUR_SLOT_RE = /(?<![\p{L}])your\s+(?:slot|place|spot|appointment|viewing\s+time|time\s+slot)(?![\p{L}])/iu;
 const ANY_WEEKDAY_EN = String.raw`(?:sun|mon|tues|wednes|thurs|fri|satur)day`;
@@ -120,12 +123,18 @@ const FUTURE_RE = new RegExp([
   String.raw`(?<![\p{L}])(?:once|when|after|as\s+soon\s+as|until|if)\s+(?:it['’]s|it\s+is|it\s+has\s+been|(?:a|the|your)\s+(?:\w+\s+)?(?:is|has\s+been))\s+(?:booked|confirmed|reserved|scheduled|set|locked\s+in)(?![\p{L}])`,
   // "will / can / could / may / should / must be booked …" (Claude r6 P3-2)
   String.raw`(?<![\p{L}])(?:will|would|can|could|may|might|should|must|['’]ll)\s+be\s+(?:booked|confirmed|reserved|scheduled|set|locked\s+in)(?![\p{L}])`,
-  // how viewings work, in general ("Viewings are scheduled Sunday to Thursday"), never "your viewings are booked"
-  String.raw`(?<![\p{L}])(?<!your\s+)(?:viewings|visits|appointments|bookings)\s+(?:are|get)\s+(?:usually\s+|normally\s+|only\s+)?(?:booked|scheduled|confirmed|reserved|set)(?![\p{L}])`,
 ].join('|'), 'giu');
 /**
- * A sentence about stock, price, delivery or the home's features: its claim needs its sign in that same sentence, even
- * with a viewing tool in the turn ("fully booked", "confirmed delivery", "the private pool is confirmed").
+ * How viewings work, in general ("Viewings are scheduled Sunday to Thursday"), never "your viewings are booked": cut
+ * out only from a sentence with no booking sign of its own ("Both viewings are booked for Sunday at 10" stays a claim).
+ */
+const GENERAL_RE = /(?<![\p{L}])(?<!your\s+)(?:viewings|visits|appointments|bookings)\s+(?:are|get)\s+(?:usually\s+|normally\s+|only\s+)?(?:booked|scheduled|confirmed|reserved|set)(?![\p{L}])/giu;
+/** Clauses inside a sentence: the stock test reads the claim's own clause (, ، — – " - " "and" «و»). */
+const CLAUSE_SPLIT_RE = /\s*(?:[,،—–]|\s-\s|(?<![\p{L}])and(?![\p{L}])|\sو(?=\S))\s*/iu;
+/**
+ * A clause about stock, price, delivery or the home's features: a claim in it needs its sign in its own sentence, even
+ * with a viewing tool in the turn ("fully booked", "confirmed delivery", "the private pool is confirmed"). Read on the
+ * claim's clause only: "I've booked it, and visitor parking is available" is a booking.
  */
 const STOCK_RE = /(?<![\p{L}])(?:units?|apartments?|flats?|villas?|homes?|price|prices|delivery|handover|completion|project|pools?|gardens?|parking|elevators?|lifts?|terraces?|balcon(?:y|ies)|amenities|finish(?:ing|es)?|specifications?)(?![\p{L}])|الشقق|الشقة|الوحدات|الوحدة|السعر|الأسعار|التسليم|المشروع|الفلل|مسبح|حديقة|موقف|مواقف|مصعد|التشطيب/iu;
 /** Claim words beyond reply-guard claimsBooking (booked, confirmed, تم الحجز, تم تأكيد, حجزت لك, تأكد الحجز); Claude r5 P3-1. */
@@ -181,13 +190,18 @@ const signIn = (sentence) => {
  */
 function claimsABooking(calls, body) {
   const viewingTool = calls.some((c) => c.name === 'viewing_slots' || c.name === 'book_viewing');
-  const sentences = String(body ?? '').split(SENTENCE_SPLIT_RE).map((x) => toAsciiDigits(x.replace(FUTURE_RE, ' ').replace(GOVERNED_DENIAL_RE, ' ')));
+  const sentences = String(body ?? '').split(SENTENCE_SPLIT_RE)
+    .map((x) => toAsciiDigits(x.replace(FUTURE_RE, ' ').replace(GOVERNED_DENIAL_RE, ' ')))
+    .map((x) => (signIn(x.replace(GENERAL_RE, ' ')) ? x : x.replace(GENERAL_RE, ' ')));
   const answerSign = sentences.some(signIn);
   return sentences.some((s) => {
     if (PERSONAL_CLAIM_RE.test(s)) return true;
     if (!claimsBooking(s) && !EXTRA_CLAIM_RE.test(s) && !ALL_SET_RE.test(s)) return false;
-    // A stock sentence needs its own sign, with a viewing tool in the turn too (Claude r6 P3-1).
-    return signIn(s) || ((viewingTool || answerSign) && !STOCK_RE.test(s));
+    // A claim about stock needs its own sign, with a viewing tool in the turn too (Claude r6 P3-1), judged on the claim's
+    // own clause: a feature clause next to it never switches the sign off (Claude r7 P2-1, Codex r7 P1).
+    const claimClauses = s.split(CLAUSE_SPLIT_RE).filter((cl) => claimsBooking(cl) || EXTRA_CLAIM_RE.test(cl) || ALL_SET_RE.test(cl));
+    const stock = claimClauses.length ? claimClauses.every((cl) => STOCK_RE.test(cl)) : STOCK_RE.test(s);
+    return signIn(s) || ((viewingTool || answerSign) && !stock);
   });
 }
 
