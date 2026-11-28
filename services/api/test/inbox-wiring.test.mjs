@@ -2001,20 +2001,30 @@ test('T14 boot: a shutdown during app.start\'s first probe never starts the poll
   }
 });
 
-test('T14 wiring: the ingest gets the notes, so the Greeting/Away detector raises exactly one greeting_away alert for one untracked text in two chats', async () => {
-  const h = rig14();
-  try {
-    h.seedLead('LEAD-20261203-grta0001', '966500000066');
-    h.seedLead('LEAD-20261203-grta0002', '966500000067');
-    const away = 'Thanks for your message. We are away and will reply tomorrow.';
-    await h.poll(h.rec('966500000066', 'AWAY-1', away, { fromMe: true, at: h.now - 20_000 }), h.rec('966500000067', 'AWAY-2', away, { fromMe: true, at: h.now - 10_000 }));
-    h.advance(60_000);
-    await h.poll(h.rec('966500000066', 'AWAY-3', away, { fromMe: true, at: h.now - 5_000 }));
-    const rows = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'greeting_away');
-    assert.equal(rows.length, 1, 'exactly one al:greeting_away row');
-    assert.match(rows[0].dedupe_key, /^al:greeting_away:\d+$/);
-  } finally {
-    await h.close();
+test('T14 wiring: the ingest gets the notes for the Greeting/Away alert, delivered only while the automation is on: default settings send nothing; with the owner test on, one alert', async () => {
+  for (const on of [false, true]) {
+    const h = rig14();
+    try {
+      if (on) h.app.team.setSetting('owner_as_client', '1');
+      h.seedLead('LEAD-20261203-grta0001', '966500000066');
+      h.seedLead('LEAD-20261203-grta0002', '966500000067');
+      const reply = 'Thanks, we will call you back shortly.';
+      await h.poll(h.rec('966500000066', 'AWAY-1', reply, { fromMe: true, at: h.now - 20_000 }), h.rec('966500000067', 'AWAY-2', reply, { fromMe: true, at: h.now - 10_000 }));
+      h.advance(60_000);
+      await h.poll(h.rec('966500000066', 'AWAY-3', reply, { fromMe: true, at: h.now - 5_000 }));
+      await h.app.notes.tick();
+      const rows = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'greeting_away');
+      if (on) {
+        assert.equal(rows.length, 1, 'owner test on: exactly one al:greeting_away row');
+        assert.match(rows[0].dedupe_key, /^al:greeting_away:\d+$/);
+      } else {
+        assert.deepEqual(rows, [], 'automation off: no alert row');
+        assert.deepEqual(noteSends(h.evo.sends), [], 'and nothing sent to the owner');
+        assert.ok(h.logs.some((l) => l.evt === 'inbox.greeting_away_quiet'), 'a journal line only');
+      }
+    } finally {
+      await h.close();
+    }
   }
 });
 
@@ -2272,5 +2282,77 @@ test('T14 brain: a held outage alert is dropped when the brain recovers (the mod
     assert.deepEqual(pushed, []);
   } finally {
     await h.close();
+  }
+});
+
+/* ---------------- PR-INT r4 ---------------- */
+
+test('T14 brain: a restored held alert is dropped once this process\'s models probe answers 200 (key replaced across the restart)', async () => {
+  const AUTH = { status: 401, json: { error: { code: 'invalid_api_key' } } };
+  const db = openDb(':memory:');
+  try {
+    const a = rig14({ db, realBrain: true, openai: [AUTH] });
+    await a.app.ticks.brainProbe();
+    assert.notEqual(a.app.team.brainOutSince(), null);
+    await a.close();
+    const b = rig14({ db, realBrain: true, openai: [{ status: 200, json: { data: [] } }], startAt: T14 + 60_000 });
+    try {
+      const pushed = [];
+      const owners = b.app.alerts.notifyOwners;
+      b.app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
+      await b.app.ticks.brainProbe();
+      b.app.team.setSetting('owner_as_client', '1');
+      await b.app.ticks.notes();
+      await b.app.alerts.flush();
+      assert.deepEqual(b.notes(), [], 'no stale note');
+      assert.deepEqual(pushed, [], 'no stale push');
+    } finally {
+      await b.close();
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('T14 brain: a restart during an outage with the owner test already on holds nothing, so its push is not repeated once the instance is proven', async () => {
+  const AUTH = { status: 401, json: { error: { code: 'invalid_api_key' } } };
+  const db = openDb(':memory:');
+  try {
+    const a = rig14({ db, realBrain: true, openai: [AUTH] });
+    a.app.team.setSetting('owner_as_client', '1');
+    await a.app.ticks.brainProbe();
+    await a.close();
+    let proven = false;
+    const link = { ...provenLink(), identityOk: () => proven, health: () => ({ identityOk: proven, linkOk: true }) };
+    const b = rig14({ db, realBrain: true, waLink: link, startAt: T14 + 60_000 });
+    try {
+      const pushed = [];
+      const owners = b.app.alerts.notifyOwners;
+      b.app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
+      await b.app.ticks.notes();
+      proven = true;
+      await b.app.ticks.notes();
+      await b.app.alerts.flush();
+      assert.deepEqual(pushed, [], 'the alert went before the restart; not again');
+    } finally {
+      await b.close();
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('T14 timers: the 5-s notes tick skips its pass while the own-number identity is unproven', async () => {
+  for (const identity of [false, true]) {
+    const h = rig14({ waLink: provenLink({ identity }) });
+    try {
+      let passes = 0;
+      const real = h.app.notes.tick;
+      h.app.notes.tick = () => { passes += 1; return real(); };
+      await h.app.ticks.notes();
+      assert.equal(passes, identity ? 1 : 0);
+    } finally {
+      await h.close();
+    }
   }
 });

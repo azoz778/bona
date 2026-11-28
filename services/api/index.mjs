@@ -434,7 +434,9 @@ export function createApp(options = {}) {
   // An outage the brain restored from its marker (PR-INT r3): the marker is set only by quota or auth, and its alert
   // went before the restart, or was held then; held again while the brain is not in use, so its first use delivers it.
   try {
-    if (brain.configured === true && team.brainOutSince?.() != null && !brainInUse()) deferredBrainOut = { code: 'brain_out', meta: { code: 'down' }, push: true };
+    // The owner's test switch is read as saved (r4): at start the instance is not proven yet, so active() is false, and a
+    // test already on before the restart had its alert then.
+    if (brain.configured === true && team.brainOutSince?.() != null && !brainInUse() && team.ownerAsClientEnabled?.() !== true) deferredBrainOut = { code: 'brain_out', meta: { code: 'down' }, push: true };
   } catch { /* nothing to hold */ }
   // The owner's notes (DESIGN §7, PR-B2): the ledger, paced and merged, sent through the one sender as kind 'note' (the
   // owner's jid only, its own `note:to:` limit, an outbox row without text or lead), held while Sending is off. A test
@@ -457,8 +459,23 @@ export function createApp(options = {}) {
   // Each subscribes by its `onPurge(leadId)` (PR-B1: the lead's booked rows to cancel_pending;
   // PR-B2: the lead's owner_notes rows). A module without one has nothing to forget.
   purgeSubscribers.push((leadId) => viewing.onPurge?.(leadId), (leadId) => notes.onPurge?.(leadId));
+  // The Greeting/Away alert (ingest's detector) reaches the owner only while the new automation is on (PR-INT r4,
+  // strict inert): own_inbox '1', the owner's test, or dana_brain '1'. Otherwise two staff replies alike are a
+  // journal line, never a new WhatsApp note.
+  const automationOn = () => {
+    try { return team.ownInboxEnabled?.() === true || ownerTest.active?.() === true || team.danaBrainEnabled?.() === true; } catch { return false; }
+  };
+  const ingestNotes = {
+    alert: (code, meta) => {
+      if (code === 'greeting_away' && !automationOn()) {
+        log({ level: 'warn', evt: 'inbox.greeting_away_quiet' });
+        return { queued: false, reason: 'automation_off' };
+      }
+      return notes.alert(code, meta);
+    },
+  };
   const given = options.ingest ?? createIngest({
-    db, inbox: inboxStore, ownerUserId, ownerPhone: selfDigits || null, isExcludedLead: excludedLead, ownerTest, notes, log, now: clock,
+    db, inbox: inboxStore, ownerUserId, ownerPhone: selfDigits || null, isExcludedLead: excludedLead, ownerTest, notes: ingestNotes, log, now: clock,
   });
   // The backfill and the poller take the one-record function. A test may hand in either
   // shape, as createPoller allows; any other fails here, not on every record the poller reads.
@@ -892,12 +909,20 @@ export function createApp(options = {}) {
   }
   app.ticks = {
     identity: tick('identity', identityWatch),
-    notes: tick('notes', () => { flushDeferredBrainAlert(); return notes.tick?.(); }),
+    notes: tick('notes', () => {
+      flushDeferredBrainAlert();
+      // Nothing can go on Bona's own number before its instance is proven (sendNote holds it): no pass, no journal noise.
+      if (wa.ownNumberFrom === 'instance' && waLink.identityOk?.() !== true) return undefined;
+      return notes.tick?.();
+    }),
     summary: tick('summary', summaryMinute),
     sweep: tick('sweep', () => dana.sweep?.()),
     viewing: tick('viewing', () => viewing.tick?.()),
     brainProbe: tick('brainProbe', async () => {
       const out = brain.configured === true ? await brain.probe?.() : undefined;
+      // This process's models probe answered (r4): the key works, so a held alert (one restored from the marker included)
+      // is stale; a real quota outage gets dana-wa's own brain_out at the first failed turn.
+      if (out?.ok === true) deferredBrainOut = null;
       flushDeferredBrainAlert();
       return out;
     }),
