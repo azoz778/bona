@@ -414,8 +414,11 @@ export function createApp(options = {}) {
     }
     deliverBrainAlert(code, meta);
   };
+  // This process's first models probe has answered (r5): until then a RESTORED hold waits (a 200 drops it).
+  let probeAnswered = false;
   const flushDeferredBrainAlert = () => {
     if (!deferredBrainOut) return;
+    if (deferredBrainOut.restored && !probeAnswered && brain?.configured === true) return;
     let out = false;
     try { out = brain?.health?.()?.ok !== true; } catch { out = false; }
     if (!out) { deferredBrainOut = null; return; }
@@ -436,7 +439,9 @@ export function createApp(options = {}) {
   try {
     // The owner's test switch is read as saved (r4): at start the instance is not proven yet, so active() is false, and a
     // test already on before the restart had its alert then.
-    if (brain.configured === true && team.brainOutSince?.() != null && !brainInUse() && team.ownerAsClientEnabled?.() !== true) deferredBrainOut = { code: 'brain_out', meta: { code: 'down' }, push: true };
+    if (brain.configured === true && team.brainOutSince?.() != null && !brainInUse() && team.ownerAsClientEnabled?.() !== true) {
+      deferredBrainOut = { code: 'brain_out', meta: { code: 'down' }, push: true, restored: true };
+    }
   } catch { /* nothing to hold */ }
   // The owner's notes (DESIGN §7, PR-B2): the ledger, paced and merged, sent through the one sender as kind 'note' (the
   // owner's jid only, its own `note:to:` limit, an outbox row without text or lead), held while Sending is off. A test
@@ -465,11 +470,14 @@ export function createApp(options = {}) {
   const automationOn = () => {
     try { return team.ownInboxEnabled?.() === true || ownerTest.active?.() === true || team.danaBrainEnabled?.() === true; } catch { return false; }
   };
+  let greetingQuietDay = null;
   const ingestNotes = {
     alert: (code, meta) => {
       if (code === 'greeting_away' && !automationOn()) {
-        log({ level: 'warn', evt: 'inbox.greeting_away_quiet' });
-        return { queued: false, reason: 'automation_off' };
+        // `quiet`: nothing taken, so ingest keeps its day latch unset (r5); this line once a Riyadh day.
+        const day = dayKey(clock(), TZ_OFFSET_MS);
+        if (greetingQuietDay !== day) { greetingQuietDay = day; log({ level: 'warn', evt: 'inbox.greeting_away_quiet' }); }
+        return { queued: false, reason: 'automation_off', quiet: true };
       }
       return notes.alert(code, meta);
     },
@@ -920,6 +928,7 @@ export function createApp(options = {}) {
     viewing: tick('viewing', () => viewing.tick?.()),
     brainProbe: tick('brainProbe', async () => {
       const out = brain.configured === true ? await brain.probe?.() : undefined;
+      if (out && typeof out === 'object') probeAnswered = true;
       // This process's models probe answered (r4): the key works, so a held alert (one restored from the marker included)
       // is stale; a real quota outage gets dana-wa's own brain_out at the first failed turn.
       if (out?.ok === true) deferredBrainOut = null;

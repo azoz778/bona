@@ -2241,11 +2241,12 @@ test('T14 brain: a persisted outage restored at start while the brain is not in 
     assert.notEqual(a.app.team.brainOutSince(), null, 'the brain kept its marker');
     assert.deepEqual(a.notes(), []);
     await a.close();
-    const b = rig14({ db, realBrain: true, startAt: T14 + 60_000 });
+    const b = rig14({ db, realBrain: true, openai: [AUTH], startAt: T14 + 60_000 });
     try {
       const pushed = [];
       const owners = b.app.alerts.notifyOwners;
       b.app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
+      await b.app.ticks.brainProbe(); // this process's first probe answers (still 401, r5): the restored hold may now go
       await b.app.ticks.notes();
       assert.deepEqual(b.notes(), [], 'not in use: still held');
       b.app.team.setSetting('owner_as_client', '1');
@@ -2354,5 +2355,68 @@ test('T14 timers: the 5-s notes tick skips its pass while the own-number identit
     } finally {
       await h.close();
     }
+  }
+});
+
+/* ---------------- PR-INT r5 ---------------- */
+
+for (const [status, delivered] of [[200, false], [401, true]]) {
+  test(`T14 brain: a restored hold waits for this process's first models probe: the owner test on while it is pending, then ${status} → ${delivered ? 'one note and one push' : 'nothing'}`, async () => {
+    const AUTH = { status: 401, json: { error: { code: 'invalid_api_key' } } };
+    const db = openDb(':memory:');
+    try {
+      const a = rig14({ db, realBrain: true, openai: [AUTH] });
+      await a.app.ticks.brainProbe();
+      await a.close();
+      let release;
+      const gate = new Promise((r) => { release = r; });
+      const answer = status === 200 ? { status: 200, json: { data: [] } } : AUTH;
+      const b = rig14({ db, realBrain: true, openai: [async () => { await gate; return answer; }], startAt: T14 + 60_000 });
+      try {
+        const pushed = [];
+        const owners = b.app.alerts.notifyOwners;
+        b.app.alerts.notifyOwners = (x) => { pushed.push(x?.reason); return owners(x); };
+        const probe = b.app.ticks.brainProbe();
+        b.app.team.setSetting('owner_as_client', '1');
+        await b.app.ticks.notes();
+        await b.app.alerts.flush();
+        assert.deepEqual(b.notes(), [], 'nothing while the startup probe is pending');
+        release();
+        await probe;
+        await b.app.ticks.notes();
+        await b.app.alerts.flush();
+        const rows = b.notes("kind = 'alert'").filter((r) => r.meta.alert === 'brain_out');
+        assert.equal(rows.length, delivered ? 1 : 0);
+        assert.deepEqual(pushed, delivered ? ['brain'] : []);
+      } finally {
+        await b.close();
+      }
+    } finally {
+      db.close();
+    }
+  });
+}
+
+test('T14 wiring: a quiet Greeting/Away detection (automation off) leaves the day free: the owner test turns on later that day, and a real Away in two chats gives exactly one alert', async () => {
+  const h = rig14();
+  try {
+    h.seedLead('LEAD-20261203-grtb0001', '966500000081');
+    h.seedLead('LEAD-20261203-grtb0002', '966500000082');
+    const same = 'Thanks, we will call you back shortly.';
+    await h.poll(h.rec('966500000081', 'Q-1', same, { fromMe: true, at: h.now - 20_000 }), h.rec('966500000082', 'Q-2', same, { fromMe: true, at: h.now - 10_000 }));
+    h.advance(60_000);
+    await h.poll(h.rec('966500000081', 'Q-3', same, { fromMe: true, at: h.now - 5_000 }));
+    assert.deepEqual(h.notes(), [], 'automation off: quiet');
+    assert.equal(h.logs.filter((l) => l.evt === 'inbox.greeting_away_quiet').length, 1, 'the quiet line once a day');
+    h.app.team.setSetting('owner_as_client', '1');
+    h.advance(3_600_000);
+    const away = 'We are away until Sunday. We will reply then.';
+    await h.poll(h.rec('966500000081', 'W-1', away, { fromMe: true, at: h.now - 20_000 }), h.rec('966500000082', 'W-2', away, { fromMe: true, at: h.now - 10_000 }));
+    h.advance(60_000);
+    await h.poll(h.rec('966500000082', 'W-3', away, { fromMe: true, at: h.now - 5_000 }));
+    const rows = h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'greeting_away');
+    assert.equal(rows.length, 1, 'exactly one alert once the automation is on');
+  } finally {
+    await h.close();
   }
 });

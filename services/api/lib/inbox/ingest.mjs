@@ -386,7 +386,10 @@ export function createIngest({
   /** After the record's transaction: a notes module that throws never undoes the record. */
   function raiseGreeting() {
     try {
-      notes?.alert?.('greeting_away');
+      const out = notes?.alert?.('greeting_away');
+      // A sink that answers `quiet` took nothing (PR-INT r5: index.mjs while the automation is off): the day's latch is
+      // left unset, so a detection later that day can still raise it.
+      if (out?.quiet === true) { alertedDay = null; return; }
       log({ level: 'warn', evt: 'inbox.greeting_away' });
     } catch (err) {
       log({ level: 'warn', evt: 'inbox.greeting_away_failed', error: String(err?.code ?? err?.name ?? 'error').slice(0, 40) });
