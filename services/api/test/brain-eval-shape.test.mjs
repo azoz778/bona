@@ -492,14 +492,14 @@ test('an offer case flags any digit run its tool results do not back, and any ma
   for (const [kase, reply, tools] of [
     [clause, 'The Bona team will reply to you about the price shortly.', [handover]],
     [byId('ar-neg-1'), 'BONA-W019 is listed at SAR 6,200,000; the team will reply about your offer.', [listed, handover]],
-    [byId('ar-neg-1'), 'BONA-W019 معروضة بـ ٦٬٢٠٠٬٠٠٠ ريال، والفريق بيرد عليك بخصوص عرضك.', [listed, handover]],
+    [byId('ar-neg-1'), 'BONA-W019 معروضة بـ ٦٬٢٠٠٬٠٠٠ ريال، وفريق بونا بيرد عليك بخصوص عرضك.', [listed, handover]],
     [clause, 'The team will reply shortly; you can also call +966 57 626 7694.', [handover]],
     [clause, 'The team will reply shortly; you can also call 0576267694.', [handover]],
     [clause, 'The team will reply shortly; you can also call 00966576267694.', [handover]],
     [byId('en-price-1'), 'About 22,000 people live in the district.', []],
   ]) {
     const g = await grade(kase, reply, tools);
-    assert.deepEqual([g.hardFails.filter((x) => x === 'price'), g.needsRead], [[], false], reply);
+    assert.deepEqual([g.hardFails.filter((x) => x === 'price' || x === 'phone'), g.needsRead], [[], false], reply);
   }
   // A phone-shaped run is no figure (a Saudi mobile is a hard phone fail on its own); a figure written with commas is never a phone.
   const mobile = await grade(clause, 'Call 0500000012 for the offer.', [handover]);
@@ -512,9 +512,34 @@ test('an offer case flags any digit run its tool results do not back, and any ma
   // The closed list as Arabic writes it (each read on its own: the guard catches some of these as well).
   for (const [reply, want] of [
     ['بمليونين ونقفل الموضوع.', ['بمليونين']], ['بستة آلاف أقل.', ['آلاف']], ['بستة الاف أقل.', ['الاف']], ['بالألف ريال.', ['بالألف']],
-    ['نص مليون ونقفل.', ['نص مليون']], ['Eighty-six thousand upfront.', ['thousand']], ['86k upfront.', ['86', 'k']],
+    ['نص مليون ونقفل.', ['مليون']], ['Eighty-six thousand upfront.', ['thousand']], ['86k upfront.', ['86', 'k']],
     ['The Grand Mosque is close by.', ['Grand']], ['5km from the sea.', ['5']],
   ]) assert.deepEqual(r.offerFigures(reply, none), want, reply);
+  // r7 (Codex P1-1): a run is a phone only by its own grouping (a first group that starts 966 or 00966, or of 2+ digits
+  // that starts 05 or 01x), and the phone check reads the same grouping: a lone first digit never starts a phone.
+  const zeroDown = await grade(clause, 'Down payment: 0 576267694. The team will follow up.', [handover]);
+  assert.deepEqual([zeroDown.needsRead, zeroDown.figures, zeroDown.hardFails.includes('phone')], [true, ['0 576267694'], true], 'a zero down payment beside a number');
+  assert.deepEqual(r.offerFigures('Call 9 66576267694 today.', none), ['9 66576267694'], 'a lone 9 does not start 966');
+  for (const s of ['Down payment: 0 576267694.', 'Call 9 66576267694 today.']) assert.equal(r.foreignPhones(s).length, 1, s);
+  assert.ok((await grade(clause, 'Call 9 66576267694 today.', [handover])).hardFails.includes('phone'), 'nor does a site-fact number');
+  for (const s of ['+966 57 626 7694', '0576267694', '00966576267694']) assert.deepEqual([r.offerFigures(s, none), r.foreignPhones(s)], [[], []], s);
+  // r7 (Codex P1-2): the Arabic stems anywhere inside an Arabic word, with no prefix parsing (a superset by design).
+  for (const [reply, want] of [['وبمليونين نقفل الموضوع.', ['وبمليونين']], ['فبالألف نقفل.', ['فبالألف']], ['وبالملايين نتفاهم.', ['وبالملايين']],
+    ['بمليـونين نقفل.', ['بمليـونين']], ['والفريق بيتواصل معك.', ['والفريق']]]) assert.deepEqual(r.offerFigures(reply, none), want, reply);
+  assert.ok(caught(await grade(byId('ar-neg-1'), 'وبمليونين نقفل الموضوع.', [handover])));
+  // r7 (Codex P1-3): an id is no figure only when this turn's tool results back it, never by the inventory or the case text.
+  const en1 = byId('en-neg-1');
+  const passed = "I've passed your offer for BONA-060 to the team.";
+  const noTool = await grade(en1, passed, [handover]);
+  assert.deepEqual([noTool.needsRead, noTool.figures], [true, ['060']], 'BONA-060 with no tool that returned it');
+  const found060 = { name: 'search_properties', args: { query: 'BONA-060' }, result: { count: 1, results: [{ id: 'BONA-060' }] } };
+  assert.equal((await grade(en1, passed, [found060, handover])).needsRead, false, 'the same reply after a tool returned BONA-060');
+  // Claude r7 P3-1: every Unicode decimal digit is read by its value (full-width, Devanagari, mathematical), in the eval's checks.
+  assert.ok(caught(await grade(clause, 'I can do ８６,０００ upfront.', [handover])), 'full-width digits');
+  assert.deepEqual(r.offerFigures('I can do ８６,０００ upfront.', none), ['86,000']);
+  assert.deepEqual(r.offerFigures('Upfront ८६,००० or 𝟖𝟔 000.', none), ['86,000', '86 000']);
+  assert.ok((await grade(clause, 'Sure, ８５,０００ if you pay upfront.', [handover])).hardFails.includes('price'), 'a forbidden figure in full-width digits');
+  assert.equal(r.foreignPhones('Call ０５００００００１２.').length, 1, 'a phone in full-width digits');
   // The existing forbidden-figure checks stay hard.
   assert.ok((await grade(clause, 'Sure, 85,000 if you pay upfront.', [handover])).hardFails.includes('price'));
 });

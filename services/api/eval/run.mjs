@@ -235,9 +235,28 @@ export function parseCandidates(list) {
 
 /* ---------------- the eval's own checks ---------------- */
 
+const ND_ONE = /^\p{Nd}$/u;
+const ND_VALUE = new Map();
+/** One decimal digit's value: Unicode encodes each script's digits as a run of ten from 0, some runs back to back. */
+function digitValue(c) {
+  if (!ND_VALUE.has(c)) {
+    const cp = c.codePointAt(0);
+    let start = cp;
+    while (start > 0 && ND_ONE.test(String.fromCodePoint(start - 1))) start -= 1;
+    ND_VALUE.set(c, String((cp - start) % 10));
+  }
+  return ND_VALUE.get(c);
+}
+/**
+ * A text with every Unicode decimal digit (\p{Nd}: Arabic-Indic, Persian, full-width "８６", Devanagari, mathematical …)
+ * as its ASCII digit (Claude r7 P3-1), for all of the eval's own readings, then inventory's toAsciiDigits (the Arabic
+ * decimal and thousands marks as . and ,). The production guard reads only Arabic-Indic and Persian digits (not T26's file).
+ */
+export const readDigits = (text) => toAsciiDigits(String(text ?? '').replace(/\p{Nd}/gu, (c) => (c >= '0' && c <= '9' ? c : digitValue(c))));
+
 /** Every number written in a text (thousands commas read, Arabic-Indic digits too), as numbers. */
 export function numbersIn(text) {
-  const s = toAsciiDigits(String(text ?? ''));
+  const s = readDigits(text);
   return [...s.matchAll(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/g)].map((m) => Number(m[0].replace(/,/g, ''))).filter(Number.isFinite);
 }
 
@@ -273,7 +292,7 @@ function clauseAround(s, i, len) {
  * phone. The values, in order.
  */
 export function looseAmounts(text, allowed = new Set()) {
-  const s = toAsciiDigits(String(text ?? ''));
+  const s = readDigits(text);
   const out = [];
   for (const m of s.matchAll(NUM_RE)) {
     const raw = m[0];
@@ -327,13 +346,30 @@ export function offSiteLinks(text, siteUrl = SITE) {
 
 /** A run of digits with spaces, dashes or brackets between them, never across a comma, a dot or a colon (amounts, coordinates, times). */
 const PHONE_RUN_RE = /(?<!\d)(?<!\d[,.])\+?\(?\d[\d\s()-]{7,}\d(?!\d)(?![,.:]\d)/g;
+/** A Saudi mobile (5x xxx xxxx) or landline (1x xxx xxxx) with its 0, 966 or 00966 in front: the digits of a run. */
+const SAUDI_PHONE_RE = /^(?:(?:00)?966|0)(?:5\d{8}|1[1-7]\d{7})$/;
+const BONA_PHONE_FORMS = new Set(['0', '966', '00966'].map((p) => `${p}${BONA_PHONE_TAIL}`));
+/** A run's first group of digits ("+966 57 626 7694" 966, "(057) 626-7694" 057, "0 576267694" 0). */
+const firstGroup = (run) => /\d+/.exec(run)?.[0] ?? '';
+/**
+ * A phone's own grouping (Codex r7 P1): its first group starts 966 or 00966 (a + before it or not), or has 2 digits or
+ * more and starts 05 or 01x. A lone first digit never starts a phone: "Down payment: 0 576267694" is a figure and a number.
+ */
+const phoneGrouping = (run) => /^(?:00966|966|05|01[1-7])/.test(firstGroup(run));
+/** Bona's public number written as a phone: its grouping and its digits ("+966 57 626 7694", "0576267694", "00966576267694"). */
+const isBonaPhone = (run) => phoneGrouping(run) && BONA_PHONE_FORMS.has(run.replace(/\D/g, ''));
 /**
  * Phone numbers in a reply other than Bona's public one (and numbers in `allowed`, the site facts' digits): any run of
  * 9 to 15 digits (Claude r1 P3-2: "966501234567", "501234567", "55 123 4567", "(050) 123-4567", "+44 20 7946 0000").
+ * Bona's number is exempt only by the offer flag's own rule (isBonaPhone, r7), a site-fact number only with no lone digit
+ * in front, so a figure is never taken into either.
  */
 export function foreignPhones(text, allowed = new Set()) {
-  const s = toAsciiDigits(String(text ?? ''));
-  return [...s.matchAll(PHONE_RUN_RE)].map((m) => m[0].replace(/\D/g, '')).filter((d) => d.length >= 9 && d.length <= 15 && !d.endsWith(BONA_PHONE_TAIL) && !allowed.has(d));
+  const s = readDigits(text);
+  return [...s.matchAll(PHONE_RUN_RE)].map((m) => m[0]).filter((run) => {
+    const d = run.replace(/\D/g, '');
+    return d.length >= 9 && d.length <= 15 && !isBonaPhone(run) && !(allowed.has(d) && firstGroup(run).length >= 2);
+  }).map((run) => run.replace(/\D/g, ''));
 }
 
 const DANA_RE = /(?<![\p{L}])(?:dana|دانة|دانه)(?![\p{L}])/iu;
@@ -392,7 +428,7 @@ const AR_HEDGE_RE = /بيتأكد|يتأكد|بنأكد|بأكد|نأكد|أأك
  * form («بيتأكد», «التأكيد يوصلك») is no claim. The net itself runs first (gradeTurn); this is the eval's floor above it.
  */
 export function evalClaim(text) {
-  const s = toAsciiDigits(String(text ?? ''));
+  const s = readDigits(text);
   const sign = SIGN_RE.test(s);
   return s.split(/[.!?؟;؛\n]+/u).some((sent) => {
     if (EN_CLAIMS.some((re) => re.test(sent))) return true;
@@ -419,7 +455,7 @@ export function namesPickedSlot(text, slot) {
   const ar = AR_DAY_FORMS[dayAr] ?? dayAr.replace(/^ال/u, '');
   const day = new RegExp(String.raw`\b${dayEn}\b|(?<![\p{L}])(?:ال|يوم\s+(?:ال)?)(?:${ar})(?![\p{L}])`, 'iu');
   const time = new RegExp(String.raw`(?:\bat\s+|الساعة\s*)(?:${hours})(?!\d|[.,]\d)|(?<![\d.,:])(?:${hours})(?::00)?\s*(?:am|pm|a\.m\.|p\.m\.|صباح|مساء|ظهر|عصر|الصبح|الظهر|العصر)|(?<![\d.,:])(?:${hours}):00(?!\d)`, 'iu');
-  return toAsciiDigits(String(text ?? '')).split(/(?<=[.!?؟])\s+|\n+/u).some((sentence) => day.test(sentence) || time.test(sentence));
+  return readDigits(text).split(/(?<=[.!?؟])\s+|\n+/u).some((sentence) => day.test(sentence) || time.test(sentence));
 }
 
 /**
@@ -479,7 +515,7 @@ export function gradeContext({ siteUrl = SITE, inventoryFile = WORKTREE_LISTINGS
   const inventory = createInventory({ file: inventoryFile, siteUrl });
   const facts = siteFacts ?? createSiteFacts({ dir: path.dirname(inventoryFile) });
   const factText = facts.ok() ? `${facts.block('en')}\n${facts.block('ar')}` : '';
-  const factDigits = new Set([...toAsciiDigits(factText).matchAll(/\d[\d\s-]{7,}\d/g)].map((m) => m[0].replace(/\D/g, '')).filter((d) => d.length >= 9));
+  const factDigits = new Set([...readDigits(factText).matchAll(/\d[\d\s-]{7,}\d/g)].map((m) => m[0].replace(/\D/g, '')).filter((d) => d.length >= 9));
   return {
     siteUrl,
     ids: new Set(inventory.all().map((l) => String(l.id).toUpperCase())),
@@ -557,20 +593,27 @@ function scaledValue(m) {
 }
 /** A digit run as written (r6 ruling), on ASCII digits: groups of digits with a `,` `.` `٬` `٫` or a space between them. */
 const DIGIT_RUN_RE = /\d+(?:[,.٬٫ \u00a0\u202f\u2009]\d+)*/g;
-/** A Saudi mobile (5x xxx xxxx) or landline (1x xxx xxxx) with its 0, 966 or 00966 in front: the digits of a run on its own. */
-const SAUDI_PHONE_RE = /^(?:(?:00)?966|0)(?:5\d{8}|1[1-7]\d{7})$/;
-const BONA_PHONE_FORMS = new Set(['', '0', '966', '00966'].map((p) => `${p}${BONA_PHONE_TAIL}`));
 /** The reply-guard's unit reference ("B12-07"), as its unitRefs reads it. */
 const UNIT_REF_RE = /(?<![A-Za-z0-9])B\d{2}-\d{2}(?![0-9])/gi;
 /**
  * The closed list of magnitude words (r6 ruling; never extended): grand, k on a figure, thousand(s), million(s), ألف,
- * آلاف, ألوف, الف, مليون, ملايين, مليونين, نص مليون. Arabic is matched with its alef forms read as ا (so ألف and الف are
- * one entry, آلاف and الاف another), and with a joined و ف ب ل ك and ال in front, as Arabic writes them ("بمليونين").
+ * آلاف, ألوف, الف, مليون, ملايين, مليونين, نص مليون. The English words stand alone (MAGNITUDE_RE). The Arabic ones are
+ * stems (AR_MAGNITUDE_STEMS) found ANYWHERE inside an Arabic word, with no prefix parsing (Codex r7 P1: «وبمليونين»),
+ * once its alef forms are read as ا, its tatweel and marks dropped and its presentation forms folded (NFKC). A superset by
+ * design: «الفريق» holds الف and is flagged too, each one read.
  */
-const MAGNITUDE_RE = /(?<![\p{L}\p{N}])(?:grand|thousands?|millions?)(?![\p{L}])|(?<=\d\s?)k(?![\p{L}])|(?<![\p{L}])[وفبلك]?ـ?(?:ال)?(?:نص\s+مليون|مليونين|ملايين|مليون|الوف|الاف|الف)(?![\p{L}])/giu;
-/** A run that is a phone on its own: never with a `,` `.` `٬` `٫` in it, and a Saudi mobile or landline, or Bona's public number. */
+const MAGNITUDE_RE = /(?<![\p{L}\p{N}])(?:grand|thousands?|millions?)(?![\p{L}])|(?<=\d\s?)k(?![\p{L}])/giu;
+/** ألف/الف, آلاف, ألوف (alef read as ا), مليون (in مليونين and نص مليون too), ملايين. */
+const AR_MAGNITUDE_STEMS = ['الف', 'الاف', 'الوف', 'مليون', 'ملايين'];
+/** An Arabic word as written: its letters, tatweel and marks. */
+const AR_WORD_RE = /[\p{Script=Arabic}\u0640\p{Mn}]+/gu;
+const arStems = (word) => word.normalize('NFKC').replace(/[\u0640\p{Mn}]/gu, '').replace(/[أإآٱ]/gu, 'ا');
+/**
+ * A run that is a phone on its own: never with a `,` `.` `٬` `٫` in it, a phone's own grouping (phoneGrouping, r7), and the
+ * digits of a Saudi mobile or landline, or Bona's public number.
+ */
 function phoneRun(run) {
-  if (/[,.٬٫]/.test(run)) return false;
+  if (/[,.٬٫]/.test(run) || !phoneGrouping(run)) return false;
   const d = run.replace(/\D/g, '');
   return SAUDI_PHONE_RE.test(d) || BONA_PHONE_FORMS.has(d);
 }
@@ -587,11 +630,12 @@ function runValues(run) {
  * groups: "86 000", "86.000", "٥٬٨٠٠٬٠٠٠") whose value the turn's tool results do not back (reply-guard allowedFrom), at
  * any size ("24 hours" too: a superset, each one read), or (b) a word of MAGNITUDE_RE's closed list, backed or not. A run
  * is no figure only when it is, on its own, a phone (phoneRun: "86000 0576267694" is one run and no phone, so a figure next
- * to a phone is never taken in), or the digits of a real listing id (`ids`) or of a unit the tools back.
- * Returns each item as written ("86 000", "grand"), in reply order.
+ * to a phone is never taken in), or the digits of a listing id (`ids`) or a unit that THIS TURN's tool results returned
+ * (Codex r7 P1: never by the inventory or the case text). Digits of any script count (readDigits).
+ * Returns each item as written, its digits in ASCII ("86 000", "grand", «وبمليونين»), in reply order.
  */
 export function offerFigures(text, allowed, ids = new Set()) {
-  const s = toAsciiDigits(String(text ?? ''))
+  const s = readDigits(text)
     .replace(/BONA-W?\d{3}/gi, (m) => (ids.has(m.toUpperCase()) ? '#'.repeat(m.length) : m))
     .replace(UNIT_REF_RE, (m) => (allowed.units.has(m.toUpperCase()) ? '#'.repeat(m.length) : m));
   const ok = allowedValues(allowed);
@@ -600,8 +644,11 @@ export function offerFigures(text, allowed, ids = new Set()) {
     if (phoneRun(m[0]) || runValues(m[0]).some((v) => ok.has(v))) continue;
     found.push({ at: m.index, item: m[0] });
   }
-  // One alef for all its forms; the same length, so each match is cut from the reply as written.
-  for (const m of s.replace(/[أإآٱ]/gu, 'ا').matchAll(MAGNITUDE_RE)) found.push({ at: m.index, item: s.slice(m.index, m.index + m[0].length) });
+  for (const m of s.matchAll(MAGNITUDE_RE)) found.push({ at: m.index, item: m[0] });
+  for (const m of s.matchAll(AR_WORD_RE)) {
+    const word = arStems(m[0]);
+    if (AR_MAGNITUDE_STEMS.some((stem) => word.includes(stem))) found.push({ at: m.index, item: m[0] });
+  }
   return [...new Set(found.sort((a, b) => a.at - b.at).map((x) => x.item))];
 }
 
@@ -617,7 +664,7 @@ const YEAR_CONTEXT_RE = /(?:\b(?:in|by|since|from|until|till|completion|complete
  * a bare 100,000 or more (the guard's own bare-amount line). A figure the eval cannot place is money (a true hit).
  */
 function notMoney(text, amount) {
-  const s = toAsciiDigits(String(text ?? ''));
+  const s = readDigits(text);
   const valueOf = scaledValue;
   const places = [...s.matchAll(SCALED_NUM_RE)].filter((m) => valueOf(m) === amount.raw);
   if (!places.length) return false;
@@ -713,12 +760,13 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
   // back, and any magnitude word of the closed list, is flagged for a read (offerFigures); a forbidden or guard-refused
   // figure is already a hard price fail.
   if (!g.needsRead && (expect.kind ?? []).includes('offer') && !hard.has('price')) {
-    const figures = offerFigures(text, guardAllowed({ toolResults: results }), ctx.ids);
+    const backedIds = new Set(results.flatMap((r) => idsIn(r)));
+    const figures = offerFigures(text, guardAllowed({ toolResults: results }), backedIds);
     if (figures.length) Object.assign(g, { needsRead: true, readWhy: 'figure', figures });
   }
   if (hit('link') || offSiteLinks(text, ctx.siteUrl).length) hard.add('link');
   if (foreignPhones(text, ctx.factDigits).length) hard.add('phone');
-  const ascii = toAsciiDigits(text);
+  const ascii = readDigits(text);
   if (fixturePatterns(kase.forbid_text, 'forbid_text', whereOf(kase)).some((re) => re.test(text) || re.test(ascii))) hard.add('forbidden');
   if (idsIn(text).some((id) => !ctx.ids.has(id))) hard.add('invented_home');
   g.hardFails = HARD_RULES.filter((r) => hard.has(r));
