@@ -19,6 +19,13 @@
 import { STAGES } from '../db.mjs';
 import { sourceFromTouch } from '../attribution.mjs';
 import { OWNER_METHODS } from '../leads.mjs';
+import { HANDOVER } from '../dana-wa.mjs';
+
+/**
+ * The fixed lines code sends as a `dana` row that are never an answer: the hand-over (and holding) line of
+ * lib/dana-wa.mjs, alone or after the disclosure line. A task that adds another such line adds it here.
+ */
+export const NOT_ANSWER_LINES = Object.freeze(Object.values(HANDOVER));
 
 /** Asia/Riyadh, permanently UTC+3. */
 export const TZ_OFFSET_MS = 3 * 3_600_000;
@@ -45,6 +52,23 @@ const ACQUIRED = `COALESCE(match_method, '') NOT IN (${[...OWNER_METHODS].map((m
   if (!/^[a-z_]+$/.test(m)) throw new Error('an owner method must be a plain word');
   return `'${m}'`;
 }).join(', ')})`;
+
+/**
+ * The assistant's hand-over reasons that mean "it could not answer at all" (an outage, a
+ * limit, a message left too long), for the daily summary's "Not answered by the AI" line.
+ */
+export const NOT_ANSWERED_REASONS = Object.freeze(['missed', 'cap_day', 'cap_chat', 'brain', 'brain_out', 'budget', 'retell_error', 'not_configured']);
+
+/** A lead's channel as the daily summary groups it: whatsapp, form, chat, email, phone or other. */
+export function channelBucket(channel) {
+  const c = String(channel ?? '').toLowerCase();
+  if (c === 'whatsapp') return 'whatsapp';
+  if (c === 'form') return 'form';
+  if (c === 'concierge_voice' || c === 'voice' || c === 'call' || c === 'phone') return 'phone';
+  if (c === 'chat' || c === 'concierge_chat') return 'chat';
+  if (c === 'email') return 'email';
+  return 'other';
+}
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const round1 = (v) => Math.round(v * 10) / 10;
@@ -545,6 +569,115 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     return out.sort((a, b) => a.ts - b.ts || rank[a.kind] - rank[b.kind]);
   }
 
+  /**
+   * The counts behind the owner's daily WhatsApp summary (DESIGN §7.3, lib/daily-summary.mjs),
+   * over `[from, to)`, plus the viewings booked in `[viewingsFrom, viewingsTo)`. Read-only, like
+   * everything here. Names come back raw: whether one may be printed is the summary's rule, not
+   * this file's.
+   *
+   *   - newClients: leads the business acquired that were created in the window (`ACQUIRED`),
+   *     plus chats that joined the inbox in the window under the own-number rule or as the
+   *     owner's test (a returning lead counts once it joins, G13); by channel (non-zero only),
+   *     and how many of them hold a viewing (`booked` or `done`).
+   *   - waiting: inbox chats flagged for a person right now.
+   *   - ai: the assistant's ANSWERS in the window (one per chat and `covers_ts`, grouped like
+   *     store.countDanaTurns but never a hand-over or holding line, nor a send that may not have
+   *     gone), its hand-overs, and the median time from the client's message to the first answer
+   *     bubble WhatsApp took.
+   *   - notAnswered: chats it handed over in the window because it could not answer at all (an
+   *     outage, a limit, a message left too long).
+   *   - viewings: booked rows with the lead's name and how it joined.
+   *   - lidOnly (the newest 5) / lidOnlyCount / candidatesWithPhone: the open "Chats to check"
+   *     rows that are not leads, without and with a phone number.
+   *   - oldOutWrote: the owner-notes alerts "a chat you marked Not a client wrote" in the window.
+   *   - heldOver: notes kept back by the 40-a-day limit (owner_notes `merged` with `over`), by kind.
+   * @param {{ from: number, to: number, viewingsFrom?: number, viewingsTo?: number }} o
+   */
+  function ownerSummary({ from, to, viewingsFrom = to, viewingsTo = to } = {}) {
+    const a = num(from);
+    const b = num(to);
+    const fresh = all(`SELECT l.lead_id, l.channel,
+                         EXISTS (SELECT 1 FROM viewing_bookings v WHERE v.lead_id = l.lead_id AND v.status IN ('booked','done') AND v.task_id IS NOT NULL) AS booked
+                       FROM leads l
+                       WHERE (l.created >= ? AND l.created < ? AND ${ACQUIRED})
+                          OR (l.inbox_via IN ('own_number','owner_test') AND l.inbox_since >= ? AND l.inbox_since < ?)`, a, b, a, b);
+    const byChannel = {};
+    for (const r of fresh) {
+      const c = channelBucket(r.channel);
+      byChannel[c] = (byChannel[c] ?? 0) + 1;
+    }
+    // One row per ANSWER: a chat (or a purged chat's jid) and the client message it answered (Codex r9,
+    // r10). Only a `dana` row WhatsApp took (`accepted`; a pending or uncertain one may never have gone)
+    // is one, and only one that
+    //   - the reply guard passed (`guarded = 1`: a brain turn's bubbles, never a line code sends), or
+    //   - carries a text that is none of the fixed lines code sends (NOT_ANSWER_LINES: the hand-over and
+    //     holding line, alone or after the disclosure line): a legacy (Retell) answer, on every turn.
+    // A purged chat's stub keeps no text, so only its guard says it was an answer.
+    // A turn's time is when WhatsApp took its first answer bubble (`updated`, written as it turns
+    // `accepted`); a purge rewrites a stub's `updated`, so a stub's is its `created` (Claude r11). A turn
+    // belongs, once, to the window that holds that first bubble (an answer split across 08:00, Codex
+    // r10): rows from a day before the window are read so a turn is grouped whole before it is placed.
+    // store.countDanaTurns stays as it is: the pacing cap must count every send that may have gone.
+    const notLine = NOT_ANSWER_LINES.map(() => '(o.text <> ? AND substr(o.text, -?) <> ?)').join(' AND ');
+    // SQLite's substr counts characters (code points), so the length is too, never UTF-16 units (Claude r12 P3).
+    const lineArgs = NOT_ANSWER_LINES.flatMap((t) => [t, [...t].length + 2, `\n\n${t}`]);
+    const turns = all(`SELECT MIN(CASE WHEN o.lead_id IS NULL THEN o.created ELSE o.updated END) AS at, o.covers_ts FROM wa_outbox o
+                       WHERE o.sender_kind = 'dana' AND o.status = 'accepted' AND o.created >= ? AND o.created < ?
+                         AND (o.guarded = 1 OR (o.text IS NOT NULL AND ${notLine}))
+                       GROUP BY COALESCE(o.lead_id, 'jid:' || o.jid), COALESCE(o.covers_ts, o.send_id)
+                       HAVING at >= ? AND at < ?`, a - DAY_MS, b, ...lineArgs, a, b);
+    const replies = turns.filter((t) => t.covers_ts !== null && num(t.at) - num(t.covers_ts) >= 0).map((t) => num(t.at) - num(t.covers_ts));
+    const handovers = num(one(`SELECT COUNT(*) AS n FROM lead_tasks WHERE kind = 'handoff' AND source = 'dana' AND created >= ? AND created < ?`, a, b)?.n);
+    const notAnswered = num(one(`SELECT COUNT(DISTINCT lead_id) AS n FROM lead_tasks
+                                 WHERE kind = 'handoff' AND source = 'dana' AND created >= ? AND created < ?
+                                   AND reason IN (${NOT_ANSWERED_REASONS.map(() => '?').join(',')})`, a, b, ...NOT_ANSWERED_REASONS)?.n);
+    const viewings = all(`SELECT v.booking_id, v.lead_id, v.listing_id, v.start_ts, v.end_ts, l.name, l.inbox_via
+                          FROM viewing_bookings v LEFT JOIN leads l ON l.lead_id = v.lead_id
+                          WHERE v.status = 'booked' AND v.task_id IS NOT NULL AND v.start_ts >= ? AND v.start_ts < ? ORDER BY v.start_ts, v.booking_id`,
+    num(viewingsFrom), num(viewingsTo));
+    // The store's "Chats to check" rule (lib/inbox/store.mjs listCandidates): open, and no lead holds its ids.
+    const notALead = `c.state = 'open' AND NOT EXISTS (
+      SELECT 1 FROM leads l WHERE l.phone_e164 = c.phone_e164 OR l.wa_jid IN (c.jid, c.lid) OR l.wa_lid IN (c.jid, c.lid))`;
+    const lidOnly = all(`SELECT c.name, c.last_ts FROM inbox_candidates c WHERE ${notALead} AND c.phone_e164 IS NULL
+                         ORDER BY c.last_ts DESC, c.rowid DESC LIMIT 5`).map((r) => ({ name: r.name ?? null, last_ts: num(r.last_ts) }));
+    const lidOnlyCount = num(one(`SELECT COUNT(*) AS n FROM inbox_candidates c WHERE ${notALead} AND c.phone_e164 IS NULL`)?.n);
+    const candidatesWithPhone = num(one(`SELECT COUNT(*) AS n FROM inbox_candidates c WHERE ${notALead} AND c.phone_e164 IS NOT NULL`)?.n);
+    const oldOutWrote = num(one(`SELECT COUNT(*) AS n FROM owner_notes
+                                 WHERE kind = 'alert' AND substr(dedupe_key, 1, 17) = 'al:old_out_wrote:' AND created >= ? AND created < ?`, a, b)?.n);
+    // `meta` is JSON written by lib/owner-notes.mjs; a row that is not JSON is simply not held over.
+    const held = all(`SELECT kind, COUNT(*) AS n FROM owner_notes
+                      WHERE status = 'merged' AND (CASE WHEN json_valid(meta) THEN json_extract(meta, '$.over') END) IS NOT NULL
+                        AND updated >= ? AND updated < ? GROUP BY kind ORDER BY kind`, a, b);
+    return {
+      newClients: { total: fresh.length, byChannel, booked: fresh.filter((r) => num(r.booked) === 1).length },
+      waiting: num(one(`SELECT COUNT(*) AS n FROM leads WHERE inbox_state = 'in' AND needs_human = 1`)?.n),
+      ai: { answers: turns.length, handovers, medianReplyMs: median(replies) },
+      notAnswered,
+      viewings: viewings.map((v) => ({ ...v, start_ts: num(v.start_ts), end_ts: num(v.end_ts) })),
+      lidOnly,
+      lidOnlyCount,
+      candidatesWithPhone,
+      oldOutWrote,
+      heldOver: { total: held.reduce((s, r) => s + num(r.n), 0), byKind: Object.fromEntries(held.map((r) => [r.kind, num(r.n)])) },
+    };
+  }
+
+  /**
+   * The mailbox's day for the summary's Email line (Track C; the `mail_seen` table is db v9):
+   * mails listed (never answered) and possible clients received in `[from, to)`. Zeros while the
+   * table does not exist yet.
+   */
+  function mailCounts({ from, to } = {}) {
+    let rows = [];
+    try {
+      rows = all(`SELECT decision, COUNT(*) AS n FROM mail_seen WHERE received_ts >= ? AND received_ts < ? GROUP BY decision`, num(from), num(to));
+    } catch {
+      rows = [];
+    }
+    const of = (d) => num(rows.find((r) => r.decision === d)?.n);
+    return { listed: of('listed'), possible: of('possible_client') };
+  }
+
   /** Everything `GET /v1/admin/stats` answers with. */
   function overview(days = 14) {
     return {
@@ -565,5 +698,5 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     };
   }
 
-  return { overviewDaily, sources, matchQuality, pipeline, responseTimes, listingFunnel, cplByCampaign, roi, leadJourney, overview };
+  return { overviewDaily, sources, matchQuality, pipeline, responseTimes, listingFunnel, cplByCampaign, roi, leadJourney, overview, ownerSummary, mailCounts };
 }
