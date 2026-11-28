@@ -955,6 +955,35 @@ test("Codex r14 P1: the spend meter fails closed: a total the store refused to s
   assert.ok(Number(b.team.getSetting('brain_usd_day').split(':')[1]) > 1000000, 'the refused total was saved once it could be');
 });
 
+test("Codex r15: a spend marker that cannot be READ blocks paid requests and is never overwritten; a stop reached while writes failed is saved once they work; health shows a broken meter", async () => {
+  // The read throws: no paid request, and the saved $50 stays.
+  const r = harness({ script: [reply('never'), reply('Back.')] });
+  r.team.setSetting('brain_usd_month', '2026-11:50000000');
+  const realGet = r.team.getSetting.bind(r.team);
+  let failRead = true;
+  r.team.getSetting = (k) => { if (failRead && String(k).startsWith('brain_usd_')) throw new Error('disk I/O error'); return realGet(k); };
+  assert.deepEqual(await r.brain.turn(turnArgs()), { ok: false, code: 'budget' });
+  assert.equal(r.calls.length, 0, 'no paid request on an unreadable meter');
+  assert.equal(r.brain.health().ok, false, 'health shows it');
+  failRead = false;
+  assert.equal(realGet('brain_usd_month'), '2026-11:50000000', 'the saved total is untouched');
+  assert.equal((await r.brain.turn(turnArgs())).ok, true, 'readable again: the brain answers');
+  // $49.99 -> past $50 while writes fail; writes recover; a restart still sees the stop.
+  const env = { BONA_BRAIN_MONTH_STOP_USD: '50' };
+  const w = harness({ env, script: [reply('Hello.'), reply('never'), reply('never')] });
+  w.team.setSetting('brain_usd_month', '2026-11:49990000');
+  const realSet = w.team.setSetting.bind(w.team);
+  let failWrite = true;
+  w.team.setSetting = (k, v, o) => { if (failWrite && String(k).startsWith('brain_usd_')) throw new Error('database or disk is full'); return realSet(k, v, o); };
+  assert.deepEqual(await w.brain.turn(turnArgs()), { ok: false, code: 'budget' }, 'the answer crossed the month stop');
+  assert.equal(w.brain.health().ok, false);
+  failWrite = false;
+  assert.deepEqual(await w.brain.turn(turnArgs()), { ok: false, code: 'budget' }, 'still stopped');
+  assert.ok(Number(realGet === null ? 0 : w.team.getSetting('brain_usd_month').split(':')[1]) >= 50000000, 'the stop was saved once writes worked');
+  const again = createBrain({ ...w.deps });
+  assert.deepEqual(await again.turn(turnArgs()), { ok: false, code: 'budget' }, 'a restart still sees it');
+});
+
 test('the runaway stops are checked before every paid request and after every response: crossing one mid-turn stops the turn at once, with the stop alert in that turn', async () => {
   const stopAlerts = (h) => h.alerts.filter((a) => a.code === 'brain_spend' && a.meta.stop);
   // A tool round takes the day from $19.99 past $20: no second round.

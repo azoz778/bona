@@ -268,6 +268,8 @@ export function createBrain(deps = {}) {
 
   /* ---------------- state ---------------- */
   const setting = (k) => { try { return team?.getSetting?.(k) ?? ''; } catch { return ''; } };
+  /** A spend marker as stored: '' when there is none, null when the read threw (never read as zero). */
+  const readMarker = (k) => { try { return String(team?.getSetting?.(k) ?? ''); } catch { return null; } };
   /** A marker write; never breaks a turn. True when it was saved (or there is no store). */
   const store = (k, v) => { try { team?.setSetting?.(k, v, { by: 'system' }); return true; } catch { return false; } };
   const state = {
@@ -366,10 +368,20 @@ export function createBrain(deps = {}) {
     if (!team) {
       return { day, month, dayMicro: state.spend.day === day ? state.spend.dayMicro : 0, monthMicro: state.spend.month === month ? state.spend.monthMicro : 0 };
     }
-    const d = /^(\d{4}-\d{2}-\d{2}):(\d{1,15})$/.exec(setting('brain_usd_day'));
-    const m = /^(\d{4}-\d{2}):(\d{1,15})$/.exec(setting('brain_usd_month'));
     // Never less than this process counted: a total the store refused to save still counts (Codex r14).
     const mine = { day: state.spend.day === day ? state.spend.dayMicro : 0, month: state.spend.month === month ? state.spend.monthMicro : 0 };
+    // A marker read that throws is no zero: the meter is unreadable, no paid request goes out (meterBlocked()) and
+    // nothing is written over the saved total (Codex r15).
+    const rd = readMarker('brain_usd_day');
+    const rm = readMarker('brain_usd_month');
+    if (rd === null || rm === null) {
+      if (!state.meterUnreadable) say({ level: 'error', evt: 'brain.meter_failed', kind: 'read' });
+      state.meterUnreadable = true;
+      return { day, month, dayMicro: mine.day, monthMicro: mine.month, unreadable: true };
+    }
+    state.meterUnreadable = false;
+    const d = /^(\d{4}-\d{2}-\d{2}):(\d{1,15})$/.exec(rd);
+    const m = /^(\d{4}-\d{2}):(\d{1,15})$/.exec(rm);
     return {
       day, month,
       dayMicro: Math.max(d && d[1] === day ? Number(d[2]) : 0, mine.day),
@@ -382,9 +394,11 @@ export function createBrain(deps = {}) {
    */
   function flushSpend() {
     if (!team || !state.spend.day) return true;
-    const s = state.spend;
-    const okDay = store('brain_usd_day', `${s.day}:${s.dayMicro}`);
-    const okMonth = store('brain_usd_month', `${s.month}:${s.monthMicro}`);
+    // Written only on top of a total just read (never lower than it): a read that fails writes nothing.
+    const cur = readSpend(now());
+    if (cur.unreadable) return false;
+    const okDay = store('brain_usd_day', `${cur.day}:${cur.dayMicro}`);
+    const okMonth = store('brain_usd_month', `${cur.month}:${cur.monthMicro}`);
     const ok = okDay && okMonth;
     if (!ok && !state.meterBroken) say({ level: 'error', evt: 'brain.meter_failed' });
     state.meterBroken = !ok;
@@ -396,7 +410,8 @@ export function createBrain(deps = {}) {
     const dayMicro = Math.min(cur.dayMicro + micro, 999_999_999_999_999);
     const monthMicro = Math.min(cur.monthMicro + micro, 999_999_999_999_999);
     state.spend = { ...state.spend, day: cur.day, dayMicro, month: cur.month, monthMicro };
-    flushSpend();
+    if (cur.unreadable) state.meterBroken = true; // counted here; saved once a read works (flushSpend)
+    else flushSpend();
     const level = monthMicro >= usd.alert * 1e6 ? 100 : monthMicro >= usd.alert * 0.8 * 1e6 ? 80 : 0;
     if (!level) return;
     const marked = /^(\d{4}-\d{2}):(80|100)$/.exec(team ? setting('brain_month_alerted') : state.spend.alerted);
@@ -414,9 +429,11 @@ export function createBrain(deps = {}) {
     return which ? { which, period: which === 'day' ? cur.day : cur.month } : null;
   }
   /** True while the spend totals cannot be saved: no paid request may be SENT (a response already paid for still counts). */
-  const meterBlocked = () => state.meterBroken && !flushSpend();
+  const meterBlocked = () => (state.meterBroken && !flushSpend()) || Boolean(team && readSpend(now()).unreadable);
   /** 'day' | 'month' when a runaway stop is reached (one alert per day or month), else null. */
   function overBudget() {
+    // A total that could not be saved is saved first, so a stop reached in memory survives a restart (Codex r15).
+    if (state.meterBroken) flushSpend();
     const stop = stopReached();
     if (!stop) return null;
     if (state.stopAlerted[stop.which] !== stop.period) {
@@ -880,7 +897,8 @@ export function createBrain(deps = {}) {
     if (!configured) return { configured: false, ok: false, backup: false };
     const t = now();
     const ok = state.outCode === null && !state.breaker.open && state.lastProbeOk !== false && t - state.lastFailedAllAt >= limits.failedWindowMs
-      && !stopReached(); // a runaway stop answers every turn `budget`; the alert went out with the turn that hit it
+      && !stopReached() // a runaway stop answers every turn `budget`; the alert went out with the turn that hit it
+      && !state.meterBroken && !state.meterUnreadable; // so does a spend meter that cannot be saved or read (Codex r15)
     return { configured: true, ok, backup: inCooldown(t) || state.lastTurnBackup };
   }
   function ops() {
