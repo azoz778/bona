@@ -287,18 +287,6 @@ export function findAmounts(text) {
     use();
     out.push({ raw, sar: Math.round(raw * SAR_RATE[cur ?? 'SAR']), currency: cur, at: numStart, scale, end: amountEnd });
   }
-  // A compound amount is ONE amount: "٢ مليون و٥٠٠ ألف ريال" / "2 million 500 thousand" is 2,500,000, never 2,000,000 and
-  // 500,000 checked apart (both may be published while the total is not, Codex r26).
-  for (let k = out.length - 2; k >= 0; k -= 1) {
-    const a = out[k];
-    const b = out[k + 1];
-    if (!(a.scale >= 1e6 && b.scale === 1e3 && b.raw < a.scale)) continue;
-    if (!/^[\s,،]*(?:و|and|&)?[\s,،]*$/iu.test(s.slice(a.end, b.at))) continue;
-    if (a.currency && b.currency && a.currency !== b.currency) continue;
-    const currency = a.currency ?? b.currency;
-    const raw = a.raw + b.raw;
-    out.splice(k, 2, { raw, sar: Math.round(raw * SAR_RATE[currency ?? 'SAR']), currency, at: a.at, scale: a.scale, end: b.end });
-  }
   for (const m of s.matchAll(MILLION_WORD_RE)) {
     const [at, end] = m.indices.groups.word;
     if (used.has(at) || AREA_AFTER_RE.test(s.slice(end))) continue;
@@ -316,7 +304,7 @@ export function findAmounts(text) {
         if (one && !NUMBER_WORD_BEFORE_RE.test(lead.slice(0, one.index + 1))) raw = 1e6;
       }
     }
-    out.push({ raw, sar: raw, currency: null, at });
+    out.push({ raw, sar: raw, currency: null, at, scale: 1e6, end });
   }
   for (const m of s.matchAll(THOUSAND_WORD_RE)) {
     const [at, end] = m.indices.groups.word;
@@ -325,7 +313,20 @@ export function findAmounts(text) {
     const lead = s.slice(Math.max(0, m.index - 24), m.index);
     if (NUMBER_WORD_BEFORE_RE.test(lead) || CURRENCY_AFTER_RE.test(rest) || DIGIT_BEFORE_RE.test(lead)) out.push({ raw: null, sar: null, currency: null, at });
   }
-  return out.sort((a, b) => a.at - b.at).map(({ raw, sar, currency }) => ({ raw, sar, currency }));
+  out.sort((a, b) => a.at - b.at);
+  // A compound amount is ONE amount: "٢ مليون و٥٠٠ ألف ريال", "مليونين و٥٠٠ ألف", "2 million 500 thousand" is 2,500,000,
+  // never 2,000,000 and 500,000 checked apart (both may be published while the total is not, Codex r26, r27).
+  for (let k = out.length - 2; k >= 0; k -= 1) {
+    const a = out[k];
+    const b = out[k + 1];
+    if (a.raw == null || b.raw == null || !(a.scale >= 1e6 && b.scale === 1e3 && b.raw < a.scale)) continue;
+    if (!/^[\s,،]*(?:و|and|&)?[\s,،]*$/iu.test(s.slice(a.end, b.at))) continue;
+    if (a.currency && b.currency && a.currency !== b.currency) continue;
+    const currency = a.currency ?? b.currency;
+    const raw = a.raw + b.raw;
+    out.splice(k, 2, { raw, sar: Math.round(raw * SAR_RATE[currency ?? 'SAR']), currency, at: a.at, scale: a.scale, end: b.end });
+  }
+  return out.map(({ raw, sar, currency }) => ({ raw, sar, currency }));
 }
 
 /** The unit references in a text (`B08-19`), upper-case, each once, in order. */
