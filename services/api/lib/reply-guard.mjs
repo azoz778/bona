@@ -341,7 +341,8 @@ export function findAmounts(text) {
   for (let k = out.length - 2; k >= 0; k -= 1) {
     const a = out[k];
     const b = out[k + 1];
-    if (a.raw == null || b.raw == null || !(a.scale >= 1e6 && b.scale === 1e3 && b.raw < a.scale)) continue;
+    // The second part is below a million in any form: "500 ألف", "100,000 ريال", "250k" (Codex r33).
+    if (a.raw == null || b.raw == null || !(a.scale >= 1e6 && b.scale < a.scale && b.raw < a.scale)) continue;
     const gap = s.slice(a.end, b.at);
     // "مليون إلا 100 ألف" is ONE amount of 900,000: the thousands are taken off (Codex r32).
     const minus = /^\s*(?:إلا|الا)\s*$/u.test(gap);

@@ -617,3 +617,14 @@ test('"مليون وخمسمية" / "مليون و٥٠٠" are refused against a 
     assert.equal(checkReply(reply, parts).ok, true, reply);
   }
 });
+
+/* Codex r33 P2: a deduction or an addition written as a full number is one amount too. */
+test('"مليون إلا 100,000 ريال" is 900,000 and "مليون و250,000 ريال" is 1,250,000', () => {
+  const parts = { toolResults: ['{"p":"SAR 1,000,000"}', '{"q":"SAR 100,000"}', '{"r":"SAR 250,000"}'] };
+  for (const reply of ['سعر الفيلا مليون إلا 100,000 ريال', 'سعر الفيلا مليون ريال الا ١٠٠٬٠٠٠ ريال', 'سعر الفيلا مليون و250,000 ريال', '1 million and 250,000 SAR', 'مليون و250k ريال']) {
+    assert.equal(checkReply(reply, parts).ok, false, reply);
+  }
+  assert.equal(checkReply('سعر الفيلا مليون إلا 100,000 ريال', { toolResults: ['{"p":"SAR 900,000"}'] }).ok, true);
+  assert.equal(checkReply('سعر الفيلا مليون و250,000 ريال', { toolResults: ['{"p":"SAR 1,250,000"}'] }).ok, true);
+  assert.equal(checkReply('مليون ريال، 250,000 ريال', parts).ok, true, 'a comma list stays two prices');
+});
