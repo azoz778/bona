@@ -15,7 +15,7 @@ import { createInboxStore } from '../lib/inbox/store.mjs';
 import { createDashboardRoutes } from '../lib/dashboard/routes.mjs';
 import { createInventory, WORKTREE_LISTINGS } from '../lib/inventory.mjs';
 import { calendarTag, calendarTagOf, createGcal, eventIdFor, TOKEN_URL } from '../lib/gcal.mjs';
-import { DAY_CAP, confirmationText, createViewing } from '../lib/viewing.mjs';
+import { DAY_CAP, INSERT_LAND_MS, confirmationText, createViewing } from '../lib/viewing.mjs';
 import { addTask, ensureHandoff, tasksForLead } from '../lib/lead-tasks.mjs';
 
 /** A Riyadh wall-clock time as epoch ms (UTC+3, no daylight saving). */
@@ -629,6 +629,73 @@ test("Codex r15: the other order: reconcile's older read answers while the looku
     assert.equal(tasksForLead(h.db, x.lead_id).find((t) => t.kind === 'viewing').due_ts, R(2026, 12, 7, 10));
     const again = await h.viewing.commitBooking({ lead: x, listingId: 'BONA-W903', slotId: '2026-12-08T10:00+03:00' });
     assert.equal(again.ok, false, 'one booking per lead: no second viewing');
+  } finally { h.db.close(); }
+});
+
+test("Codex r16: reconcile's older read answers while the lookup waits on its access check: the lookup took the row first, so the older read is not applied", async () => {
+  const clock = { t: NOW };
+  const h = setup({ clock });
+  try {
+    const rowOf = (id) => h.rows().find((r) => r.booking_id === id);
+    const x = h.lead('LEAD-20261201-0000aaaa');
+    const y = h.lead('LEAD-20261201-0000bbbb');
+    const gx = await h.viewing.commitBooking({ lead: x, listingId: 'BONA-W901', slotId: '2026-12-06T10:00+03:00' });
+    const gy = await h.viewing.commitBooking({ lead: y, listingId: 'BONA-W902', slotId: '2026-12-07T12:00+03:00' });
+    assert.equal(gx.ok && gy.ok, true, JSON.stringify([gx, gy]));
+    clock.t = R(2026, 12, 6, 11, 30);
+    const realGet = h.gcal.get;
+    const realAccess = h.gcal.access;
+    const held = new Map();
+    let accesses = 0;
+    const hold = (k) => new Promise((resolve) => { held.set(k, resolve); });
+    h.gcal.get = async (id) => { const answer = await realGet(id); if (id === gy.eventId && !held.has('y')) await hold('y'); return answer; };
+    h.gcal.access = async () => { accesses += 1; const answer = await realAccess(); if (accesses === 2) await hold('access2'); return answer; };
+    const reached = async (k) => {
+      for (let i = 0; i < 200 && !held.has(k); i += 1) await new Promise((resolve) => setImmediate(resolve));
+      assert.ok(held.has(k), `${k} reached`);
+    };
+    const rec = h.viewing.reconcile();
+    await reached('y');
+    moveEvent(h, gx.eventId, '2026-12-07T10:00:00+03:00', '2026-12-07T11:00:00+03:00');
+    const look = h.viewing.slots({ lead: x, listingId: 'BONA-W903' });
+    await reached('access2');
+    held.get('y')();
+    await rec;
+    assert.equal(rowOf(gx.bookingId).status, 'booked', "the lookup took the row before reconcile answered: reconcile's read is older");
+    held.get('access2')();
+    const got = await look;
+    assert.equal(got.reason, 'active_booking', JSON.stringify(got));
+    assert.deepEqual([rowOf(gx.bookingId).status, rowOf(gx.bookingId).start_ts], ['booked', R(2026, 12, 7, 10)]);
+    assert.equal((await h.viewing.commitBooking({ lead: x, listingId: 'BONA-W903', slotId: '2026-12-08T10:00+03:00' })).ok, false);
+  } finally { h.db.close(); }
+});
+
+test("Codex r16: an insert that timed out may still land: a 404 for its event is no proof it is gone until INSERT_LAND_MS, so an event that lands late is deleted, never left in the calendar", async () => {
+  const clock = { t: NOW };
+  const h = setup({ clock });
+  try {
+    const lead = h.lead();
+    let late = null;
+    h.gcal.insert = async (ev) => { late = ev; return { ok: false, code: 'timeout', uncertain: true }; }; // still processing at Google
+    const realDelete = h.gcal.delete;
+    h.gcal.delete = async (id) => (h.gcal.events.has(id) ? realDelete(id) : { ok: true, gone: true }); // a 404, as gcal.mjs reads it
+    const got = await h.viewing.commitBooking({ lead, listingId: 'BONA-W901', slotId: SLOT });
+    assert.equal(got.ok, false);
+    assert.deepEqual(h.rows().map((r) => r.status), ['cancel_pending']);
+    await h.viewing.tick(); // the worker's delete reads 404: the insert has not landed yet
+    assert.deepEqual(h.rows().map((r) => r.status), ['cancel_pending'], 'the row waits: its insert may still land');
+    h.gcal.events.set(late.id, { ...late, status: 'confirmed' }); // it lands
+    clock.t = NOW + INSERT_LAND_MS;
+    await h.viewing.tick();
+    assert.deepEqual(h.rows().map((r) => r.status), ['cancelled']);
+    assert.equal(h.gcal.events.size, 0, 'the late event was deleted');
+    // With no late landing, a 404 after INSERT_LAND_MS cancels the row.
+    const other = h.lead('LEAD-20261201-0000dddd');
+    clock.t = NOW + INSERT_LAND_MS + 60_000;
+    assert.equal((await h.viewing.commitBooking({ lead: other, listingId: 'BONA-W902', slotId: SLOT })).ok, false);
+    clock.t += INSERT_LAND_MS;
+    await h.viewing.tick();
+    assert.deepEqual(h.rows().map((r) => r.status), ['cancelled', 'cancelled']);
   } finally { h.db.close(); }
 });
 

@@ -83,6 +83,11 @@ const CALENDAR_DOWN = new Set(['auth', 'forbidden', 'network', 'timeout', 'quota
  * few 5 s calls; the margin also covers a commit in another process over the same database.
  */
 export const STRANDED_MS = 2 * 60_000;
+/**
+ * How long an insert that went uncertain may still land in Google after its call timed out: until then a 404 for
+ * that booking's event is no proof it is gone, and the worker tries the deletion again (Codex r16).
+ */
+export const INSERT_LAND_MS = 10 * 60_000;
 
 const NOT_CONFIGURED = Object.freeze({ configured: false, ok: false, lastErrorCode: null });
 
@@ -614,7 +619,7 @@ export function createViewing(deps = {}) {
     const stranded = sweepStranded(t);
     const settled = await settle(t);
     const out = { stranded, done: settled.done, moved: settled.moved, cancelled: settled.cancelled, failed: 0 };
-    const pending = prep("SELECT booking_id, event_id FROM viewing_bookings WHERE status = 'cancel_pending' ORDER BY updated, booking_id LIMIT ?").all(WORKER_BATCH)
+    const pending = prep("SELECT booking_id, event_id, task_id, created FROM viewing_bookings WHERE status = 'cancel_pending' ORDER BY updated, booking_id LIMIT ?").all(WORKER_BATCH)
       .filter((r) => !inFlight.has(r.booking_id));
     // A delete answers 404 on a calendar the robot cannot see as well: that is no "already gone".
     const probe = pending.length ? await gcal.access() : null;
@@ -627,6 +632,13 @@ export function createViewing(deps = {}) {
       // 404 is "already gone" only in the calendar the event was made in: another calendar id (one the
       // robot can write to as well) says nothing about it, and the row waits for the right one.
       const elsewhere = res.ok && res.gone === true && madeElsewhere(r.event_id);
+      // A 404 for a booking whose insert never answered ok (no task) may come before that insert lands: the row
+      // waits, and the deletion is tried again, until INSERT_LAND_MS after the booking was made (Codex r16).
+      const mayLand = res.ok && res.gone === true && r.task_id === null && now() - r.created < INSERT_LAND_MS;
+      if (mayLand) {
+        prep("UPDATE viewing_bookings SET updated = ? WHERE booking_id = ? AND status = 'cancel_pending'").run(now(), r.booking_id);
+        continue;
+      }
       if (res.ok && !elsewhere) {
         out.cancelled += prep("UPDATE viewing_bookings SET status = 'cancelled', updated = ? WHERE booking_id = ? AND status = 'cancel_pending'").run(now(), r.booking_id).changes;
         continue;
@@ -780,6 +792,12 @@ export function createViewing(deps = {}) {
     const res = { checked: 0, found: 0, plans: [], gone: [], unread: [], code: null, stopped: false, probed: false };
     const todo = rows.filter((r) => !inFlight.has(r.booking_id));
     if (!todo.length) return res;
+    // The reads of this run are numbered as it takes its rows, before any await (the access probe, the gets):
+    // from here on an older run's result for these bookings is not applied (newestRead(), Codex r16).
+    for (const r of todo) {
+      r.readSeq = ++readN;
+      readSeq.set(r.booking_id, r.readSeq);
+    }
     // A calendar the robot cannot see any more answers 404 for every event too: no 404 is read before this.
     if (probe) {
       const p = await gcal.access();
@@ -791,8 +809,6 @@ export function createViewing(deps = {}) {
     }
     for (const r of todo) {
       res.checked += 1;
-      r.readSeq = ++readN;
-      readSeq.set(r.booking_id, r.readSeq);
       const got = await gcal.get(r.event_id);
       if (!got.ok && got.gone === true) { res.gone.push(r); continue; }
       if (!got.ok) {
