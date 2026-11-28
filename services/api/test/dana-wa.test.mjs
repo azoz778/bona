@@ -935,7 +935,7 @@ const immediate = { batchMs: () => 0, batchDelay: () => 0, typingFloorMs: () => 
 function bh({
   turns = [], auto = true, brainOn = false, configured = true, health = null, lead = {}, evo = null, pacing = immediate, commit,
   link = null, wa = null, retellAnswer = defaultAnswer, retell: withRetell = true, agentId = 'agent_wa', enabled = true, at = T_IN,
-  brain: givenBrain = null, env = ENV, notes: givenNotes = null, backfill = null,
+  brain: givenBrain = null, env = ENV, notes: givenNotes = null, backfill = null, notifyHandoff = async () => {},
 } = {}) {
   const s = openDb(':memory:');
   let clock = at;
@@ -971,7 +971,7 @@ function bh({
   const slept = [];
   const laters = []; // side effects she schedules (the read receipt, "composing"): run by a test that wants them
   const build = (b = brain, n = notes) => createDana({
-    db: s, inbox, team, sender, retell, inventory, siteUrl: SITE, agentId, brain: b, ownerTest, notes: n, pacing, link, wa, backfill,
+    db: s, inbox, team, sender, retell, inventory, siteUrl: SITE, agentId, brain: b, ownerTest, notes: n, pacing, link, wa, backfill, notifyHandoff,
     ...(commit ? { commit } : {}),
     alerts: { notify: (id, o) => { pushed.push([id, o]); return Promise.resolve({}); }, notifyOwners: (o) => { owners.push(o); return Promise.resolve({}); } },
     isExcludedLead: (l) => isExcludedLead(team, s, l), now: () => clock, log: (o) => logs.push(o), batchMs: 0,
@@ -3742,4 +3742,55 @@ test('T12 r25 3 (Codex P1-2): a brain hand-over queued at 1h59m50s, the route fl
   assert.equal(h.sent().length, 0, h.sent().join(' | '));
   assert.equal(r.handover, 'missed');
   assert.deepEqual(handoffTasks(h), ['missed']);
+});
+
+/* ======================================================================================
+ * PR-B3 r26 (Codex P1s, Claude P3): the route and eligibility right before every model call; a RECORDED hand-over
+ * keeps its reason past 2 h; the legacy fallback's 2-h mark binds a closing line too.
+ * ====================================================================================== */
+
+test('T12 r26 1 (Codex P1-1): auto mode off while the missed notifier runs (dana_brain off): no OpenAI call; the re-run leaves it to the person', async () => {
+  let h;
+  let armed = true;
+  const notifyHandoff = async () => { if (armed) { armed = false; h.ownerTest.setAuto(LEAD, false); } };
+  h = bh({ auto: true, notifyHandoff, turns: [brainReply('never')] });
+  h.client('an old question', { ts: T_IN - 3 * HOUR });
+  const q = h.client('is the villa available?', { ts: T_IN - 60_000 });
+  const r = await h.dana.answer(LEAD, { ts: q });
+  await h.dana.flush();
+  assert.equal(armed, false, 'the notifier ran');
+  assert.equal(h.brain.calls.length, 0, 'no OpenAI call on the old route');
+  assert.deepEqual(r, { skipped: 'route_changed' });
+  assert.ok(h.logs.some((l) => l.evt === 'dana.route_changed'));
+  // The missed record stands; on the legacy route an open hand-over is the person's (main's rule): no Retell either.
+  assert.equal(h.lead().needs_human, 1);
+  assert.deepEqual(handoffTasks(h), ['missed']);
+  assert.equal(h.retell.completions.length, 0);
+  assert.equal(h.sent().length, 0);
+});
+
+test('T12 r26 2 (Codex P1-2): a brain reply sent just before 2 h fails with a 4xx after 2 h while the route flips: needs_human and a send_failed task', async () => {
+  let h;
+  h = bh({ auto: false, brainOn: true, link: { identityOk: () => true, linkStable: () => true },
+    evo: () => { h.tick(20_000); h.team.setSetting('dana_brain', '0'); return { status: 400, body: {} }; }, turns: [brainReply('Yes, it is available.')] });
+  h.client('is it available?', { ts: T_IN - 2 * HOUR + 10_000 });
+  const r = await h.dana.answer(LEAD, { ts: T_IN - 2 * HOUR + 10_000 });
+  await h.dana.flush();
+  assert.equal(r.handover, 'send_failed');
+  assert.equal(h.lead().needs_human, 1);
+  assert.deepEqual(handoffTasks(h), ['send_failed']);
+});
+
+test('T12 r26 3 (Claude P3, U28): a stop request 3 h old: no closing line past 2 h, with or without a flip in the queue; the stop recorded', async () => {
+  for (const flip of [false, true]) {
+    let h;
+    let armed = flip;
+    const pacing = { ...immediate, fifo: (fn) => { if (armed) { armed = false; h.team.setSetting('dana_brain', '0'); } return fn(() => {}); } };
+    h = bh({ auto: false, brainOn: true, pacing, turns: [] });
+    const ts = h.client('stop messaging me', { ts: h.now() - 3 * HOUR });
+    await h.dana.answer(LEAD, { ts });
+    await h.dana.flush();
+    assert.equal(h.sent().length, 0, `flip=${flip}: ${h.sent().join(' | ')}`);
+    assert.equal(h.lead().dana_off, 1, `flip=${flip}: the stop recorded`);
+  }
 });

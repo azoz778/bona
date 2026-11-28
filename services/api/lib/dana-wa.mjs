@@ -1049,7 +1049,8 @@ export function createDana({
     // the legacy way (main's line, at once), so the client is not left without it. Never an outage or owed line.
     if (r.stopped === 'not_brain' && legacyText) {
       // Through the commit point first (r24): the legacy route still, and the chat's own checks, right before the send.
-      const cp = commitPoint(lead.lead_id, false, coversTs, { closing, deadline: !closing });
+      // The 2-h mark binds the closing line too (r26), as the brain gate's own check does: the stop stays recorded.
+      const cp = commitPoint(lead.lead_id, false, coversTs, { closing, deadline: true });
       // Past the 2-h mark in the queue: `missed` (handover() marks the task and notes it; r25), never the line.
       if (cp) return { sent: false, stopped: cp.skipped === 'missed' ? 'missed' : 'not_brain', legacy: cp.skipped !== 'missed' };
       return { ...(await send(db.getLead(lead.lead_id) ?? lead, legacyText, language, coversTs)), legacy: true };
@@ -1164,7 +1165,9 @@ export function createDana({
     if (cp) return cp;
     // Past the 2-h mark a brain chat's message is a person's: the hand-over is `missed`, with no line (r5).
     // A stop request still stops the chat.
-    if (viaBrain && !stop && why !== 'missed' && now() - Number(coversTs) > FRESH_MS) {
+    // A RECORDED hand-over (a send that failed, a booking not told; r26) keeps its own reason past 2 h: only a
+    // prospective hand-over becomes `missed`.
+    if (viaBrain && !stop && !RECORDED.has(why) && why !== 'missed' && now() - Number(coversTs) > FRESH_MS) {
       return handover(leadId, language, 'missed', coversTs, { checked: true, line: 'none', note: { kind: 'missed' }, viaBrain });
     }
     const auto = autoOf(fresh);
@@ -1796,7 +1799,14 @@ export function createDana({
       return skip(leadId, 'cap_chat');
     }
 
-    // The model.
+    // The model. THE route and eligibility right before the call (r26), with no await in between: every window that
+    // opens before it (the missed notifier, a backfill, the typing floor, any future await) closes here. A flip
+    // re-queues with no model call; a refusal ends the run as at its start. (A legacy chat has no await before it:
+    // the same answer as its start, so main's when nothing flips.)
+    const flippedBefore = routeFlip(leadId, viaBrain, coversTs);
+    if (flippedBefore) return flippedBefore;
+    const eNow = eligible(leadId, viaBrain ? {} : { ts });
+    if (!eNow.ok) return refusedRun(leadId, eNow);
     const thinkAt = now();
     let turn;
     let newChat = false;
