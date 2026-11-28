@@ -26,10 +26,12 @@
  *     a caller that could bypass the switch for anyone else could use it to spam past the
  *     owner's own kill switch. Without this the owner could never get back in to switch
  *     sending back on.
- *   - 20 a minute across every sender, 6 a minute to any one recipient and 30 a minute
- *     from any one team member, all asked before any is charged (see lib/ratelimit.mjs
- *     `peek`), and 500 in any 24 hours, counted from the outbox (below) so that a restart
- *     cannot hand out a fresh day. A login `code` or a `note` to the owner's jid or to the
+ *   - 8 a minute across every sender (DESIGN §6.3, PR-B3), 6 a minute to any one recipient
+ *     and 30 a minute from any one team member, all asked before any is charged (see
+ *     lib/ratelimit.mjs `peek`), and SEND_PER_DAY in any 24 hours by the warm-up tier of
+ *     BONA_WA_LINKED_AT (100 / 180 / 300 on days 0-7 / 8-21 / 22+, lib/pacing.mjs TIERS; unset =
+ *     100), counted from the outbox (below) so that a restart cannot hand out a fresh day.
+ *     A login `code` or a `note` to the owner's jid or to the
  *     instance's own number (`BONA_WA_INSTANCE_JID`, the same number while that is unset)
  *     skips the shared per-minute and daily budget (still capped per-recipient), so a busy
  *     day of team-member codes cannot lock the owner out of logging in. Only those two
@@ -41,6 +43,19 @@
  *     replies too (see services/README.md); a login `code` only needs Evolution to be
  *     configured (`baseUrl`/`apiKey`) — otherwise the owner could be locked out by an env
  *     var that was never about dashboard logins. Every other kind still needs it on.
+ *
+ *   - never first (DESIGN §6.1, PR-B3): a 'dana' row must answer a STORED client message of its
+ *     chat (`covers_ts` = that message's ts) under 24 hours old, or it is refused `no_open_chat`.
+ *   - a brochure (PR-B3): a 'dana' send with `document: { url, fileName }` goes to Evolution's
+ *     sendMedia as a document by URL, its `text` the caption (never empty), its row written first
+ *     with `media_kind` 'document', within 45 s (MEDIA_TIMEOUT_MS); a timeout is `uncertain`,
+ *     never retried. The URL must be https and the file name end in `.pdf` (Evolution derives the
+ *     type from it; T00 finding 6), or it is refused `bad_document`.
+ *
+ * Every refusal carries its failure class (PR-B3, the breaker of lib/dana-wa.mjs): `failure:
+ * 'local'` for this file's own refusals (a bad argument, the Sending switch, BONA_WA_NOTIFY,
+ * no Evolution, a rate limit, never-first, a duplicate), `failure: 'evolution'` for what
+ * Evolution answered or did not (a 4xx, a 5xx, a network error, a timeout, a 2xx with no key).
  *
  * Every send that passes the gate is written to `wa_outbox` BEFORE the HTTP call, then
  * marked with what came back. A login code's row has no text (a code is never written
@@ -73,9 +88,16 @@
 import { createLimiter } from './ratelimit.mjs';
 import { waConfig } from './wa.mjs';
 import { randomId } from './store.mjs';
+import { parseIsoInstant } from './config.mjs';
+import { TIERS, tierIndex } from './pacing.mjs';
 
-export const SEND_PER_MIN = 20;
-export const SEND_PER_DAY = 500;
+export const SEND_PER_MIN = TIERS[0].SEND_PER_MIN;
+/** The day's cap per warm-up tier (days 0-7, 8-21, 22+ since BONA_WA_LINKED_AT). */
+export const SEND_PER_DAY_TIERS = Object.freeze(TIERS.map((t) => t.SEND_PER_DAY));
+/** The strictest day: the one in force while BONA_WA_LINKED_AT is unset. */
+export const SEND_PER_DAY = SEND_PER_DAY_TIERS[0];
+/** A document send's deadline (DESIGN §6.3; Evolution downloads the PDF before it answers). */
+export const MEDIA_TIMEOUT_MS = 45_000;
 export const PER_RECIPIENT_PER_MIN = 6;
 export const PER_USER_PER_MIN = 30;
 export const MAX_TEXT_LEN = 4096;
@@ -92,6 +114,8 @@ const SEND_ID_RE = /^[A-Za-z0-9_-]{16,64}$/;
 /** Failures we can be sure never reached the other side — no ambiguity, so not "uncertain". */
 const DEFINITE_NETWORK_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
 const DAY_MS = 86_400_000;
+/** A brochure's file name: Evolution reads the type from its extension (T00 finding 6). */
+const PDF_NAME_RE = /^[^/\\\u0000-\u001f]{1,120}\.pdf$/i;
 /**
  * A send still `pending` this long after it was written is no longer on its way. The rule
  * for the reply stale guard and the daily upkeep (index.mjs); the start-up recovery needs
@@ -128,6 +152,7 @@ export function replyJidFor(lead) {
  */
 export function createSender({
   env = {}, team, inbox, db = null, fetchImpl = globalThis.fetch, now = () => Date.now(), log = () => {}, timeoutMs = 8000, limits = {},
+  mediaTimeoutMs = MEDIA_TIMEOUT_MS,
 } = {}) {
   if (!team) throw new TypeError('createSender needs the team store (for the sending switch)');
   if (!inbox) throw new TypeError('createSender needs the inbox store (for the outbox and the daily cap)');
@@ -144,28 +169,53 @@ export function createSender({
   // With the shipped 20/min across everyone this cannot bind; it is here so that raising
   // the shared limit can never let one account alone send faster than this.
   const perUser = createLimiter({ capacity: limits.perUser ?? PER_USER_PER_MIN, perMs: 60_000, now });
+  // The warm-up anchor (BONA_WA_LINKED_AT): the day's cap grows with the number's age (DESIGN §6.3).
+  const linkedAt = parseIsoInstant(env.BONA_WA_LINKED_AT);
+  const dayCap = () => SEND_PER_DAY_TIERS[tierIndex(now(), linkedAt)];
+  let openStmt = null;
+  /**
+   * Never first (DESIGN §6.1): `coversTs` is a stored client message of this chat under 24 h old.
+   * Read from the messages themselves; without the db store, from the chat's newest 200.
+   */
+  function openChat(leadId, coversTs) {
+    if (typeof leadId !== 'string' || !leadId || !Number.isFinite(coversTs) || coversTs < now() - DAY_MS) return false;
+    if (db?.db) {
+      openStmt ??= db.db.prepare("SELECT 1 FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts = ? LIMIT 1");
+      return Boolean(openStmt.get(leadId, coversTs));
+    }
+    return inbox.messagesFor(leadId, { limit: 200 }).some((m) => m.direction === 'in' && m.ts === coversTs);
+  }
 
-  /** The HTTP call and nothing else: what came back, as honestly as we can tell. */
-  async function post(number, text, kind) {
+  /**
+   * The HTTP call and nothing else: what came back, as honestly as we can tell. A `document`
+   * goes to sendMedia (by URL, the text as its caption) within the longer media deadline.
+   * Every failure is Evolution's answer, or the lack of one: `failure: 'evolution'`.
+   */
+  async function post(number, text, kind, document = null) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), document ? mediaTimeoutMs : timeoutMs);
+    const failed = (o) => ({ ok: false, ...o, failure: 'evolution' });
     try {
       let res;
       try {
-        res = await fetchImpl(`${cfg.baseUrl}/message/sendText/${encodeURIComponent(cfg.instance)}`, {
+        const route = document ? 'sendMedia' : 'sendText';
+        const body = document
+          ? { number, mediatype: 'document', mimetype: 'application/pdf', media: document.url, fileName: document.fileName, caption: text }
+          : { number, text };
+        res = await fetchImpl(`${cfg.baseUrl}/message/${route}/${encodeURIComponent(cfg.instance)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', apikey: cfg.apiKey },
-          body: JSON.stringify({ number, text }),
+          body: JSON.stringify(body),
           signal: controller.signal,
         });
       } catch (err) {
         if (err?.name === 'AbortError') {
           log({ level: 'warn', evt: 'wa.send.uncertain', kind, error: 'timeout' });
-          return { ok: false, error: 'timeout', uncertain: true };
+          return failed({ error: 'timeout', uncertain: true });
         }
         const definite = DEFINITE_NETWORK_CODES.has(err?.cause?.code);
         log({ level: 'warn', evt: definite ? 'wa.send.failed' : 'wa.send.uncertain', kind, error: 'network' });
-        return definite ? { ok: false, error: 'network' } : { ok: false, error: 'network', uncertain: true };
+        return definite ? failed({ error: 'network' }) : failed({ error: 'network', uncertain: true });
       }
 
       if (!res.ok) {
@@ -174,7 +224,7 @@ export function createSender({
         // from a proxy in front of a send that went, a 502/504 gateway.
         const refused = res.status >= 400 && res.status < 500;
         log({ level: 'warn', evt: refused ? 'wa.send.failed' : 'wa.send.uncertain', kind, status: res.status });
-        return refused ? { ok: false, error: `http_${res.status}` } : { ok: false, error: `http_${res.status}`, uncertain: true };
+        return refused ? failed({ error: `http_${res.status}` }) : failed({ error: `http_${res.status}`, uncertain: true });
       }
 
       let text2xx;
@@ -183,7 +233,7 @@ export function createSender({
       } catch {
         // The send may well have gone through — we just could not read the ack.
         log({ level: 'warn', evt: 'wa.send.no_key', kind });
-        return { ok: false, error: 'no_ack', uncertain: true };
+        return failed({ error: 'no_ack', uncertain: true });
       }
       let keyId = null;
       try {
@@ -192,7 +242,7 @@ export function createSender({
       } catch { keyId = null; }
       if (typeof keyId !== 'string') {
         log({ level: 'warn', evt: 'wa.send.no_key', kind });
-        return { ok: false, error: 'no_ack', uncertain: true };
+        return failed({ error: 'no_ack', uncertain: true });
       }
       log({ evt: 'wa.send.ok', kind });
       return { ok: true, keyId, status: res.status };
@@ -203,24 +253,26 @@ export function createSender({
 
   /**
    * @param {{ jid: string, text: string, kind: 'code'|'staff'|'dana'|'note', userId?: string|null, bypassSwitch?: boolean,
-   *           leadId?: string|null, sendId?: string|null }} o
+   *           leadId?: string|null, sendId?: string|null, document?: { url: string, fileName: string }|null }} o
+   *   `document`: Dana's brochure (her row written first with media_kind 'document'; `text` is the caption)
    * @returns {Promise<{ ok: true, keyId: string, status?: number, sendId: string }
-   *                 | { ok: false, error: string, uncertain?: true, sendId?: string }>}
+   *                 | { ok: false, error: string, failure: 'local'|'evolution', uncertain?: true, sendId?: string }>}
    *   `sendId` is there whenever an outbox row stands behind the answer. `status` here is
    *   the HTTP status of the 2xx that carried the key (201, say) — not an outbox status,
    *   which is what `reply`'s `status` is. It is absent when the call itself failed but the
    *   poller had already seen the message go: then `keyId` is the one the poller recorded.
    */
-  async function sendTo({ jid, text, kind, userId = null, bypassSwitch = false, leadId = null, sendId = null } = {}) {
+  async function sendTo({ jid, text, kind, userId = null, bypassSwitch = false, leadId = null, sendId = null, document = null } = {}) {
     const given = sendId ? String(sendId) : null;
     const givenRow = given ? inbox.getOutbox(given) : null;
     // Decided once — accepted, failed, or perhaps delivered — so never sent a second time.
-    if (givenRow && givenRow.status !== 'pending') return { ok: false, error: 'duplicate', sendId: given };
+    if (givenRow && givenRow.status !== 'pending') return { ok: false, error: 'duplicate', failure: 'local', sendId: given };
     // A refusal closes a row the caller already wrote, so it is never left `pending` —
     // which a restart would turn into "not sure it went" for a message that never left.
+    // Every one of these is ours, not Evolution's: `failure: 'local'` (the breaker never counts it).
     const refuse = (error) => {
       if (givenRow) inbox.updateOutbox(given, { status: 'failed', error });
-      return givenRow ? { ok: false, error, sendId: given } : { ok: false, error };
+      return givenRow ? { ok: false, error, failure: 'local', sendId: given } : { ok: false, error, failure: 'local' };
     };
 
     const m = PHONE_JID_RE.exec(String(jid ?? ''));
@@ -231,6 +283,16 @@ export function createSender({
     // Dana writes her row first, with the `covers_ts` it answers; a bare Dana send never is.
     if (kind === 'dana' && !givenRow) return refuse('bad_send_id');
     if (typeof text !== 'string' || text.length === 0 || text.length > MAX_TEXT_LEN) return refuse('bad_text');
+    // A brochure is Dana's alone, on a document row she wrote first, by https URL as a .pdf.
+    if (document !== null && document !== undefined) {
+      const url = typeof document?.url === 'string' ? document.url : '';
+      let https = false;
+      try { https = new URL(url).protocol === 'https:'; } catch { https = false; }
+      const named = typeof document?.fileName === 'string' && PDF_NAME_RE.test(document.fileName);
+      if (kind !== 'dana' || givenRow?.media_kind !== 'document' || !https || !named) return refuse('bad_document');
+    }
+    // Never first (DESIGN §6.1): her row answers a stored client message of its chat, under 24 h old.
+    if (kind === 'dana' && !openChat(givenRow.lead_id, givenRow.covers_ts)) return refuse('no_open_chat');
 
     const isOwner = m[1] === ownerDigits;
     // A caller's `bypassSwitch` is only ever honoured for the owner's own login code —
@@ -253,7 +315,7 @@ export function createSender({
       // (`countSentSince` leaves out only free-kind rows to the unbudgeted jids, as `free` does.)
       const own = givenRow && givenRow.created >= since
         && !(FREE_KINDS.has(givenRow.sender_kind) && unbudgetedJids.includes(givenRow.jid)) ? 1 : 0;
-      dayFull = inbox.countSentSince(since, { excludeJids: unbudgetedJids }) - own >= SEND_PER_DAY;
+      dayFull = inbox.countSentSince(since, { excludeJids: unbudgetedJids }) - own >= dayCap();
     }
     if (dayFull || gates.some(([limiter, key]) => !limiter.peek(key).ok)) {
       log({ level: 'warn', evt: 'wa.send.rate_limited', kind, limit: dayFull ? 'day' : 'minute' });
@@ -271,7 +333,7 @@ export function createSender({
       sender_kind: kind,
     }).row;
 
-    const out = await post(m[1], text, kind);
+    const out = await post(m[1], text, kind, document ?? null);
     try {
       // A 2xx with a key names this send exactly, so it is always written.
       if (out.ok) {

@@ -10,7 +10,7 @@ import { createTeam } from '../lib/team.mjs';
 import { createInboxStore, RETENTION_MS } from '../lib/inbox/store.mjs';
 import { createIngest } from '../lib/inbox/ingest.mjs';
 import {
-  createSender, replyJidFor, SEND_PER_MIN, SEND_PER_DAY, PER_RECIPIENT_PER_MIN, PER_USER_PER_MIN,
+  createSender, replyJidFor, SEND_PER_MIN, SEND_PER_DAY, PER_RECIPIENT_PER_MIN, PER_USER_PER_MIN, SEND_PER_DAY_TIERS, MEDIA_TIMEOUT_MS,
 } from '../lib/wa-send.mjs';
 
 const NOW = 1_790_500_000_000;
@@ -29,7 +29,7 @@ const netError = (code) => Object.assign(new Error('boom'), { cause: { code } })
  * make the call itself fail. Each call also records how many outbox rows were
  * `pending` at that moment — the row must be written before the call, not after.
  */
-function harness({ reply = () => ({ status: 201, body: { key: { id: 'KEY-1' } } }), env = ENV, limits, replies = true } = {}) {
+function harness({ reply = () => ({ status: 201, body: { key: { id: 'KEY-1' } } }), env = ENV, limits, replies = true, mediaTimeoutMs } = {}) {
   const s = openDb(':memory:');
   let clock = NOW;
   const team = createTeam(s, { now: () => clock });
@@ -42,11 +42,13 @@ function harness({ reply = () => ({ status: 201, body: { key: { id: 'KEY-1' } } 
   const pendingNow = () => s.db.prepare("SELECT COUNT(*) AS n FROM wa_outbox WHERE status = 'pending'").get().n;
   const fetchImpl = async (url, init) => {
     calls.push({ url, init, body: JSON.parse(init.body), pending: pendingNow() });
-    const r = await reply(calls.length);
+    const r = await Promise.race([reply(calls.length), new Promise((resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(abortError()));
+    })]);
     if (r.throws) throw r.throws;
     return { ok: r.status >= 200 && r.status < 300, status: r.status, text: async () => JSON.stringify(r.body ?? {}) };
   };
-  const sender = createSender({ env, team, inbox, db: s, fetchImpl, now: () => clock, log: (o) => logs.push(o), limits });
+  const sender = createSender({ env, team, inbox, db: s, fetchImpl, now: () => clock, log: (o) => logs.push(o), limits, ...(mediaTimeoutMs ? { mediaTimeoutMs } : {}) });
   return { s, team, inbox, sender, calls, logs, now: () => clock, tick: (ms) => { clock += ms; } };
 }
 
@@ -108,7 +110,7 @@ test('never sends to a group, a lid, a broadcast, a local-format number or garba
   const h = harness();
   const bad = ['120363135705763548@g.us', '123456789@lid', 'status@broadcast', '966500000001', '', null, '0500000001@s.whatsapp.net'];
   for (const jid of bad) {
-    assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'code' }), { ok: false, error: 'bad_recipient' }, String(jid));
+    assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'code' }), { ok: false, error: 'bad_recipient', failure: 'local' }, String(jid));
   }
   assert.equal(h.calls.length, 0);
   h.s.close();
@@ -117,9 +119,9 @@ test('never sends to a group, a lid, a broadcast, a local-format number or garba
 test('bad_text: empty, oversized, or not a string at all', async () => {
   const h = harness();
   const jid = '966500000001@s.whatsapp.net';
-  assert.deepEqual(await h.sender.sendTo({ jid, text: '', kind: 'code' }), { ok: false, error: 'bad_text' });
-  assert.deepEqual(await h.sender.sendTo({ jid, text: undefined, kind: 'code' }), { ok: false, error: 'bad_text' });
-  assert.deepEqual(await h.sender.sendTo({ jid, text: 'a'.repeat(4097), kind: 'code' }), { ok: false, error: 'bad_text' });
+  assert.deepEqual(await h.sender.sendTo({ jid, text: '', kind: 'code' }), { ok: false, error: 'bad_text', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid, text: undefined, kind: 'code' }), { ok: false, error: 'bad_text', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid, text: 'a'.repeat(4097), kind: 'code' }), { ok: false, error: 'bad_text', failure: 'local' });
   assert.equal(h.calls.length, 0, 'none of the bad texts reach the network');
   assert.equal((await h.sender.sendTo({ jid, text: 'a'.repeat(4096), kind: 'code' })).ok, true, '4096 exactly is fine');
   h.s.close();
@@ -128,9 +130,9 @@ test('bad_text: empty, oversized, or not a string at all', async () => {
 test('bad_kind: "code", "staff", "dana" and "note" are the real kinds; a note to anyone but the owner is never sent', async () => {
   const h = harness();
   const jid = '966500000001@s.whatsapp.net';
-  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'reply' }), { ok: false, error: 'bad_kind' });
-  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'note' }), { ok: false, error: 'bad_recipient' }, 'a note is the owner\'s alone (PR-F2b)');
-  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x' }), { ok: false, error: 'bad_kind' });
+  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'reply' }), { ok: false, error: 'bad_kind', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x', kind: 'note' }), { ok: false, error: 'bad_recipient', failure: 'local' }, 'a note is the owner\'s alone (PR-F2b)');
+  assert.deepEqual(await h.sender.sendTo({ jid, text: 'x' }), { ok: false, error: 'bad_kind', failure: 'local' });
   assert.equal(h.calls.length, 0);
   assert.equal((await h.sender.sendTo({ jid, text: 'x', kind: 'staff' })).ok, true);
   h.s.close();
@@ -139,8 +141,8 @@ test('bad_kind: "code", "staff", "dana" and "note" are the real kinds; a note to
 test('the sending switch stops everything except what is allowed to bypass it', async () => {
   const h = harness();
   h.team.setSetting('sending_enabled', '0');
-  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'sending_disabled' });
-  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'staff' }), { ok: false, error: 'sending_disabled' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'sending_disabled', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'staff' }), { ok: false, error: 'sending_disabled', failure: 'local' });
   const owner = await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true });
   assert.equal(owner.ok, true, "the owner's own login code still goes, or he could never switch it back on");
   h.s.close();
@@ -152,12 +154,12 @@ test('bypassSwitch is decided here, not trusted from the caller: it only ever wo
   // a caller claiming bypassSwitch for someone other than the owner is still refused.
   assert.deepEqual(
     await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code', bypassSwitch: true }),
-    { ok: false, error: 'sending_disabled' },
+    { ok: false, error: 'sending_disabled', failure: 'local' },
   );
   // nor for a reply, even one addressed to the owner.
   assert.deepEqual(
     await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'staff', bypassSwitch: true }),
-    { ok: false, error: 'sending_disabled' },
+    { ok: false, error: 'sending_disabled', failure: 'local' },
   );
   assert.equal(h.calls.length, 0, 'a non-owner bypass attempt never reaches the network');
   h.s.close();
@@ -167,12 +169,12 @@ test('limits: per recipient per minute, and across every sender', async () => {
   const h = harness();
   const one = '966500000001@s.whatsapp.net';
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: one, text: 'x', kind: 'code' })).ok, true);
-  assert.deepEqual(await h.sender.sendTo({ jid: one, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: one, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
   let ok = PER_RECIPIENT_PER_MIN;
   for (let n = 2; ok < SEND_PER_MIN; n += 1) {
     if ((await h.sender.sendTo({ jid: `9665000000${String(n).padStart(2, '0')}@s.whatsapp.net`, text: 'x', kind: 'code' })).ok) ok += 1;
   }
-  assert.deepEqual(await h.sender.sendTo({ jid: '966599999999@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966599999999@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
   h.tick(60_000);
   assert.equal((await h.sender.sendTo({ jid: '966599999999@s.whatsapp.net', text: 'x', kind: 'code' })).ok, true, 'refills');
   h.s.close();
@@ -183,7 +185,7 @@ test('a limiter refusal leaves the other limiters untouched (peek before take)',
   const hot = '966500000001@s.whatsapp.net';
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: hot, text: 'x', kind: 'code' })).ok, true);
   // burn a handful of refusals against the per-recipient limiter alone
-  for (let i = 0; i < 5; i += 1) assert.deepEqual(await h.sender.sendTo({ jid: hot, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  for (let i = 0; i < 5; i += 1) assert.deepEqual(await h.sender.sendTo({ jid: hot, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
   // if those refusals had also charged the shared per-minute bucket, this would stall below SEND_PER_MIN
   let ok = PER_RECIPIENT_PER_MIN;
   for (let n = 100; ok < SEND_PER_MIN && n < 200; n += 1) {
@@ -196,7 +198,7 @@ test('a limiter refusal leaves the other limiters untouched (peek before take)',
 test("the owner's own jid skips the shared per-minute/per-day budget, but not the per-recipient one", async () => {
   const h = harness();
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code' })).ok, true);
-  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' }, 'still capped per-recipient');
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' }, 'still capped per-recipient');
   // immediately after, in the same minute, a fresh recipient still gets the FULL shared allowance
   let ok = 0;
   for (let n = 0; ok < SEND_PER_MIN && n < 100; n += 1) {
@@ -214,14 +216,14 @@ test('bypass is still subject to the per-recipient limit', async () => {
   }
   assert.deepEqual(
     await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true }),
-    { ok: false, error: 'rate_limited' },
+    { ok: false, error: 'rate_limited', failure: 'local' },
   );
   h.s.close();
 });
 
 test('a 4xx fails; a timeout is "uncertain", never retried here', async () => {
   const bad = harness({ reply: () => ({ status: 400, body: {} }) });
-  assert.deepEqual(withoutSendId(await bad.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })), { ok: false, error: 'http_400' });
+  assert.deepEqual(withoutSendId(await bad.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })), { ok: false, error: 'http_400', failure: 'evolution' });
   bad.s.close();
 
   const s = openDb(':memory:');
@@ -230,7 +232,7 @@ test('a 4xx fails; a timeout is "uncertain", never retried here', async () => {
     env: ENV, team, inbox: createInboxStore(s), timeoutMs: 5,
     fetchImpl: (url, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(abortError()))),
   });
-  assert.deepEqual(withoutSendId(await slow.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })), { ok: false, error: 'timeout', uncertain: true });
+  assert.deepEqual(withoutSendId(await slow.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })), { ok: false, error: 'timeout', uncertain: true, failure: 'evolution' });
   s.close();
 });
 
@@ -239,7 +241,7 @@ test('any 5xx (500, 502, 503, 504) is "uncertain": the request may well have gon
     const h = harness({ reply: () => ({ status, body: {} }) });
     assert.deepEqual(
       withoutSendId(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })),
-      { ok: false, error: `http_${status}`, uncertain: true },
+      { ok: false, error: `http_${status}`, uncertain: true, failure: 'evolution' },
       String(status),
     );
     h.s.close();
@@ -251,7 +253,7 @@ test('only a 4xx is a definite HTTP failure: 400, 401, 404, 422 and 429 all fail
     const h = harness({ reply: () => ({ status, body: {} }) });
     assert.deepEqual(
       withoutSendId(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })),
-      { ok: false, error: `http_${status}` },
+      { ok: false, error: `http_${status}`, failure: 'evolution' },
       String(status),
     );
     assert.equal(outboxRows(h)[0].status, 'failed', String(status));
@@ -267,7 +269,7 @@ test('a definite pre-connection failure (refused, unknown host, DNS) is not "unc
     const sender = createSender({ env: ENV, team, inbox, fetchImpl: async () => { throw netError(code); } });
     assert.deepEqual(
       withoutSendId(await sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })),
-      { ok: false, error: 'network' },
+      { ok: false, error: 'network', failure: 'evolution' },
       code,
     );
   }
@@ -287,7 +289,7 @@ test('any other thrown error is "network" but "uncertain" — we cannot tell if 
     const sender = createSender({ env: ENV, team, inbox, fetchImpl: async () => { throw err; } });
     assert.deepEqual(
       withoutSendId(await sender.sendTo({ jid: '966500000002@s.whatsapp.net', text: 'x', kind: 'code' })),
-      { ok: false, error: 'network', uncertain: true },
+      { ok: false, error: 'network', uncertain: true, failure: 'evolution' },
       err.message,
     );
   }
@@ -297,7 +299,7 @@ test('any other thrown error is "network" but "uncertain" — we cannot tell if 
 test('a 2xx counts as sent only when the body carries a WhatsApp message id', async () => {
   const h = harness({ reply: () => ({ status: 200, body: { success: true, note: 'super-secret-body-marker' } }) });
   const out = await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' });
-  assert.deepEqual(withoutSendId(out), { ok: false, error: 'no_ack', uncertain: true });
+  assert.deepEqual(withoutSendId(out), { ok: false, error: 'no_ack', uncertain: true, failure: 'evolution' });
   const entry = h.logs.find((l) => l.evt === 'wa.send.no_key');
   assert.ok(entry, 'logs that the ack was missing');
   assert.ok(!JSON.stringify(entry).includes('super-secret-body-marker'), 'never logs the response body');
@@ -318,7 +320,7 @@ test('a timeout while reading the body is also "no key", not "network"', async (
   });
   assert.deepEqual(
     withoutSendId(await sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' })),
-    { ok: false, error: 'no_ack', uncertain: true },
+    { ok: false, error: 'no_ack', uncertain: true, failure: 'evolution' },
   );
   assert.ok(logs.some((l) => l.evt === 'wa.send.no_key'));
   s.close();
@@ -328,14 +330,14 @@ test('BONA_WA_NOTIFY=0 does not block a login code (only other kinds would need 
   const h = harness({ env: { ...ENV, BONA_WA_NOTIFY: '0' } });
   const out = await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' });
   assert.equal(out.ok, true);
-  assert.deepEqual(await h.sender.sendTo({ jid: '966500000002@s.whatsapp.net', text: 'x', kind: 'staff' }), { ok: false, error: 'disabled' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000002@s.whatsapp.net', text: 'x', kind: 'staff' }), { ok: false, error: 'disabled', failure: 'local' });
   assert.equal(h.calls.length, 1, 'the reply never reached the network');
   h.s.close();
 });
 
 test('no Evolution credentials: nothing is attempted', async () => {
   const h = harness({ env: {} });
-  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'evolution-not-configured' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'evolution-not-configured', failure: 'local' });
   assert.equal(h.calls.length, 0);
   h.s.close();
 });
@@ -403,7 +405,7 @@ test('a refusal before the call writes no row of its own', async () => {
   await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' });
   h.team.setSetting('sending_enabled', '1');
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' });
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local' });
   assert.equal(outboxRows(h).length, PER_RECIPIENT_PER_MIN, 'only the sends that were attempted');
   h.s.close();
 });
@@ -414,7 +416,7 @@ test('a refusal closes a row the caller already wrote, so it never lingers as pe
   h.team.setSetting('sending_enabled', '0');
   assert.deepEqual(
     await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a', leadId: 'L-1', sendId: SID }),
-    { ok: false, error: 'sending_disabled', sendId: SID },
+    { ok: false, error: 'sending_disabled', failure: 'local', sendId: SID },
   );
   const row = h.inbox.getOutbox(SID);
   assert.equal(row.status, 'failed');
@@ -430,7 +432,7 @@ test('a send id that has already been decided is never sent again', async () => 
     h.inbox.insertOutbox({ send_id: sendId, lead_id: 'L-1', jid: CLIENT_JID, text: 'x', user_id: 'USR-a', sender_kind: 'staff', status });
     assert.deepEqual(
       await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a', leadId: 'L-1', sendId }),
-      { ok: false, error: 'duplicate', sendId },
+      { ok: false, error: 'duplicate', failure: 'local', sendId },
       status,
     );
     assert.equal(h.inbox.getOutbox(sendId).status, status, `${status} row left as it was`);
@@ -474,27 +476,27 @@ test('a ledger write that fails after a 2xx with a key still answers ok, logged 
 
 /* ------------------------------ the durable day cap ------------------------------ */
 
-test('500 sends in the last 24 hours stop everyone but the owner — and a restart does not reset it', async () => {
+test('a full day (SEND_PER_DAY) in the last 24 hours stops everyone but the owner — and a restart does not reset it', async () => {
   const h = harness();
   seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
-  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited', failure: 'local' });
   assert.ok(h.logs.some((l) => l.evt === 'wa.send.rate_limited' && l.limit === 'day'));
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true, "the owner's own code still goes");
   assert.equal(h.calls.length, 1);
 
   // A fresh process over the same file: the in-memory limiters are new, the ledger is not.
   const again = createSender({ env: ENV, team: h.team, inbox: createInboxStore(h.s, { now: h.now }), db: h.s, now: h.now, fetchImpl: async () => { throw new Error('must not be called'); } });
-  assert.deepEqual(await again.sendTo({ jid: '966500000003@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await again.sendTo({ jid: '966500000003@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
   h.s.close();
 });
 
-test('499 in the last 24 hours (codes and replies alike): one more goes, and that one fills the day', async () => {
+test('one short of the day (codes and replies alike): one more goes, and that one fills the day', async () => {
   const h = harness();
-  seedOutbox(h, 250, { created: NOW - 3_600_000, kind: 'code' });
-  seedOutbox(h, SEND_PER_DAY - 1 - 250, { created: NOW - 3_600_000, kind: 'staff', status: 'uncertain' });
+  seedOutbox(h, 50, { created: NOW - 3_600_000, kind: 'code' });
+  seedOutbox(h, SEND_PER_DAY - 1 - 50, { created: NOW - 3_600_000, kind: 'staff', status: 'uncertain' });
   assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' })).ok, true);
-  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
   h.s.close();
 });
 
@@ -507,11 +509,11 @@ test('rows older than 24 hours, rows to the owner and failed rows do not count',
   h.s.close();
 });
 
-test('the day is rolling: a send becomes possible the moment the oldest of the 500 turns 24 hours old', async () => {
+test('the day is rolling: a send becomes possible the moment the oldest of the day turns 24 hours old', async () => {
   const h = harness();
   seedOutbox(h, SEND_PER_DAY, { created: NOW - DAY + 1_000 });
   h.tick(1_000);
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited' }, 'exactly 24 hours old still counts');
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local' }, 'exactly 24 hours old still counts');
   h.tick(1);
   assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' })).ok, true);
   h.s.close();
@@ -527,7 +529,7 @@ test('per user: 30 a minute from one team member; another member and a login cod
   for (let i = 0; i < PER_USER_PER_MIN; i += 1) {
     assert.equal((await h.sender.sendTo({ jid: to(i), text: 'x', kind: 'staff', userId: 'USR-a' })).ok, true, `send ${i + 1}`);
   }
-  assert.deepEqual(await h.sender.sendTo({ jid: to(100), text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: to(100), text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited', failure: 'local' });
   assert.equal((await h.sender.sendTo({ jid: to(101), text: 'x', kind: 'staff', userId: 'USR-b' })).ok, true, 'another member has their own allowance');
   assert.equal((await h.sender.sendTo({ jid: to(102), text: 'x', kind: 'code' })).ok, true, 'a login code has no member behind it');
   h.tick(60_000);
@@ -1222,6 +1224,8 @@ test("kind 'dana' passes the gate like a staff reply: a text row with no user, t
   const h = harness();
   h.s.insertLead({ lead_id: 'LEAD-D', created: NOW, updated: NOW, phone_e164: CLIENT, wa_jid: CLIENT_JID, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
   // Dana writes her row first, with what it answers; the sender only ever sends a row it is given.
+  // What it answers is a stored client message (never first, PR-B3).
+  h.inbox.upsertMessage({ key_id: 'IN-LEAD-D', lead_id: 'LEAD-D', jid: CLIENT_JID, direction: 'in', sender_kind: 'client', text: 'hi', ts: NOW - 1000 });
   let n = 0;
   const danaRow = (text) => {
     n += 1;
@@ -1229,7 +1233,7 @@ test("kind 'dana' passes the gate like a staff reply: a text row with no user, t
     h.inbox.insertOutbox({ send_id, lead_id: 'LEAD-D', jid: CLIENT_JID, text, user_id: null, sender_kind: 'dana', covers_ts: NOW - 1000 });
     return send_id;
   };
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'Dana here', kind: 'dana', leadId: 'LEAD-D' }), { ok: false, error: 'bad_send_id' },
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'Dana here', kind: 'dana', leadId: 'LEAD-D' }), { ok: false, error: 'bad_send_id', failure: 'local' },
     'a Dana send with no row written first is refused');
   assert.equal(h.calls.length, 0);
   const first = danaRow('Dana here');
@@ -1246,13 +1250,13 @@ test("kind 'dana' passes the gate like a staff reply: a text row with no user, t
     assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: `Dana ${i}`, kind: 'dana', leadId: 'LEAD-D', sendId: id })).ok, true);
   }
   const over = danaRow('one too many');
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'one too many', kind: 'dana', leadId: 'LEAD-D', sendId: over }), { ok: false, error: 'rate_limited', sendId: over },
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'one too many', kind: 'dana', leadId: 'LEAD-D', sendId: over }), { ok: false, error: 'rate_limited', failure: 'local', sendId: over },
     'the per-recipient limit binds her like anyone');
   assert.equal(h.inbox.getOutbox(over).status, 'failed', 'a refusal closes her row');
   h.team.setSetting('sending_enabled', '0');
   const off = danaRow('again');
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'again', kind: 'dana', leadId: 'LEAD-D', sendId: off }), { ok: false, error: 'sending_disabled', sendId: off }, "the owner's Sending switch stops her too");
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'robot' }), { ok: false, error: 'bad_kind' }, 'still only the three kinds');
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'again', kind: 'dana', leadId: 'LEAD-D', sendId: off }), { ok: false, error: 'sending_disabled', failure: 'local', sendId: off }, "the owner's Sending switch stops her too");
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'robot' }), { ok: false, error: 'bad_kind', failure: 'local' }, 'still only the three kinds');
 });
 
 test('a dashboard reply stamps the human clock at the second it went', async () => {
@@ -1293,7 +1297,7 @@ test("split: the owner's personal number keeps its login-code bypass; the Bona n
   const h = harness({ env: SPLIT_ENV });
   h.team.setSetting('sending_enabled', '0');
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true);
-  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code', bypassSwitch: true }), { ok: false, error: 'sending_disabled' });
+  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code', bypassSwitch: true }), { ok: false, error: 'sending_disabled', failure: 'local' });
   assert.equal(h.calls.length, 1);
   assert.equal(h.calls[0].url, 'http://evo.test/message/sendText/bona', 'sent from the Bona instance');
   assert.equal(h.calls[0].body.number, '966593296933', "to the owner's personal phone");
@@ -1303,11 +1307,11 @@ test("split: the owner's personal number keeps its login-code bypass; the Bona n
 test('split: a full day stops everyone but the owner and the Bona number, both still capped per recipient', async () => {
   const h = harness({ env: SPLIT_ENV });
   seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
-  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true);
   assert.equal((await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' })).ok, true);
   for (let i = 1; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' })).ok, true);
-  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
   h.s.close();
 });
 
@@ -1324,20 +1328,27 @@ test('unset: only the owner is outside the shared day budget, as before the spli
   seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'code', bypassSwitch: true })).ok, true);
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'note' })).ok, true, "the owner's notes are outside it too");
-  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
   // Only the login code and the note are free (critic C13): Dana and a staff reply into the
   // owner's own chat (the test chat) are paced like any client's.
-  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  ownerChatMessage(h);
   h.inbox.insertOutbox({ send_id: 'SND-dana-owner-full', lead_id: 'LEAD-O', jid: OWNER_JID, text: 'x', sender_kind: 'dana', covers_ts: NOW - 1000 });
   assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'x', kind: 'dana', leadId: 'LEAD-O', sendId: 'SND-dana-owner-full' }),
-    { ok: false, error: 'rate_limited', sendId: 'SND-dana-owner-full' });
+    { ok: false, error: 'rate_limited', failure: 'local', sendId: 'SND-dana-owner-full' });
   h.s.close();
 });
 
 /* ---------------- kind 'note': the owner's notes (DESIGN §7.1, PR-F2b) ---------------- */
 
 /** A pending Dana row into the owner's own chat (the test chat), as Dana writes it before her send. */
+/** The owner's test chat: one stored client message a second ago, which Dana's rows answer (never first, PR-B3). */
+function ownerChatMessage(h) {
+  h.inbox.upsertMessage({ key_id: 'IN-LEAD-O', lead_id: 'LEAD-O', jid: OWNER_JID, direction: 'in', sender_kind: 'client', text: 'hi', ts: NOW - 1000 });
+}
+
 function danaOwnerRow(h, n) {
+  ownerChatMessage(h);
   const send_id = `SND-dana-owner-${String(n).padStart(4, '0')}`;
   h.inbox.insertOutbox({ send_id, lead_id: 'LEAD-O', jid: OWNER_JID, text: `Dana ${n}`, user_id: null, sender_kind: 'dana', covers_ts: NOW - 1000 });
   return send_id;
@@ -1345,8 +1356,8 @@ function danaOwnerRow(h, n) {
 
 test("a note goes only to the owner's own jid: anyone else is bad_recipient, before any row or call", async () => {
   const h = harness({ env: SPLIT_ENV });
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: '*Bona — new enquiry*', kind: 'note' }), { ok: false, error: 'bad_recipient' });
-  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: '*Bona — new enquiry*', kind: 'note' }), { ok: false, error: 'bad_recipient' },
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: '*Bona — new enquiry*', kind: 'note' }), { ok: false, error: 'bad_recipient', failure: 'local' });
+  assert.deepEqual(await h.sender.sendTo({ jid: BONA_JID, text: '*Bona — new enquiry*', kind: 'note' }), { ok: false, error: 'bad_recipient', failure: 'local' },
     "not even the Bona number's own chat");
   assert.equal(h.calls.length, 0);
   assert.equal(outboxRows(h).length, 0);
@@ -1369,11 +1380,11 @@ test("a note's outbox row keeps the key and the status but no text and no lead",
 test("a note obeys the Sending switch (no bypass, ever) and BONA_WA_NOTIFY", async () => {
   const h = harness();
   h.team.setSetting('sending_enabled', '0');
-  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'n', kind: 'note', bypassSwitch: true }), { ok: false, error: 'sending_disabled' },
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'n', kind: 'note', bypassSwitch: true }), { ok: false, error: 'sending_disabled', failure: 'local' },
     'only the owner\'s login code may pass the switch');
   h.s.close();
   const off = harness({ env: { ...ENV, BONA_WA_NOTIFY: '0' } });
-  assert.deepEqual(await off.sender.sendTo({ jid: OWNER_JID, text: 'n', kind: 'note' }), { ok: false, error: 'disabled' });
+  assert.deepEqual(await off.sender.sendTo({ jid: OWNER_JID, text: 'n', kind: 'note' }), { ok: false, error: 'disabled', failure: 'local' });
   assert.equal(off.calls.length, 0);
   off.s.close();
 });
@@ -1384,13 +1395,13 @@ test('a note is outside the shared budget and pays its own per-recipient limit',
   for (let i = 0; i < SEND_PER_MIN; i += 1) {
     assert.equal((await h.sender.sendTo({ jid: `9665000001${String(i).padStart(2, '0')}@s.whatsapp.net`, text: 'x', kind: 'code' })).ok, true);
   }
-  assert.deepEqual(await h.sender.sendTo({ jid: '966500000199@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: '966500000199@s.whatsapp.net', text: 'x', kind: 'code' }), { ok: false, error: 'rate_limited', failure: 'local' });
   // ...and the shared day too.
   seedOutbox(h, SEND_PER_DAY, { created: NOW - 60_000 });
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) {
     assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: `note ${i}`, kind: 'note' })).ok, true, `note ${i}: neither stops it`);
   }
-  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'one too many', kind: 'note' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'one too many', kind: 'note' }), { ok: false, error: 'rate_limited', failure: 'local' });
   h.s.close();
 });
 
@@ -1398,7 +1409,7 @@ test("notes and Dana's sends to the owner use separate limiter keys: 6 notes do 
   const h = harness();
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: `note ${i}`, kind: 'note' })).ok, true);
   // The notes' own minute really is used up (the clock is frozen)...
-  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'note 7', kind: 'note' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: OWNER_JID, text: 'note 7', kind: 'note' }), { ok: false, error: 'rate_limited', failure: 'local' });
   // ...and Dana's next send into the owner's chat goes all the same.
   const id = danaOwnerRow(h, 1);
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'Dana 1', kind: 'dana', leadId: 'LEAD-O', sendId: id })).ok, true);
@@ -1412,7 +1423,7 @@ test("notes and Dana's sends to the owner use separate limiter keys: 6 notes do 
     assert.equal((await r.sender.sendTo({ jid: OWNER_JID, text: `Dana ${n}`, kind: 'dana', leadId: 'LEAD-O', sendId: more })).ok, true);
   }
   const over = danaOwnerRow(r, 99);
-  assert.deepEqual(await r.sender.sendTo({ jid: OWNER_JID, text: 'Dana 99', kind: 'dana', leadId: 'LEAD-O', sendId: over }), { ok: false, error: 'rate_limited', sendId: over });
+  assert.deepEqual(await r.sender.sendTo({ jid: OWNER_JID, text: 'Dana 99', kind: 'dana', leadId: 'LEAD-O', sendId: over }), { ok: false, error: 'rate_limited', failure: 'local', sendId: over });
   const calls = r.calls.length;
   assert.equal((await r.sender.sendTo({ jid: OWNER_JID, text: 'same minute', kind: 'note' })).ok, true, "Dana's full minute is not the note's");
   assert.equal(r.calls.length, calls + 1);
@@ -1426,7 +1437,134 @@ test("Dana to the owner's jid is counted in the day budget, and her row is count
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'Dana 1', kind: 'dana', leadId: 'LEAD-O', sendId: id })).ok, true,
     'the 500th send of the day: her own pending row is this send, not an earlier one');
   assert.equal(h.inbox.countSentSince(NOW - DAY, { excludeJids: [OWNER_JID] }), SEND_PER_DAY, 'it counts toward the 500');
-  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited' });
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' }), { ok: false, error: 'rate_limited', failure: 'local' });
   assert.equal((await h.sender.sendTo({ jid: OWNER_JID, text: 'n', kind: 'note' })).ok, true, 'a note still goes');
   h.s.close();
+});
+
+/* ------------------------------ PR-B3 (PLAN T12 tests 3, 6, 13) ------------------------------ */
+
+/** A client chat with a stored client message at `at`, and a Dana row written first that answers `covers`. */
+function danaChat(h, { at = NOW - 60_000, covers = at, media = null, text = 'Dana here', id = 'LEAD-T12' } = {}) {
+  if (!h.s.getLead(id)) {
+    h.s.insertLead({ lead_id: id, created: NOW - DAY, updated: NOW - DAY, phone_e164: CLIENT, wa_jid: CLIENT_JID, channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  }
+  h.inbox.upsertMessage({ key_id: `IN-${id}-${at}`, lead_id: id, jid: CLIENT_JID, direction: 'in', sender_kind: 'client', text: 'hi', ts: at });
+  seedSeq += 1;
+  const sendId = `SND-t12-${String(seedSeq).padStart(12, '0')}`;
+  h.inbox.insertOutbox({ send_id: sendId, lead_id: id, jid: CLIENT_JID, text, user_id: null, sender_kind: 'dana', covers_ts: covers, media_kind: media });
+  return sendId;
+}
+
+test('T12: SEND_PER_MIN is 8 and SEND_PER_DAY follows the warm-up tiers by BONA_WA_LINKED_AT (unset: the strictest)', async () => {
+  assert.equal(SEND_PER_MIN, 8);
+  assert.equal(SEND_PER_DAY, 100, 'the exported number is the strictest tier, the one in force while BONA_WA_LINKED_AT is unset');
+  assert.deepEqual(SEND_PER_DAY_TIERS, [100, 180, 300]);
+  for (const [days, cap] of [[null, 100], [0, 100], [7, 100], [8, 180], [21, 180], [22, 300], [40, 300]]) {
+    const linked = days === null ? null : new Date(NOW - days * DAY - 60_000).toISOString();
+    const h = harness({ env: { ...ENV, ...(linked ? { BONA_WA_LINKED_AT: linked } : {}) } });
+    seedOutbox(h, cap - 1, { created: NOW - 3_600_000 });
+    assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' })).ok, true, `day ${days}: the ${cap}th goes`);
+    const over = await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'staff', userId: 'USR-b' });
+    assert.equal(over.error, 'rate_limited', `day ${days}: the day holds ${cap}`);
+    h.s.close();
+  }
+});
+
+test('T12: every refusal carries its failure class — local for our own refusals, evolution for what Evolution answered', async () => {
+  const h = harness();
+  const local = [
+    await h.sender.sendTo({ jid: 'x', text: 'x', kind: 'staff' }),
+    await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'robot' }),
+    await h.sender.sendTo({ jid: CLIENT_JID, text: '', kind: 'staff' }),
+    await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'dana' }),
+  ];
+  for (const r of local) assert.equal(r.failure, 'local', r.error);
+  h.team.setSetting('sending_enabled', '0');
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'sending_disabled', failure: 'local' });
+  h.team.setSetting('sending_enabled', '1');
+  for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) await h.sender.sendTo({ jid: CLIENT_JID, text: `x${i}`, kind: 'staff' });
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local' });
+  const off = harness({ env: { ...ENV, BONA_WA_NOTIFY: '0' } });
+  assert.equal((await off.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' })).failure, 'local');
+  const bare = harness({ env: { BONA_WA_INSTANCE: 'abdulaziz-personal' } });
+  assert.deepEqual(await bare.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'evolution-not-configured', failure: 'local' });
+  for (const [reply, error, uncertain] of [
+    [{ status: 400 }, 'http_400', false], [{ status: 500 }, 'http_500', true], [{ throws: netError('ECONNREFUSED') }, 'network', false],
+    [{ throws: netError('ECONNRESET') }, 'network', true], [{ throws: abortError() }, 'timeout', true], [{ status: 201, body: {} }, 'no_ack', true],
+  ]) {
+    const e = harness({ reply: () => reply });
+    const out = await e.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' });
+    assert.equal(out.ok, false);
+    assert.equal(out.error, error);
+    assert.equal(out.failure, 'evolution', error);
+    assert.equal(Boolean(out.uncertain), uncertain, error);
+    e.s.close();
+  }
+  h.s.close();
+});
+
+test('T12: never-first — a Dana send must answer a stored client message under 24 h old (no_open_chat)', async () => {
+  const h = harness();
+  const ok = danaChat(h, { at: NOW - 60_000 });
+  assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'Dana here', kind: 'dana', leadId: 'LEAD-T12', sendId: ok })).ok, true);
+  const notStored = danaChat(h, { at: NOW - 50_000, covers: NOW - 40_000 });
+  assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'Dana here', kind: 'dana', leadId: 'LEAD-T12', sendId: notStored }),
+    { ok: false, error: 'no_open_chat', failure: 'local', sendId: notStored }, 'covers_ts is not a stored client message');
+  assert.equal(h.inbox.getOutbox(notStored).status, 'failed');
+  const old = danaChat(h, { at: NOW - DAY - 1 });
+  assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'Dana here', kind: 'dana', leadId: 'LEAD-T12', sendId: old })).error, 'no_open_chat', 'older than 24 h');
+  // A Dana row with no covers_ts at all (a bare insert) answers nothing.
+  h.inbox.insertOutbox({ send_id: 'SND-t12-nocovers0001', lead_id: 'LEAD-T12', jid: CLIENT_JID, text: 'x', user_id: null, sender_kind: 'dana' });
+  assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'dana', leadId: 'LEAD-T12', sendId: 'SND-t12-nocovers0001' })).error, 'no_open_chat');
+  // Another lead's message never opens this chat.
+  h.s.insertLead({ lead_id: 'LEAD-T12b', created: NOW - DAY, updated: NOW - DAY, phone_e164: '966500000022', wa_jid: '966500000022@s.whatsapp.net', channel: 'whatsapp', stage: 'new', inbox_state: 'in' });
+  h.inbox.upsertMessage({ key_id: 'IN-other', lead_id: 'LEAD-T12b', jid: '966500000022@s.whatsapp.net', direction: 'in', sender_kind: 'client', text: 'hi', ts: NOW - 30_000 });
+  h.inbox.insertOutbox({ send_id: 'SND-t12-otherlead001', lead_id: 'LEAD-T12', jid: CLIENT_JID, text: 'x', user_id: null, sender_kind: 'dana', covers_ts: NOW - 30_000 });
+  assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'dana', leadId: 'LEAD-T12', sendId: 'SND-t12-otherlead001' })).error, 'no_open_chat');
+  assert.equal(h.calls.length, 1, 'only the first went');
+  // A staff reply is a person: never-first is Dana's rule only.
+  assert.equal((await h.sender.sendTo({ jid: '966500000033@s.whatsapp.net', text: 'hello', kind: 'staff' })).ok, true);
+  h.s.close();
+});
+
+test('T12: postMedia — a brochure goes as a document by URL with a caption, its row written first; a timeout is uncertain and never retried', async () => {
+  assert.equal(MEDIA_TIMEOUT_MS, 45_000);
+  const h = harness();
+  const id = danaChat(h, { media: 'document', text: 'The brochure' });
+  const doc = { url: 'https://bona.azoz.uk/brochures/bona-w012.pdf', fileName: 'Bona BONA-W012.pdf' };
+  const out = await h.sender.sendTo({ jid: CLIENT_JID, text: 'The brochure', kind: 'dana', leadId: 'LEAD-T12', sendId: id, document: doc });
+  assert.equal(out.ok, true);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].url, 'http://evo.test/message/sendMedia/abdulaziz-personal');
+  assert.deepEqual(h.calls[0].body, { number: CLIENT, mediatype: 'document', mimetype: 'application/pdf', media: doc.url, fileName: doc.fileName, caption: 'The brochure' });
+  assert.equal(h.calls[0].pending, 1, 'the row was written before the call');
+  const row = h.inbox.getOutbox(id);
+  assert.deepEqual([row.status, row.media_kind, row.text, row.key_id], ['accepted', 'document', 'The brochure', 'KEY-1']);
+
+  // Refused before any call: no caption, a row that is no document row, a URL that is not https, a name without .pdf, a staff document.
+  const refusals = [
+    [{ text: '', sendId: danaChat(h, { media: 'document', text: 'c' }) }, 'bad_text'],
+    [{ sendId: danaChat(h, { media: null }) }, 'bad_document'],
+    [{ sendId: danaChat(h, { media: 'document' }), document: { ...doc, url: 'http://bona.azoz.uk/b.pdf' } }, 'bad_document'],
+    [{ sendId: danaChat(h, { media: 'document' }), document: { ...doc, fileName: 'brochure' } }, 'bad_document'],
+  ];
+  for (const [patch, error] of refusals) {
+    const r = await h.sender.sendTo({ jid: CLIENT_JID, text: 'The brochure', kind: 'dana', leadId: 'LEAD-T12', document: doc, ...patch });
+    assert.equal(r.error, error);
+    assert.equal(r.failure, 'local');
+  }
+  assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', document: doc })).error, 'bad_document', 'only Dana sends a document');
+  assert.equal(h.calls.length, 1);
+
+  // A timeout (45 s; shortened here) is uncertain: the row says so, and the same send id never goes again.
+  const t = harness({ mediaTimeoutMs: 20, reply: () => new Promise(() => {}) });
+  const slowId = danaChat(t, { media: 'document', text: 'The brochure' });
+  const slow = await t.sender.sendTo({ jid: CLIENT_JID, text: 'The brochure', kind: 'dana', leadId: 'LEAD-T12', sendId: slowId, document: doc });
+  assert.deepEqual([slow.ok, slow.error, slow.uncertain, slow.failure], [false, 'timeout', true, 'evolution']);
+  assert.equal(t.inbox.getOutbox(slowId).status, 'uncertain');
+  assert.equal((await t.sender.sendTo({ jid: CLIENT_JID, text: 'The brochure', kind: 'dana', leadId: 'LEAD-T12', sendId: slowId, document: doc })).error, 'duplicate');
+  assert.equal(t.calls.length, 1, 'never retried');
+  h.s.close();
+  t.s.close();
 });

@@ -1654,6 +1654,8 @@ test("the poller's match and wa-send's 2xx, in either order at the real callers:
     dana: {
       leadId: LEAD_ID, key: 'WA-DANA-1', text: 'Hello from the assistant',
       async send(h, sender) {
+        // What it answers is a stored client message (never first, PR-B3).
+        h.inbox.upsertMessage({ key_id: 'IN-dana-x', lead_id: LEAD_ID, jid: PHONE_JID, direction: 'in', sender_kind: 'client', text: 'hi', ts: NOW - 60_000 });
         h.inbox.insertOutbox({ send_id: 'SND-dana-x', lead_id: LEAD_ID, jid: PHONE_JID, text: this.text, sender_kind: 'dana', covers_ts: NOW - 60_000 });
         const out = await sender.sendTo({ jid: PHONE_JID, text: this.text, kind: 'dana', leadId: LEAD_ID, sendId: 'SND-dana-x' });
         assert.equal(out.ok, true);
@@ -1707,7 +1709,7 @@ test("the poller's match and wa-send's 2xx, in either order at the real callers:
       // A note's copy cannot be matched before its key is known (no text in its row): its first acceptance is the 2xx.
       const firstAccept = order === 'poller first' && kind !== 'note' ? SEEN : ANSWERED;
       assert.deepEqual([row.status, row.key_id, row.updated], ['accepted', s.key, firstAccept], label);
-      const kinds = h.inbox.messagesFor(s.leadId).map((m) => m.sender_kind);
+      const kinds = h.inbox.messagesFor(s.leadId).filter((m) => m.key_id !== 'IN-dana-x').map((m) => m.sender_kind); // the client message Dana answered aside
       if (expectedKind[kind]) {
         assert.deepEqual(kinds, [expectedKind[kind]], label);
         assert.equal(h.inbox.messageByKey(s.key)?.sender_kind, expectedKind[kind], label);
