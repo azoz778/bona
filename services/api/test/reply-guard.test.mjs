@@ -587,3 +587,12 @@ test('"مليون وثلث" / "1 million and three quarters" are values the guar
     assert.equal(checkReply(reply, parts).ok, false, reply);
   }
 });
+
+/* Codex r31 P2: a currency word after the millions does not split a compound amount. */
+test('"مليون ريال و500 ألف" is one amount of 1,500,000', () => {
+  const parts = { toolResults: ['{"p":"SAR 1,000,000"}', '{"q":"SAR 500,000"}'] };
+  for (const reply of ['سعر الفيلا مليون ريال و500 ألف', 'سعر الفيلا مليون ريال سعودي و٥٠٠ ألف', '1 مليون ريال و500 ألف', 'a million riyals and 500 thousand']) {
+    assert.equal(checkReply(reply, parts).ok, false, reply);
+    assert.equal(checkReply(reply, { toolResults: ['{"p":"SAR 1,500,000"}'] }).ok, true, `${reply}: the total was published`);
+  }
+});

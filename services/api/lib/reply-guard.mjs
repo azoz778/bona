@@ -315,7 +315,8 @@ export function findAmounts(text) {
     // The currency right after the word goes with it ("مليون دولار" is USD 1,000,000, never SAR, Codex r30).
     const c = CURRENCY_FIRST_RE.exec(s.slice(end));
     const currency = c ? currencyOf(c[0].replace(/^[\s-]+/, '')) : null;
-    out.push({ raw, sar: raw == null ? null : Math.round(raw * SAR_RATE[currency ?? 'SAR']), currency, at, scale: 1e6, end });
+    // It ends after that currency word, so "مليون ريال و500 ألف" is still one compound amount (Codex r31).
+    out.push({ raw, sar: raw == null ? null : Math.round(raw * SAR_RATE[currency ?? 'SAR']), currency, at, scale: 1e6, end: c ? end + c[0].length : end });
   }
   for (const m of s.matchAll(THOUSAND_WORD_RE)) {
     const [at, end] = m.indices.groups.word;
