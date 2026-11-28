@@ -726,7 +726,7 @@ test('a note that cannot be drawn is dropped (and logged by kind); the notes beh
   const lead = addLead(h, { name: 'Sara Example' });
   h.autoIds.add(lead.lead_id);
   h.db.db.prepare(`INSERT INTO viewing_bookings (booking_id, lead_id, task_id, listing_id, start_ts, end_ts, event_id, status, client_told, created, updated)
-                   VALUES ('BK-POISON', ?, NULL, 'BONA-W012', ?, ?, 'evpoison', 'booked', 1, ?, ?)`).run(lead.lead_id, NOW + DAY, NOW + DAY + HOUR, NOW, NOW);
+                   VALUES ('BK-POISON', ?, 'task-poison', 'BONA-W012', ?, ?, 'evpoison', 'booked', 1, ?, ?)`).run(lead.lead_id, NOW + DAY, NOW + DAY + HOUR, NOW, NOW);
   h.notes.booking('BK-POISON', { told: true });
   h.notes.alert('breaker');
   const summaryOf = h.notes;
@@ -884,10 +884,25 @@ test('hand-over reasons come from the code: system kinds and a reason code (brai
 
 function bookingFixture(h, lead, { id = 'BK-0001', start = Date.UTC(2026, 10, 29, 11, 0, 0) } = {}) {
   h.db.db.prepare(`INSERT INTO viewing_bookings (booking_id, lead_id, task_id, listing_id, start_ts, end_ts, event_id, status, client_told, created, updated)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(id, lead.lead_id, null, 'BONA-W012', start, start + HOUR, `ev${id.toLowerCase().replace(/[^a-z0-9]/g, '')}`, 'booked', 1, NOW, NOW);
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(id, lead.lead_id, `task-${id}`, 'BONA-W012', start, start + HOUR, `ev${id.toLowerCase().replace(/[^a-z0-9]/g, '')}`, 'booked', 1, NOW, NOW);
   return id;
 }
 const inventory = (precision) => ({ find: (id) => (id === 'BONA-W012' ? { id, title: { en: 'Marina Tower Villa', ar: 'فيلا' }, mapPrecision: precision } : null) });
+
+test("booking: a note queued for a viewing that is cancelled, or never confirmed, before it goes announces nothing (Codex T11 r13)", async () => {
+  for (const [label, change] of [['cancelled', "status = 'cancelled'"], ['cancel_pending', "status = 'cancel_pending'"], ['no task', 'task_id = NULL']]) {
+    const h = harness({ inventory: inventory('exact') });
+    const lead = addLead(h, { name: 'Sara Example', phone_e164: '966500000011' });
+    h.autoIds.add(lead.lead_id);
+    const id = bookingFixture(h, lead);
+    assert.equal(h.notes.booking(id, { told: false }).queued, true, label);
+    // The viewing changes after the note was queued and before it is rendered (a held or retried note renders later).
+    h.db.db.prepare(`UPDATE viewing_bookings SET ${change} WHERE booking_id = ?`).run(id);
+    await h.notes.tick(); // eslint-disable-line no-await-in-loop
+    assert.deepEqual(h.sent, [], `${label}: nothing about a viewing that is not on`);
+    assert.notEqual(h.row(`bk-untold:${id}`).status, 'queued', `${label}: the note does not wait forever`);
+  }
+});
 
 test('booking: told (with the meeting point by the pin) and untold; outside auto mode nothing', async () => {
   const h = harness({ inventory: inventory('exact') });

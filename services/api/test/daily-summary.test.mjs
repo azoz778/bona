@@ -57,7 +57,7 @@ function lead(h, over = {}) {
 function booking(h, l, start, listingId) {
   const id = `BK-${l.lead_id.slice(-4)}-${start}`;
   h.db.db.prepare(`INSERT INTO viewing_bookings (booking_id, lead_id, task_id, listing_id, start_ts, end_ts, event_id, status, client_told, created, updated)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(id, l.lead_id, null, listingId, start, start + 60 * MIN, `ev${start}`, 'booked', 1, start - 86_400_000, start - 86_400_000);
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(id, l.lead_id, `task-${id}`, listingId, start, start + 60 * MIN, `ev${start}`, 'booked', 1, start - 86_400_000, start - 86_400_000);
 }
 /** One `dana` outbox row, `delay` after the client message it covers. */
 function danaSend(h, l, coversTs, delay, { status = 'accepted', guarded = 1, text = 'Of course.' } = {}) {

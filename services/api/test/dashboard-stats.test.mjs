@@ -521,7 +521,7 @@ test('ownerSummary(): new clients by channel, waiting chats, the assistant\'s tu
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`).run(`SND-${i}`, lead, 'x@s.whatsapp.net', 't', null, 'dana', 'accepted', null, created, created, null, covers);
   }
   db.db.prepare(`INSERT INTO viewing_bookings (booking_id, lead_id, task_id, listing_id, start_ts, end_ts, event_id, status, client_told, created, updated)
-                 VALUES ('BK-1','LEAD-0001',NULL,'BONA-W012',?,?,'ev1','booked',1,?,?)`).run(to + 3_600_000, to + 7_200_000, from, from);
+                 VALUES ('BK-1','LEAD-0001','task-BK-1','BONA-W012',?,?,'ev1','booked',1,?,?)`).run(to + 3_600_000, to + 7_200_000, from, from);
   db.db.prepare(`INSERT INTO inbox_candidates (cand_id, jid, lid, phone_e164, name, first_ts, last_ts, hits, words, last_dir, state, updated)
                  VALUES ('CND-1', NULL, '1234@lid', NULL, 'Ahmed Example', ?, ?, 1, 'villa', 'in', 'open', ?)`).run(from + 1, from + 9, from + 9);
   db.db.prepare(`INSERT INTO inbox_candidates (cand_id, jid, lid, phone_e164, name, first_ts, last_ts, hits, words, last_dir, state, updated)
@@ -538,6 +538,23 @@ test('ownerSummary(): new clients by channel, waiting chats, the assistant\'s tu
   assert.equal(s.candidatesWithPhone, 1);
   assert.deepEqual(s.heldOver, { total: 0, byKind: {} });
   assert.equal(s.oldOutWrote, 0);
+  db.close();
+});
+
+test("ownerSummary(): only a viewing Google confirmed counts: a reservation still waiting on its insert (no task) is no viewing (Codex T11 r13)", () => {
+  const db = openDb(':memory:');
+  const stats = createStats({ db, now });
+  const from = NOW - DAY_MS;
+  const to = NOW;
+  db.insertLead({ lead_id: 'LEAD-0901', created: from + 1000, updated: from + 1000, phone_e164: '966500000901', wa_jid: '966500000901@s.whatsapp.net', channel: 'whatsapp', match_method: 'ref', stage: 'new', inbox_state: 'in', name: 'Sara Example' });
+  const put = (id, task, status) => db.db.prepare(`INSERT INTO viewing_bookings (booking_id, lead_id, task_id, listing_id, start_ts, end_ts, event_id, status, client_told, created, updated)
+                 VALUES (?,'LEAD-0901',?,'BONA-W012',?,?,?,?,1,?,?)`).run(id, task, to + 3_600_000, to + 7_200_000, `ev-${id}`, status, from, from);
+  put('BK-HOLD', null, 'booked');
+  let s = stats.ownerSummary({ from, to, viewingsFrom: to, viewingsTo: to + 2 * DAY_MS });
+  assert.deepEqual([s.viewings.length, s.newClients.booked], [0, 0], 'a reservation is no viewing yet');
+  db.db.prepare("UPDATE viewing_bookings SET task_id = 'task-1' WHERE booking_id = 'BK-HOLD'").run();
+  s = stats.ownerSummary({ from, to, viewingsFrom: to, viewingsTo: to + 2 * DAY_MS });
+  assert.deepEqual([s.viewings.length, s.newClients.booked], [1, 1], 'once Google confirmed it');
   db.close();
 });
 

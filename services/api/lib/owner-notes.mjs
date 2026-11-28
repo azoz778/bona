@@ -610,7 +610,9 @@ function createLedgerNotes({
 
   function renderBooking(r) {
     const b = prep('SELECT * FROM viewing_bookings WHERE booking_id = ?').get(String(r.meta.booking ?? ''));
-    if (!b) return null;
+    // A viewing Google confirmed (its task is set) and still on: a note queued before a cancellation, or for a
+    // reservation whose insert failed, announces nothing (Codex T11 r13, with T10's lifecycle).
+    if (!b || !['booked', 'done'].includes(b.status) || b.task_id == null) return null;
     const lead = leadOf(b.lead_id);
     if (!lead || !auto(lead)) return null;
     let listing = null;

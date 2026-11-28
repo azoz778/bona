@@ -597,7 +597,7 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
     const a = num(from);
     const b = num(to);
     const fresh = all(`SELECT l.lead_id, l.channel,
-                         EXISTS (SELECT 1 FROM viewing_bookings v WHERE v.lead_id = l.lead_id AND v.status IN ('booked','done')) AS booked
+                         EXISTS (SELECT 1 FROM viewing_bookings v WHERE v.lead_id = l.lead_id AND v.status IN ('booked','done') AND v.task_id IS NOT NULL) AS booked
                        FROM leads l
                        WHERE (l.created >= ? AND l.created < ? AND ${ACQUIRED})
                           OR (l.inbox_via IN ('own_number','owner_test') AND l.inbox_since >= ? AND l.inbox_since < ?)`, a, b, a, b);
@@ -633,7 +633,7 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
                                    AND reason IN (${NOT_ANSWERED_REASONS.map(() => '?').join(',')})`, a, b, ...NOT_ANSWERED_REASONS)?.n);
     const viewings = all(`SELECT v.booking_id, v.lead_id, v.listing_id, v.start_ts, v.end_ts, l.name, l.inbox_via
                           FROM viewing_bookings v LEFT JOIN leads l ON l.lead_id = v.lead_id
-                          WHERE v.status = 'booked' AND v.start_ts >= ? AND v.start_ts < ? ORDER BY v.start_ts, v.booking_id`,
+                          WHERE v.status = 'booked' AND v.task_id IS NOT NULL AND v.start_ts >= ? AND v.start_ts < ? ORDER BY v.start_ts, v.booking_id`,
     num(viewingsFrom), num(viewingsTo));
     // The store's "Chats to check" rule (lib/inbox/store.mjs listCandidates): open, and no lead holds its ids.
     const notALead = `c.state = 'open' AND NOT EXISTS (
