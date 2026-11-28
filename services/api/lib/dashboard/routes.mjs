@@ -638,7 +638,13 @@ export function createDashboardRoutes({
     if (!limiters.verify.take(`dashverify:${ip}`).ok) return toLogin(res, withNext('?step=code&error=rate_limited', carried), 303);
     const parsed = await fieldsOf(req);
     if (!parsed.ok) return refuseBody(req, res, parsed);
-    const next = loginNext(parsed.fields.next) ?? carried;
+    // A form that names a return-to decides it: one that is not a deep link is none at all, and
+    // an earlier login's cookie must not take its place. Only a form without the field uses it.
+    const given = Object.hasOwn(parsed.fields, 'next');
+    const next = given ? loginNext(parsed.fields.next) : carried;
+    let dropped = false;
+    const dropNext = () => { if (!dropped) { dropped = true; clearNextCookie(req, res); } };
+    if (given && !next) dropNext();
 
     const ua = String(req.headers['user-agent'] ?? '').slice(0, 300) || null;
     const out = authenticator.verify(parsed.fields.code, ua, { nonce: authenticator.readTryCookie(req) });
@@ -647,12 +653,12 @@ export function createDashboardRoutes({
       // cookie that can only ever produce the same refusal.
       if (out.error === 'attempts' || out.error === 'used' || out.error === 'expired') {
         authenticator.clearTryCookie(res);
-        clearNextCookie(req, res);
+        dropNext();
       }
       return toLogin(res, withNext(`?step=code&error=${encodeURIComponent(out.error)}`, next), 303);
     }
     authenticator.clearTryCookie(res);
-    clearNextCookie(req, res);
+    dropNext();
     authenticator.setCookie(res, out.token);
     return redirect(res, next ?? '/dashboard');
   }
@@ -864,6 +870,7 @@ export function createDashboardRoutes({
       journey: statistics.leadJourney(leadId),
       tasks: tasksForLead(db, leadId),
       notifications: enquiryNotifications(db, leadId),
+      chatHidden: viaHidden(lead),
       saved: saved === 'stage' || saved === 'note' || saved === 'task' ? saved : null,
       error: knownError(error),
       now: now(),
@@ -1292,23 +1299,27 @@ export function createDashboardRoutes({
   /** A colleague's or a never-list number, however the lead row holds it (lib/team.mjs). */
   const excludedLead = (lead) => isExcludedLead(team, db, lead);
 
-  /** Rule 1: the one test every inbox read and write goes through first. */
-  const openChat = (lead) => Boolean(lead && lead.inbox_state === 'in' && (lead.wa_jid || lead.wa_lid) && !excludedLead(lead));
-
   /**
-   * The rollback guard on the list (DESIGN §3.2, critic round 2 #13): a chat that joined under
-   * the own-number rule (`inbox_via` set) is left off the Inbox list, its badge and its pulse
-   * while Bona's number is not checked (ownerTest.ownNumberOk() false), as ingest refuses its
-   * records then; it stays on the Leads page. Fails closed: no ownerTest, or one that throws,
-   * reads as not checked. A chat joined by proof (`inbox_via` NULL) is listed either way.
+   * The rollback guard (DESIGN §3.2 and §13.2 step 2, critic round 2 #13): a chat that joined
+   * under the own-number rule (`inbox_via` set) is not in the inbox while Bona's number is not
+   * checked (ownerTest.ownNumberOk() false), as ingest refuses its records then: never listed,
+   * opened, read from WhatsApp or answered (on the personal number, after a rollback). It stays
+   * on the Leads page. Fails closed: no ownerTest, or one that throws, reads as not checked. A
+   * chat joined by proof (`inbox_via` NULL) is untouched.
    */
   const ownNumberOk = () => {
     try { return ownerTest?.ownNumberOk?.() === true; } catch { return false; }
   };
+  /** True when the rollback guard keeps this lead out of the inbox right now. */
+  const viaHidden = (lead, checked = null) => Boolean(lead?.inbox_via) && !(checked ?? ownNumberOk());
+
+  /** Rule 1: the one test every inbox read and write goes through first (the rollback guard included). */
+  const openChat = (lead) => Boolean(lead && lead.inbox_state === 'in' && (lead.wa_jid || lead.wa_lid) && !excludedLead(lead) && !viaHidden(lead));
+
   /** The rows a list shows: rule 1's exclusions, then the rollback guard (asked once a list). */
   const listable = (rows) => {
     const checked = ownNumberOk();
-    return rows.filter((l) => !excludedLead(l) && (checked || !l.inbox_via));
+    return rows.filter((l) => !excludedLead(l) && !viaHidden(l, checked));
   };
 
   /**
@@ -1472,19 +1483,27 @@ export function createDashboardRoutes({
    * one ledger row a lead a day (`al:old_out_wrote:<lead>:<day>`). Listed from those rows of
    * the last 30 days, whatever became of the note: the lead id and the newest time only, the
    * name read from the lead row, never a word it wrote. Only a lead still `out` (Move brings it
-   * in, as today) and not a colleague's or a never-list number. A chat to check's row (a
-   * candidate, no lead) is not one: its chat is on the list above. A read that fails is an
-   * empty list, never a page that will not open.
+   * in, as today), in the SQL before the limit, and not a colleague's or a never-list number,
+   * read page by page until the list is full, so neither kind can crowd an eligible lead out.
+   * A dismissed chat to check that wrote (a candidate's row, no lead) is not listed: it has no
+   * lead to name or move, and it stays dismissed. A read that fails is an empty list, never a
+   * page that will not open.
    */
   function oldOutShown() {
     try {
-      oldOutStmt ??= db.db.prepare(`SELECT lead_id, MAX(created) AS ts FROM owner_notes
-        WHERE kind = 'alert' AND lead_id IS NOT NULL AND dedupe_key GLOB 'al:old_out_wrote:*' AND created >= ?
-        GROUP BY lead_id ORDER BY ts DESC, lead_id LIMIT ?`);
+      oldOutStmt ??= db.db.prepare(`SELECT n.lead_id AS lead_id, MAX(n.created) AS ts FROM owner_notes n
+        JOIN leads l ON l.lead_id = n.lead_id AND l.inbox_state = 'out'
+        WHERE n.kind = 'alert' AND n.dedupe_key GLOB 'al:old_out_wrote:*' AND n.created >= ?
+        GROUP BY n.lead_id ORDER BY ts DESC, n.lead_id LIMIT ? OFFSET ?`);
+      const since = now() - OLD_OUT_MS;
       const out = [];
-      for (const row of oldOutStmt.all(now() - OLD_OUT_MS, CANDIDATES_SHOWN)) {
-        const lead = db.getLead(row.lead_id);
-        if (lead && lead.inbox_state === 'out' && !excludedLead(lead)) out.push({ lead_id: lead.lead_id, name: lead.name, ts: row.ts });
+      for (let offset = 0; out.length < CANDIDATES_SHOWN; offset += CANDIDATES_SHOWN) {
+        const rows = oldOutStmt.all(since, CANDIDATES_SHOWN, offset);
+        for (const row of rows) {
+          const lead = db.getLead(row.lead_id);
+          if (lead && !excludedLead(lead) && out.length < CANDIDATES_SHOWN) out.push({ lead_id: lead.lead_id, name: lead.name, ts: row.ts });
+        }
+        if (rows.length < CANDIDATES_SHOWN) break;
       }
       return out;
     } catch (err) {

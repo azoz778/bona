@@ -1425,14 +1425,19 @@ const JOURNEY_LABEL = {
  * only the owner sees the word (D9); to a team member, anything not in the inbox is
  * simply not in it.
  */
-function inboxLabel(lead, owner) {
+function inboxLabel(lead, owner, chatHidden = false) {
+  if (lead.inbox_state === 'in' && chatHidden) return 'Joined on Bona’s own number — hidden from the inbox until Bona’s WhatsApp number is checked';
   if (lead.inbox_state === 'in') return lead.wa_jid || lead.wa_lid ? 'In the Bona inbox' : 'In the Bona inbox — no WhatsApp chat yet';
   if (owner && lead.inbox_state === 'unsure') return 'Unsure — waiting for your decision';
   if (owner && lead.inbox_state === 'out') return 'Not a client';
   return 'Not in the Bona inbox';
 }
 
-export function leadDetailPage({ lead, journey, tasks = [], notifications = [], saved = null, error = null, now = Date.now(), me = null }) {
+/**
+ * `chatHidden`: the rollback guard holds this lead's chat out of the inbox (routes.mjs `viaHidden`,
+ * DESIGN §13.2), so there is no "Open chat" and the inbox line says why.
+ */
+export function leadDetailPage({ lead, journey, tasks = [], notifications = [], saved = null, error = null, now = Date.now(), me = null, chatHidden = false }) {
   const field = (k, v) => `<dt>${esc(k)}</dt><dd dir="auto">${esc(v ?? '—')}</dd>`;
   const owner = me?.role === 'owner';
   const state = lead.inbox_state ?? null;
@@ -1440,7 +1445,7 @@ export function leadDetailPage({ lead, journey, tasks = [], notifications = [], 
   // Only a chat can be opened; only an owner moves a lead in or out (D9). "Not a
   // client" is offered while there is something to take out: in, or waiting on him.
   const inboxActions = [
-    state === 'in' && (lead.wa_jid || lead.wa_lid) ? `<a class="btn pri" href="${esc(`/dashboard/inbox/${leadPath}`)}">Open chat</a>` : '',
+    state === 'in' && (lead.wa_jid || lead.wa_lid) && !chatHidden ? `<a class="btn pri" href="${esc(`/dashboard/inbox/${leadPath}`)}">Open chat</a>` : '',
     owner && state !== 'in' ? postButton(`/v1/admin/inbox/${leadPath}/move`, 'Move to Bona inbox') : '',
     owner && (state === 'in' || state === 'unsure') ? postButton(`/v1/admin/inbox/${leadPath}/out`, 'Not a client') : '',
   ].join('');
@@ -1467,7 +1472,7 @@ ${banner}
     ${field('WhatsApp', lead.wa_jid ?? lead.wa_lid)}
     ${field('Language', lead.language)}
     ${field('Channel', lead.channel)}
-    ${field('Inbox', inboxLabel(lead, owner))}
+    ${field('Inbox', inboxLabel(lead, owner, chatHidden === true))}
     ${field('First reply', responded)}
   </dl></div>
   <div class="card"><h3>Attribution</h3><dl class="fields">
@@ -1492,7 +1497,7 @@ ${banner}
 </div>
 
 <h2>Bona inbox</h2>
-<p class="sub">${esc(inboxLabel(lead, owner))}</p>
+<p class="sub">${esc(inboxLabel(lead, owner, chatHidden === true))}</p>
 ${inboxActions ? `<div class="acts" style="flex-wrap:wrap">${inboxActions}</div>` : ''}
 
 ${leadTasksPanel(lead.lead_id, tasks, owner, notifications)}

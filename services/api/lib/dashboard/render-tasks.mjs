@@ -20,7 +20,7 @@ const notifyLabel = s => typeof s==='string'&&Object.hasOwn(NOTIFY_LABELS,s)?NOT
  * §8.4). Its status (Cancel) stays the owner's.
  */
 const dueField = t => t.details?.booking_id
- ? `<p class="muted">Booked on the calendar for ${esc(date(t.due_ts))}. To change the time, move it in Google Calendar; Bona follows the calendar.</p>`
+ ? `<p class="muted">Booked on the calendar${t.due_ts ? ` for ${esc(date(t.due_ts))}` : ''}. To change the time, move it in Google Calendar; Bona follows the calendar.</p>`
  : '<label>Date and time (Riyadh, UTC+3; leave blank to keep) <input type="datetime-local" name="due_at"></label>';
 export function taskQueue(tasks=[],{page=0,total=tasks.length,limit=100}={}) {
  if(!total)return '<p class="muted">No open handoffs, follow-ups or viewing requests.</p>';

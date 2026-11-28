@@ -2374,6 +2374,27 @@ test('T08-2 the cookie alone carries next through the code step when the form lo
   });
 });
 
+test('T08-2 an explicitly given next that is not a return-to wins over an earlier lead\'s cookie: /dashboard, and the cookie is cleared', async () => {
+  await withDash({}, async (h) => {
+    const { db, postForm, cookieValue, cookiesOf } = h;
+    const id = seedLead(db, { phone: '966500000080', inboxState: 'in' });
+    const asked = await codeWith(h, { next: `/dashboard/leads/${id}` });
+    const browser = `bona_dash_try=${asked.nonce}; bona_dash_next=${cookieValue(asked.res, 'bona_dash_next')}`;
+    const cleared = (res) => cookiesOf(res).some((c) => c.startsWith('bona_dash_next=') && c.includes('Max-Age=0'));
+    for (const next of ['//evil.example', '']) {
+      const wrong = String((Number(asked.code) + 1) % 1_000_000).padStart(6, '0');
+      const missed = await postForm('/dashboard/login/verify', { _dash: '1', code: wrong, next }, { cookie: browser });
+      assert.equal(missed.headers.get('location'), '/dashboard/login?step=code&error=bad_code', `${JSON.stringify(next)}: not the cookie's lead`);
+      assert.ok(cleared(missed), `${JSON.stringify(next)}: the cookie goes`);
+    }
+    const verified = await postForm('/dashboard/login/verify', { _dash: '1', code: asked.code, next: 'https://evil.example' }, { cookie: browser });
+    assert.equal(verified.status, 303);
+    assert.equal(verified.headers.get('location'), '/dashboard', 'the earlier lead is not opened');
+    assert.ok(cleared(verified));
+    assert.equal(cookiesOf(verified).filter((c) => c.startsWith('bona_dash_next=')).length, 1, 'cleared once');
+  });
+});
+
 /** An inbox chat (DESIGN §3.1 rule 1: `in`, with a jid) for the T08 inbox tests. */
 function chatLead(db, { id, name, phone, ...over }) {
   db.insertLead({
@@ -2479,6 +2500,18 @@ test('T08-4 a calendar-booked viewing: moving its time is refused with "move it 
   }, { hooks: { onTaskChange: (task, patch) => { calls.push([task.task_id, patch]); } } });
 });
 
+test('T08-4 a booked viewing with no time on its task still says to move it in Google Calendar, never "for Not scheduled"', async () => {
+  await withTeamRoutes(async ({ db, get, login }) => {
+    const leadId = seedLead(db, { phone: '966500000079', inboxState: 'in' });
+    const task = addTask(db, { leadId, kind: 'viewing', source: 'dana', details: {}, dueTs: null });
+    db.db.prepare('UPDATE lead_tasks SET details = ? WHERE task_id = ?').run(JSON.stringify({ booking_id: 'BKG-t08b', listing_id: 'BONA-W012' }), task.task_id);
+    const page = await (await get(`/dashboard/leads/${leadId}`, { cookie: await login(OWNER_PHONE) })).text();
+    const form = page.slice(page.indexOf(`value="${task.task_id}"`), page.indexOf('</form>', page.indexOf(`value="${task.task_id}"`)));
+    assert.match(form, /Booked on the calendar\. To change the time, move it in Google Calendar; Bona follows the calendar\./);
+    assert.doesNotMatch(form, /Not scheduled|name="due_at"/);
+  });
+});
+
 test('T08-5 the inbox list hides a chat with inbox_via set while Bona\'s number is not checked; a chat joined by proof is listed either way; the lead page stays', async () => {
   let numberOk = false;
   let inbox;
@@ -2517,6 +2550,55 @@ test('T08-5 the inbox list hides a chat with inbox_via set while Bona\'s number 
     inbox = createInboxStore(db);
     return { inbox, ownerTest: { ownNumberOk() { return typeof numberOk === 'function' ? numberOk() : numberOk; } } };
   });
+});
+
+test('T08-5 while Bona\'s number is not checked an inbox_via chat cannot be opened, read from WhatsApp or answered (DESIGN §13.2); once checked, all of it works', async () => {
+  let numberOk = false;
+  const refreshes = [];
+  const replies = [];
+  await withTeamRoutes(async ({ db, base, get, postForm, login }) => {
+    const via = chatLead(db, { id: 'LEAD-20261128-aaaa0098', name: 'Own Number Client', phone: '966500000098', inbox_via: 'own_number', dana_off: 1 });
+    const proof = chatLead(db, { id: 'LEAD-20261128-aaaa0099', name: 'Proof Client', phone: '966500000099' });
+    const owner = await login(OWNER_PHONE);
+    const staff = await login(STAFF_PHONE);
+    const json = (p, body, cookie) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: cookie }, body: JSON.stringify(body) });
+    const openChatLink = new RegExp(`href="/dashboard/inbox/${via}"`);
+
+    for (const cookie of [owner, staff]) {
+      const thread = await get(`/dashboard/inbox/${via}`, { cookie });
+      assert.equal(thread.status, 404, 'the thread answers not-in-inbox');
+      assert.match(await thread.text(), /That chat is not in the Bona inbox/);
+      assert.equal((await postForm(`/v1/admin/inbox/${via}/reply`, { _dash: '1', text: 'hello', send_id: 'a'.repeat(24), seen_rev: '0' }, { cookie })).status, 404, 'a reply is refused');
+      assert.equal((await json(`/v1/admin/inbox/${via}/handler`, { user_id: '' }, cookie)).status, 404);
+      assert.equal((await json(`/v1/admin/inbox/${via}/dana`, { dana_off: '0' }, cookie)).status, 404);
+      assert.equal((await json(`/v1/admin/inbox/${via}/answer_again`, {}, cookie)).status, 404);
+      assert.equal((await get(`/v1/admin/inbox/pulse?lead=${via}`, { cookie })).status, 404, 'its pulse says nothing either');
+    }
+    assert.deepEqual([refreshes, replies], [[], []], 'no Evolution read and nothing sent');
+    assert.equal(db.getLead(via).dana_off, 1, 'nothing written');
+    const leadPage = await (await get(`/dashboard/leads/${via}`, { cookie: owner })).text();
+    assert.doesNotMatch(leadPage, openChatLink, 'the lead page offers no "Open chat" for it');
+    assert.match(leadPage, /hidden from the inbox until Bona’s WhatsApp number is checked/);
+    // A chat joined by proof is untouched by the guard.
+    assert.equal((await get(`/dashboard/inbox/${proof}`, { cookie: staff })).status, 200);
+    assert.match(await (await get(`/dashboard/leads/${proof}`, { cookie: owner })).text(), new RegExp(`href="/dashboard/inbox/${proof}"`));
+
+    numberOk = true;
+    refreshes.length = 0;
+    assert.equal((await get(`/dashboard/inbox/${via}`, { cookie: staff })).status, 200, 'checked: the thread opens');
+    assert.deepEqual(refreshes, [via], 'and is read from WhatsApp as any chat is');
+    const sent = await postForm(`/v1/admin/inbox/${via}/reply`, { _dash: '1', text: 'hello', send_id: 'b'.repeat(24), seen_rev: '0' }, { cookie: staff });
+    assert.equal(sent.headers.get('location'), `/dashboard/inbox/${via}?ok=sent`);
+    assert.equal(replies.length, 1);
+    assert.equal((await get(`/v1/admin/inbox/pulse?lead=${via}`, { cookie: staff })).status, 200);
+    assert.equal((await json(`/v1/admin/inbox/${via}/answer_again`, {}, staff)).status, 200);
+    assert.match(await (await get(`/dashboard/leads/${via}`, { cookie: owner })).text(), openChatLink);
+  }, ({ db }) => ({
+    inbox: createInboxStore(db),
+    ownerTest: { ownNumberOk: () => numberOk },
+    backfill: { refresh: async (lead) => { refreshes.push(lead.lead_id); } },
+    sender: { reply: async (o) => { replies.push(o); return { ok: true, sendId: o.sendId }; } },
+  }));
 });
 
 test('T08-5 without an ownerTest the routes fail closed: an inbox_via chat is not listed, a proof chat is', async () => {
@@ -2573,6 +2655,28 @@ test('T08-6 "Chats to check" lists the old out leads that wrote in the last 30 d
     assert.equal(db.getLead(old).inbox_state, 'in');
     assert.doesNotMatch(await (await get('/dashboard/inbox?tab=unsure', { cookie })).text(), /Old Out Client/);
   }, ({ db }) => { inbox = createInboxStore(db); return { inbox }; });
+});
+
+test('T08-6 "Chats to check" finds an eligible old out lead behind 200 newer rows that are no longer out, or are a never-list number', async () => {
+  for (const crowd of ['moved back in', 'never list']) {
+    let inbox;
+    await withTeamRoutes(async ({ db, team, get, login }) => {
+      const t = Date.now();
+      const eligible = chatLead(db, { id: 'LEAD-20261128-bbbb0000', name: 'Eligible Old Client', phone: '966500001000', inbox_state: 'out' });
+      oldOutRow(db, { leadId: eligible, key: `al:old_out_wrote:${eligible}:2026-11-20`, created: t - 8 * 86_400_000 });
+      for (let i = 1; i <= 201; i += 1) {
+        const n = String(i).padStart(4, '0');
+        const phone = `96650000${1000 + i}`;
+        const id = chatLead(db, { id: `LEAD-20261128-cccc${n}`, name: `Crowd ${n}`, phone, inbox_state: crowd === 'moved back in' ? 'in' : 'out' });
+        if (crowd === 'never list') team.addNever({ phone });
+        oldOutRow(db, { leadId: id, key: `al:old_out_wrote:${id}:2026-11-28`, created: t - 3_600_000 - i });
+      }
+      const html = await (await get('/dashboard/inbox?tab=unsure', { cookie: await login(OWNER_PHONE) })).text();
+      assert.match(html, /<bdi>Eligible Old Client<\/bdi>/, `${crowd}: the eligible lead is still listed`);
+      assert.doesNotMatch(html, /Crowd \d{4}/, `${crowd}: none of the crowd is`);
+      assert.match(html, /Unsure · 1<\/a>/);
+    }, ({ db }) => { inbox = createInboxStore(db); return { inbox }; });
+  }
 });
 
 test('T08-7 an enquiry whose note was skipped (a merge into an existing contact) reads "No note: an existing contact" on the lead page', async () => {
