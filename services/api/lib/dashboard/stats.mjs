@@ -573,9 +573,10 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
    *     owner's test (a returning lead counts once it joins, G13); by channel (non-zero only),
    *     and how many of them hold a viewing (`booked` or `done`).
    *   - waiting: inbox chats flagged for a person right now.
-   *   - ai: the assistant's TURNS in the window (one per chat and `covers_ts`, like
-   *     store.countDanaTurns), its hand-overs, and the median time from the client's message to
-   *     its first bubble.
+   *   - ai: the assistant's ANSWERS in the window (one per chat and `covers_ts`, grouped like
+   *     store.countDanaTurns but never a hand-over or holding line, nor a send that may not have
+   *     gone), its hand-overs, and the median time from the client's message to the first answer
+   *     bubble WhatsApp took.
    *   - notAnswered: chats it handed over in the window because it could not answer at all (an
    *     outage, a limit, a message left too long).
    *   - viewings: booked rows with the lead's name and how it joined.
@@ -598,10 +599,28 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
       const c = channelBucket(r.channel);
       byChannel[c] = (byChannel[c] ?? 0) + 1;
     }
-    // One row per turn: a chat (or a purged chat's jid) and the client message it answered.
-    const turns = all(`SELECT MIN(created) - covers_ts AS d, covers_ts FROM wa_outbox
-                       WHERE sender_kind = 'dana' AND status <> 'failed' AND created >= ? AND created < ?
-                       GROUP BY COALESCE(lead_id, 'jid:' || jid), COALESCE(covers_ts, send_id)`, a, b);
+    // One row per ANSWER: a chat (or a purged chat's jid) and the client message it answered. A
+    // hand-over or holding line is a `dana` row WhatsApp takes like an answer, so the row alone never
+    // says so: the evidence is lib/owner-notes.mjs firstAnswerSince's (Codex r9). Only a row WhatsApp
+    // took (`accepted`; a pending or uncertain one may never have gone), and either
+    //   - one the reply guard passed (`guarded = 1`: a brain turn's bubbles only, never a line code
+    //     sends), or
+    //   - the send whose taking stamped the lead's `first_reply_ts` (lib/dana-wa.mjs stamps it for an
+    //     answer only, never the hand-over line): the lead's last `dana` row taken by then, unless a
+    //     person had written by then (lib/wa-send.mjs and the poller stamp the same column).
+    // Its time is when WhatsApp took it (`updated`, written as it turns `accepted`, never again).
+    // store.countDanaTurns stays as it is: the pacing cap must count every send that may have gone.
+    const turns = all(`SELECT MIN(o.updated) - o.covers_ts AS d, o.covers_ts FROM wa_outbox o
+                       LEFT JOIN leads l ON l.lead_id = o.lead_id
+                       WHERE o.sender_kind = 'dana' AND o.status = 'accepted' AND o.created >= ? AND o.created < ?
+                         AND (o.guarded = 1 OR (l.first_reply_ts IS NOT NULL
+                           AND o.send_id = (SELECT x.send_id FROM wa_outbox x
+                                            WHERE x.lead_id = o.lead_id AND x.sender_kind = 'dana' AND x.status = 'accepted'
+                                              AND x.updated <= l.first_reply_ts
+                                            ORDER BY x.updated DESC, x.rowid DESC LIMIT 1)
+                           AND NOT EXISTS (SELECT 1 FROM wa_messages m WHERE m.lead_id = o.lead_id AND m.direction = 'out'
+                                             AND m.sender_kind <> 'dana' AND m.ts <= l.first_reply_ts)))
+                       GROUP BY COALESCE(o.lead_id, 'jid:' || o.jid), COALESCE(o.covers_ts, o.send_id)`, a, b);
     const replies = turns.filter((t) => t.covers_ts !== null && num(t.d) >= 0).map((t) => num(t.d));
     const handovers = num(one(`SELECT COUNT(*) AS n FROM lead_tasks WHERE kind = 'handoff' AND source = 'dana' AND created >= ? AND created < ?`, a, b)?.n);
     const notAnswered = num(one(`SELECT COUNT(DISTINCT lead_id) AS n FROM lead_tasks

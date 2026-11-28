@@ -7,6 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../lib/db.mjs';
 import { createStats, dayKey, median, percentile, licenceFlags, expiryMs, platformOf, DAY_MS } from '../lib/dashboard/stats.mjs';
+import { createInboxStore } from '../lib/inbox/store.mjs';
 
 const NOW = 1_757_200_000_000;
 const now = () => NOW;
@@ -513,9 +514,10 @@ test('ownerSummary(): new clients by channel, waiting chats, the assistant\'s tu
   put('LEAD-0008', { needs_human: 1, inbox_state: 'out' });
   const sends = [['LEAD-0001', from + 10_000, from + 30_000], ['LEAD-0001', from + 10_000, from + 31_000], ['LEAD-0005', from + 50_000, from + 60_000],
     ['LEAD-0005', to - 1000, to + 1000]];
+  // The assistant's answers, as a brain turn leaves them: bubbles the reply guard passed (`guarded = 1`), taken by WhatsApp.
   for (const [i, [lead, covers, created]] of sends.entries()) {
-    db.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(`SND-${i}`, lead, 'x@s.whatsapp.net', 't', null, 'dana', 'accepted', null, created, created, null, covers);
+    db.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts, guarded)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`).run(`SND-${i}`, lead, 'x@s.whatsapp.net', 't', null, 'dana', 'accepted', null, created, created, null, covers);
   }
   db.db.prepare(`INSERT INTO viewing_bookings (booking_id, lead_id, task_id, listing_id, start_ts, end_ts, event_id, status, client_told, created, updated)
                  VALUES ('BK-1','LEAD-0001',NULL,'BONA-W012',?,?,'ev1','booked',1,?,?)`).run(to + 3_600_000, to + 7_200_000, from, from);
@@ -535,5 +537,58 @@ test('ownerSummary(): new clients by channel, waiting chats, the assistant\'s tu
   assert.equal(s.candidatesWithPhone, 1);
   assert.deepEqual(s.heldOver, { total: 0, byKind: {} });
   assert.equal(s.oldOutWrote, 0);
+  db.close();
+});
+
+test('ownerSummary(): only the assistant\'s ANSWERS count, and only their times make the median: never a hand-over or holding line, a pending or uncertain send, or a reply clock a person stamped (Codex r9)', () => {
+  const db = openDb(':memory:');
+  const stats = createStats({ db, now });
+  const from = NOW - DAY_MS;
+  const to = NOW;
+  const HOLD = 'Thank you — a member of the Bona team will reply to you shortly.';
+  const jidOf = (id) => `96650000${id.slice(-4)}@s.whatsapp.net`;
+  const put = (id, over = {}) => db.insertLead({
+    lead_id: id, created: from + 1000, updated: from + 1000, phone_e164: `96650000${id.slice(-4)}`, wa_jid: jidOf(id),
+    channel: 'whatsapp', match_method: 'ref', stage: 'new', inbox_state: 'in', ...over,
+  });
+  let n = 0;
+  const send = (lead, covers, created, { status = 'accepted', guarded = 0, updated = created, text = 'Of course.' } = {}) => {
+    n += 1;
+    db.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts, guarded)
+                   VALUES (?,?,?,?,NULL,'dana',?,NULL,?,?,NULL,?,?)`).run(`SND-R9-${n}`, lead, jidOf(lead), text, status, created, updated, covers, guarded);
+  };
+  // 1. A brain turn the reply guard passed, two bubbles: ONE answer, 20 s from the client's message to the first bubble WhatsApp took.
+  put('LEAD-0101');
+  send('LEAD-0101', from + 10_000, from + 29_000, { guarded: 1, updated: from + 30_000 });
+  send('LEAD-0101', from + 10_000, from + 31_000, { guarded: 1, updated: from + 32_000 });
+  // 2. The AI was out: a holding line at +12 s; then its first real answer (unguarded, as before T12) to the next message, taken at
+  //    +11 s, which stamped the lead's reply clock (lib/dana-wa.mjs `send(…, { answer: true })`).
+  put('LEAD-0102', { first_reply_ts: from + 141_000 });
+  send('LEAD-0102', from + 100_000, from + 112_000, { text: HOLD });
+  send('LEAD-0102', from + 130_000, from + 140_000, { updated: from + 141_000 });
+  // 3. Still in flight, and never confirmed: no answer yet, guard or not.
+  put('LEAD-0103');
+  send('LEAD-0103', from + 200_000, from + 201_000, { status: 'pending', guarded: 1 });
+  send('LEAD-0103', from + 300_000, from + 302_000, { status: 'uncertain', guarded: 1 });
+  // 4. A holding line, then a person wrote: the reply clock is the person's (lib/wa-send.mjs stamps it too), not the AI's.
+  put('LEAD-0104', { first_reply_ts: from + 460_000 });
+  send('LEAD-0104', from + 400_000, from + 405_000, { text: HOLD });
+  db.db.prepare(`INSERT INTO wa_messages (key_id, lead_id, jid, direction, sender_kind, text, ts, status)
+                 VALUES ('OUT-R9-0104', 'LEAD-0104', ?, 'out', 'staff', 'Hello, this is the Bona team.', ?, 'sent')`).run(jidOf('LEAD-0104'), from + 459_000);
+  // 5. A holding line and the answer after recovery cover the same message: one answer, at the answer's 30 s, not the line's 5 s.
+  put('LEAD-0105');
+  send('LEAD-0105', from + 500_000, from + 505_000, { text: HOLD });
+  send('LEAD-0105', from + 500_000, from + 530_000, { guarded: 1 });
+  // 6. A returning lead (G13): an earlier conversation stamped its reply clock, so today's holding line is no answer.
+  put('LEAD-0106', { first_reply_ts: from - 5 * DAY_MS });
+  send('LEAD-0106', from + 600_000, from + 603_000, { text: HOLD });
+  // 7. A failed send went nowhere.
+  put('LEAD-0107');
+  send('LEAD-0107', from + 700_000, from + 701_000, { status: 'failed', guarded: 1 });
+
+  const s = stats.ownerSummary({ from, to });
+  assert.deepEqual(s.ai, { answers: 3, handovers: 0, medianReplyMs: 20_000 }, 'answers 1, 2 and 5: median of 11 s, 20 s and 30 s');
+  // The pacing cap is not this rule: it still counts every turn that may have gone (8: all but the failed one).
+  assert.equal(createInboxStore(db, { now }).countDanaTurns({ sinceTs: from }), 8);
   db.close();
 });

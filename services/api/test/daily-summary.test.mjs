@@ -59,12 +59,22 @@ function booking(h, l, start, listingId) {
   h.db.db.prepare(`INSERT INTO viewing_bookings (booking_id, lead_id, task_id, listing_id, start_ts, end_ts, event_id, status, client_told, created, updated)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(id, l.lead_id, null, listingId, start, start + 60 * MIN, `ev${start}`, 'booked', 1, start - 86_400_000, start - 86_400_000);
 }
-function danaTurn(h, l, coversTs, ...delays) {
-  for (const [i, d] of delays.entries()) {
-    h.at(coversTs + d);
-    h.inbox.insertOutbox({ send_id: `SND-${l.lead_id.slice(-4)}-${coversTs}-${i}`, lead_id: l.lead_id, jid: l.wa_jid, text: 'Of course.', sender_kind: 'dana', covers_ts: coversTs });
-  }
+/** One `dana` outbox row, `delay` after the client message it covers. */
+function danaSend(h, l, coversTs, delay, { status = 'accepted', guarded = 1, text = 'Of course.' } = {}) {
+  h.at(coversTs + delay);
+  const sendId = `SND-${l.lead_id.slice(-4)}-${coversTs}-${delay}`;
+  h.inbox.insertOutbox({ send_id: sendId, lead_id: l.lead_id, jid: l.wa_jid, text, sender_kind: 'dana', covers_ts: coversTs, status });
+  if (guarded) h.db.db.prepare('UPDATE wa_outbox SET guarded = 1 WHERE send_id = ?').run(sendId);
 }
+/** The assistant's answer, as a brain turn leaves it: bubbles the reply guard passed (`guarded = 1`), each taken by WhatsApp. */
+function danaTurn(h, l, coversTs, ...delays) {
+  for (const d of delays) danaSend(h, l, coversTs, d);
+}
+/**
+ * A hand-over or holding line (lib/dana-wa.mjs `handover`, the outage's one line): a `dana` row WhatsApp took, like an answer,
+ * but never the reply guard's and never the reply clock's: the client still waits for a person.
+ */
+const holdingLine = (h, l, coversTs, delay) => danaSend(h, l, coversTs, delay, { guarded: 0, text: 'Thank you — a member of the Bona team will reply to you shortly.' });
 const healthy = {
   brain: { configured: true, health: () => ({ configured: true, ok: true, backup: false }), ops: () => ({ backupTurns: 0 }) },
   waLink: { health: () => ({ linkOk: true, identityOk: true }) },
@@ -168,6 +178,10 @@ function layoutFixture(h) {
   danaTurn(h, sara, inPeriod(12), 21_000, 25_000);
   danaTurn(h, ali, inPeriod(18), 40_000);
   danaTurn(h, ali, riyadh(2026, 11, 30, 8, 30), 5_000); // after the period
+  // No answers, each (Codex r9): the hand-over line, a send still in flight, one never confirmed.
+  holdingLine(h, waiting, inPeriod(19), 2_000);
+  danaSend(h, sara, inPeriod(21), 3_000, { status: 'pending' });
+  danaSend(h, ali, inPeriod(21, 30), 4_000, { status: 'uncertain' });
   ensureHandoff(h.db, { leadId: waiting.lead_id, source: 'dana', reason: 'missed', now: inPeriod(19) });
   ensureHandoff(h.db, { leadId: mohammed.lead_id, source: 'form', reason: 'Enquiry received', now: inPeriod(9) });
   h.inbox.noteCandidate({ lid: '123456789012345@lid', name: 'Ahmed Example', ts: inPeriod(22, 10), words: ['villa'], dir: 'in' });
@@ -191,6 +205,21 @@ test('the layout, one screen, on fixtures with example names (own_inbox on): eve
   ].join('\n'));
   assert.doesNotMatch(h.sent[0], /Email:/);
   assert.doesNotMatch(h.sent[0], /Dana/);
+});
+
+test('an AI outage day: twenty holding lines are no answers → "AI: 0 answers", no median, and the twenty chats are "Not answered by the AI" (Codex r9)', () => {
+  const h = harness({ settings: { own_inbox: '1' } });
+  for (let i = 0; i < 20; i += 1) {
+    const at = riyadh(2026, 11, 29, 10, i);
+    const l = lead(h, { name: `Outage Example ${i + 1}`, created: at, inbox_since: at });
+    holdingLine(h, l, at, 4_000);
+    ensureHandoff(h.db, { leadId: l.lead_id, source: 'dana', reason: 'brain', now: at + 4_000 });
+  }
+  h.at(MON_0800);
+  const lines = renderSummary(h.deps, { day: '2026-11-30', days: 1 }, MON_0800).split('\n');
+  assert.ok(lines.includes('AI: 0 answers · 20 hand-overs'), lines.join('\n'));
+  assert.ok(lines.includes(`Not answered by the AI: 20 (outage/limit) → ${INBOX}`), lines.join('\n'));
+  assert.ok(!lines.some((l) => /median reply/.test(l)), 'no reply time made of holding lines');
 });
 
 test('a quiet day: zeros and "none", no empty lines', () => {
