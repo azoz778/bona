@@ -25,8 +25,9 @@
  * the client), the function calls (each with its arguments parsed: a JSON object or the whole response is
  * `bad_response`), a refusal flag, the usage token counts and the output items. Anything but `status:'completed'` is
  * `bad_response`, except an `incomplete` one stopped by the content filter, which is a refusal (never retried on
- * another model), and a `failed` one whose error code puts the fault on OpenAI's side, which is `down` as a 5xx
- * (errors.mjs codeFromFailed). Cut off at max_output_tokens is `bad_response` (the backup model's case).
+ * another model), and a `failed` one whose error code puts the fault on OpenAI's side, which is `down` as a 5xx or
+ * `rate` as a 429 (errors.mjs codeFromFailed). Cut off at max_output_tokens is `bad_response` (the backup model's
+ * case).
  */
 import { createHash } from 'node:crypto';
 import { codeFromFailed } from './errors.mjs';
@@ -123,12 +124,12 @@ const BAD = Object.freeze({ ok: false, code: 'bad_response' });
 /**
  * @param {unknown} json  the parsed 200 body
  * @returns {{ ok: true, text: string, toolCalls: {id, name, arguments, args}[], refusal: boolean, finish: string,
- *             usage: object, output: object[] } | { ok: false, code: 'bad_response'|'down' }}
+ *             usage: object, output: object[] } | { ok: false, code: 'bad_response'|'down'|'rate' }}
  *   `id` of a tool call is its `call_id` (what the function_call_output answers); `output` is the response's items,
  *   for assistantMessage.
  */
 export function parseCompletion(json) {
-  // A 200 that failed: `down` when OpenAI's own side failed (server_error and kin), else bad_response.
+  // A 200 that failed: `down` or `rate` when OpenAI's own side failed (errors.mjs FAILED_CODES), else bad_response.
   if (json && typeof json === 'object' && json.status === 'failed') return { ok: false, code: codeFromFailed(json.error) };
   if (!json || typeof json !== 'object' || !Array.isArray(json.output) || json.error != null) return BAD;
   if (json.status === 'incomplete') {

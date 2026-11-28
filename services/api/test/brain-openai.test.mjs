@@ -14,7 +14,7 @@ import {
   requestBody, parseCompletion, safetyIdentifier, cacheKey, retryAfterMs, assistantMessage, usageOf, MAX_COMPLETION_TOKENS, MAX_OUTPUT_TOKENS, REASONING_EFFORT,
   RESPONSES_PATH, MODELS_PATH,
 } from '../lib/brain/openai.mjs';
-import { CODES, codeFromHttp, codeFromThrown, codeFromFailed, BACKUP_CODES, OUT_CODES, PROVIDER_FAILURE_CODES } from '../lib/brain/errors.mjs';
+import { CODES, codeFromHttp, codeFromThrown, codeFromFailed, BACKUP_CODES, OUT_CODES, FAILED_CODES } from '../lib/brain/errors.mjs';
 import { PROVIDERS, PROVIDER_HOSTS, DEFAULT_BASE_URL, providerFor } from '../lib/brain/providers.mjs';
 import { PRICES, costMicroUsd } from '../lib/brain/prices.mjs';
 import { TOOL_SCHEMAS, ROUTE_TOOLS, toolsFor, routeToolNames } from '../lib/brain/tool-schemas.mjs';
@@ -209,16 +209,18 @@ test('the one error enum (DESIGN-brain §4.1): HTTP status and thrown errors map
   assert.equal(retryAfterMs(new Headers({ 'retry-after': 'soon' })), null);
 });
 
-test('T25b r2 (Codex P2): a 200 with status failed is down when the fault is on OpenAI\'s side (server_error, rate_limit_exceeded, vector_store_timeout), else bad_response', () => {
-  assert.deepEqual([...PROVIDER_FAILURE_CODES].sort(), ['rate_limit_exceeded', 'server_error', 'vector_store_timeout']);
-  for (const code of ['server_error', 'rate_limit_exceeded', 'vector_store_timeout', 'SERVER_ERROR']) {
-    assert.equal(codeFromFailed({ code, message: 'The model failed to generate a response.' }), 'down', code);
-    assert.deepEqual(parseCompletion(response([], { status: 'failed', error: { code, message: 'x' } })), { ok: false, code: 'down' }, code);
+test('T25b r2 (Codex P2): a 200 with status failed on OpenAI\'s side is down (server_error, vector_store_timeout) or rate (rate_limit_exceeded, as a 429), else bad_response', () => {
+  assert.deepEqual(FAILED_CODES, { server_error: 'down', vector_store_timeout: 'down', rate_limit_exceeded: 'rate' });
+  assert.ok(Object.isFrozen(FAILED_CODES));
+  for (const [code, want] of [['server_error', 'down'], ['vector_store_timeout', 'down'], ['SERVER_ERROR', 'down'], ['rate_limit_exceeded', 'rate'], ['Rate_Limit_Exceeded', 'rate']]) {
+    assert.equal(codeFromFailed({ code, message: 'The model failed to generate a response.' }), want, code);
+    assert.deepEqual(parseCompletion(response([], { status: 'failed', error: { code, message: 'x' } })), { ok: false, code: want }, code);
   }
+  assert.equal(codeFromFailed({ code: 'rate_limit_exceeded' }), codeFromHttp(429, { error: { type: 'rate_limit_exceeded' } }), 'the same code as an HTTP 429');
   assert.deepEqual(parseCompletion(response(null, { status: 'failed', error: { code: 'server_error' } })), { ok: false, code: 'down' }, 'a failed body needs no output');
   // Request-side codes (the prompt, an image) and anything unknown or missing stay bad_response.
   for (const err of [{ code: 'invalid_prompt' }, { code: 'invalid_image' }, { code: 'image_content_policy_violation' }, { code: 'failed_to_download_image' },
-    { code: 'a_new_code' }, { code: null }, {}, null, 'server_error']) {
+    { code: 'a_new_code' }, { code: 'toString' }, { code: 'constructor' }, { code: null }, {}, null, 'server_error']) {
     assert.equal(codeFromFailed(err), 'bad_response', JSON.stringify(err));
     assert.deepEqual(parseCompletion(response([], { status: 'failed', error: err })), BAD, JSON.stringify(err));
   }

@@ -997,9 +997,9 @@ test('a turn that throws during the half-open trial frees the trial: the next tu
   assert.equal(brain.ops().breaker, false, 'the trial worked: closed');
 });
 
-const failed200 = (code) => ({ status: 200, json: responseJson([], { status: 'failed', error: { code, message: 'The model failed to generate a response.' } }) });
+const failed200 = (code, headers = {}) => ({ status: 200, json: responseJson([], { status: 'failed', error: { code, message: 'The model failed to generate a response.' } }), headers });
 
-test('T25b r2 (Codex P2): a 200 that failed on the provider side is down: three in 10 min open the breaker exactly as three 5xx do, with no brain_bug', async () => {
+test('T25b r2 (Codex P2): a 200 that failed on the provider side (server_error, vector_store_timeout) is down: three in 10 min open the breaker exactly as three 5xx do, with no brain_bug', async () => {
   const run = async (script) => {
     const h = harness({ backupMode: 'handover', script: [...script, reply('never')] });
     const codes = [];
@@ -1009,13 +1009,14 @@ test('T25b r2 (Codex P2): a 200 that failed on the provider side is down: three 
     return { codes, calls: n, blocked, noCall: h.calls.length === n, alerts: h.alerts, ok: h.brain.health().ok, ops: { breaker: h.brain.ops().breaker, errors: h.brain.ops().errors } };
   };
   const fivexx = await run([http(500, {}), http(502, {}), http(503, {})]);
-  const failed = await run([failed200('server_error'), failed200('rate_limit_exceeded'), failed200('vector_store_timeout')]);
-  assert.deepEqual(failed, fivexx, 'the same path as three 5xx');
+  const failed = await run([failed200('server_error'), failed200('server_error'), failed200('server_error')]);
+  assert.deepEqual(failed, fivexx, 'three server_error bodies: the same path as three 5xx');
   assert.deepEqual(failed.codes, ['down', 'down', 'down']);
   assert.deepEqual(failed.blocked, { ok: false, code: 'down' });
   assert.equal(failed.noCall, true, 'the breaker is open: no call');
   assert.deepEqual(failed.alerts, [{ code: 'brain_out', meta: { code: 'down' } }], 'the outage alert, never brain_bug');
   assert.equal(failed.ops.breaker, true);
+  assert.deepEqual(await run([failed200('vector_store_timeout'), failed200('server_error'), failed200('vector_store_timeout')]), fivexx, 'vector_store_timeout too');
   const backup = harness({ script: [failed200('server_error'), reply('From the backup.')] });
   const r = await backup.brain.turn(turnArgs());
   assert.equal(r.ok && r.backup, true, 'it goes to the backup model, as a 5xx does');
@@ -1027,6 +1028,47 @@ test('T25b r2 (Codex P2): a 200 that failed on the provider side is down: three 
   assert.deepEqual(req.alerts, [{ code: 'brain_bug', meta: {} }]);
   assert.equal((await req.brain.turn(turnArgs())).ok, true, 'the breaker never opened');
   assert.equal(req.calls.length, 4);
+});
+
+test('T25b r3: a 200 that failed with rate_limit_exceeded behaves exactly like an HTTP 429: the short retry, the backup, the main model\'s cooldown; never the breaker', async () => {
+  const scenario = async (limited) => {
+    const short = harness({ script: [limited({ 'retry-after': '1' }), reply('Ok.')] });
+    const a = await short.brain.turn(turnArgs());
+    const long = harness({ script: [limited({ 'retry-after': '20' }), reply('From the backup.')] });
+    const b = await long.brain.turn(turnArgs());
+    const cool = harness({ script: [limited({}), reply('1'), limited({}), reply('2'), limited({}), reply('3'), reply('4'), reply('5')] });
+    const coolTurns = [];
+    for (let i = 0; i < 3; i += 1) { coolTurns.push(await cool.brain.turn(turnArgs())); cool.advance(10_000); }
+    const cooling = cool.brain.health().backup;
+    const before = cool.calls.length;
+    const c = await cool.brain.turn(turnArgs());
+    const cModel = cool.calls[before].body.model;
+    cool.advance(60_001);
+    const d = await cool.brain.turn(turnArgs());
+    const alone = harness({ backupMode: 'handover', script: [limited({}), limited({}), limited({}), reply('never')] });
+    const codes = [];
+    for (let i = 0; i < 3; i += 1) { codes.push((await alone.brain.turn(turnArgs())).code); alone.advance(10_000); }
+    const fourth = await alone.brain.turn(turnArgs());
+    const pick = (t) => (t.ok ? { ok: true, backup: t.backup, model: t.model, text: t.messages.at(-1).content } : t);
+    return {
+      short: { turn: pick(a), slept: short.slept, models: short.calls.map((x) => x.body.model) },
+      long: { turn: pick(b), slept: long.slept, models: long.calls.map((x) => x.body.model) },
+      cool: { turns: coolTurns.map(pick), cooling, c: pick(c), cModel, d: pick(d) },
+      alone: { codes, fourth, calls: alone.calls.length, alerts: alone.alerts, breaker: alone.brain.ops().breaker, cooldown: alone.brain.ops().cooldown },
+    };
+  };
+  const http429 = await scenario((headers) => http(429, { error: { type: 'rate_limit_exceeded', code: 'rate_limit_exceeded' } }, headers));
+  const failed = await scenario((headers) => failed200('rate_limit_exceeded', headers));
+  assert.deepEqual(failed, http429, 'the same behaviour as a 429, step for step');
+  assert.deepEqual(failed.short, { turn: { ok: true, backup: false, model: 'gpt-5.6-sol', text: 'Ok.' }, slept: [1000], models: ['gpt-5.6-sol', 'gpt-5.6-sol'] }, 'retry-after 1 s: one retry on the main model');
+  assert.deepEqual(failed.long.models, ['gpt-5.6-sol', 'gpt-6.1-terra'], 'retry-after 20 s: the backup model');
+  assert.equal(failed.cool.cooling, true, '3 in 5 min: the main model cools down');
+  assert.equal(failed.cool.cModel, 'gpt-6.1-terra', 'straight to the backup');
+  assert.equal(failed.cool.d.backup, false, 'the cooldown is over');
+  assert.deepEqual(failed.alone.codes, ['rate', 'rate', 'rate']);
+  assert.deepEqual(failed.alone.fourth, { ok: false, code: 'rate' }, 'cooling with no backup: rate, no call');
+  assert.equal(failed.alone.calls, 3);
+  assert.deepEqual([failed.alone.alerts, failed.alone.breaker], [[], false], 'no outage alert, no breaker');
 });
 
 test('T25b r2 (Claude P3-2): a response with two assistant messages answers with the last one only; the preamble is neither sent nor guard-checked', async () => {
