@@ -568,8 +568,10 @@ test("the thread's Dana row: her state, anyone's off switch, the owner's test sw
 
   const off = thread({ lead: { ...LEAD, dana_off: 1 }, danaEnabled: true, danaConfigured: true });
   assert.match(off, /Dana is off for this chat\./);
-  assert.match(off, /name="dana_off" value="0"/);
-  assert.match(off, /Let Dana answer here/);
+  // T08 (DESIGN §3.3): the way back is "Let the AI answer again", which clears the holds too.
+  assert.match(off, new RegExp(`action="/v1/admin/inbox/${LEAD.lead_id}/answer_again"`));
+  assert.match(off, />Let the AI answer again<\/button>/);
+  assert.doesNotMatch(off, /name="dana_off"|Let Dana answer here/, 'no second, half-way switch back');
   assert.doesNotMatch(off, /name="dana_test"/, 'no test switch while she is off here');
 
   const testing = thread({ lead: { ...LEAD, dana_test: 1 }, danaEnabled: false, danaConfigured: true });
@@ -611,4 +613,86 @@ test('the inbox list carries the Retell out-of-credit banner for an owner while 
   assert.match(inboxPage({ me: OWNER, rows: [row()], now: NOW, fundsOut: at }), /<div class="err">Dana can’t answer: Retell credit ran out at 2026-10-03 12:30 Riyadh time\./);
   assert.doesNotMatch(inboxPage({ me: STAFF, rows: [row()], now: NOW, fundsOut: at }), /Retell credit/);
   assert.doesNotMatch(inboxPage({ me: OWNER, rows: [row()], now: NOW, fundsOut: null }), /Retell credit/);
+});
+
+/* ---------------- T08 (PR-A3, DESIGN §3.3) ---------------- */
+
+test('T08-2 the login page carries next as a hidden field on both steps, and "Send another code" keeps it', () => {
+  const deep = '/dashboard/leads/LEAD-20260928-aaaa0001';
+  const first = loginPage({ step: 'request', next: deep });
+  assert.match(first, /<form method="post" action="\/dashboard\/login\/code">\s*<input type="hidden" name="_dash" value="1">\s*<input type="hidden" name="next" value="\/dashboard\/leads\/LEAD-20260928-aaaa0001">/);
+  const second = loginPage({ step: 'code', sent: true, next: deep });
+  assert.match(second, /<form method="post" action="\/dashboard\/login\/verify">\s*<input type="hidden" name="_dash" value="1">\s*<input type="hidden" name="next" value="\/dashboard\/leads\/LEAD-20260928-aaaa0001">/);
+  assert.match(second, /<a href="\/dashboard\/login\?next=%2Fdashboard%2Fleads%2FLEAD-20260928-aaaa0001">Send another code<\/a>/);
+  for (const none of [null, undefined, '', 42, ['/dashboard/leads/x']]) {
+    for (const step of ['request', 'code']) assert.doesNotMatch(loginPage({ step, next: none }), /name="next"|\?next=/, `${step}: ${String(none)}`);
+  }
+  assert.match(loginPage({ step: 'code' }), /<a href="\/dashboard\/login">Send another code<\/a>/, 'as before without one');
+  const hostile = loginPage({ step: 'code', next: '"><script>alert(1)</script>' });
+  assert.ok(!hostile.includes('<script>'), 'whatever reaches it is text, never markup');
+});
+
+test('T08-3 the thread offers "Let the AI answer again" on a stopped or held chat (only if the client asked), to anyone on the team; never on a free chat', () => {
+  const action = new RegExp(`action="/v1/admin/inbox/${LEAD.lead_id}/answer_again"`);
+  for (const me of [OWNER, STAFF]) {
+    const off = thread({ me, lead: { ...LEAD, dana_off: 1 }, danaEnabled: true, danaConfigured: true });
+    assert.match(off, action);
+    assert.match(off, />Let the AI answer again<\/button>/);
+    assert.match(off, /only if the client asked you/);
+  }
+
+  const held = thread({ lead: { ...LEAD, dana_hold_reason: 'loop', dana_hold_until: null }, danaEnabled: true, danaConfigured: true });
+  assert.match(held, action);
+  assert.match(held, /The AI is paused in this chat \(the conversation was going in circles\) until someone on the team writes\./);
+  assert.match(held, /Turn Dana off for this chat/, 'a hold is not a stop: the off switch stays');
+  const timed = thread({ lead: { ...LEAD, dana_hold_reason: 'cap_chat', dana_hold_until: Date.UTC(2026, 10, 29, 9, 0) }, now: Date.UTC(2026, 10, 28, 9, 0) });
+  assert.match(timed, action);
+  assert.match(timed, /The AI is paused in this chat \(it reached its message limit for this chat\) until 2026-11-29 12:00/);
+  const over = thread({ lead: { ...LEAD, dana_hold_reason: 'cap_chat', dana_hold_until: NOW - 1 } });
+  assert.doesNotMatch(over, action, 'a timed hold that is over holds nothing');
+  assert.doesNotMatch(over, /is paused/);
+  const free = thread({ danaEnabled: true, danaConfigured: true });
+  assert.doesNotMatch(free, action);
+  assert.doesNotMatch(free, /Let the AI answer again|is paused/);
+
+  const odd = thread({ lead: { ...LEAD, dana_hold_reason: EVIL, dana_hold_until: null } });
+  assert.match(odd, /The AI is paused in this chat until someone on the team writes\./, 'an unknown reason code is never printed');
+  assert.ok(!odd.includes('<img'));
+  for (const html of [held, timed]) {
+    const line = /The AI is paused[^<]*/.exec(html)[0];
+    assert.doesNotMatch(line, /Dana/, 'new owner-facing text is nameless');
+  }
+  assert.match(thread({ ok: 'again' }), new RegExp(`<div class="ok">${INBOX_OK.again}</div>`));
+  assert.doesNotMatch(INBOX_OK.again, /Dana/);
+});
+
+test('T08-6 the owner\'s Unsure tab lists old out leads that wrote: the lead\'s name, the time, no text, and Move; the tab counts them', () => {
+  const html = unsurePage({
+    me: OWNER, now: NOW, rows: [], candidates: [],
+    oldOut: [
+      { lead_id: 'LEAD-20260928-aaaa0002', name: 'Old Out Client', ts: NOW - 2 * HOUR },
+      { lead_id: 'LEAD/2?x=1', name: EVIL, ts: NOW - 30_000 },
+      { lead_id: 'LEAD-3', name: null, ts: null },
+    ],
+  });
+  assert.match(html, /<h2[^>]*>Marked Not a client, wrote again<\/h2>/);
+  assert.match(html, /<a href="\/dashboard\/leads\/LEAD-20260928-aaaa0002"><bdi>Old Out Client<\/bdi><\/a>/);
+  assert.match(html, /wrote 2\sh ago/);
+  assert.match(html, /wrote just now/);
+  assert.match(html, /<bdi>&lt;img src=x onerror=alert\(1\)&gt;<\/bdi>/);
+  assert.ok(!html.includes('<img'));
+  assert.match(html, /<bdi>Unnamed<\/bdi>/);
+  assert.match(html, /action="\/v1\/admin\/inbox\/LEAD-20260928-aaaa0002\/move"/);
+  assert.match(html, /action="\/v1\/admin\/inbox\/LEAD%2F2%3Fx%3D1\/move"/, 'an odd id stays one path segment');
+  assert.equal(html.match(/>Move to Bona inbox<\/button>/g).length, 3);
+  assert.doesNotMatch(html, />Not a client<\/button>/, 'they are out already: Move is the one decision');
+  assert.match(html, /The AI does not answer them, and nothing they wrote is kept/);
+  assert.match(html, /Unsure · 3<\/a>/);
+  assert.match(html, /No chats that mention Bona to decide/);
+  assert.doesNotMatch(html, /undefined|NaN|\[object|1970-01-01/);
+
+  for (const me of [STAFF, null]) assert.doesNotMatch(unsurePage({ me, now: NOW, rows: [], oldOut: [{ lead_id: 'L', name: 'Old Out Client', ts: NOW }] }), /Old Out Client|Marked Not a client/);
+  const none = unsurePage({ me: OWNER, now: NOW, rows: [], candidates: [], oldOut: [] });
+  assert.doesNotMatch(none, /Marked Not a client, wrote again/);
+  assert.match(none, /Nothing to decide/);
 });

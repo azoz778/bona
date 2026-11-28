@@ -33,6 +33,7 @@ export const INBOX_OK = {
   added: 'Added to the Bona inbox.',
   dana: 'Dana setting saved.',
   dismissed: 'Marked not a client. It is off the list; only its number and WhatsApp id are kept, for a year, so it is not listed again.',
+  again: 'Done: the stop and the pause on this chat are cleared; the AI may answer the next message from the client.',
 };
 
 /** One banner. A known error wins over an ok; a code nobody knows shows nothing. */
@@ -212,33 +213,89 @@ function candidateRow(c, now) {
 </div>`;
 }
 
+/* ------------------------------------------------------------------ */
+/* Marked Not a client before the move, wrote again (owner only, T08)  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * An out lead the owner marked before Bona's WhatsApp moved to its own number, that wrote
+ * again (DESIGN §3.1, the `old_out_wrote` alert rows of the last 30 days): the name from the
+ * lead row, when it last wrote, and Move. Nothing it wrote was kept, so nothing is shown; it is
+ * out already, so Move is the one decision.
+ */
+function oldOutRow(o, now) {
+  const name = String(o.name ?? '').trim();
+  const a = agoSince(now, o.ts);
+  const when = a === '—' ? '' : a === 'just now' ? 'wrote just now' : `wrote ${a} ago`;
+  return `<div class="lr ix">
+  <span class="av2" aria-hidden="true"><span dir="auto">${esc(firstLetter(name))}</span></span>
+  <div>
+    <div class="l1"><span class="nm"><a href="${esc(leadHref(o.lead_id))}"><bdi>${esc(name || 'Unnamed')}</bdi></a></span><span class="pl warm">marked Not a client before the move</span></div>
+    ${when ? `<div class="l2"><span>${esc(when)}</span></div>` : ''}
+    <div class="acts" style="margin-top:8px">${postButton(writeHref(o.lead_id, 'move'), 'Move to Bona inbox')}</div>
+  </div>
+</div>`;
+}
+
 /**
  * Chats that might be about Bona: the guessed leads, then the real-estate chats to check
- * (D17). Only the owner decides, so only the owner sees them; the chats to check are drawn
- * only for an owner even if a caller passes them for someone else. The tab counts both.
+ * (D17), then the chats marked Not a client before the move that wrote again (T08). Only the
+ * owner decides, so only the owner sees them; the chats to check and the old ones are drawn
+ * only for an owner even if a caller passes them for someone else. The tab counts all three.
  */
-export function unsurePage({ me, rows, candidates = [], ok = null, error = null, now = Date.now(), focus = null }) {
+export function unsurePage({ me, rows, candidates = [], oldOut = [], ok = null, error = null, now = Date.now(), focus = null }) {
   const list = Array.isArray(rows) ? rows : [];
   const cands = me?.role === 'owner' && Array.isArray(candidates) ? candidates : [];
+  const olds = me?.role === 'owner' && Array.isArray(oldOut) ? oldOut : [];
   // A tapped "chat to check" (U4) is drawn first; a focus that matches no row changes nothing.
   const ordered = focus ? [...list.filter((r) => r.lead_id === focus), ...list.filter((r) => r.lead_id !== focus)] : list;
   const guesses = list.length
     ? `<div class="card cp">${ordered.map((r) => unsureRow(r, now, { focused: focus != null && r.lead_id === focus })).join('')}</div>`
-    : `<p class="muted">${cands.length ? 'No chats that mention Bona to decide.' : 'Nothing to decide.'}</p>`;
+    : `<p class="muted">${cands.length || olds.length ? 'No chats that mention Bona to decide.' : 'Nothing to decide.'}</p>`;
   const toCheck = cands.length
     ? `<h2 style="margin-top:22px">Real-estate chats to check</h2>
 <p class="sub">Chats on Bona's WhatsApp number that talk about property but carry nothing that says Bona: a TK client, someone you know, or a new Bona client. Nothing they wrote is kept, only the number, the name WhatsApp shows and the property words, until 30 days after the last such message. <b>Move to Bona inbox</b> makes it a Bona chat and copies in its last 30 days; <b>Not a client</b> takes it off this list, and it is not listed again for a year.</p>
 <div class="card cp">${cands.map((c) => candidateRow(c, now)).join('')}</div>`
     : '';
+  const wroteAgain = olds.length
+    ? `<h2 style="margin-top:22px">Marked Not a client, wrote again</h2>
+<p class="sub">Chats you marked Not a client before Bona's WhatsApp moved to its own number, that wrote to Bona in the last 30 days. The AI does not answer them, and nothing they wrote is kept. <b>Move to Bona inbox</b> brings one in and copies in its last 30 days.</p>
+<div class="card cp">${olds.map((o) => oldOutRow(o, now)).join('')}</div>`
+    : '';
   const body = `${flash(ok, error)}
 <p class="sub">Chats that might be about Bona but carry no ad, Ref code or listing number. Only owners see this list. <b>Move to Bona inbox</b> copies in the chat's last 30 days so the team can read and reply; <b>Not a client</b> keeps it out of the inbox, and it never comes back on its own.</p>
-${guesses}${toCheck}`;
-  return layout({ title: 'Unsure', active: '/dashboard/inbox', me, actions: tabs('unsure', list.length + cands.length), body });
+${guesses}${toCheck}${wroteAgain}`;
+  return layout({ title: 'Unsure', active: '/dashboard/inbox', me, actions: tabs('unsure', list.length + cands.length + olds.length), body });
 }
 
 /* ------------------------------------------------------------------ */
 /* One chat                                                            */
 /* ------------------------------------------------------------------ */
+
+/** Why the assistant holds off in a chat (leads.dana_hold_reason, db v8), in words. Own-property lookup. */
+const HOLD_REASON = {
+  cap_chat: 'it reached its message limit for this chat',
+  loop: 'the conversation was going in circles',
+  send_failed: 'a message to the client failed to send',
+  booking_unconfirmed: 'a booked viewing was not confirmed to the client',
+  brain_out: 'the AI service was down',
+};
+const TZ_OFFSET_MS = 3 * 3_600_000;
+
+/**
+ * The hold's sentence, or '' when the chat is not held: a reason with no end waits for a
+ * person to write; a timed one holds until its end, and one that is over holds nothing.
+ */
+function holdLine(lead, now) {
+  const reason = typeof lead.dana_hold_reason === 'string' && lead.dana_hold_reason ? lead.dana_hold_reason : null;
+  if (!reason) return '';
+  const until = lead.dana_hold_until;
+  const timed = until !== null && until !== undefined && until !== '';
+  if (timed && !(Number(until) > now)) return '';
+  const why = Object.hasOwn(HOLD_REASON, reason) ? ` (${HOLD_REASON[reason]})` : '';
+  const end = timed ? `${dateTime(Number(until) + TZ_OFFSET_MS)} Riyadh time` : 'someone on the team writes';
+  return `The AI is paused in this chat${why} until ${end}.`;
+}
 
 /** Why a send failed, in words. Own-property lookup: an error code is data, not a key into anything. */
 const FAIL_REASON = {
@@ -419,9 +476,17 @@ export function threadPage({
         : `Dana is off everywhere${owner ? ' (<a href="/dashboard/team">Team page</a>)' : ''}; she does not answer here.`;
   const onUnprovisioned = !danaOff && !danaTest && danaEnabled === true && !danaConfigured;
   const danaNote = danaConfigured || onUnprovisioned ? '' : ' <span class="muted">Dana is not provisioned for WhatsApp yet, so nothing is sent either way.</span>';
-  const danaButtons = postButton(writeHref(lead.lead_id, 'dana'), danaOff ? 'Let Dana answer here' : 'Turn Dana off for this chat', { dana_off: danaOff ? '0' : '1' })
-    + (owner && !danaOff ? postButton(writeHref(lead.lead_id, 'dana'), danaTest ? 'Stop the Dana test here' : 'Let Dana test on this chat', { dana_test: danaTest ? '0' : '1' }) : '');
-  const danaRow = `<div style="margin-top:18px"><p class="sub" style="margin:0 0 6px">${danaState}${danaNote}</p>${danaButtons}</div>`;
+  // A stop or a hold (T08, DESIGN §3.3): anyone on the team may clear both at once, and the
+  // page says when. It replaces the old "Let Dana answer here", which cleared the stop only.
+  const hold = holdLine(lead, now);
+  const again = danaOff || hold
+    ? `${postButton(writeHref(lead.lead_id, 'answer_again'), 'Let the AI answer again')}<span class="muted">Use it only if the client asked you.</span>`
+    : '';
+  const danaButtons = (danaOff ? '' : postButton(writeHref(lead.lead_id, 'dana'), 'Turn Dana off for this chat', { dana_off: '1' }))
+    + (owner && !danaOff ? postButton(writeHref(lead.lead_id, 'dana'), danaTest ? 'Stop the Dana test here' : 'Let Dana test on this chat', { dana_test: danaTest ? '0' : '1' }) : '')
+    + again;
+  const holdNote = hold && !danaOff ? ` ${esc(hold)}` : '';
+  const danaRow = `<div style="margin-top:18px"><p class="sub" style="margin:0 0 6px">${danaState}${holdNote}${danaNote}</p>${danaButtons}</div>`;
 
   const notClient = owner
     ? `<div style="margin-top:18px">${postButton(writeHref(lead.lead_id, 'out'), 'Not a client')}<span class="muted">Deletes what the dashboard stored from this chat; it never comes back on its own.</span></div>`

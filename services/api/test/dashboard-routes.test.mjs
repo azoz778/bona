@@ -19,7 +19,7 @@ import { createDashboardRoutes } from '../lib/dashboard/routes.mjs';
 import { createTeam } from '../lib/team.mjs';
 import { createAudit } from '../lib/audit.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
-import { addTask, tasksForLead } from '../lib/lead-tasks.mjs';
+import { addTask, tasksForLead, bookViewing } from '../lib/lead-tasks.mjs';
 
 const TOKEN = 'a'.repeat(32);
 const inventory = createInventory({ file: WORKTREE_LISTINGS, siteUrl: 'https://bona.azoz.uk' });
@@ -2251,4 +2251,647 @@ test('without hooks the routes behave exactly as before: the defaults are no-ops
     assert.equal((await postForm('/v1/admin/settings', { _dash: '1', own_inbox: '1' }, { cookie })).headers.get('location'), '/dashboard/team?ok=setting');
     assert.equal(logs.filter((l) => l.evt === 'dash.hook_failed').length, 0);
   }, ({ db }) => ({ inbox: createInboxStore(db) }));
+});
+
+/* ---------------- T08 (PR-A3, DESIGN §3.3): login return-to, "Let the AI answer again", the booked-task guard, the inbox rules ---------------- */
+
+/** The PLAN T08 test 1 values: none of them is a place a login returns to. */
+const BAD_NEXT = ['//evil.example', '/dashboard//x', '/dashboard/leads/../../v1', 'https://evil.example', '%2F%2Fevil', `/dashboard/leads/${'a'.repeat(81)}`];
+const withNextQuery = (next) => `next=${encodeURIComponent(next)}`;
+
+/** A code request carrying extra form fields (the login form's hidden `next`), read back off the "phone". */
+async function codeWith(h, fields = {}, opts = {}) {
+  const before = h.sent.length;
+  const res = await h.postForm('/dashboard/login/code', { _dash: '1', phone: '0593296933', ...fields }, opts);
+  await h.app.dashboard?.auth?.flush?.();
+  const code = h.sent.length > before ? (/(\d{6})/.exec(h.sent.at(-1) ?? '')?.[1] ?? null) : null;
+  return { res, code, nonce: h.cookieValue(res, 'bona_dash_try') };
+}
+
+test('T08-1 a next= that is not a lead or inbox deep link falls back to /dashboard: never carried, never set as a cookie, never followed', async () => {
+  for (const next of BAD_NEXT) {
+    await withDash({}, async (h) => {
+      const page = await (await h.get(`/dashboard/login?${withNextQuery(next)}`)).text();
+      assert.doesNotMatch(page, /name="next"/, `${next}: the login form does not carry it`);
+      const asked = await codeWith(h, { next });
+      assert.equal(asked.res.headers.get('location'), '/dashboard/login?step=code&sent=1', `${next}: the code step does not carry it`);
+      assert.equal(h.cookieValue(asked.res, 'bona_dash_next'), undefined, `${next}: no return-to cookie`);
+      const wrong = String((Number(asked.code) + 1) % 1_000_000).padStart(6, '0');
+      const missed = await h.postForm('/dashboard/login/verify', { _dash: '1', code: wrong, next }, { cookie: `bona_dash_try=${asked.nonce}` });
+      assert.equal(missed.headers.get('location'), '/dashboard/login?step=code&error=bad_code', `${next}: a wrong code does not carry it`);
+      // A cookie the server never set (a sibling subdomain can plant one) is checked the same way as the field.
+      const verified = await h.postForm('/dashboard/login/verify', { _dash: '1', code: asked.code, next },
+        { cookie: `bona_dash_try=${asked.nonce}; bona_dash_next=${encodeURIComponent(next)}` });
+      assert.equal(verified.status, 303);
+      assert.equal(verified.headers.get('location'), '/dashboard', `${next}: the verify falls back`);
+      const cookie = `bona_dash=${h.cookieValue(verified, 'bona_dash')}`;
+      const signedIn = await h.get(`/dashboard/login?${withNextQuery(next)}`, { cookie });
+      assert.equal(signedIn.status, 302);
+      assert.equal(signedIn.headers.get('location'), '/dashboard', `${next}: a signed-in login page falls back`);
+    });
+  }
+});
+
+test('T08-2 next rides the code step: the gate adds it for a deep link, both forms carry it, the code step sets a login-scoped cookie, and verify lands on it', async () => {
+  await withDash({}, async (h) => {
+    const { db, get, postForm, cookieValue, cookiesOf } = h;
+    const id = seedLead(db, { phone: '966500000081', inboxState: 'in' });
+    const deep = `/dashboard/leads/${id}`;
+
+    // The auth gate: a deep link to a lead or a chat keeps where it was going; nothing else does.
+    const gate = await get(deep);
+    assert.equal(gate.status, 302);
+    assert.equal(gate.headers.get('location'), `/dashboard/login?${withNextQuery(deep)}`);
+    assert.equal((await get(`/dashboard/inbox/${id}`)).headers.get('location'), `/dashboard/login?${withNextQuery(`/dashboard/inbox/${id}`)}`);
+    assert.equal((await get(`${deep}/`)).headers.get('location'), `/dashboard/login?${withNextQuery(deep)}`, 'a trailing slash is the same page');
+    for (const p of ['/dashboard', '/dashboard/leads', '/dashboard/inbox', '/dashboard/team', '/dashboard/spend', `/dashboard/leads/${'a'.repeat(81)}`]) {
+      assert.equal((await get(p)).headers.get('location'), '/dashboard/login', p);
+    }
+
+    // Step 1 carries it as a hidden field.
+    const first = await (await get(gate.headers.get('location'))).text();
+    assert.match(first, new RegExp(`<form method="post" action="/dashboard/login/code">[\\s\\S]*<input type="hidden" name="next" value="${deep}">[\\s\\S]*</form>`));
+
+    // The code step: in the redirect, and in a cookie scoped like the try nonce.
+    const asked = await codeWith(h, { next: deep });
+    assert.equal(asked.res.headers.get('location'), `/dashboard/login?step=code&sent=1&${withNextQuery(deep)}`);
+    const nextCookie = cookiesOf(asked.res).find((c) => c.startsWith('bona_dash_next='));
+    assert.ok(nextCookie, 'the code step sets the return-to cookie');
+    for (const flag of ['HttpOnly', 'Secure', 'SameSite=Lax', 'Path=/dashboard/login', 'Max-Age=600']) assert.ok(nextCookie.includes(flag), `${flag} missing from ${nextCookie}`);
+    assert.equal(decodeURIComponent(cookieValue(asked.res, 'bona_dash_next')), deep);
+    const browser = `bona_dash_try=${asked.nonce}; bona_dash_next=${cookieValue(asked.res, 'bona_dash_next')}`;
+
+    // Step 2 carries it too, and so does "Send another code".
+    const second = await (await get(asked.res.headers.get('location'))).text();
+    assert.match(second, new RegExp(`<form method="post" action="/dashboard/login/verify">[\\s\\S]*<input type="hidden" name="next" value="${deep}">[\\s\\S]*</form>`));
+    assert.match(second, new RegExp(`<a href="/dashboard/login\\?${withNextQuery(deep)}">Send another code</a>`));
+
+    // A wrong code keeps it in the redirect, so the page it lands on still carries it.
+    const wrong = String((Number(asked.code) + 1) % 1_000_000).padStart(6, '0');
+    const missed = await postForm('/dashboard/login/verify', { _dash: '1', code: wrong, next: deep }, { cookie: browser });
+    assert.equal(missed.headers.get('location'), `/dashboard/login?step=code&error=bad_code&${withNextQuery(deep)}`);
+
+    // The right code lands on the deep link and clears the return-to cookie with the try nonce.
+    const verified = await postForm('/dashboard/login/verify', { _dash: '1', code: asked.code, next: deep }, { cookie: browser });
+    assert.equal(verified.status, 303);
+    assert.equal(verified.headers.get('location'), deep);
+    assert.ok(cookiesOf(verified).some((c) => c.startsWith('bona_dash_next=') && c.includes('Max-Age=0') && c.includes('Path=/dashboard/login')), 'the spent return-to is cleared');
+    const cookie = `bona_dash=${cookieValue(verified, 'bona_dash')}`;
+    assert.equal((await get(deep, { cookie })).status, 200, 'and the lead opens');
+
+    // Signed in already: the login page sends a deep link straight on, and anything else to /dashboard as before.
+    const on = await get(`/dashboard/login?${withNextQuery(deep)}`, { cookie });
+    assert.equal(on.status, 302);
+    assert.equal(on.headers.get('location'), deep);
+    assert.equal((await get('/dashboard/login', { cookie })).headers.get('location'), '/dashboard');
+  });
+});
+
+test('T08-2 the cookie alone carries next through the code step when the form loses it; a new code without next forgets an old one', async () => {
+  await withDash({}, async (h) => {
+    const { db, postForm, cookieValue, cookiesOf } = h;
+    const id = seedLead(db, { phone: '966500000082', inboxState: 'in' });
+    const deep = `/dashboard/inbox/${id}`;
+    const asked = await codeWith(h, { next: deep });
+    const carried = cookieValue(asked.res, 'bona_dash_next');
+    const browser = `bona_dash_try=${asked.nonce}; bona_dash_next=${carried}`;
+    // A verify that is refused before its body is read (a foreign origin) still says where it was going.
+    const foreign = await postForm('/dashboard/login/verify', { _dash: '1', code: asked.code }, { cookie: browser, headers: { Origin: 'https://evil.example' } });
+    assert.equal(foreign.headers.get('location'), `/dashboard/login?step=code&error=forbidden&${withNextQuery(deep)}`);
+    // A code form without the field (an old tab) still lands on the deep link.
+    const verified = await postForm('/dashboard/login/verify', { _dash: '1', code: asked.code }, { cookie: browser });
+    assert.equal(verified.headers.get('location'), deep);
+
+    // A login started over without next: the old cookie is cleared at the code step, so it cannot redirect this one.
+    const plain = await codeWith(h, {}, { cookie: `bona_dash_next=${carried}` });
+    assert.equal(plain.res.headers.get('location'), '/dashboard/login?step=code&sent=1');
+    assert.ok(cookiesOf(plain.res).some((c) => c.startsWith('bona_dash_next=') && c.includes('Max-Age=0')), 'the stale return-to is cleared');
+    assert.equal(cookiesOf(plain.res).filter((c) => c.startsWith('bona_dash_next=')).length, 1, 'cleared once, never set');
+    // With no return-to anywhere the verify is as before T08: /dashboard, and no return-to cookie touched.
+    const again = await postForm('/dashboard/login/verify', { _dash: '1', code: plain.code }, { cookie: `bona_dash_try=${plain.nonce}` });
+    assert.equal(again.headers.get('location'), '/dashboard');
+    assert.equal(cookiesOf(again).filter((c) => c.startsWith('bona_dash_next=')).length, 0, 'no return-to cookie is touched when the browser has none');
+  });
+});
+
+test('T08-2 an explicitly given next that is not a return-to wins over an earlier lead\'s cookie: /dashboard, and the cookie is cleared', async () => {
+  await withDash({}, async (h) => {
+    const { db, postForm, cookieValue, cookiesOf } = h;
+    const id = seedLead(db, { phone: '966500000080', inboxState: 'in' });
+    const asked = await codeWith(h, { next: `/dashboard/leads/${id}` });
+    const browser = `bona_dash_try=${asked.nonce}; bona_dash_next=${cookieValue(asked.res, 'bona_dash_next')}`;
+    const cleared = (res) => cookiesOf(res).some((c) => c.startsWith('bona_dash_next=') && c.includes('Max-Age=0'));
+    for (const next of ['//evil.example', '']) {
+      const wrong = String((Number(asked.code) + 1) % 1_000_000).padStart(6, '0');
+      const missed = await postForm('/dashboard/login/verify', { _dash: '1', code: wrong, next }, { cookie: browser });
+      assert.equal(missed.headers.get('location'), '/dashboard/login?step=code&error=bad_code', `${JSON.stringify(next)}: not the cookie's lead`);
+      assert.ok(cleared(missed), `${JSON.stringify(next)}: the cookie goes`);
+    }
+    const verified = await postForm('/dashboard/login/verify', { _dash: '1', code: asked.code, next: 'https://evil.example' }, { cookie: browser });
+    assert.equal(verified.status, 303);
+    assert.equal(verified.headers.get('location'), '/dashboard', 'the earlier lead is not opened');
+    assert.ok(cleared(verified));
+    assert.equal(cookiesOf(verified).filter((c) => c.startsWith('bona_dash_next=')).length, 1, 'cleared once');
+  });
+});
+
+test('T08-2 an invalid next on the code step page clears an earlier lead\'s cookie, so the code then typed lands on /dashboard', async () => {
+  await withDash({}, async (h) => {
+    const id = seedLead(h.db, { phone: '966500000078', inboxState: 'in' });
+    const asked = await codeWith(h, { next: `/dashboard/leads/${id}` });
+    // What the browser keeps, and what it does with each page's Set-Cookie.
+    const jar = { bona_dash_try: asked.nonce, bona_dash_next: h.cookieValue(asked.res, 'bona_dash_next') };
+    const cookie = () => Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+    const apply = (res) => { for (const name of Object.keys(jar)) if (h.cookieValue(res, name) === null) delete jar[name]; };
+
+    // The page without a next leaves the return-to alone (an old tab still lands on the lead)...
+    const plain = await h.get('/dashboard/login?step=code', { cookie: cookie() });
+    assert.equal(h.cookieValue(plain, 'bona_dash_next'), undefined);
+    // ...but a page that names one which is not a deep link forgets the earlier lead's.
+    const page = await h.get(`/dashboard/login?step=code&${withNextQuery('//evil.example')}`, { cookie: cookie() });
+    assert.equal(page.status, 200);
+    assert.doesNotMatch(await page.text(), /name="next"/);
+    apply(page);
+    assert.equal(jar.bona_dash_next, undefined, 'the page cleared the earlier return-to');
+    const verified = await h.postForm('/dashboard/login/verify', { _dash: '1', code: asked.code }, { cookie: cookie() });
+    assert.equal(verified.status, 303);
+    assert.equal(verified.headers.get('location'), '/dashboard', 'the earlier lead is not opened');
+  });
+});
+
+test('T08-2 a code request refused by the limit decides the return-to too: without next it forgets an earlier lead\'s, with one it takes the new one', async () => {
+  for (const later of [null, 'new lead']) {
+    await withDash({}, async (h) => {
+      const a = seedLead(h.db, { phone: '966500000076', inboxState: 'in' });
+      const b = seedLead(h.db, { id: 'LEAD-20260908-aaaa0002', phone: '966500000075', inboxState: 'in' });
+      // This browser: a code from lead A's link.
+      const asked = await codeWith(h, { next: `/dashboard/leads/${a}` });
+      const jar = { bona_dash_try: asked.nonce, bona_dash_next: h.cookieValue(asked.res, 'bona_dash_next') };
+      const cookie = () => Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+      const apply = (res) => {
+        for (const name of ['bona_dash_try', 'bona_dash_next', 'bona_dash']) {
+          const v = h.cookieValue(res, name);
+          if (v === null) delete jar[name]; else if (v !== undefined) jar[name] = v;
+        }
+      };
+      // Two other browsers on the same address use up its three codes; they never touch this one's cookies,
+      // and their numbers are not this one's, so its code stays live.
+      for (const phone of ['0511111111', '0522222222']) assert.equal((await codeWith(h, { phone })).res.headers.get('location'), '/dashboard/login?step=code&sent=1', phone);
+      apply(await h.get(later ? `/dashboard/login?${withNextQuery(`/dashboard/leads/${b}`)}` : '/dashboard/login', { cookie: cookie() }));
+      const fields = later ? { next: `/dashboard/leads/${b}` } : {};
+      const limited = await codeWith(h, fields, { cookie: cookie() });
+      assert.equal(limited.res.headers.get('location'), later ? `/dashboard/login?step=code&error=rate_limited&${withNextQuery(`/dashboard/leads/${b}`)}` : '/dashboard/login?step=code&error=rate_limited');
+      assert.equal(limited.code, null, 'no new code: the earlier one is still live');
+      apply(limited.res);
+      assert.equal(jar.bona_dash_try, asked.nonce, 'the try nonce is untouched');
+      // The code form it lands on, then the earlier code typed in (the form's field as the page drew it).
+      const page = await (await h.get(limited.res.headers.get('location'), { cookie: cookie() })).text();
+      const field = /name="next" value="([^"]+)"/.exec(page)?.[1];
+      const verified = await h.postForm('/dashboard/login/verify', { _dash: '1', code: asked.code, ...(field ? { next: field } : {}) }, { cookie: cookie() });
+      assert.equal(verified.status, 303);
+      assert.equal(verified.headers.get('location'), later ? `/dashboard/leads/${b}` : '/dashboard', later ? 'the newest request\'s lead' : 'not the earlier lead');
+    });
+  }
+});
+
+test('T08-2 a finished code (five wrong tries) takes its return-to cookie with its try nonce; the page still carries next for a new code', async () => {
+  await withDash({}, async (h) => {
+    const id = seedLead(h.db, { phone: '966500000074', inboxState: 'in' });
+    const deep = `/dashboard/leads/${id}`;
+    const asked = await codeWith(h, { next: deep });
+    const browser = `bona_dash_try=${asked.nonce}; bona_dash_next=${h.cookieValue(asked.res, 'bona_dash_next')}`;
+    const wrong = String((Number(asked.code) + 1) % 1_000_000).padStart(6, '0');
+    for (let i = 0; i < 5; i += 1) {
+      const res = await h.postForm('/dashboard/login/verify', { _dash: '1', code: wrong }, { cookie: browser });
+      assert.equal(h.cookieValue(res, 'bona_dash_next'), undefined, `guess ${i + 1}: the code is still live, so is its return-to`);
+    }
+    const burnt = await h.postForm('/dashboard/login/verify', { _dash: '1', code: asked.code }, { cookie: browser });
+    assert.equal(burnt.headers.get('location'), `/dashboard/login?step=code&error=attempts&${withNextQuery(deep)}`);
+    assert.equal(h.cookieValue(burnt, 'bona_dash_try'), null);
+    assert.equal(h.cookieValue(burnt, 'bona_dash_next'), null, 'cleared with the burnt code');
+  });
+});
+
+test('T08-2 logging out forgets a return-to the browser still holds, though the browser never sends it to logout', async () => {
+  await withDash({}, async (h) => {
+    const { cookie } = await h.login();
+    const out = await h.postForm('/dashboard/logout', { _dash: '1' }, { cookie: `${cookie}; bona_dash_next=%2Fdashboard%2Fleads%2FLEAD-1` });
+    assert.equal(out.headers.get('location'), '/dashboard/login');
+    assert.equal(h.cookieValue(out, 'bona_dash_next'), null, 'cleared with the try nonce');
+    // A real browser never sends bona_dash_next to /dashboard/logout (its Path is /dashboard/login): logout clears it anyway (Codex r4).
+    const plain = await h.postForm('/dashboard/logout', { _dash: '1' }, { cookie });
+    assert.equal(h.cookieValue(plain, 'bona_dash_next'), null, 'cleared though the request could not show it');
+    const header = [plain.headers.get('set-cookie')].flat().join('\n');
+    assert.match(header, /bona_dash_next=;[^\n]*Path=\/dashboard\/login[^\n]*Max-Age=0/, 'on the path the browser keeps it under');
+  });
+});
+
+/** An inbox chat (DESIGN §3.1 rule 1: `in`, with a jid) for the T08 inbox tests. */
+function chatLead(db, { id, name, phone, ...over }) {
+  db.insertLead({
+    lead_id: id, created: Date.now() - 3_600_000, updated: Date.now(), phone_e164: phone, wa_jid: `${phone}@s.whatsapp.net`, name,
+    channel: 'whatsapp', match_method: 'ref', stage: 'new', stage_ts: Date.now() - 3_600_000,
+    inbox_state: 'in', inbox_since: Date.now() - 3_600_000, last_msg_ts: Date.now() - 60_000, ...over,
+  });
+  return id;
+}
+
+test('T08-3 "Let the AI answer again": anyone on the team clears the chat\'s stop and holds; audited, behind the marker and the origin check; nothing is sent', async () => {
+  let inbox;
+  await withTeamRoutes(async ({ db, audit, sent, postForm, login, base, logs, staffUser, owner }) => {
+    const held = { dana_off: 1, dana_test: 0, dana_hold_until: Date.now() + 86_400_000, dana_hold_reason: 'loop' };
+    const id = chatLead(db, { id: 'LEAD-20261128-aaaa0083', name: 'Held Client', phone: '966500000083', ...held });
+    const route = `/v1/admin/inbox/${id}/answer_again`;
+    const state = () => { const l = db.getLead(id); return [l.dana_off, l.dana_hold_until, l.dana_hold_reason, l.dana_test]; };
+    const raw = (headers, body = '_dash=1') => fetch(base + route, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers }, body });
+
+    assert.equal((await raw({})).status, 401, 'signed out: refused');
+    const staff = await login(STAFF_PHONE);
+    const codes = sent.length;
+    assert.equal((await raw({ Cookie: staff }, '')).status, 403, 'no marker: refused');
+    assert.equal((await raw({ Cookie: staff, Origin: 'https://evil.example' })).status, 403, 'a foreign page: refused');
+    assert.deepEqual(state(), [1, held.dana_hold_until, 'loop', 0], 'a refused post changes nothing');
+
+    const res = await postForm(route, { _dash: '1' }, { cookie: staff });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.get('location'), `/dashboard/inbox/${id}?ok=again`);
+    assert.deepEqual(state(), [0, null, null, 0], 'dana_off and both hold columns cleared; the test switch untouched');
+    const row = audit.recent(50).find((r) => r.action === 'dana_chat');
+    assert.deepEqual([row.user_id, row.target, row.meta], [staffUser.user_id, id, { dana_off: 0, dana_hold_until: null, dana_hold_reason: null }]);
+    assert.ok(logs.some((l) => l.evt === 'dash.dana_again' && l.leadId === id));
+    assert.doesNotMatch(JSON.stringify(logs.filter((l) => l.evt === 'dash.dana_again')), /Held Client|966500000083/, 'logged by lead id only');
+
+    // The owner too, over JSON with the header marker; a hold alone (no stop) is cleared the same way.
+    db.updateLead(id, { dana_hold_reason: 'cap_chat', dana_hold_until: null });
+    const ownerCookie = await login(OWNER_PHONE);
+    const json = await fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: ownerCookie }, body: '{}' });
+    assert.equal(json.status, 200);
+    assert.deepEqual(await json.json(), { ok: true, dana_off: 0, dana_hold_until: null, dana_hold_reason: null });
+    assert.deepEqual(state(), [0, null, null, 0]);
+    assert.equal(audit.recent(50).filter((r) => r.action === 'dana_chat').length, 2);
+    assert.equal(audit.recent(50).find((r) => r.action === 'dana_chat').user_id, owner.user_id);
+
+    // Rule 1: a lead that is not an inbox chat is refused like every other inbox write.
+    const out = chatLead(db, { id: 'LEAD-20261128-aaaa0084', name: 'Out Client', phone: '966500000084', inbox_state: 'out', dana_off: 1 });
+    const refused = await fetch(base + `/v1/admin/inbox/${out}/answer_again`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: staff }, body: '{}' });
+    assert.equal(refused.status, 404);
+    assert.equal(db.getLead(out).dana_off, 1);
+    assert.equal(sent.length, codes + 1, 'only the owner\'s login code went out: the button sends nothing');
+  }, ({ db }) => { inbox = createInboxStore(db); return { inbox }; });
+});
+
+test('T08-3 the thread offers "Let the AI answer again" on a stopped or held chat, to staff as well', async () => {
+  await withTeamRoutes(async ({ db, get, login }) => {
+    const id = chatLead(db, { id: 'LEAD-20261128-aaaa0085', name: 'Stopped Client', phone: '966500000085', dana_off: 1 });
+    const staff = await login(STAFF_PHONE);
+    const html = await (await get(`/dashboard/inbox/${id}`, { cookie: staff })).text();
+    assert.match(html, new RegExp(`action="/v1/admin/inbox/${id}/answer_again"`));
+    assert.match(html, />Let the AI answer again<\/button>/);
+    assert.match(html, /only if the client asked you/);
+    assert.match(await (await get(`/dashboard/inbox/${id}?ok=again`, { cookie: staff })).text(), /class="ok"/);
+  }, ({ db }) => ({ inbox: createInboxStore(db) }));
+});
+
+test('T08-4 a calendar-booked viewing: moving its time is refused with "move it in Google Calendar", its time is read-only, and Cancel still works', async () => {
+  const calls = [];
+  await withTeamRoutes(async ({ db, base, get, postForm, login }) => {
+    const leadId = seedLead(db, { phone: '966500000086', inboxState: 'in' });
+    const slot = Date.parse('2026-12-06T10:00:00+03:00');
+    const booked = bookViewing(db, { leadId, bookingId: 'BKG-t08', listingId: 'BONA-W012', slotStart: '2026-12-06T10:00:00+03:00', dueTs: slot, now: Date.parse('2026-11-28T09:00:00Z') });
+    const plain = addTask(db, { leadId, kind: 'followup', source: 'owner', details: { note: 'call back' }, dueTs: slot + 86_400_000 });
+    const cookie = await login(OWNER_PHONE);
+    const route = `/v1/admin/leads/${leadId}/task`;
+
+    const moved = await postForm(route, { _dash: '1', task_id: booked.task_id, status: 'confirmed', due_at: '2026-12-07T12:00' }, { cookie });
+    assert.equal(moved.status, 303);
+    assert.equal(moved.headers.get('location'), `/dashboard/leads/${leadId}?error=calendar_booked`);
+    const json = await fetch(base + route, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: cookie }, body: JSON.stringify({ task_id: booked.task_id, status: 'confirmed', due_at: '2026-12-07T12:00' }) });
+    assert.equal(json.status, 409);
+    assert.deepEqual(await json.json(), { error: 'calendar_booked' });
+    assert.equal(tasksForLead(db, leadId).find((t) => t.task_id === booked.task_id).due_ts, slot, 'the time is the calendar\'s');
+    assert.equal(calls.length, 0, 'a refused move is no change');
+    const banner = await (await get(`/dashboard/leads/${leadId}?error=calendar_booked`, { cookie })).text();
+    assert.match(banner, /<div class="err">[^<]*move it in Google Calendar; Bona follows the calendar[^<]*<\/div>/);
+
+    // The page: the booked task has no time field, says where to move it, and keeps its status (Cancel).
+    const page = await (await get(`/dashboard/leads/${leadId}`, { cookie })).text();
+    const card = (taskId) => page.slice(page.lastIndexOf('<div class="card"', page.indexOf(`value="${taskId}"`)), page.indexOf('</form>', page.indexOf(`value="${taskId}"`)));
+    assert.doesNotMatch(card(booked.task_id), /name="due_at"/, 'the booked time is read-only');
+    assert.match(card(booked.task_id), /move it in Google Calendar; Bona follows the calendar/);
+    assert.match(card(booked.task_id), /<option value="cancelled">cancelled<\/option>/, 'Cancel stays');
+    assert.match(card(plain.task_id), /name="due_at"/, 'a task the owner made keeps its time field');
+
+    // Cancel (no time sent) goes through and reaches the viewing seam as before.
+    const cancelled = await postForm(route, { _dash: '1', task_id: booked.task_id, status: 'cancelled' }, { cookie });
+    assert.equal(cancelled.headers.get('location'), `/dashboard/leads/${leadId}?ok=task`);
+    assert.equal(tasksForLead(db, leadId).find((t) => t.task_id === booked.task_id).status, 'cancelled');
+    assert.equal(calls.length, 1);
+    // A wrong status on a booked task is still the old bad_task, not the calendar message.
+    assert.equal((await postForm(route, { _dash: '1', task_id: booked.task_id, status: 'nonsense' }, { cookie })).headers.get('location'), `/dashboard/leads/${leadId}?error=bad_task`);
+  }, { hooks: { onTaskChange: (task, patch) => { calls.push([task.task_id, patch]); } } });
+});
+
+test('T08-4 a booked viewing with no time on its task still says to move it in Google Calendar, never "for Not scheduled"', async () => {
+  await withTeamRoutes(async ({ db, get, login }) => {
+    const leadId = seedLead(db, { phone: '966500000079', inboxState: 'in' });
+    const task = addTask(db, { leadId, kind: 'viewing', source: 'dana', details: {}, dueTs: null });
+    db.db.prepare('UPDATE lead_tasks SET details = ? WHERE task_id = ?').run(JSON.stringify({ booking_id: 'BKG-t08b', listing_id: 'BONA-W012' }), task.task_id);
+    const page = await (await get(`/dashboard/leads/${leadId}`, { cookie: await login(OWNER_PHONE) })).text();
+    const form = page.slice(page.indexOf(`value="${task.task_id}"`), page.indexOf('</form>', page.indexOf(`value="${task.task_id}"`)));
+    assert.match(form, /Booked on the calendar\. To change the time, move it in Google Calendar; Bona follows the calendar\./);
+    assert.doesNotMatch(form, /Not scheduled|name="due_at"/);
+  });
+});
+
+test('T08-5 the inbox list hides a chat with inbox_via set while Bona\'s number is not checked; a chat joined by proof is listed either way; the lead page stays', async () => {
+  let numberOk = false;
+  let inbox;
+  await withTeamRoutes(async ({ db, get, login }) => {
+    chatLead(db, { id: 'LEAD-20261128-aaaa0087', name: 'Own Number Client', phone: '966500000087', inbox_via: 'own_number' });
+    chatLead(db, { id: 'LEAD-20261128-aaaa0088', name: 'Owner Test Chat', phone: '966500000088', inbox_via: 'owner_test' });
+    chatLead(db, { id: 'LEAD-20261128-aaaa0089', name: 'Proof Client', phone: '966500000089', inbox_via: null });
+    const owner = await login(OWNER_PHONE);
+    const staff = await login(STAFF_PHONE);
+    // Newer than both people's accounts, so it is unread for each of them.
+    inbox.upsertMessage({ key_id: 'K-87', lead_id: 'LEAD-20261128-aaaa0087', jid: null, direction: 'in', sender_kind: 'client', text: 'hello', ts: Date.now() + 5_000 });
+    const list = async (cookie) => (await get('/dashboard/inbox', { cookie })).text();
+
+    for (const cookie of [owner, staff]) {
+      const off = await list(cookie);
+      assert.match(off, /Proof Client/);
+      assert.doesNotMatch(off, /Own Number Client|Owner Test Chat/, 'hidden while ownNumberOk() is false');
+      assert.doesNotMatch(off, /Inbox<span class="c">/, 'and its unread message is not on the badge');
+    }
+    assert.equal((await get('/dashboard/leads/LEAD-20261128-aaaa0087', { cookie: owner })).status, 200, 'it stays on the Leads page');
+
+    numberOk = true;
+    for (const cookie of [owner, staff]) {
+      const on = await list(cookie);
+      assert.match(on, /Proof Client/);
+      assert.match(on, /Own Number Client/);
+      assert.match(on, /Owner Test Chat/);
+      assert.match(on, /Inbox<span class="c">1<\/span>/);
+    }
+
+    numberOk = () => { throw new Error('link state unreadable'); };
+    const failing = await list(owner);
+    assert.doesNotMatch(failing, /Own Number Client/, 'an ownNumberOk() that throws reads as false');
+    assert.match(failing, /Proof Client/);
+  }, ({ db }) => {
+    inbox = createInboxStore(db);
+    return { inbox, ownerTest: { ownNumberOk() { return typeof numberOk === 'function' ? numberOk() : numberOk; } } };
+  });
+});
+
+test('T08-5 while Bona\'s number is not checked an inbox_via chat cannot be opened, read from WhatsApp or answered (DESIGN §13.2); once checked, all of it works', async () => {
+  let numberOk = false;
+  const refreshes = [];
+  const replies = [];
+  await withTeamRoutes(async ({ db, base, get, postForm, login }) => {
+    const via = chatLead(db, { id: 'LEAD-20261128-aaaa0098', name: 'Own Number Client', phone: '966500000098', inbox_via: 'own_number', dana_off: 1 });
+    const proof = chatLead(db, { id: 'LEAD-20261128-aaaa0099', name: 'Proof Client', phone: '966500000099' });
+    const owner = await login(OWNER_PHONE);
+    const staff = await login(STAFF_PHONE);
+    const json = (p, body, cookie) => fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Bona-Dash': '1', Cookie: cookie }, body: JSON.stringify(body) });
+    const openChatLink = new RegExp(`href="/dashboard/inbox/${via}"`);
+
+    for (const cookie of [owner, staff]) {
+      const thread = await get(`/dashboard/inbox/${via}`, { cookie });
+      assert.equal(thread.status, 404, 'the thread answers not-in-inbox');
+      assert.match(await thread.text(), /That chat is not in the Bona inbox/);
+      assert.equal((await postForm(`/v1/admin/inbox/${via}/reply`, { _dash: '1', text: 'hello', send_id: 'a'.repeat(24), seen_rev: '0' }, { cookie })).status, 404, 'a reply is refused');
+      assert.equal((await json(`/v1/admin/inbox/${via}/handler`, { user_id: '' }, cookie)).status, 404);
+      assert.equal((await json(`/v1/admin/inbox/${via}/dana`, { dana_off: '0' }, cookie)).status, 404);
+      assert.equal((await json(`/v1/admin/inbox/${via}/answer_again`, {}, cookie)).status, 404);
+      assert.equal((await get(`/v1/admin/inbox/pulse?lead=${via}`, { cookie })).status, 404, 'its pulse says nothing either');
+    }
+    assert.deepEqual([refreshes, replies], [[], []], 'no Evolution read and nothing sent');
+    assert.equal(db.getLead(via).dana_off, 1, 'nothing written');
+    const leadPage = await (await get(`/dashboard/leads/${via}`, { cookie: owner })).text();
+    assert.doesNotMatch(leadPage, openChatLink, 'the lead page offers no "Open chat" for it');
+    assert.match(leadPage, /hidden from the inbox until Bona’s WhatsApp number is checked/);
+    // A chat joined by proof is untouched by the guard.
+    assert.equal((await get(`/dashboard/inbox/${proof}`, { cookie: staff })).status, 200);
+    assert.match(await (await get(`/dashboard/leads/${proof}`, { cookie: owner })).text(), new RegExp(`href="/dashboard/inbox/${proof}"`));
+
+    numberOk = true;
+    refreshes.length = 0;
+    assert.equal((await get(`/dashboard/inbox/${via}`, { cookie: staff })).status, 200, 'checked: the thread opens');
+    assert.deepEqual(refreshes, [via], 'and is read from WhatsApp as any chat is');
+    const sent = await postForm(`/v1/admin/inbox/${via}/reply`, { _dash: '1', text: 'hello', send_id: 'b'.repeat(24), seen_rev: '0' }, { cookie: staff });
+    assert.equal(sent.headers.get('location'), `/dashboard/inbox/${via}?ok=sent`);
+    assert.equal(replies.length, 1);
+    assert.equal((await get(`/v1/admin/inbox/pulse?lead=${via}`, { cookie: staff })).status, 200);
+    assert.equal((await json(`/v1/admin/inbox/${via}/answer_again`, {}, staff)).status, 200);
+    assert.match(await (await get(`/dashboard/leads/${via}`, { cookie: owner })).text(), openChatLink);
+  }, ({ db }) => ({
+    inbox: createInboxStore(db),
+    ownerTest: { ownNumberOk: () => numberOk },
+    backfill: { refresh: async (lead) => { refreshes.push(lead.lead_id); } },
+    sender: { reply: async (o) => { replies.push(o); return { ok: true, sendId: o.sendId }; } },
+  }));
+});
+
+test('T08-5 an older proof-joined chat behind 1,001 newer unread own-number chats is still listed, on the badge and opened by an alert while the guard is on', async () => {
+  let inbox;
+  await withTeamRoutes(async ({ db, get, login }) => {
+    const owner = await login(OWNER_PHONE);
+    const t = Date.now() + 10_000;
+    const proof = chatLead(db, { id: 'LEAD-20261128-eeee0000', name: 'Proof Client', phone: '966500020000', last_msg_ts: t });
+    inbox.upsertMessage({ key_id: 'K-proof', lead_id: proof, jid: null, direction: 'in', sender_kind: 'client', text: 'hello', ts: t });
+    db.transaction(() => {
+      for (let i = 1; i <= 1001; i += 1) {
+        const n = String(i).padStart(4, '0');
+        const id = chatLead(db, { id: `LEAD-20261128-dddd${n}`, name: `Own ${n}`, phone: `96650002${n}`, inbox_via: 'own_number', last_msg_ts: t + i });
+        inbox.upsertMessage({ key_id: `K-own-${n}`, lead_id: id, jid: null, direction: 'in', sender_kind: 'client', text: 'hi', ts: t + i });
+      }
+    });
+    const list = await (await get('/dashboard/inbox', { cookie: owner })).text();
+    assert.match(list, /Proof Client/, 'the list: the store leaves the own-number chats out before its limit');
+    assert.doesNotMatch(list, /Own \d{4}/);
+    assert.match(list, /Inbox<span class="c">1<\/span>/, 'the badge counts its unread message');
+    const open = await get('/dashboard/push/open', { cookie: owner });
+    assert.equal(open.status, 302);
+    assert.equal(open.headers.get('location'), `/dashboard/inbox/${proof}`, 'an alert opens it');
+  }, ({ db }) => { inbox = createInboxStore(db); return { inbox, ownerTest: { ownNumberOk: () => false } }; });
+});
+
+test('T08-5 a reply that waits on its WhatsApp refresh is refused when the identity check fails meanwhile: nothing is sent', async () => {
+  let numberOk = true;
+  const replies = [];
+  await withTeamRoutes(async ({ db, postForm, login }) => {
+    const via = chatLead(db, { id: 'LEAD-20261128-ffff0001', name: 'Own Number Client', phone: '966500000071', inbox_via: 'own_number' });
+    const proof = chatLead(db, { id: 'LEAD-20261128-ffff0002', name: 'Proof Client', phone: '966500000072' });
+    const staff = await login(STAFF_PHONE);
+    const reply = (leadId, sendId) => postForm(`/v1/admin/inbox/${leadId}/reply`, { _dash: '1', text: 'hello', send_id: sendId, seen_rev: '0' }, { cookie: staff });
+    const res = await reply(via, 'c'.repeat(24));
+    assert.equal(res.status, 404, 'checked again after the refresh, right before the send');
+    assert.match(await res.text(), /That chat is not in the Bona inbox/);
+    assert.equal(replies.length, 0, 'nothing sent');
+    // A chat joined by proof is not the guard's: the same flip does not stop its reply.
+    numberOk = true;
+    const ok = await reply(proof, 'd'.repeat(24));
+    assert.equal(ok.headers.get('location'), `/dashboard/inbox/${proof}?ok=sent`);
+    assert.deepEqual(replies.map((r) => r.leadId), [proof]);
+  }, ({ db }) => ({
+    inbox: createInboxStore(db),
+    ownerTest: { ownNumberOk: () => numberOk },
+    // The identity probe reports a mismatch while the refresh is out at WhatsApp.
+    backfill: { refresh: async () => { numberOk = false; } },
+    sender: { reply: async (o) => { replies.push(o); return { ok: true, sendId: o.sendId }; } },
+  }));
+});
+
+test('T08-5 while the number is not checked the owner cannot Move, Add or move a chat to check in for a hidden own-number client: refused before any WhatsApp history read', async () => {
+  let numberOk = false;
+  const reads = [];
+  let inbox;
+  await withTeamRoutes(async ({ db, get, postForm, login }) => {
+    const out = chatLead(db, { id: 'LEAD-20261128-ffff0003', name: 'Own Out Client', phone: '966500000073', inbox_via: 'own_number', inbox_state: 'out' });
+    const cand = inbox.noteCandidate({ phone: '966500000073', jid: '966500000073@s.whatsapp.net', name: 'Own Out Client', ts: Date.now(), words: ['villa'], dir: 'in' }).cand_id;
+    const cookie = await login(OWNER_PHONE);
+    const moved = await postForm(`/v1/admin/inbox/${out}/move`, { _dash: '1' }, { cookie });
+    assert.equal(moved.headers.get('location'), `/dashboard/leads/${out}?error=number_unchecked`);
+    const added = await postForm('/v1/admin/inbox/add', { _dash: '1', phone: '0500000073' }, { cookie });
+    assert.equal(added.headers.get('location'), '/dashboard/inbox?error=number_unchecked');
+    const fromList = await postForm(`/v1/admin/inbox/candidates/${cand}/move`, { _dash: '1' }, { cookie });
+    assert.equal(fromList.headers.get('location'), '/dashboard/inbox?tab=unsure&error=number_unchecked');
+    assert.deepEqual(reads, [], 'no history read from the personal number');
+    assert.equal(db.getLead(out).inbox_state, 'out', 'nothing moved');
+    assert.equal(inbox.getCandidate(cand).state, 'open', 'the chat to check stays');
+    assert.match(await (await get(`/dashboard/leads/${out}?error=number_unchecked`, { cookie })).text(), /<div class="err">[^<]*until Bona’s WhatsApp number is checked/);
+
+    numberOk = true;
+    const now = await postForm(`/v1/admin/inbox/${out}/move`, { _dash: '1' }, { cookie });
+    assert.equal(now.status, 303);
+    assert.equal(db.getLead(out).inbox_state, 'in', 'checked: Move works as today');
+    assert.deepEqual(reads, [out]);
+  }, ({ db }) => {
+    inbox = createInboxStore(db);
+    return { inbox, ownerTest: { ownNumberOk: () => numberOk }, backfill: { refresh: async () => {}, history: async (lead) => { reads.push(lead.lead_id); } } };
+  });
+});
+
+test('T08-5 without an ownerTest the routes fail closed: an inbox_via chat is not listed, a proof chat is', async () => {
+  await withTeamRoutes(async ({ db, get, login }) => {
+    chatLead(db, { id: 'LEAD-20261128-aaaa0090', name: 'Own Number Client', phone: '966500000090', inbox_via: 'own_number' });
+    chatLead(db, { id: 'LEAD-20261128-aaaa0091', name: 'Proof Client', phone: '966500000091' });
+    const html = await (await get('/dashboard/inbox', { cookie: await login(OWNER_PHONE) })).text();
+    assert.match(html, /Proof Client/);
+    assert.doesNotMatch(html, /Own Number Client/);
+  }, ({ db }) => ({ inbox: createInboxStore(db) }));
+});
+
+/** An owner_notes alert row as the notes ledger writes one (PR-B2: kind alert, the lead, `al:old_out_wrote:<lead>:<day>`). */
+function oldOutRow(db, { leadId = null, key, created, status = 'sent' }) {
+  db.db.prepare(`INSERT INTO owner_notes (note_id, kind, lead_id, dedupe_key, due_ts, status, send_id, meta, created, updated)
+    VALUES (?, 'alert', ?, ?, ?, ?, NULL, ?, ?, ?)`).run(`NOTE-${key}`, leadId, key, created, status, JSON.stringify({ alert: 'old_out_wrote' }), created, created);
+}
+
+test('T08-6 "Chats to check" lists the old out leads that wrote in the last 30 days: the lead row\'s name, the time, no text, and Move', async () => {
+  let inbox;
+  await withTeamRoutes(async ({ db, get, postForm, login }) => {
+    const t = Date.now();
+    const old = chatLead(db, { id: 'LEAD-20261128-aaaa0092', name: 'Old Out Client', phone: '966500000092', inbox_state: 'out' });
+    inbox.upsertMessage({ key_id: 'K-92', lead_id: old, jid: null, direction: 'in', sender_kind: 'client', text: 'secret villa words', ts: t - 7_200_000 });
+    oldOutRow(db, { leadId: old, key: `al:old_out_wrote:${old}:2026-11-27`, created: t - 26 * 3_600_000 });
+    oldOutRow(db, { leadId: old, key: `al:old_out_wrote:${old}:2026-11-28`, created: t - 2 * 3_600_000, status: 'dropped' });
+    const stale = chatLead(db, { id: 'LEAD-20261128-aaaa0093', name: 'Long Ago Client', phone: '966500000093', inbox_state: 'out' });
+    oldOutRow(db, { leadId: stale, key: `al:old_out_wrote:${stale}:2026-10-01`, created: t - 31 * 86_400_000 });
+    const back = chatLead(db, { id: 'LEAD-20261128-aaaa0094', name: 'Moved Back Client', phone: '966500000094', inbox_state: 'in' });
+    oldOutRow(db, { leadId: back, key: `al:old_out_wrote:${back}:2026-11-28`, created: t - 3_600_000 });
+    const colleague = chatLead(db, { id: 'LEAD-20261128-aaaa0095', name: 'Colleague Client', phone: STAFF_PHONE, inbox_state: 'out' });
+    oldOutRow(db, { leadId: colleague, key: `al:old_out_wrote:${colleague}:2026-11-28`, created: t - 3_600_000 });
+    oldOutRow(db, { key: 'al:old_out_wrote:CND-mf3k2a-1a2b:2026-11-28', created: t - 3_600_000 });
+    const other = chatLead(db, { id: 'LEAD-20261128-aaaa0096', name: 'Other Alert Client', phone: '966500000096', inbox_state: 'out' });
+    oldOutRow(db, { leadId: other, key: 'al:breaker:493000', created: t - 3_600_000 });
+
+    const cookie = await login(OWNER_PHONE);
+    const res = await get('/dashboard/inbox?tab=unsure', { cookie });
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.match(html, /<bdi>Old Out Client<\/bdi>/, 'the name comes from the lead row');
+    assert.match(html, /wrote 2\sh ago/, 'the newest of its rows');
+    assert.match(html, new RegExp(`action="/v1/admin/inbox/${old}/move"`), 'and its Move button');
+    assert.doesNotMatch(html, /secret villa words/, 'never what they wrote');
+    assert.doesNotMatch(html, /966500000092/, 'never the number');
+    assert.equal(html.match(/Old Out Client/g).length, 1, 'one row a lead, however many days it wrote');
+    for (const gone of ['Long Ago Client', 'Moved Back Client', 'Colleague Client', 'Other Alert Client', 'CND-mf3k2a']) assert.doesNotMatch(html, new RegExp(gone), gone);
+    assert.match(html, /Unsure · 1<\/a>/, 'the tab counts it');
+    assert.match(await (await get('/dashboard/inbox', { cookie })).text(), /Unsure · 1<\/a>/, 'and so does the inbox list\'s tab');
+
+    // Move brings it in, as today, and it leaves the list.
+    const moved = await postForm(`/v1/admin/inbox/${old}/move`, { _dash: '1' }, { cookie });
+    assert.equal(moved.status, 303);
+    assert.equal(db.getLead(old).inbox_state, 'in');
+    assert.doesNotMatch(await (await get('/dashboard/inbox?tab=unsure', { cookie })).text(), /Old Out Client/);
+  }, ({ db }) => { inbox = createInboxStore(db); return { inbox }; });
+});
+
+test('T08-6 "Chats to check" finds an eligible old out lead behind 200 newer rows that are no longer out, or are a never-list number', async () => {
+  for (const crowd of ['moved back in', 'never list']) {
+    let inbox;
+    await withTeamRoutes(async ({ db, team, get, login }) => {
+      const t = Date.now();
+      const eligible = chatLead(db, { id: 'LEAD-20261128-bbbb0000', name: 'Eligible Old Client', phone: '966500001000', inbox_state: 'out' });
+      oldOutRow(db, { leadId: eligible, key: `al:old_out_wrote:${eligible}:2026-11-20`, created: t - 8 * 86_400_000 });
+      for (let i = 1; i <= 201; i += 1) {
+        const n = String(i).padStart(4, '0');
+        const phone = `96650000${1000 + i}`;
+        const id = chatLead(db, { id: `LEAD-20261128-cccc${n}`, name: `Crowd ${n}`, phone, inbox_state: crowd === 'moved back in' ? 'in' : 'out' });
+        if (crowd === 'never list') team.addNever({ phone });
+        oldOutRow(db, { leadId: id, key: `al:old_out_wrote:${id}:2026-11-28`, created: t - 3_600_000 - i });
+      }
+      const html = await (await get('/dashboard/inbox?tab=unsure', { cookie: await login(OWNER_PHONE) })).text();
+      assert.match(html, /<bdi>Eligible Old Client<\/bdi>/, `${crowd}: the eligible lead is still listed`);
+      assert.doesNotMatch(html, /Crowd \d{4}/, `${crowd}: none of the crowd is`);
+      assert.match(html, /Unsure · 1<\/a>/);
+    }, ({ db }) => { inbox = createInboxStore(db); return { inbox }; });
+  }
+});
+
+test('T08-6 an old_out_wrote alert the owner has handled (moved in, then Not a client again) is not listed again; a newer one is', async () => {
+  let inbox;
+  await withTeamRoutes(async ({ db, owner, get, postForm, login }) => {
+    const t = Date.now();
+    const old = chatLead(db, { id: 'LEAD-20261128-ffff0004', name: 'Handled Client', phone: '966500000074', inbox_state: 'out' });
+    // His Not a client from before the move: older than the alert, so the alert stands.
+    db.db.prepare('INSERT INTO audit_log (id, ts, user_id, action, target, meta) VALUES (?, ?, ?, ?, ?, NULL)').run('AUD-t08-old', t - 40 * 86_400_000, owner.user_id, 'inbox_out', old);
+    oldOutRow(db, { leadId: old, key: `al:old_out_wrote:${old}:2026-11-27`, created: t - 2 * 3_600_000 });
+    const cookie = await login(OWNER_PHONE);
+    const tab = async () => (await get('/dashboard/inbox?tab=unsure', { cookie })).text();
+    assert.match(await tab(), /<bdi>Handled Client<\/bdi>/);
+
+    assert.equal((await postForm(`/v1/admin/inbox/${old}/move`, { _dash: '1' }, { cookie })).status, 303);
+    assert.equal((await postForm(`/v1/admin/inbox/${old}/out`, { _dash: '1' }, { cookie })).status, 303);
+    assert.equal(db.getLead(old).inbox_state, 'out');
+    const handled = await tab();
+    assert.doesNotMatch(handled, /Handled Client/, 'marked Not a client again: the older alert is handled');
+    assert.doesNotMatch(handled, /Unsure · \d/);
+
+    oldOutRow(db, { leadId: old, key: `al:old_out_wrote:${old}:2026-11-28`, created: Date.now() + 1000 });
+    assert.match(await tab(), /<bdi>Handled Client<\/bdi>/, 'an alert raised after that dismissal is listed');
+  }, ({ db }) => { inbox = createInboxStore(db); return { inbox }; });
+});
+
+test('T08-7 an enquiry whose note was skipped (a merge into an existing contact) reads "No note: an existing contact" on the lead page', async () => {
+  await withTeamRoutes(async ({ db, get, login }) => {
+    const leadId = seedLead(db, { phone: '966500000097', inboxState: 'in' });
+    const t = Date.now();
+    const receipt = db.db.prepare('INSERT INTO enquiry_receipts (event_id, payload_hash, lead_id, created, notify_status) VALUES (?, ?, ?, ?, ?)');
+    receipt.run('evt-t08-skipped', 'h1', leadId, t - 4000, 'skipped');
+    receipt.run('evt-t08-sent', 'h2', leadId, t - 3000, 'sent');
+    receipt.run('evt-t08-pending', 'h3', leadId, t - 2000, 'pending');
+    receipt.run('evt-t08-uncertain', 'h4', leadId, t - 1000, 'uncertain');
+    // The ledger's other two (PR-B2): dropped (owner notes off, or no longer sendable) and over (the day's limit).
+    receipt.run('evt-t08-dropped', 'h5', leadId, t - 900, 'dropped');
+    receipt.run('evt-t08-over', 'h6', leadId, t - 800, 'over');
+    const html = await (await get(`/dashboard/leads/${leadId}`, { cookie: await login(OWNER_PHONE) })).text();
+    assert.equal(html.match(/No note: an existing contact/g)?.length, 1);
+    assert.equal(html.match(/No note sent: owner notes were off, or it could no longer go/g)?.length, 1);
+    assert.equal(html.match(/No note of its own: over the day’s limit, so it is in the daily summary/g)?.length, 1);
+    assert.equal(html.match(/Accepted by WhatsApp; not proof of delivery/g)?.length, 1);
+    assert.equal(html.match(/Awaiting acknowledgement/g)?.length, 1);
+    assert.equal(html.match(/Not confirmed — check WhatsApp before resending/g)?.length, 1, 'skipped, dropped and over are no longer read as "not confirmed"');
+  });
 });

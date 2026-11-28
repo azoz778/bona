@@ -747,6 +747,25 @@ test('unreadTotal is the same rule summed over every inbox chat, and nothing out
   s.close();
 });
 
+test('listInbox proofOnly (T08, DESIGN §13.2): only chats joined by proof, filtered before the limit; without it the list is exactly as before', () => {
+  const { s, inbox, owner } = listScene();
+  const before = inbox.listInbox({ userId: owner.user_id });
+  // B (the unread one first) and G joined under the own-number rule; A and C by proof.
+  s.updateLead('B', { inbox_via: 'own_number' });
+  s.updateLead('G', { inbox_via: 'owner_test' });
+  const all = inbox.listInbox({ userId: owner.user_id });
+  assert.deepEqual(all.map((r) => r.lead_id), ['B', 'G', 'C', 'A'], 'inbox_via changes nothing without the option');
+  assert.deepEqual(all.map(({ inbox_via: _via, ...r }) => r), before.map(({ inbox_via: _via, ...r }) => r));
+  for (const off of [undefined, false, 0, null, 'true', 1]) {
+    assert.deepEqual(inbox.listInbox({ userId: owner.user_id, proofOnly: off }), all, `proofOnly ${String(off)}: the old list, byte for byte`);
+  }
+  const proof = inbox.listInbox({ userId: owner.user_id, proofOnly: true });
+  assert.deepEqual(proof.map((r) => r.lead_id), ['C', 'A'], 'the same order, own-number chats left out');
+  assert.deepEqual(proof, all.filter((r) => r.inbox_via === null), 'the same rows as before, unread counts and last message included');
+  assert.deepEqual(inbox.listInbox({ userId: owner.user_id, limit: 1, proofOnly: true }).map((r) => r.lead_id), ['C'], 'the limit counts only what is left');
+  s.close();
+});
+
 test('listInbox breaks a tie by the newest row', () => {
   const { s, inbox } = harness();
   chat(s, 'T-1', { inbox_since: NOW - 1000 });
