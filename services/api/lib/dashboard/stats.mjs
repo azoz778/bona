@@ -19,6 +19,13 @@
 import { STAGES } from '../db.mjs';
 import { sourceFromTouch } from '../attribution.mjs';
 import { OWNER_METHODS } from '../leads.mjs';
+import { HANDOVER } from '../dana-wa.mjs';
+
+/**
+ * The fixed lines code sends as a `dana` row that are never an answer: the hand-over (and holding) line of
+ * lib/dana-wa.mjs, alone or after the disclosure line. A task that adds another such line adds it here.
+ */
+export const NOT_ANSWER_LINES = Object.freeze(Object.values(HANDOVER));
 
 /** Asia/Riyadh, permanently UTC+3. */
 export const TZ_OFFSET_MS = 3 * 3_600_000;
@@ -599,29 +606,26 @@ export function createStats({ db, now = () => Date.now(), tzOffsetMs = TZ_OFFSET
       const c = channelBucket(r.channel);
       byChannel[c] = (byChannel[c] ?? 0) + 1;
     }
-    // One row per ANSWER: a chat (or a purged chat's jid) and the client message it answered. A
-    // hand-over or holding line is a `dana` row WhatsApp takes like an answer, so the row alone never
-    // says so: the evidence is lib/owner-notes.mjs firstAnswerSince's (Codex r9). Only a row WhatsApp
-    // took (`accepted`; a pending or uncertain one may never have gone), and either
-    //   - one the reply guard passed (`guarded = 1`: a brain turn's bubbles only, never a line code
-    //     sends), or
-    //   - the send whose taking stamped the lead's `first_reply_ts` (lib/dana-wa.mjs stamps it for an
-    //     answer only, never the hand-over line): the lead's last `dana` row taken by then, unless a
-    //     person had written by then (lib/wa-send.mjs and the poller stamp the same column).
-    // Its time is when WhatsApp took it (`updated`, written as it turns `accepted`, never again).
+    // One row per ANSWER: a chat (or a purged chat's jid) and the client message it answered (Codex r9,
+    // r10). Only a `dana` row WhatsApp took (`accepted`; a pending or uncertain one may never have gone)
+    // is one, and only one that
+    //   - the reply guard passed (`guarded = 1`: a brain turn's bubbles, never a line code sends), or
+    //   - carries a text that is none of the fixed lines code sends (NOT_ANSWER_LINES: the hand-over and
+    //     holding line, alone or after the disclosure line): a legacy (Retell) answer, on every turn.
+    // A purged chat's stub keeps no text, so only its guard says it was an answer.
+    // A turn's time is when WhatsApp took its first answer bubble (`updated`, written as it turns
+    // `accepted`); a purge rewrites a stub's `updated`, so a stub's is its `created` (Claude r11). A turn
+    // belongs, once, to the window that holds that first bubble (an answer split across 08:00, Codex
+    // r10): rows from a day before the window are read so a turn is grouped whole before it is placed.
     // store.countDanaTurns stays as it is: the pacing cap must count every send that may have gone.
-    const turns = all(`SELECT MIN(o.updated) - o.covers_ts AS d, o.covers_ts FROM wa_outbox o
-                       LEFT JOIN leads l ON l.lead_id = o.lead_id
+    const notLine = NOT_ANSWER_LINES.map(() => '(o.text <> ? AND substr(o.text, -?) <> ?)').join(' AND ');
+    const lineArgs = NOT_ANSWER_LINES.flatMap((t) => [t, t.length + 2, `\n\n${t}`]);
+    const turns = all(`SELECT MIN(CASE WHEN o.lead_id IS NULL THEN o.created ELSE o.updated END) AS at, o.covers_ts FROM wa_outbox o
                        WHERE o.sender_kind = 'dana' AND o.status = 'accepted' AND o.created >= ? AND o.created < ?
-                         AND (o.guarded = 1 OR (l.first_reply_ts IS NOT NULL
-                           AND o.send_id = (SELECT x.send_id FROM wa_outbox x
-                                            WHERE x.lead_id = o.lead_id AND x.sender_kind = 'dana' AND x.status = 'accepted'
-                                              AND x.updated <= l.first_reply_ts
-                                            ORDER BY x.updated DESC, x.rowid DESC LIMIT 1)
-                           AND NOT EXISTS (SELECT 1 FROM wa_messages m WHERE m.lead_id = o.lead_id AND m.direction = 'out'
-                                             AND m.sender_kind <> 'dana' AND m.ts <= l.first_reply_ts)))
-                       GROUP BY COALESCE(o.lead_id, 'jid:' || o.jid), COALESCE(o.covers_ts, o.send_id)`, a, b);
-    const replies = turns.filter((t) => t.covers_ts !== null && num(t.d) >= 0).map((t) => num(t.d));
+                         AND (o.guarded = 1 OR (o.text IS NOT NULL AND ${notLine}))
+                       GROUP BY COALESCE(o.lead_id, 'jid:' || o.jid), COALESCE(o.covers_ts, o.send_id)
+                       HAVING at >= ? AND at < ?`, a - DAY_MS, b, ...lineArgs, a, b);
+    const replies = turns.filter((t) => t.covers_ts !== null && num(t.at) - num(t.covers_ts) >= 0).map((t) => num(t.at) - num(t.covers_ts));
     const handovers = num(one(`SELECT COUNT(*) AS n FROM lead_tasks WHERE kind = 'handoff' AND source = 'dana' AND created >= ? AND created < ?`, a, b)?.n);
     const notAnswered = num(one(`SELECT COUNT(DISTINCT lead_id) AS n FROM lead_tasks
                                  WHERE kind = 'handoff' AND source = 'dana' AND created >= ? AND created < ?

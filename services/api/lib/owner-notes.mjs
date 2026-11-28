@@ -1215,7 +1215,11 @@ function createLedgerNotes({
     const enabled = notesOn();
     if (!db) return { enabled, ok: true };
     try {
-      const stuck = prep("SELECT 1 FROM owner_notes WHERE status = 'queued' AND due_ts <= ? LIMIT 1").get(now() - STUCK_MS);
+      // Stuck = still queued 15 min after it was queued (DESIGN §7.1): a new enquiry's note from when it was
+      // queued, its wait for the AI's answer (FIRST_MESSAGE_WAIT_MS) included (Codex r10); any other from when
+      // it is due, so a note scheduled for later (the next hour's brain alert) or retried counts from then.
+      const stuck = prep(`SELECT 1 FROM owner_notes WHERE status = 'queued'
+                            AND CASE WHEN kind = 'new_client' THEN MIN(due_ts, created) ELSE due_ts END <= ? LIMIT 1`).get(now() - STUCK_MS);
       return { enabled, ok: !stuck };
     } catch {
       return { enabled, ok: false };

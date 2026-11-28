@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { openDb } from '../lib/db.mjs';
 import { createStats, dayKey, median, percentile, licenceFlags, expiryMs, platformOf, DAY_MS } from '../lib/dashboard/stats.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
+import { HANDOVER, DISCLOSURE } from '../lib/dana-wa.mjs';
 
 const NOW = 1_757_200_000_000;
 const now = () => NOW;
@@ -590,5 +591,63 @@ test('ownerSummary(): only the assistant\'s ANSWERS count, and only their times 
   assert.deepEqual(s.ai, { answers: 3, handovers: 0, medianReplyMs: 20_000 }, 'answers 1, 2 and 5: median of 11 s, 20 s and 30 s');
   // The pacing cap is not this rule: it still counts every turn that may have gone (8: all but the failed one).
   assert.equal(createInboxStore(db, { now }).countDanaTurns({ sinceTs: from }), 8);
+  db.close();
+});
+
+test('ownerSummary(): a legacy (unguarded) answer counts on every turn, not only the first; the fixed hand-over line never does, with or without the disclosure line (Codex r10)', () => {
+  const db = openDb(':memory:');
+  const stats = createStats({ db, now });
+  const from = NOW - DAY_MS;
+  const to = NOW;
+  db.insertLead({ lead_id: 'LEAD-0201', created: from - DAY_MS, updated: from - DAY_MS, phone_e164: '966500000201', wa_jid: '966500000201@s.whatsapp.net',
+    channel: 'whatsapp', match_method: 'ref', stage: 'new', inbox_state: 'in', first_reply_ts: from - DAY_MS + 30_000 });
+  let n = 0;
+  const send = (covers, at, text) => {
+    n += 1;
+    db.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts, guarded)
+                   VALUES (?,'LEAD-0201','966500000201@s.whatsapp.net',?,NULL,'dana','accepted',NULL,?,?,NULL,?,0)`).run(`SND-L-${n}`, text, at, at, covers);
+  };
+  // Yesterday's first answer stamped the reply clock; today two follow-up questions get two Retell answers.
+  send(from + 10_000, from + 25_000, 'The villa has four bedrooms.');
+  send(from + 100_000, from + 135_000, 'Yes, it has a private pool.');
+  // The hand-over line code sends, alone, after the disclosure line, and in Arabic: never an answer.
+  send(from + 200_000, from + 203_000, HANDOVER.en);
+  send(from + 300_000, from + 303_000, `${DISCLOSURE.en}\n\n${HANDOVER.en}`);
+  send(from + 400_000, from + 403_000, HANDOVER.ar);
+  const s = stats.ownerSummary({ from, to });
+  assert.deepEqual(s.ai, { answers: 2, handovers: 0, medianReplyMs: 25_000 }, 'the two answers: 15 s and 35 s');
+  db.close();
+});
+
+test('ownerSummary(): an answer split across 08:00 counts once, in the day of its first bubble; a purged chat keeps its reply time (Codex r10, Claude r11)', () => {
+  const db = openDb(':memory:');
+  const stats = createStats({ db, now });
+  const inbox = createInboxStore(db, { now });
+  const a = NOW - DAY_MS;
+  const put = (id) => db.insertLead({ lead_id: id, created: a - DAY_MS, updated: a - DAY_MS, phone_e164: `96650000${id.slice(-4)}`,
+    wa_jid: `96650000${id.slice(-4)}@s.whatsapp.net`, channel: 'whatsapp', match_method: 'ref', stage: 'new', inbox_state: 'in' });
+  let n = 0;
+  const send = (lead, covers, at) => {
+    n += 1;
+    db.db.prepare(`INSERT INTO wa_outbox (send_id, lead_id, jid, text, user_id, sender_kind, status, key_id, created, updated, error, covers_ts, guarded)
+                   VALUES (?,?,?,'Of course.',NULL,'dana','accepted',NULL,?,?,NULL,?,1)`).run(`SND-W-${n}`, lead, `96650000${lead.slice(-4)}@s.whatsapp.net`, at, at, covers);
+  };
+  // Two bubbles of one answer, at 07:59:58 and 08:00:03 (the day boundary `a`).
+  put('LEAD-0301');
+  send('LEAD-0301', a - 22_000, a - 2_000);
+  send('LEAD-0301', a - 22_000, a + 3_000);
+  assert.deepEqual(stats.ownerSummary({ from: a - DAY_MS, to: a }).ai, { answers: 1, handovers: 0, medianReplyMs: 20_000 }, 'the day of its first bubble');
+  assert.deepEqual(stats.ownerSummary({ from: a, to: NOW }).ai, { answers: 0, handovers: 0, medianReplyMs: null }, 'never again the next day');
+  // Two answers today (20 s and 25 s); then the owner taps Not a client on one chat 4 h later: the purge stubs its row
+  // (lead_id and text cleared, `updated` rewritten), and the answer keeps its count and its 25 s.
+  put('LEAD-0302');
+  put('LEAD-0303');
+  send('LEAD-0302', a + 60_000, a + 80_000);
+  send('LEAD-0303', a + 90_000, a + 115_000);
+  const before = stats.ownerSummary({ from: a, to: NOW }).ai;
+  assert.deepEqual(before, { answers: 2, handovers: 0, medianReplyMs: 22_500 });
+  inbox.leaveInbox('LEAD-0303');
+  assert.equal(db.db.prepare("SELECT COUNT(*) n FROM wa_outbox WHERE lead_id IS NULL AND sender_kind = 'dana'").get().n, 1, 'a stub is left');
+  assert.deepEqual(stats.ownerSummary({ from: a, to: NOW }).ai, before, 'the purge changes neither the count nor the median');
   db.close();
 });

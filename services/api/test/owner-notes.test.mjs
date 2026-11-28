@@ -1854,6 +1854,21 @@ test('health: enabled follows owner_notes; ok is false once a queued note is 15 
   assert.deepEqual(createOwnerNotes().health(), { enabled: true, ok: true }, 'no ledger: nothing can be stuck');
 });
 
+test("health: a new enquiry's note is stuck 15 min after it was queued, its wait for the AI's answer included (Codex r10)", async () => {
+  const h = harness({ env: ENV });
+  h.team.setSetting('sending_enabled', '0');
+  const lead = addLead(h, { name: 'Sara Example' });
+  await h.notes.leadEvent(lead, { why: 'wa', created: true, ts: NOW });
+  assert.equal(h.row(`new:${lead.lead_id}`).due_ts, NOW + 3 * MIN, 'it waits 3 min for an answer');
+  h.at(NOW + 3 * MIN);
+  await h.notes.tick();
+  assert.equal(h.row(`new:${lead.lead_id}`).status, 'queued', 'held while Sending is off');
+  h.at(NOW + 15 * MIN - 1);
+  assert.deepEqual(h.notes.health(), { enabled: true, ok: true });
+  h.at(NOW + 15 * MIN);
+  assert.deepEqual(h.notes.health(), { enabled: true, ok: false }, 'queued 15 min ago, though due only 12 min ago');
+});
+
 /* ---------------- 12. same-release gating ---------------- */
 
 test('switches off (auto mode false): no hand-over, booking or stopped note; no summary; a WhatsApp lead gets today\'s lines + the Lead line', async () => {
