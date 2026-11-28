@@ -12,6 +12,7 @@ import { postBeacon, postJson, resolveApiBase, statusOf, type Card, type ChatAct
 import { bubble, el, listingCard, note, type ConciergeConfig } from './render';
 import { browserSupportsCall, CallSession } from './call';
 import { visitorAttr } from './attr';
+import { createConciergeLifecycle } from './lifecycle.mjs';
 
 type Item =
   | { t: 'agent'; text: string }
@@ -592,18 +593,14 @@ class Concierge {
 declare global { interface Window { __bonaConcierge?: Concierge } }
 
 const widget = window.__bonaConcierge ?? (window.__bonaConcierge = new Concierge());
-let bound: HTMLElement | null = null;
+const lifecycle = createConciergeLifecycle<HTMLElement>({
+  findRoot: () => document.querySelector<HTMLElement>('[data-concierge]'),
+  bind: root => widget.bind(root),
+  unbind: () => widget.unbind(),
+  dispose: () => widget.dispose(),
+});
 
-function init() {
-  const root = document.querySelector<HTMLElement>('[data-concierge]');
-  if (!root) { if (bound) { widget.unbind(); bound = null; } return; }
-  if (bound === root) return;
-  if (bound) widget.unbind();
-  bound = root;
-  widget.bind(root);
-}
-
-document.addEventListener('astro:page-load', init);
+document.addEventListener('astro:page-load', lifecycle.pageLoad);
 /* An in-site swap keeps the call alive (the panel re-opens on the Call tab); leaving the page for good does not. */
-document.addEventListener('astro:before-swap', () => { if (bound) { widget.unbind(); bound = null; } });
-window.addEventListener('pagehide', () => widget.dispose());
+document.addEventListener('astro:before-swap', lifecycle.beforeSwap);
+window.addEventListener('pagehide', lifecycle.pageHide);

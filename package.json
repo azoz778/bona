@@ -10,6 +10,7 @@
     "sync": "node scripts/sync-listings.mjs",
     "check": "astro check",
     "test": "node --test scripts/test/*.test.mjs",
+    "test:regression": "astro build && node --test test/regression-baseline.test.mjs",
     "test:dist": "node --test test/*.test.mjs"
   },
   "dependencies": {

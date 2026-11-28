@@ -1,0 +1,21 @@
+{
+  "fileName": "synthetic-jeddah-villa.pdf",
+  "extraction": {
+    "ok": true,
+    "pages": 2,
+    "text": "مشروع سكني في حي الروضة، جدة. فيلا للبيع، خمس غرف نوم، مساحة ٦٠٠ متر مربع.",
+    "embeddedImageCount": 4,
+    "candidates": []
+  },
+  "caption": "للبيع في جدة — ٤٥٠٠٠٠٠ ريال #brochure",
+  "expected": {
+    "category": "buy",
+    "price": {
+      "amount": 4500000,
+      "currency": "SAR"
+    },
+    "period": null,
+    "publishBrochure": true,
+    "hidden": false
+  }
+}
