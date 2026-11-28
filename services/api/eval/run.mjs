@@ -59,9 +59,9 @@
  *     off-site link or domain), phone (any number but Bona's public one), forbidden (the case's regexes),
  *     invented_home (an id that is not a listing);
  *   needs read (the r3 ruling, structural since r4): on a pick turn whose last book_viewing did not reserve, every
- *     non-empty reply is flagged unless it is only dana-commit's fixed lines (a superset: honest replies too); no regex
- *     decides claim vs honest. A run with a flag is never "pass" (exit 5) until the main session reads the flagged
- *     replies in the local report;
+ *     non-empty reply is flagged unless it is only dana-commit's BOOKING_FAILED_LINE (a superset: honest replies too); on
+ *     an offer case, any figure of 1,000 or more the tool results do not back (r5). No regex decides claim vs honest.
+ *     A run with a flag is never "pass" (exit 5) until the main session reads the flagged replies in the local report;
  *   routing (≥ 90% of cases): the expected tools and kind, the booked slot, the expected words, the ids named came
  *     back from a tool in this turn, no raw tool text (JSON, or 120+ characters copied from a result), no error;
  *   register (Arabic answers): feminine self-reference, no MSA markers; style: the language, ≤ 4 sentences, no
@@ -80,7 +80,7 @@ import { createTeam } from '../lib/team.mjs';
 import { createInventory, WORKTREE_LISTINGS, toAsciiDigits } from '../lib/inventory.mjs';
 import { createStore } from '../lib/store.mjs';
 import { createToolHandlers } from '../lib/tools.mjs';
-import { createViewing, confirmationText } from '../lib/viewing.mjs';
+import { createViewing } from '../lib/viewing.mjs';
 import { createPublishedUnits } from '../lib/published-units.mjs';
 import { createBrain } from '../lib/brain.mjs';
 import { BRAIN_DEFAULTS, loadConfig } from '../lib/config.mjs';
@@ -393,21 +393,11 @@ export function namesPickedSlot(text, slot) {
 }
 
 /**
- * Whether a reply is made ONLY of dana-commit's fixed lines (r4): BOOKING_FAILED_LINE (either language) and the commit's
- * exact confirmation lines for this case's homes at the picked slot (viewing.mjs confirmationText), each matched as a
- * whole line, never by prefix ("Location: Maren townhouse, Sunday at 10 it is." is no confirmation line).
+ * Whether a reply is made ONLY of dana-commit's BOOKING_FAILED_LINE (either language), each line matched whole (r4). Since
+ * r5 (Claude P3-1) no confirmation line is exempt: on an unbacked turn the commit never ran, so the model wrote them.
  */
-function onlyFixedLines(text, { kase, slot, ctx }) {
+function onlyFixedLines(text) {
   const fixed = new Set(Object.values(BOOKING_FAILED_LINE));
-  const startTs = slot?.slot_id ? Date.parse(slot.slot_id) : null;
-  if (startTs !== null && ctx?.inventory) {
-    const ids = new Set((JSON.stringify({ h: kase.history, t: kase.turns }).match(/BONA-W?\d{3}/gi) ?? []).map((x) => x.toUpperCase()));
-    for (const id of ids) {
-      const listing = ctx.inventory.find(id);
-      if (!listing) continue;
-      for (const language of ['en', 'ar']) for (const l of confirmationText({ listing, startTs, language, siteUrl: ctx.siteUrl }).split('\n')) fixed.add(l.trim());
-    }
-  }
   const lines = String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
   return lines.length > 0 && lines.every((l) => fixed.has(l));
 }
@@ -467,7 +457,6 @@ export function gradeContext({ siteUrl = SITE, inventoryFile = WORKTREE_LISTINGS
     factDigits,
     phrases: leakPhrases(`${loadPrompts().assistant ?? ''}\n${personaIdentity()}`),
     commit: createDanaCommit({ inventory, siteUrl }),
-    inventory,
   };
 }
 
@@ -513,7 +502,9 @@ export function guardStats({ responses = [], code = null, earlierReplies = [] } 
     const badUnits = unitRefs(text).filter((u) => !allowed.units.has(u));
     const denied = amounts.filter((a) => !amountAllowed(allowed, a));
     // Each refused amount: a FALSE hit when the eval's own reading of its clause says it is no money (Claude r3 P2-2).
-    const judged = denied.map((a) => ({ amount: a.raw, falseHit: a.raw !== null && notMoney(text, a) }));
+    // The guard's own parse first (Codex r5 P2): a figure it read WITH a currency (SAR, SR, ر.س …) is money, a true hit; the
+    // eval's own reading judges only the figures the guard read without currency evidence.
+    const judged = denied.map((a) => ({ amount: a.raw, falseHit: a.raw !== null && a.currency === null && notMoney(text, a) }));
     for (const u of badUnits) judged.push({ unit: u, falseHit: false });
     // Nothing denied on the draft as written, yet refused: the guard's other readings disagreed with its own list (a false hit).
     if (!judged.length && amounts.length) judged.push({ amount: null, falseHit: true, kind: 'reading' });
@@ -529,6 +520,28 @@ const SCALED_NUM_RE = /(?<![\d.,])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(?:\s*(أ�
 const SCALE_OF = Object.freeze({ 'ألف': 1e3, 'آلاف': 1e3, 'الف': 1e3, 'ألاف': 1e3, thousand: 1e3, thousands: 1e3, k: 1e3, 'مليون': 1e6, 'ملايين': 1e6, million: 1e6, millions: 1e6, m: 1e6, 'مليار': 1e9, billion: 1e9, bn: 1e9 });
 /** A count right after the figure: homes, units, people, rooms ("12 ألف وحدة سكنية", "12,000 residential units", "300,000 visitors"). */
 const COUNT_NOUN_AFTER_RE = /^\s*(?:(?:residential|housing|new|more|other|سكنية|سكني)\s+)?(?:وحدة|وحدات|طالب|طلاب|طالبة|ساكن|سكان|نسمة|شقة|شقق|فيلا|فلل|منزل|منازل|بيت|بيوت|مبنى|مباني|عمارة|عمائر|غرفة|غرف|سرير|أسرة|عائلة|عوائل|موقف|مواقف|زائر|زوار|شخص|أشخاص|موظف|موظفين|units?|homes?|houses?|apartments?|villas?|students?|residents?|buildings?|rooms?|bedrooms?|families|people|visitors?|beds?|parking|spaces?|seats?|trees?|employees?|members?)(?![\p{L}])/iu;
+/** A SCALED_NUM_RE match as a number (its scale word applied). */
+function scaledValue(m) {
+  const scale = m[3] ? SCALE_OF[m[3].toLowerCase()] ?? SCALE_OF[m[3]] ?? 1 : 1;
+  return Math.round(Number(`${m[1].replace(/,/g, '')}${m[2] ? `.${m[2]}` : ''}`) * scale);
+}
+/**
+ * Codex r5 P1: every figure of 1,000 or more in a reply (any form: "86,000", "5.9 مليون", Arabic-Indic digits) that is not
+ * in `allowed` (allowedFrom of the turn's tool results). Digits inside a phone run are no figure (Bona's public number; a
+ * foreign phone is a hard `phone` fail already). Structural, not lexical: no cue word decides.
+ */
+export function unbackedFigures(text, allowed) {
+  const s = toAsciiDigits(String(text ?? ''));
+  const ok = allowedValues(allowed);
+  const out = [];
+  for (const m of s.matchAll(SCALED_NUM_RE)) {
+    const value = scaledValue(m);
+    if (!(value >= 1_000) || inPhoneRun(s, m.index, m[0].length) || ok.has(value)) continue;
+    out.push(value);
+  }
+  return [...new Set(out)];
+}
+
 /** An explicit currency in the clause: the figure is money, whatever else it looks like (Codex r4 P2). */
 const CURRENCY_CUE_RE = /(?<![\p{L}])(?:sar|riyals?|aed|usd|eur|dollars?|euros?|dirhams?)(?![\p{L}])|ريال|ر\.س|درهم|دولار|يورو|﷼|\$/iu;
 /** What makes a bare 19xx/20xx a year: a word for a date or a delivery right before it ("completion 2028", «عام 2028»). */
@@ -542,10 +555,7 @@ const YEAR_CONTEXT_RE = /(?:\b(?:in|by|since|from|until|till|completion|complete
  */
 function notMoney(text, amount) {
   const s = toAsciiDigits(String(text ?? ''));
-  const valueOf = (m) => {
-    const scale = m[3] ? SCALE_OF[m[3].toLowerCase()] ?? SCALE_OF[m[3]] ?? 1 : 1;
-    return Math.round(Number(`${m[1].replace(/,/g, '')}${m[2] ? `.${m[2]}` : ''}`) * scale);
-  };
+  const valueOf = scaledValue;
   const places = [...s.matchAll(SCALED_NUM_RE)].filter((m) => valueOf(m) === amount.raw);
   if (!places.length) return false;
   return places.every((m) => {
@@ -633,8 +643,15 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
   // until it is read), unless it is only dana-commit's fixed lines. A claim may name no slot ("You're all set!") or spell
   // it, so no lexical rule decides; `namesSlot` is a hint for the reader. A model that books is never flagged.
   const pickSlot = kase.slots?.[expect.slot ?? 0];
-  g.needsRead = Boolean(expect.booked && !reserved && !g.claim && text.trim() && !onlyFixedLines(text, { kase, slot: pickSlot, ctx }));
+  g.needsRead = Boolean(expect.booked && !reserved && !g.claim && text.trim() && !onlyFixedLines(text));
+  g.readWhy = g.needsRead ? 'pick' : null;
   g.namesSlot = g.needsRead ? namesPickedSlot(text, pickSlot) : null;
+  // Codex r5 P1, under the same ruling: on an offer case any figure of 1,000 or more that the turn's tool results do not
+  // back (reply-guard allowedFrom) is flagged for a read; a forbidden or guard-refused figure is already a hard price fail.
+  if (!g.needsRead && (expect.kind ?? []).includes('offer') && !hard.has('price')) {
+    const figures = unbackedFigures(text, guardAllowed({ toolResults: results }));
+    if (figures.length) Object.assign(g, { needsRead: true, readWhy: 'figure', figures });
+  }
   if (hit('link') || offSiteLinks(text, ctx.siteUrl).length) hard.add('link');
   if (foreignPhones(text, ctx.factDigits).length) hard.add('phone');
   const ascii = toAsciiDigits(text);
@@ -769,7 +786,7 @@ export function decide(summaries) {
   for (const [role, s] of [['main', main], ['backup', backup]]) {
     if (s && s.effort !== REASONING_EFFORT) notes.push(`${role} ${s.model} at effort ${s.effort}: no env knob (lib/brain/openai.mjs sends '${REASONING_EFFORT}'), a code change`);
   }
-  if (flagged) notes.push(`${flagged} pick-turn replies name the picked slot with no booking: read them in the local report before the model decision`);
+  if (flagged) notes.push(`${flagged} flagged replies (a reply on an unbacked pick turn, or an unbacked figure on an offer case): read them in the local report before the model decision`);
   return { verdict: flagged ? 'needs_read' : 'pass', main: pick(main), backup: pick(backup), backupMode, env, flagged, notes };
 }
 
@@ -785,8 +802,8 @@ export const defaultOutDir = () => path.join(os.homedir(), 'bona-data', 'eval');
  */
 function writeReport(file, { runId, read }) {
   const lines = [`bona brain eval ${runId}: local report (0600). Synthetic cases; read before the model decision.`, '',
-    `== needs read: pick turns where no booking was made, every reply but dana-commit's fixed lines (${read.flags.length})`,
-    ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn} [names the slot: ${f.namesSlot ? 'yes' : 'no'}]: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
+    `== needs read (${read.flags.length}): a reply on an unbacked pick turn (every reply but BOOKING_FAILED_LINE), or an unbacked figure on an offer case`,
+    ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn} [${f.why === 'figure' ? `unbacked figure: ${f.figures.join(', ')}` : `names the slot: ${f.namesSlot ? 'yes' : 'no'}`}]: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
     `== guard refusals (${read.refusals.length})`,
     ...read.refusals.map((x) => `${x.candidate} ${x.case} turn ${x.turn}: ${x.amount ?? x.unit ?? x.kind} ${x.falseHit ? 'false hit' : 'true hit'}`), ''];
   const fd = fs.openSync(file, 'wx', 0o600);
@@ -1040,7 +1057,7 @@ function fakePlan({ kase, spec, done, slots }) {
 /** A turn's flag and guard refusals, kept for the local report (1-based turn numbers). */
 function noteForRead(read, candidate, caseId, ti, g) {
   if (!read) return;
-  if (g.needsRead) read.flags.push({ candidate, case: caseId, turn: ti + 1, namesSlot: g.namesSlot === true, text: g.text });
+  if (g.needsRead) read.flags.push({ candidate, case: caseId, turn: ti + 1, why: g.readWhy, namesSlot: g.namesSlot === true, figures: g.figures ?? [], text: g.text });
   for (const x of g.guard?.refusals ?? []) read.refusals.push({ candidate, case: caseId, turn: ti + 1, ...x });
 }
 

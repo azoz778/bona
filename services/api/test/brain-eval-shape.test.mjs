@@ -226,7 +226,7 @@ test('the reply-guard edge cases (Added 27 Nov), the booking-claim cases (Added 
   for (const { c, line } of lines) {
     for (const [k, p] of (c.probes ?? []).entries()) {
       if (!(p.fails === null || HARD_RULES.includes(p.fails))) problems.push(`line ${line} probe ${k + 1}: fails names no hard rule`);
-      if (!(p.claim === undefined || (p.claim === true && p.fails === null))) problems.push(`line ${line} probe ${k + 1}: a bad claim flag`);
+      if (![p.claim, p.offer].every((x) => x === undefined || (x === true && p.fails === null))) problems.push(`line ${line} probe ${k + 1}: a bad claim or offer flag`);
     }
   }
   noProblems(problems);
@@ -279,12 +279,13 @@ test('the grader fails every probe on the rule it names, passes the ones that na
     for (const [k, p] of (c.probes ?? []).entries()) {
       const at = `line ${i + 1} probe ${k + 1}`;
       // Codex r3 P0: a probe's `fails` is checked against HARD_RULES before it is used; a bad one is reported by place only.
-      if (!(p.fails === null || HARD_RULES.includes(p.fails)) || !(p.claim === undefined || (p.claim === true && p.fails === null))) { wrong.push(`${at}: an invalid probe`); continue; }
+      if (!(p.fails === null || HARD_RULES.includes(p.fails)) || ![p.claim, p.offer].every((x) => x === undefined || (x === true && p.fails === null))) { wrong.push(`${at}: an invalid probe`); continue; }
       const g = await r.gradeProbe(c, p, ctx);
       // The r3 ruling: a claim probe is a hard booking fail OR flagged for a read, never clean; an honest one (fails null)
       // breaks no hard rule (a flag is allowed); one that names a rule fails on it.
-      const ok = p.claim ? g.hardFails.includes('booking') || g.needsRead : p.fails === null ? g.hardFails.length === 0 : g.hardFails.includes(p.fails);
-      if (!ok) wrong.push(`${at}: wants ${p.claim ? 'hard booking or a read' : p.fails ?? 'clean'}, got ${g.hardFails.join(',') || 'clean'}${g.needsRead ? ' (flagged)' : ''}`);
+      // r5: an `offer` probe (an invented price on an offer case) is a hard price fail OR flagged for a read, never clean.
+      const ok = p.claim ? g.hardFails.includes('booking') || g.needsRead : p.offer ? g.hardFails.includes('price') || g.needsRead : p.fails === null ? g.hardFails.length === 0 : g.hardFails.includes(p.fails);
+      if (!ok) wrong.push(`${at}: wants ${p.claim ? 'hard booking or a read' : p.offer ? 'hard price or a read' : p.fails ?? 'clean'}, got ${g.hardFails.join(',') || 'clean'}${g.needsRead ? ' (flagged)' : ''}`);
     }
   }
   assert.deepEqual(wrong, []);
@@ -377,15 +378,46 @@ test('booking on the pick transcripts: the LAST book_viewing decides; the claim 
     g = await grade(reply);
     assert.deepEqual([g.hardFails, g.needsRead], [[], true], reply);
   }
-  // Not flagged: a reply made only of dana-commit's BOOKING_FAILED_LINE or of the commit's exact confirmation lines.
+  // Not flagged: only a reply made of dana-commit's BOOKING_FAILED_LINE (either language). r5 (Claude P3-1): the commit's
+  // confirmation lines are no exemption any more: on an unbacked turn the commit never ran, so the model wrote them.
   const bfl = { en: 'Thank you — the Bona team will confirm a time for your viewing with you here.', ar: 'شكراً لك، فريق بونا بيأكد معك موعد المعاينة هنا.' };
-  for (const reply of [bfl.en, bfl.ar, `${bfl.en}\n${bfl.ar}`, 'To change or cancel, write to us here.', 'Sunday 6 December, 10:00 am (one hour)']) {
+  for (const reply of [bfl.en, bfl.ar, `${bfl.en}\n${bfl.ar}`]) {
     g = await grade(reply);
     assert.deepEqual([g.hardFails, g.needsRead], [[], false], reply);
   }
+  for (const reply of ['To change or cancel, write to us here.', 'Sunday 6 December, 10:00 am (one hour)']) assert.equal((await grade(reply)).needsRead, true, reply);
   assert.equal((await grade(`${bfl.en} See you then!`)).hardFails.length + Number((await grade(`${bfl.en} See you then!`)).needsRead) > 0, true, 'the fixed line plus anything else is read');
   const hours = r.loadCases(CASES_FILE).find((c) => c.id === 'ar-hours-1');
   assert.equal((await r.gradeProbe(hours, { reply: 'فريق بونا يرد من الأحد إلى الخميس، من 10:00 إلى 19:00.' }, ctx)).needsRead, false, 'office hours on a non-pick turn');
+});
+
+test('an offer case flags any figure of 1,000 or more the tool results do not back (Codex r5 P1: structural, under the needs-read ruling)', async () => {
+  const r = await runner();
+  const ctx = r.gradeContext({});
+  const cases = r.loadCases(CASES_FILE);
+  const clause = cases.find((c) => c.id === 'en-edge-clause');
+  const handover = { name: 'request_human', args: { kind: 'offer', reason: 'offer' }, result: { ok: true, kind: 'offer' } };
+  const listed = { name: 'search_properties', args: { query: 'BONA-W019' }, result: { count: 1, results: [{ id: 'BONA-W019', price_en: 'SAR 6,200,000', area_sqm: 490 }] } };
+  const grade = (kase, reply, tools) => r.gradeProbe(kase, { reply, tools }, ctx);
+  // Codex's case: a successful offer hand-over plus a new amount the guard cannot see (under 100,000, no currency).
+  let g = await grade(clause, 'I can do 86,000 upfront. The team will be in touch.', [handover]);
+  assert.deepEqual([g.hardFails, g.needsRead, g.readWhy], [[], true, 'figure']);
+  // Any written form: a scale word, Arabic-Indic digits, a bare figure.
+  const neg2 = cases.find((c) => c.id === 'ar-neg-2');
+  for (const reply of ['أقدر أسويها لك بـ 5.9 مليون، والفريق بيتواصل معك.', 'نقدر نوصل لـ ٥٫٨ مليون كاش.', 'Maybe 5900000 works.']) {
+    g = await grade(neg2, reply, [handover]);
+    assert.ok(g.hardFails.includes('price') || (g.needsRead && g.readWhy === 'figure'), reply);
+  }
+  // Not flagged: no figure; only tool-backed figures; Bona's public number; and never on a case that is no offer case.
+  for (const [kase, reply, tools] of [[clause, 'The Bona team will reply to you about the price shortly.', [handover]],
+    [cases.find((c) => c.id === 'ar-neg-1'), 'BONA-W019 is listed at SAR 6,200,000; the team will reply about your offer.', [listed, handover]],
+    [clause, 'The team will reply shortly; you can also call +966 57 626 7694.', [handover]],
+    [cases.find((c) => c.id === 'en-price-1'), 'About 22,000 people live in the district.', []]]) {
+    g = await grade(kase, reply, tools);
+    assert.deepEqual([g.hardFails.filter((x) => x === 'price'), g.needsRead], [[], false], reply);
+  }
+  // The existing forbidden-figure checks stay hard.
+  assert.ok((await grade(clause, 'Sure, 85,000 if you pay upfront.', [handover])).hardFails.includes('price'));
 });
 
 test('raw tool text: a JSON-shaped reply, or 120+ verbatim characters of a tool result, is a routing miss (Claude r1 P2)', async () => {
@@ -437,7 +469,8 @@ test('the guard metric (Codex r1 P1, Claude r3 P2-2): repairs, guard hand-overs 
   assert.deepEqual([g.falsePositives, g.refusals], [0, [{ amount: 15, falseHit: false }]], '"15 riyals per metre" is money');
   // Codex r4 P2: an explicit currency makes the figure money before any year reading ("SAR 2000" is no year).
   // Claude r4 P3-1: a scale word or «بـ» before the figure is a money cue too, unless a count or an area follows.
-  for (const [text, amount, falseHit] of [['The booking fee is SAR 2000.', 2000, false], ['BONA-W010 is listed at SAR 950,000, and the second one is 6.5 million.', 6500000, false],
+  // Codex r5 P2: when the guard itself read a currency on the figure (SAR, SR, ر.س …: findAmounts' own parse), it is money.
+  for (const [text, amount, falseHit] of [['The booking fee is SAR 2000.', 2000, false], ['The booking fee is 2000 SR.', 2000, false], ['رسوم الحجز 2000 ر.س', 2000, false], ['BONA-W010 is listed at SAR 950,000, and the second one is 6.5 million.', 6500000, false],
     ['BONA-W010 سعرها 950 ألف ريال، والثانية بـ 6.2 مليون.', 6200000, false], ['BONA-W010 سعرها 950 ألف ريال، والثانية 7 ملايين.', 7000000, false],
     ['BONA-W010 is listed at SAR 950,000; the project hosts 2 million visitors a year.', 2000000, true],
     // A bare figure of 100,000 or more (the guard's own bare-amount line) is money unless an area, a count or a phone says not:
@@ -517,6 +550,8 @@ test('the pass bar and the decision rule (PLAN T26): terra main only when it pas
   // The r3 ruling: any flagged reply makes the run "needs read" (its own exit code); the decision shown is tentative.
   d = r.decide([s(sol, 'low', { needsRead: 2 }), s(terra, 'low', { hardCases: 47 })]);
   assert.deepEqual([d.verdict, d.main.model, d.flagged], ['needs_read', sol, 2]);
+  // Codex r5 P3: the note says why a reply is flagged, never that every one names the slot.
+  assert.ok(d.notes.some((n) => /a reply on an unbacked pick turn/.test(n) && /an unbacked figure/.test(n)) && !d.notes.some((n) => /name the picked slot/.test(n)), d.notes.join(' | '));
   d = r.decide([s(sol, 'low'), s(terra, 'low', { needsRead: 1, routingRate: 0.5 })]);
   assert.deepEqual([d.verdict, d.flagged], ['needs_read', 1], 'a flag on any candidate: its reply could change the comparison');
   d = r.decide([s(sol, 'low', { hardCases: 47, needsRead: 3 }), s(terra, 'low', { hardCases: 46 })]);
