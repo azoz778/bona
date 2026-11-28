@@ -93,8 +93,9 @@ const INBOX_UPKEEP_EVERY_MS = 24 * 3_600_000;
 const HEALTH_ERROR_CODES = new Set(['auth', 'forbidden', 'not_found', 'timeout', 'quota', 'network', 'bad_response']);
 /**
  * The workers PR-INT puts on a clock (PLAN T14): the owner notes' pass, the daily summary's minute (with
- * the calendar's 05:00 reconcile), the hold and backlog sweep, the viewing worker, the brain's free
- * GET /v1/models probe, and the daily upkeep. The link probe keeps its own 10-minute loop (lib/wa-link.mjs).
+ * the calendar's 05:00 reconcile, and T18a's two alert checks, `app.opsAlerts`), the hold and backlog sweep,
+ * the viewing worker, the brain's free GET /v1/models probe, and the daily upkeep. The link probe keeps its own
+ * 10-minute loop (lib/wa-link.mjs).
  */
 export const TIMERS = Object.freeze([
   ['notes', 5_000], ['summary', 60_000], ['sweep', 60_000], ['viewing', 5 * 60_000], ['brainProbe', 15 * 60_000], ['upkeep', INBOX_UPKEEP_EVERY_MS],
@@ -104,6 +105,10 @@ export const TIMERS = Object.freeze([
 ]);
 /** The calendar's daily reconcile hour, Riyadh time (DESIGN §8.4); it also runs before the summary builds. */
 const RECONCILE_HOUR = 5;
+/** DESIGN §14: the owner hears of a calendar that has failed for longer than this without a success between. */
+const GCAL_ALERT_AFTER_MS = 3_600_000;
+/** The month answer alert's levels (DESIGN §6.3), the highest first: percent of BONA_DANA_TURNS_MONTH_ALERT. */
+const TURNS_MONTH_LEVELS = Object.freeze([100, 80]);
 /** DESIGN §5.4: latencyOk = p90 ≤ 60 s over the answers' ring, once it holds 5 answers. */
 const LATENCY_OK_MS = 60_000;
 const LATENCY_MIN_ANSWERS = 5;
@@ -116,6 +121,12 @@ const DAY_MS = 86_400_000;
 /** A snapshot of any label (db-snapshot.mjs ANY_NAME_RE; group 1 its UTC stamp) and a killed run's temp copy (its PARTIAL_RE). */
 const SNAPSHOT_NAME_RE = /^bona-[a-z0-9][a-z0-9-]{0,39}-(\d{8}T\d{6}Z)\.db$/;
 const SNAPSHOT_PARTIAL_RE = /^\.bona-[a-z0-9][a-z0-9-]{0,39}-\d{8}T\d{6}Z\.db\.[1-9]\d{0,9}\.[0-9a-f]{12}\.partial$/;
+
+/** The Riyadh calendar month `t` falls in: its key (`2026-12`) and the instant it began. */
+function riyadhMonth(t) {
+  const d = new Date(t + TZ_OFFSET_MS);
+  return { month: d.toISOString().slice(0, 7), start: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) - TZ_OFFSET_MS };
+}
 
 /** The time (ms) a snapshot stamp (20261127T111500Z) stands for, or NaN when it is no real UTC time. */
 function snapshotTime(stamp) {
@@ -830,9 +841,8 @@ export function createApp(options = {}) {
       out['Viewings booked (upcoming)'] = db.db.prepare("SELECT COUNT(*) AS n FROM viewing_bookings WHERE status = 'booked' AND start_ts >= ?").get(t).n;
     });
     part(() => {
-      const d = new Date(t + TZ_OFFSET_MS);
-      const monthStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) - TZ_OFFSET_MS;
-      out['Assistant turns this month'] = inboxStore.countDanaTurns({ sinceTs: monthStart });
+      // The number the month answer alert (opsAlerts below) counts.
+      out['Assistant turns this month'] = inboxStore.countDanaTurns({ sinceTs: riyadhMonth(t).start });
     });
     part(() => {
       out['Lid-only chats to check'] = db.db.prepare("SELECT COUNT(*) AS n FROM inbox_candidates WHERE state = 'open' AND phone_e164 IS NULL AND lid IS NOT NULL").get().n;
@@ -856,11 +866,63 @@ export function createApp(options = {}) {
   }
   app.ops = opsCounts;
 
+  /**
+   * The two owner alerts no module raises (PLAN T18, "Added 28 Nov (T14 #101 review)"; DESIGN §6.3, §7.2, §14), checked
+   * on the summary's minute. Each goes only while the new automation is on (`automationOn`, the Greeting/Away rule);
+   * otherwise it is one `ops.alert_quiet` line a Riyadh day and takes nothing, so the month's level or the open incident
+   * still alerts once the automation is on. INERT with default settings: no note, no setting written.
+   *   - turns_month: the AI's answers this Riyadh month (store.countDanaTurns, the Ops panel's "Assistant turns this
+   *     month") reach 80%, then 100%, of BONA_DANA_TURNS_MONTH_ALERT: the highest level due, once a month each. The
+   *     level sent is the `dana_month_alerted` marker (`2026-12:80`), written before the alert, so no restart sends it
+   *     again. An alert only (§6.3): nothing is handed over or stopped.
+   *   - gcal: the calendar's own failure signal (viewing.health().gcal, the /health booking keys: the last call failed,
+   *     with its code) held for over an hour with no success seen between: one alert an incident; a success ends it.
+   *     The incident is this process's (a restart mid-outage starts a new hour).
+   */
+  const quietDay = new Map();
+  function quietAlert(code, t) {
+    const day = dayKey(t, TZ_OFFSET_MS);
+    if (quietDay.get(code) === day) return;
+    quietDay.set(code, day);
+    log({ level: 'warn', evt: 'ops.alert_quiet', code });
+  }
+  function turnsMonthCheck(t) {
+    const limit = cfg.danaTurnsMonthAlert;
+    if (!Number.isSafeInteger(limit) || limit <= 0) return;
+    const { month, start } = riyadhMonth(t);
+    const turns = inboxStore.countDanaTurns({ sinceTs: start });
+    const level = TURNS_MONTH_LEVELS.find((pct) => turns * 100 >= limit * pct);
+    if (!level) return;
+    const sent = /^(\d{4}-\d{2}):(80|100)$/.exec(String(team.getSetting('dana_month_alerted') ?? ''));
+    if (sent && sent[1] === month && Number(sent[2]) >= level) return;
+    if (!automationOn()) { quietAlert('turns_month', t); return; }
+    team.setSetting('dana_month_alerted', `${month}:${level}`, { by: 'system' });
+    notes.alert('turns_month', { level: String(level) });
+  }
+  let gcalIncident = null;
+  function gcalCheck(t) {
+    const g = viewing.health?.()?.gcal;
+    if (!(g?.configured === true && g.ok !== true && HEALTH_ERROR_CODES.has(g.lastErrorCode))) { gcalIncident = null; return; }
+    gcalIncident ??= { since: t, alerted: false };
+    if (gcalIncident.alerted || t - gcalIncident.since <= GCAL_ALERT_AFTER_MS) return;
+    if (!automationOn()) { quietAlert('gcal', t); return; }
+    gcalIncident.alerted = true;
+    notes.alert('gcal', { code: g.lastErrorCode });
+  }
+  /** Both checks, each on its own: one that throws is an `ops.alert_failed` line naming it, never its message. */
+  app.opsAlerts = function opsAlerts() {
+    const t = clock();
+    for (const [code, check] of [['turns_month', turnsMonthCheck], ['gcal', gcalCheck]]) {
+      try { check(t); } catch (err) { log({ level: 'error', evt: 'ops.alert_failed', code, name: loggableName(err) }); }
+    }
+  };
+
   /*
    * The timers (PLAN T14). Each tick is its own: one at a time, it never rejects, and one that throws is a
    * `timer.failed` line naming the timer and the kind of failure, never its message. INERT with the switches
    * off: the notes have nothing queued, the summary is off, the sweep finds no hold, the viewing worker and the
-   * reconcile have no calendar (or nothing booked), the probe is $0 and only with a key, the link probe only reads.
+   * reconcile have no calendar (or nothing booked), the probe is $0 and only with a key, the link probe only reads,
+   * the alert checks (opsAlerts) are quiet.
    */
   let reconciled = { day: null, summary: null };
   async function summaryMinute() {
@@ -923,7 +985,7 @@ export function createApp(options = {}) {
       if (wa.ownNumberFrom === 'instance' && waLink.identityOk?.() !== true) return undefined;
       return notes.tick?.();
     }),
-    summary: tick('summary', summaryMinute),
+    summary: tick('summary', () => { app.opsAlerts(); return summaryMinute(); }),
     sweep: tick('sweep', () => dana.sweep?.()),
     viewing: tick('viewing', () => viewing.tick?.()),
     brainProbe: tick('brainProbe', async () => {

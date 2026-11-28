@@ -2420,3 +2420,232 @@ test('T14 wiring: a quiet Greeting/Away detection (automation off) leaves the da
     await h.close();
   }
 });
+
+/* ==============================================================================================
+ * T18a (PLAN T18, "Added 28 Nov (T14 #101 review): unowned alerts"): the month answer level
+ * (`turns_month`, DESIGN §6.3/§7.2) and the calendar failing over an hour (`gcal`, §14), checked on
+ * the summary's minute, delivered only while the new automation is on, inert with default settings.
+ * ============================================================================================== */
+
+/** BONA_DANA_TURNS_MONTH_ALERT in these cases: 80% = 8 turns, 100% = 10. */
+const T18A_LEVEL = 10;
+const T18A_LEAD = 'LEAD-20261203-turn0001';
+const T18A_DIGITS = '966500000051';
+const monthAlerts = (h) => h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'turns_month');
+const gcalAlerts = (h) => h.notes("kind = 'alert'").filter((r) => r.meta.alert === 'gcal');
+const settingsOf = (db) => db.db.prepare('SELECT key, value FROM settings ORDER BY key').all();
+const quietLines = (h, code) => h.logs.filter((l) => l.evt === 'ops.alert_quiet' && l.code === code);
+
+/** `n` Dana turns now (accepted outbox rows, each its own covers_ts), as store.countDanaTurns counts them. */
+function danaTurns(h, n) {
+  if (!h.db.getLead(T18A_LEAD)) h.seedLead(T18A_LEAD, T18A_DIGITS);
+  for (let i = 0; i < n; i += 1) {
+    h.turnSeq = (h.turnSeq ?? 0) + 1;
+    h.app.inboxStore.insertOutbox({
+      send_id: `SND-t18a-${h.now}-${h.turnSeq}`, lead_id: T18A_LEAD, jid: jidOf(T18A_DIGITS), text: 'An answer.',
+      sender_kind: 'dana', status: 'accepted', covers_ts: h.now - 60_000 + h.turnSeq,
+    });
+  }
+}
+
+/** A service-account key the real gcal client signs with (rig14 answers the token call), and a calendar to switch down. */
+function t18aCalendar() {
+  const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bona-t18a-sa-'));
+  const saFile = path.join(dir, 'sa.json');
+  fs.writeFileSync(saFile, JSON.stringify({ type: 'service_account', client_email: 'robot@example.iam.gserviceaccount.com', private_key: privateKey }), { mode: 0o600 });
+  const cal = {
+    down: true,
+    config: { gcalSaFile: saFile, gcalCalendarId: 'test-calendar@example.com' },
+    // Down: every Calendar call answers 503 (gcal's code bad_response). Up: an empty holiday feed.
+    google: () => (cal.down ? { status: 503, json: {} } : { status: 200, json: { items: [] } }),
+    cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
+  };
+  return cal;
+}
+/** One round as the server runs it: the viewing worker (it calls the calendar), then the summary's minute. */
+async function t18aRound(h) {
+  await h.app.ticks.viewing();
+  await h.app.ticks.summary();
+}
+
+test('T18a turns_month: 80% then 100% of the month level, each once (a later hour too), never again after a restart on the same database; the next Riyadh month alerts again', async () => {
+  const db = openDb(':memory:');
+  try {
+    const a = rig14({ db, config: { danaTurnsMonthAlert: T18A_LEVEL } });
+    try {
+      a.app.team.setSetting('owner_as_client', '1');
+      danaTurns(a, 7);
+      await a.app.ticks.summary();
+      assert.deepEqual(monthAlerts(a), [], '7 of 10: below 80%');
+      danaTurns(a, 1);
+      await a.app.ticks.summary();
+      await a.app.ticks.summary();
+      assert.deepEqual(monthAlerts(a).map((r) => r.meta.level), ['80'], '8 of 10: the 80% alert, once');
+      assert.match(monthAlerts(a)[0].dedupe_key, /^al:turns_month:80:\d+$/);
+      assert.equal(a.app.team.getSetting('dana_month_alerted'), '2026-12:80', 'the month and the level sent, in the existing marker');
+      // Another hour bucket: only the marker can stop a second 80% now.
+      a.advance(2 * 3_600_000);
+      await a.app.ticks.summary();
+      assert.equal(monthAlerts(a).length, 1, 'the 80% alert goes once a month');
+      danaTurns(a, 2);
+      await a.app.ticks.summary();
+      await a.app.ticks.summary();
+      assert.deepEqual(monthAlerts(a).map((r) => r.meta.level), ['80', '100'], '10 of 10: the 100% alert, once');
+      assert.equal(a.app.team.getSetting('dana_month_alerted'), '2026-12:100');
+      // An alert only (DESIGN §6.3): no hand-over, nothing stopped.
+      assert.deepEqual(a.notes("kind <> 'alert'"), []);
+      const lead = db.getLead(T18A_LEAD);
+      assert.equal(lead.needs_human, 0);
+      assert.equal(lead.dana_off, 0);
+    } finally {
+      await a.close();
+    }
+    const b = rig14({ db, config: { danaTurnsMonthAlert: T18A_LEVEL }, startAt: T14 + 5 * 3_600_000 });
+    try {
+      danaTurns(b, 1);
+      await b.app.ticks.summary();
+      assert.equal(monthAlerts(b).length, 2, 'a restart on the same database sends neither level again');
+      // 00:30 on 1 January in Riyadh is still 31 December in UTC: the month is Riyadh's.
+      b.set(Date.parse('2027-01-01T00:30:00+03:00'));
+      await b.app.ticks.summary();
+      assert.equal(monthAlerts(b).length, 2, 'January starts from zero');
+      danaTurns(b, 8);
+      await b.app.ticks.summary();
+      assert.deepEqual(monthAlerts(b).map((r) => r.meta.level), ['80', '100', '80'], 'the next month alerts again');
+      assert.equal(b.app.team.getSetting('dana_month_alerted'), '2027-01:80');
+    } finally {
+      await b.close();
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('T18a turns_month: quiet while the automation is off (one journal line a day, no marker, no note), then delivered once when the owner test turns on the same month', async () => {
+  const h = rig14({ config: { danaTurnsMonthAlert: T18A_LEVEL } });
+  try {
+    danaTurns(h, 10);
+    await h.app.ticks.summary();
+    h.advance(3_600_000);
+    await h.app.ticks.summary();
+    assert.deepEqual(monthAlerts(h), [], 'automation off: no alert row');
+    assert.equal(h.db.db.prepare("SELECT 1 FROM settings WHERE key = 'dana_month_alerted'").get(), undefined, 'the quiet case uses up nothing');
+    assert.equal(quietLines(h, 'turns_month').length, 1, 'one journal line that day');
+    h.app.team.setSetting('owner_as_client', '1');
+    await h.app.ticks.summary();
+    await h.app.ticks.summary();
+    assert.deepEqual(monthAlerts(h).map((r) => r.meta.level), ['100'], 'once on: one alert, the level reached');
+    assert.equal(h.app.team.getSetting('dana_month_alerted'), '2026-12:100');
+    await h.app.notes.tick();
+    const sent = noteSends(h.sendsTo(OWNER14));
+    assert.equal(sent.length, 1, 'it reaches the owner');
+    assert.match(sent[0].body.text, /passed 100% of this month's answer alert level/);
+  } finally {
+    await h.close();
+  }
+});
+
+test('T18a gcal: failing 59 min → nothing, 61 min → one alert with the code; still failing → no second; a success ends it, and a new incident alerts again after its own hour', async () => {
+  const cal = t18aCalendar();
+  const h = rig14({ google: cal.google, config: cal.config });
+  try {
+    h.app.team.setSetting('owner_as_client', '1');
+    await t18aRound(h);
+    assert.equal(h.app.viewing.health().gcal.ok, false);
+    assert.equal(h.app.viewing.health().gcal.lastErrorCode, 'bad_response', 'the calendar\'s own failure signal');
+    h.advance(59 * 60_000);
+    await t18aRound(h);
+    assert.deepEqual(gcalAlerts(h), [], '59 minutes: nothing');
+    h.advance(2 * 60_000);
+    await t18aRound(h);
+    assert.equal(gcalAlerts(h).length, 1, '61 minutes: one alert');
+    assert.equal(gcalAlerts(h)[0].meta.code, 'bad_response');
+    assert.match(gcalAlerts(h)[0].dedupe_key, /^al:gcal:\d+$/);
+    h.advance(90 * 60_000);
+    await t18aRound(h);
+    assert.equal(gcalAlerts(h).length, 1, 'the same incident alerts once');
+    cal.down = false;
+    h.advance(60_000);
+    await t18aRound(h);
+    assert.equal(h.app.viewing.health().gcal.ok, true, 'a success');
+    // The holiday copy is good for 12 h: past that the worker asks Google again, and it fails.
+    cal.down = true;
+    h.advance(13 * 3_600_000);
+    await t18aRound(h);
+    assert.equal(h.app.viewing.health().gcal.ok, false);
+    h.advance(59 * 60_000);
+    await t18aRound(h);
+    assert.equal(gcalAlerts(h).length, 1, 'the new incident\'s first 59 minutes: nothing');
+    h.advance(2 * 60_000);
+    await t18aRound(h);
+    assert.equal(gcalAlerts(h).length, 2, 'a new incident alerts again');
+    await h.app.notes.tick();
+    assert.ok(noteSends(h.sendsTo(OWNER14)).some((s) => /The calendar is not answering \(code: bad_response\)/.test(s.body.text)));
+  } finally {
+    await h.close();
+    cal.cleanup();
+  }
+});
+
+test('T18a gcal: an incident past its hour while the automation is off is one journal line and leaves the incident open: the owner test turns on and it alerts once', async () => {
+  const cal = t18aCalendar();
+  const h = rig14({ google: cal.google, config: cal.config });
+  try {
+    await t18aRound(h);
+    h.advance(61 * 60_000);
+    await t18aRound(h);
+    h.advance(30 * 60_000);
+    await t18aRound(h);
+    assert.deepEqual(gcalAlerts(h), []);
+    assert.equal(quietLines(h, 'gcal').length, 1);
+    h.app.team.setSetting('owner_as_client', '1');
+    await t18aRound(h);
+    await t18aRound(h);
+    assert.equal(gcalAlerts(h).length, 1, 'the open incident alerts once the automation is on');
+  } finally {
+    await h.close();
+    cal.cleanup();
+  }
+});
+
+test('T18a inert: with default settings, a month past 100% and a calendar failing for hours send nothing and write no setting, before and after a restart', async () => {
+  const cal = t18aCalendar();
+  const db = openDb(':memory:');
+  try {
+    const a = rig14({ db, google: cal.google, config: { danaTurnsMonthAlert: T18A_LEVEL, ...cal.config } });
+    let before;
+    try {
+      danaTurns(a, 12);
+      before = settingsOf(db);
+      for (let i = 0; i < 18; i += 1) {
+        await t18aRound(a);
+        a.advance(10 * 60_000);
+      }
+      await a.app.notes.tick();
+      assert.deepEqual(a.notes(), [], 'no owner note row of any kind');
+      assert.deepEqual(noteSends(a.sendsTo(OWNER14)), [], 'nothing sent to the owner');
+      assert.deepEqual(settingsOf(db), before, 'no setting written');
+      assert.equal(quietLines(a, 'turns_month').length, 1, 'a journal line a day at most');
+      assert.equal(quietLines(a, 'gcal').length, 1);
+    } finally {
+      await a.close();
+    }
+    const b = rig14({ db, google: cal.google, config: { danaTurnsMonthAlert: T18A_LEVEL, ...cal.config }, startAt: T14 + 4 * 3_600_000 });
+    try {
+      for (let i = 0; i < 9; i += 1) {
+        await t18aRound(b);
+        b.advance(10 * 60_000);
+      }
+      await b.app.notes.tick();
+      assert.deepEqual(b.notes(), [], 'a restart sends nothing new');
+      assert.deepEqual(noteSends(b.sendsTo(OWNER14)), []);
+      assert.deepEqual(settingsOf(db), before, 'and writes no setting');
+    } finally {
+      await b.close();
+    }
+  } finally {
+    db.close();
+    cal.cleanup();
+  }
+});
