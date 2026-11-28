@@ -60,7 +60,8 @@
  *     invented_home (an id that is not a listing);
  *   needs read (the r3 ruling, structural since r4): on a pick turn whose last book_viewing did not reserve, every
  *     non-empty reply is flagged unless it is only dana-commit's BOOKING_FAILED_LINE (a superset: honest replies too); on
- *     an offer case, any figure of 1,000 or more the tool results do not back (r5). No regex decides claim vs honest.
+ *     an offer case (closed since r6), any digit run the tool results do not back, at any size, and any magnitude word
+ *     of a closed list ("grand", "ألف" …; offerFigures). No regex decides claim vs honest.
  *     A run with a flag is never "pass" (exit 5) until the main session reads the flagged replies in the local report;
  *   routing (≥ 90% of cases): the expected tools and kind, the booked slot, the expected words, the ids named came
  *     back from a tool in this turn, no raw tool text (JSON, or 120+ characters copied from a result), no error;
@@ -136,6 +137,33 @@ export class EvalError extends Error {
 
 /** Each loaded case's file line, so a message can name the line and never the case's text (Claude r2 P3-4). */
 const CASE_LINES = new WeakMap();
+/** Where a message points: the file line when the case came from loadCases, else its id; never its text. */
+const whereOf = (kase) => (CASE_LINES.has(kase) ? `line ${CASE_LINES.get(kase)}` : String(kase?.id));
+
+/** Each fixture regex list, compiled once (by the list itself: fillCase keeps the same arrays). */
+const COMPILED = new WeakMap();
+/**
+ * Every fixture regex (a case's `forbid_text`, a turn's `expect.text_any`) is compiled here and only here (Codex r6 P0):
+ * V8's SyntaxError quotes the pattern, and a pattern may hold a client's phone, so an invalid one, or one that is no
+ * string, is named by its line (or id) and field only: "<file> line N field F: an invalid pattern".
+ */
+export function fixturePatterns(list, field, where) {
+  if (list === undefined || list === null) return [];
+  if (COMPILED.has(list)) return COMPILED.get(list);
+  const invalid = () => new EvalError(`${where} field ${field}: an invalid pattern`);
+  if (!Array.isArray(list)) throw invalid();
+  const out = list.map((re) => {
+    if (typeof re !== 'string') throw invalid();
+    try { return new RegExp(re, 'iu'); } catch { throw invalid(); }
+  });
+  COMPILED.set(list, out);
+  return out;
+}
+/** The fixture regexes of one case, all compiled (loadCases refuses a file with an invalid one before anything runs). */
+function checkPatterns(kase, where = whereOf(kase)) {
+  fixturePatterns(kase.forbid_text, 'forbid_text', where);
+  for (const t of kase.turns ?? []) fixturePatterns(t?.expect?.text_any, 'text_any', where);
+}
 
 export function loadCases(file = CASES_FILE) {
   const lines = fs.readFileSync(file, 'utf8').split('\n');
@@ -149,6 +177,7 @@ export function loadCases(file = CASES_FILE) {
       throw new EvalError(`${path.basename(file)} line ${i + 1}: not a case`);
     }
     CASE_LINES.set(c, i + 1);
+    checkPatterns(c, `${path.basename(file)} line ${i + 1}`);
     out.push(c);
   });
   return out;
@@ -159,8 +188,7 @@ const wallHour = (ts) => new Date(ts + 3 * 3_600_000).getUTCHours();
 
 /** The case with its time (`start`), its slot grid (`slots`) and every placeholder filled. */
 export function fillCase(kase) {
-  // Where a message points: the file line when the case came from loadCases, else its id; never its text.
-  const where = CASE_LINES.has(kase) ? `line ${CASE_LINES.get(kase)}` : String(kase.id);
+  const where = whereOf(kase);
   const start = Date.parse(kase.at ?? T0);
   if (!Number.isFinite(start)) throw new EvalError(`${where}: bad time`);
   const slots = freeSlots({ now: start });
@@ -183,13 +211,15 @@ export function fillCase(kase) {
     if (/\{\{|\}\}/.test(out)) throw new EvalError(`${where}: an unbalanced placeholder`);
     return out;
   };
-  return {
+  const filled = {
     ...kase,
     start,
     slots,
     history: (kase.history ?? []).map((h) => ({ ...h, text: fill(h.text) })),
     turns: kase.turns.map((t) => ({ ...t, client: t.client.map((m) => (typeof m === 'string' ? fill(m) : { ...m })) })),
   };
+  if (CASE_LINES.has(kase)) CASE_LINES.set(filled, CASE_LINES.get(kase));
+  return filled;
 }
 
 export function parseCandidates(list) {
@@ -525,21 +555,54 @@ function scaledValue(m) {
   const scale = m[3] ? SCALE_OF[m[3].toLowerCase()] ?? SCALE_OF[m[3]] ?? 1 : 1;
   return Math.round(Number(`${m[1].replace(/,/g, '')}${m[2] ? `.${m[2]}` : ''}`) * scale);
 }
+/** A digit run as written (r6 ruling), on ASCII digits: groups of digits with a `,` `.` `٬` `٫` or a space between them. */
+const DIGIT_RUN_RE = /\d+(?:[,.٬٫ \u00a0\u202f\u2009]\d+)*/g;
+/** A Saudi mobile (5x xxx xxxx) or landline (1x xxx xxxx) with its 0, 966 or 00966 in front: the digits of a run on its own. */
+const SAUDI_PHONE_RE = /^(?:(?:00)?966|0)(?:5\d{8}|1[1-7]\d{7})$/;
+const BONA_PHONE_FORMS = new Set(['', '0', '966', '00966'].map((p) => `${p}${BONA_PHONE_TAIL}`));
+/** The reply-guard's unit reference ("B12-07"), as its unitRefs reads it. */
+const UNIT_REF_RE = /(?<![A-Za-z0-9])B\d{2}-\d{2}(?![0-9])/gi;
 /**
- * Codex r5 P1: every figure of 1,000 or more in a reply (any form: "86,000", "5.9 مليون", Arabic-Indic digits) that is not
- * in `allowed` (allowedFrom of the turn's tool results). Digits inside a phone run are no figure (Bona's public number; a
- * foreign phone is a hard `phone` fail already). Structural, not lexical: no cue word decides.
+ * The closed list of magnitude words (r6 ruling; never extended): grand, k on a figure, thousand(s), million(s), ألف,
+ * آلاف, ألوف, الف, مليون, ملايين, مليونين, نص مليون. Arabic is matched with its alef forms read as ا (so ألف and الف are
+ * one entry, آلاف and الاف another), and with a joined و ف ب ل ك and ال in front, as Arabic writes them ("بمليونين").
  */
-export function unbackedFigures(text, allowed) {
-  const s = toAsciiDigits(String(text ?? ''));
+const MAGNITUDE_RE = /(?<![\p{L}\p{N}])(?:grand|thousands?|millions?)(?![\p{L}])|(?<=\d\s?)k(?![\p{L}])|(?<![\p{L}])[وفبلك]?ـ?(?:ال)?(?:نص\s+مليون|مليونين|ملايين|مليون|الوف|الاف|الف)(?![\p{L}])/giu;
+/** A run that is a phone on its own: never with a `,` `.` `٬` `٫` in it, and a Saudi mobile or landline, or Bona's public number. */
+function phoneRun(run) {
+  if (/[,.٬٫]/.test(run)) return false;
+  const d = run.replace(/\D/g, '');
+  return SAUDI_PHONE_RE.test(d) || BONA_PHONE_FORMS.has(d);
+}
+/** A digit run's values: its groups joined ("86 000", "86.000" 86000), and with its last `.` or `٫` a decimal point (5.8). */
+function runValues(run) {
+  const out = [Number(run.replace(/\D/g, ''))];
+  const dec = /^(.*)[.٫](\d+)$/u.exec(run);
+  if (dec) out.push(Number(`${dec[1].replace(/\D/g, '') || '0'}.${dec[2]}`));
+  return out.filter(Number.isFinite);
+}
+/**
+ * The r6 ruling (Codex r6 P1, Claude r6 P3-1): the offer-case flag is CLOSED, not lexical. A reply on an offer case is
+ * flagged for a read when it has (a) a digit run (ASCII or Arabic-Indic digits; a `,` `.` `٬` `٫` or a space between its
+ * groups: "86 000", "86.000", "٥٬٨٠٠٬٠٠٠") whose value the turn's tool results do not back (reply-guard allowedFrom), at
+ * any size ("24 hours" too: a superset, each one read), or (b) a word of MAGNITUDE_RE's closed list, backed or not. A run
+ * is no figure only when it is, on its own, a phone (phoneRun: "86000 0576267694" is one run and no phone, so a figure next
+ * to a phone is never taken in), or the digits of a real listing id (`ids`) or of a unit the tools back.
+ * Returns each item as written ("86 000", "grand"), in reply order.
+ */
+export function offerFigures(text, allowed, ids = new Set()) {
+  const s = toAsciiDigits(String(text ?? ''))
+    .replace(/BONA-W?\d{3}/gi, (m) => (ids.has(m.toUpperCase()) ? '#'.repeat(m.length) : m))
+    .replace(UNIT_REF_RE, (m) => (allowed.units.has(m.toUpperCase()) ? '#'.repeat(m.length) : m));
   const ok = allowedValues(allowed);
-  const out = [];
-  for (const m of s.matchAll(SCALED_NUM_RE)) {
-    const value = scaledValue(m);
-    if (!(value >= 1_000) || inPhoneRun(s, m.index, m[0].length) || ok.has(value)) continue;
-    out.push(value);
+  const found = [];
+  for (const m of s.matchAll(DIGIT_RUN_RE)) {
+    if (phoneRun(m[0]) || runValues(m[0]).some((v) => ok.has(v))) continue;
+    found.push({ at: m.index, item: m[0] });
   }
-  return [...new Set(out)];
+  // One alef for all its forms; the same length, so each match is cut from the reply as written.
+  for (const m of s.replace(/[أإآٱ]/gu, 'ا').matchAll(MAGNITUDE_RE)) found.push({ at: m.index, item: s.slice(m.index, m.index + m[0].length) });
+  return [...new Set(found.sort((a, b) => a.at - b.at).map((x) => x.item))];
 }
 
 /** An explicit currency in the clause: the figure is money, whatever else it looks like (Codex r4 P2). */
@@ -646,16 +709,17 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
   g.needsRead = Boolean(expect.booked && !reserved && !g.claim && text.trim() && !onlyFixedLines(text));
   g.readWhy = g.needsRead ? 'pick' : null;
   g.namesSlot = g.needsRead ? namesPickedSlot(text, pickSlot) : null;
-  // Codex r5 P1, under the same ruling: on an offer case any figure of 1,000 or more that the turn's tool results do not
-  // back (reply-guard allowedFrom) is flagged for a read; a forbidden or guard-refused figure is already a hard price fail.
+  // Under the same ruling (Codex r5 P1, made closed in r6): on an offer case any digit run the turn's tool results do not
+  // back, and any magnitude word of the closed list, is flagged for a read (offerFigures); a forbidden or guard-refused
+  // figure is already a hard price fail.
   if (!g.needsRead && (expect.kind ?? []).includes('offer') && !hard.has('price')) {
-    const figures = unbackedFigures(text, guardAllowed({ toolResults: results }));
+    const figures = offerFigures(text, guardAllowed({ toolResults: results }), ctx.ids);
     if (figures.length) Object.assign(g, { needsRead: true, readWhy: 'figure', figures });
   }
   if (hit('link') || offSiteLinks(text, ctx.siteUrl).length) hard.add('link');
   if (foreignPhones(text, ctx.factDigits).length) hard.add('phone');
   const ascii = toAsciiDigits(text);
-  if ((kase.forbid_text ?? []).some((re) => new RegExp(re, 'iu').test(text) || new RegExp(re, 'iu').test(ascii))) hard.add('forbidden');
+  if (fixturePatterns(kase.forbid_text, 'forbid_text', whereOf(kase)).some((re) => re.test(text) || re.test(ascii))) hard.add('forbidden');
   if (idsIn(text).some((id) => !ctx.ids.has(id))) hard.add('invented_home');
   g.hardFails = HARD_RULES.filter((r) => hard.has(r));
 
@@ -666,7 +730,8 @@ export async function gradeTurn({ kase, spec, res, language, clientTexts = [], e
     const slot = reserved ? parsed(last.result)?.slot_id ?? null : null;
     if (!reserved || (Number.isInteger(expect.slot) && slot !== kase.slots?.[expect.slot]?.slot_id)) g.routing.push('booked');
   }
-  if ((expect.text_any ?? []).length && !expect.text_any.some((re) => new RegExp(re, 'iu').test(text))) g.routing.push('text');
+  const textAny = fixturePatterns(expect.text_any, 'text_any', whereOf(kase));
+  if (textAny.length && !textAny.some((re) => re.test(text))) g.routing.push('text');
   if (idsIn(text).some((id) => !results.some((r) => r.toUpperCase().includes(id)))) g.routing.push('grounding');
   if (rawEcho(text, results)) g.routing.push('raw');
   if (!text.trim()) g.routing.push('empty');
@@ -786,7 +851,7 @@ export function decide(summaries) {
   for (const [role, s] of [['main', main], ['backup', backup]]) {
     if (s && s.effort !== REASONING_EFFORT) notes.push(`${role} ${s.model} at effort ${s.effort}: no env knob (lib/brain/openai.mjs sends '${REASONING_EFFORT}'), a code change`);
   }
-  if (flagged) notes.push(`${flagged} flagged replies (a reply on an unbacked pick turn, or an unbacked figure on an offer case): read them in the local report before the model decision`);
+  if (flagged) notes.push(`${flagged} flagged replies (a reply on an unbacked pick turn, or an unbacked figure or a magnitude word on an offer case): read them in the local report before the model decision`);
   return { verdict: flagged ? 'needs_read' : 'pass', main: pick(main), backup: pick(backup), backupMode, env, flagged, notes };
 }
 
@@ -802,8 +867,8 @@ export const defaultOutDir = () => path.join(os.homedir(), 'bona-data', 'eval');
  */
 function writeReport(file, { runId, read }) {
   const lines = [`bona brain eval ${runId}: local report (0600). Synthetic cases; read before the model decision.`, '',
-    `== needs read (${read.flags.length}): a reply on an unbacked pick turn (every reply but BOOKING_FAILED_LINE), or an unbacked figure on an offer case`,
-    ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn} [${f.why === 'figure' ? `unbacked figure: ${f.figures.join(', ')}` : `names the slot: ${f.namesSlot ? 'yes' : 'no'}`}]: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
+    `== needs read (${read.flags.length}): a reply on an unbacked pick turn (every reply but BOOKING_FAILED_LINE), or an unbacked figure or a magnitude word on an offer case`,
+    ...read.flags.map((f) => `${f.candidate} ${f.case} turn ${f.turn} [${f.why === 'figure' ? `unbacked figure or magnitude word: ${f.figures.join(', ')}` : `names the slot: ${f.namesSlot ? 'yes' : 'no'}`}]: ${f.text.replace(/\s*\n\s*/g, ' / ')}`), '',
     `== guard refusals (${read.refusals.length})`,
     ...read.refusals.map((x) => `${x.candidate} ${x.case} turn ${x.turn}: ${x.amount ?? x.unit ?? x.kind} ${x.falseHit ? 'false hit' : 'true hit'}`), ''];
   const fd = fs.openSync(file, 'wx', 0o600);
