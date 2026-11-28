@@ -1491,6 +1491,8 @@ export function createDashboardRoutes({
    * name read from the lead row, never a word it wrote. Only a lead still `out` (Move brings it
    * in, as today), in the SQL before the limit, and not a colleague's or a never-list number,
    * read page by page until the list is full, so neither kind can crowd an eligible lead out.
+   * An alert older than the lead's newest *Not a client* (its latest `inbox_out` audit row) is
+   * handled: the owner moved it in and marked it out again since, so only a newer one lists it.
    * A dismissed chat to check that wrote (a candidate's row, no lead) is not listed: it has no
    * lead to name or move, and it stays dismissed. A read that fails is an empty list, never a
    * page that will not open.
@@ -1499,7 +1501,9 @@ export function createDashboardRoutes({
     try {
       oldOutStmt ??= db.db.prepare(`SELECT n.lead_id AS lead_id, MAX(n.created) AS ts FROM owner_notes n
         JOIN leads l ON l.lead_id = n.lead_id AND l.inbox_state = 'out'
+        LEFT JOIN (SELECT target, MAX(ts) AS out_ts FROM audit_log WHERE action = 'inbox_out' GROUP BY target) o ON o.target = n.lead_id
         WHERE n.kind = 'alert' AND n.dedupe_key GLOB 'al:old_out_wrote:*' AND n.created >= ?
+          AND (o.out_ts IS NULL OR n.created > o.out_ts)
         GROUP BY n.lead_id ORDER BY ts DESC, n.lead_id LIMIT ? OFFSET ?`);
       const since = now() - OLD_OUT_MS;
       const out = [];
@@ -1661,6 +1665,9 @@ export function createDashboardRoutes({
     // deactivated (or signed out) meanwhile must not send on the strength of a check made
     // before. The sender reads the member again right before its outbox row as well.
     if (!currentUser(req)) return signedOut(res, form);
+    // And the chat, asked again for the same reason: the identity check can fail while the
+    // refresh is out, and the sender has no own-number gate of its own (DESIGN §13.2).
+    if (!openChat(db.getLead(leadId))) return refuseChat(res, form, me);
 
     const text = asText(fields.text).replace(/\r\n?/g, '\n').trim();
     const out = await sender.reply({ sendId: asText(fields.send_id), leadId, userId: me.user_id, text, seenRev: asRev(fields.seen_rev) });
@@ -1778,6 +1785,9 @@ export function createDashboardRoutes({
     const leadPage = `/dashboard/leads/${encodeURIComponent(leadId)}`;
     if (!lead) return answer(res, { form, back: '/dashboard/inbox?error=not_a_chat', status: 404, payload: { error: 'not_found' } });
     if (excludedLead(lead)) return answer(res, { form, back: `${leadPage}?error=excluded`, status: 400, payload: { error: 'excluded' } });
+    // The rollback guard (DESIGN §13.2): an own-number client is not brought in, nor its history
+    // read, while Bona's number is not checked.
+    if (viaHidden(lead)) return answer(res, { form, back: `${leadPage}?error=number_unchecked`, status: 409, payload: { error: 'number_unchecked' } });
     // Nothing to read a chat by: no jid, no lid, no phone to make a jid of.
     if (!lead.wa_jid && !lead.wa_lid && !lead.phone_e164) return answer(res, { form, back: `${leadPage}?error=not_a_chat`, status: 400, payload: { error: 'not_a_chat' } });
     const t = now();
@@ -1819,6 +1829,7 @@ export function createDashboardRoutes({
     const digits = /[@:a-zA-Z]/.test(raw) ? null : normalisePhone(raw);
     if (!digits || digits.startsWith('0')) return answer(res, { form, back: '/dashboard/inbox?error=bad_phone', status: 400, payload: { error: 'bad_phone' } });
     if (team.isExcludedPhone(digits)) return answer(res, { form, back: '/dashboard/inbox?error=excluded', status: 400, payload: { error: 'excluded' } });
+    if (viaHidden(db.getLeadByPhone(digits))) return answer(res, { form, back: '/dashboard/inbox?error=number_unchecked', status: 409, payload: { error: 'number_unchecked' } });
     const t = now();
     // The one lead write path; `owner_added` never fans out and is born in the inbox (P2-5).
     const { lead } = createOrMergeLead(db, { phone: digits, waJid: `${digits}@s.whatsapp.net` }, {
@@ -1857,6 +1868,7 @@ export function createDashboardRoutes({
       inbox.removeCandidatesFor(ids);
       return answer(res, { form, back: `${unsure}&error=excluded`, status: 400, payload: { error: 'excluded' } });
     }
+    if (viaHidden(existing)) return answer(res, { form, back: `${unsure}&error=number_unchecked`, status: 409, payload: { error: 'number_unchecked' } });
     const t = now();
     const { lead } = createOrMergeLead(db, { name: c.name, phone: c.phone_e164, waJid: c.jid, waLid: c.lid }, {
       channel: 'whatsapp', matchMethod: 'owner_added', now: t, dataDir: cfg.dataDir,
@@ -1931,6 +1943,9 @@ export function createDashboardRoutes({
     /* --- login, the only pages reachable signed out --- */
     if (p === '/dashboard/login') {
       if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
+      // A page that names a return-to decides it, as the forms do: one that is not a deep link
+      // is none, and an earlier login's cookie must not stand in for it at the verify.
+      if (url.searchParams.has('next') && !loginNext(url.searchParams.get('next'))) clearNextCookie(req, res);
       if (signedIn(req)) return redirect(res, loginNext(url.searchParams.get('next')) ?? '/dashboard', 302);
       return sendHtml(res, 200, loginView(req, url));
     }

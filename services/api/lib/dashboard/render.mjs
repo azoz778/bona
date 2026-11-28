@@ -757,6 +757,7 @@ export const MESSAGES = {
   forbidden: 'That request did not come from this page. Open api.bona-real-estate.com/dashboard directly, with translation off.',
   bad_task: 'Task not saved. Check its status and a valid Riyadh date/time; a confirmed viewing needs a time.',
   calendar_booked: 'This viewing was booked on the calendar, so its time is not changed here: move it in Google Calendar; Bona follows the calendar.',
+  number_unchecked: 'That chat joined on Bona’s own number, so it cannot be brought into the inbox until Bona’s WhatsApp number is checked.',
   bad_stage: 'That is not one of the stages.',
   bad_value: 'A deal value has to be a number.',
   empty_note: 'A note cannot be empty.',
