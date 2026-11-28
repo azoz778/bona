@@ -920,6 +920,10 @@ test('TOOL_NAMES has the six new tools, so the HTTP route knows them too; the gu
         assert.equal(out[key], off, `${name} for ${leadId || 'no lead'}`);
         assert.equal(out.reason, 'bad_lead');
       }
+      h.lead('LEAD-20261201-0000b4dd', { inbox_state: 'out' });
+      const gone = await h.wa(name, ARGS[name], { leadId: 'LEAD-20261201-0000b4dd' });
+      assert.deepEqual([gone[key], gone.reason], [off, 'not_in_inbox'], `${name}: a lead out of the inbox (Not a client) gets nothing`);
+      h.db.db.prepare('DELETE FROM leads WHERE lead_id = ?').run('LEAD-20261201-0000b4dd');
       const one = await h.wa(name);
       const two = await h.wa(name);
       assert.deepEqual(two, one, `${name} answers the same twice (the brain may retry a turn on the backup model)`);

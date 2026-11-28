@@ -400,8 +400,9 @@ export function createToolHandlers({
 
   /**
    * The lead a WhatsApp-only tool serves, or why it serves none (DESIGN §4.3): the source and the lead id come
-   * from the chat's metadata, which code sets (the brain's envelope; the model cannot forge them), and the lead
-   * must be in auto mode (the same-release rule, §2): outside it these tools answer as if nothing was available.
+   * from the chat's metadata, which code sets (the brain's envelope; the model cannot forge them), the lead
+   * must be in the inbox, and in auto mode (the same-release rule, §2): otherwise these tools answer as if
+   * nothing was available.
    */
   function waLead(ctx) {
     const source = ctx.attr?.source ?? null;
@@ -409,6 +410,8 @@ export function createToolHandlers({
     const id = ctx.attr?.lead_id;
     const lead = typeof id === 'string' && LEAD_ID_RE.test(id) ? db.getLead(id) ?? null : null;
     if (!lead) return { why: 'bad_lead' };
+    // Only a chat the assistant may answer (as viewing's gate): a late turn never writes to a lead that left the inbox.
+    if (lead.inbox_state !== 'in') return { why: 'not_in_inbox' };
     let auto = false;
     try { auto = ownerTest?.autoMode?.(lead) === true; } catch { auto = false; }
     if (!auto) return { why: 'not_auto' };

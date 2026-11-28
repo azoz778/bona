@@ -133,8 +133,9 @@ export function createDanaCommit(deps = {}) {
     const listing = exact(call.args.listing_id);
     if (!listing || pinOf(listing) !== 'exact') return body;
     const link = `https://maps.google.com/?q=${Number(listing.map.lat)},${Number(listing.map.lng)}`;
-    if (body.includes(link) || (body.match(LINK_RE) ?? []).length >= maxLinks) return body;
-    return `${body.trimEnd()}\n\n${lang === 'en' ? 'Location' : 'الموقع'}: ${link}`;
+    const s = String(body ?? '');
+    if (s.includes(link) || (s.match(LINK_RE) ?? []).length >= maxLinks) return body;
+    return `${s.trimEnd()}\n\n${lang === 'en' ? 'Location' : 'الموقع'}: ${link}`;
   }
 
   async function afterPreSend({ lead = null, turn = null, text: answer = '', language = 'ar' } = {}) {
