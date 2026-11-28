@@ -83,7 +83,7 @@ import { codeFromHttp, codeFromThrown, BACKUP_CODES, OUT_CODES, CODES } from './
 import { requestBody, parseCompletion, assistantMessage, safetyIdentifier, cacheKey, retryAfterMs, usageOf, CHAT_PATH, MODELS_PATH } from './brain/openai.mjs';
 import { toolsFor, routeToolNames, schemaArgNames } from './brain/tool-schemas.mjs';
 import { loadPrompts, systemPrompt, contextNote, clientTurn, PROMPT_DIR, CHANNEL_SECTIONS } from './brain/prompt.mjs';
-import { minimise as defaultMinimise } from './brain/minimise.mjs';
+import { minimise as defaultMinimise, minimiseParts } from './brain/minimise.mjs';
 import { costMicroUsd as defaultCost } from './brain/prices.mjs';
 
 export const KEY_NAME = 'BONA_OPENAI_API_KEY';
@@ -633,6 +633,20 @@ export function createBrain(deps = {}) {
     return merged;
   }
 
+  /**
+   * The client's own rows (the history's `user` rows, then this batch), masked as one text (minimiseParts): a
+   * number split across two of the client's messages, a reply of ours between them or not, is masked in both
+   * pieces (Codex r9). Only the client's rows: an amount in our reply never joins a client's number.
+   */
+  function clientRows(history, batchText) {
+    const rows = Array.isArray(history) ? history : [];
+    const at = rows.flatMap((h, i) => (h?.role === 'user' && typeof h.content === 'string' ? [i] : []));
+    const masked = minimiseParts([...at.map((i) => rows[i].content), String(batchText ?? '')]);
+    const out = rows.slice();
+    at.forEach((i, k) => { out[i] = { ...rows[i], content: masked[k] }; });
+    return { history: out, batch: masked.at(-1) };
+  }
+
   /* ---------------- turn ---------------- */
   async function runTurn(input) {
     const route = input.route;
@@ -680,6 +694,7 @@ export function createBrain(deps = {}) {
 
     const turnMs = Number.isFinite(input.deadlineMs) && input.deadlineMs > 0 ? Math.min(input.deadlineMs, limits.turnMs) : limits.turnMs;
     const offeredTools = toolsFor(route, Array.isArray(input.toolNames) ? input.toolNames : undefined);
+    const client = clientRows(input.history, input.batchText);
     const ctx = {
       route, language, leadId, logLead, outTrial,
       deadline: started + turnMs,
@@ -692,9 +707,9 @@ export function createBrain(deps = {}) {
       earlier: (Array.isArray(input.earlierReplies) ? input.earlierReplies : []).filter((s) => typeof s === 'string'),
       base: [
         { role: 'system', content: system },
-        ...historyMessages(input.history),
+        ...historyMessages(client.history),
         // Masked before the clip, so a phone across the 4,000-character cut leaves no digit.
-        { role: 'user', content: minimise(clientTurn({ batchText: clipChars(minimise(String(input.batchText ?? '')), limits.batchChars), leadFacts: input.leadFacts })) },
+        { role: 'user', content: minimise(clientTurn({ batchText: clipChars(minimise(client.batch), limits.batchChars), leadFacts: input.leadFacts })) },
         { role: 'system', content: contextNote({ now: started, route, firstReply: Boolean(input.turnContext?.firstReply), autoMode: Boolean(input.autoMode) }) },
       ],
     };

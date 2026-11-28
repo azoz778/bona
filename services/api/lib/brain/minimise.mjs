@@ -184,7 +184,7 @@ function thousandsRange(run, gaps) {
  * Whether the groups from `j` on, within one line, start a phone or ID of their own (maskFor): a line break before
  * such a group starts the next number (Claude r13 F1).
  */
-function lineStartsNumber(s, groups, j) {
+function lineStartsNumber(s, groups, j, plus = false) {
   let d = '';
   for (let m = j; m < groups.length; m += 1) {
     if (m > j) {
@@ -193,7 +193,25 @@ function lineStartsNumber(s, groups, j) {
     }
     d += groups[m].digits;
     if (d.length > MAX_DIGITS) break;
-    if (maskFor(d, false)) return true;
+    if (maskFor(d, plus)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the groups from `j` on, within one line, complete `digits` (a phone already found before a line break)
+ * into a longer phone with a clear prefix: "+966 50 000 00" then "00" is one Saudi number (Codex r9).
+ */
+function lineCompletes(s, groups, j, digits) {
+  let d = digits;
+  for (let m = j; m < groups.length; m += 1) {
+    if (m > j) {
+      const gap = s.slice(groups[m - 1].end, groups[m].start);
+      if (groups[m].date || !PHONE_GAP_RE.test(gap) || /[\r\n\u2028\u2029]/.test(gap)) break;
+    }
+    d += groups[m].digits;
+    if (d.length > MAX_DIGITS) break;
+    if (CLEAR_PHONE_RE.test(d)) return true;
   }
   return false;
 }
@@ -234,7 +252,10 @@ function numberCuts(s) {
         // A line break starts the next number when a number ended before it ("+966 50 000 0000\n+44 7700 900000",
         // Codex r7) or the next line starts its own ("ميزانيتي 500.000\n055 123 4567"); otherwise it is a number a
         // line break split, as a plain-text email wraps one ("055 123\n4567", Claude r13 F1).
-        if (/[\r\n\u2028\u2029]/.test(gap) && (best || lineStartsNumber(s, groups, j))) break;
+        // ...and a phone found before the break goes on when the next line completes it into a longer clear one
+        // ("+966 50 000 00\n00", Codex r9).
+        if (/[\r\n\u2028\u2029]/.test(gap)
+          && (lineStartsNumber(s, groups, j, gap.includes('+')) || (best && !lineCompletes(s, groups, j, digits)))) break;
         if (!GAP_RE.test(gap)) { if (tail) break; wide = true; }
         gaps.push(gap);
         if (wide || SOFT_GAP_RE.test(gap)) soft = true;
@@ -276,7 +297,10 @@ function numberCuts(s) {
       // prefix (CLEAR_PHONE_RE), or, after a `+`, after an amount the cut took whole (groups i..k-1 are one budget) or
       // after a complete number (groups i..k-1 are a phone or ID themselves), any phone or ID shape. The cut goes on to that number's end; it only grows, so it never unmasks anything
       // (Claude r12 F2, Codex r7). "551 234 567 - 1 000" is a phone and an amount: the amount stays.
-      // Read again from every group the cut took on, so a number that starts there is not split either.
+      // Read again from every group the cut took on, so a number that starts there is not split either: a group past
+      // the main cut (k > own) was taken because a number runs through it, so a number read from it carries the cut
+      // on too, whatever its shape (three numbers on one line, Claude r14).
+      const own = best.j;
       let far = best.j;
       for (let k = i + 1; k <= far; k += 1) {
         const lead = s.slice(groups[k - 1].end, groups[k].start);
@@ -284,7 +308,7 @@ function numberCuts(s) {
         // on a long run of short groups (Claude r13 F2). A complete number before group k counts too: a `+` phone's
         // longest match may take the first group of the next number (Codex r8).
         const before = k - i <= MAX_DIGITS ? groups.slice(i, k) : null;
-        const weak = lead.includes('+') || (before !== null && ((k - i <= 9 && isAmount(before, gaps.slice(0, k - 1 - i)))
+        const weak = lead.includes('+') || k > own || (before !== null && ((k - i <= 9 && isAmount(before, gaps.slice(0, k - 1 - i)))
           || maskFor(before.map((g) => g.digits).join(''), plus) !== null));
         let d = '';
         for (let m = k; m < groups.length; m += 1) {
@@ -324,16 +348,41 @@ function takeMatches(p, re, mask) {
  */
 export function minimise(text) {
   if (typeof text !== 'string') return '';
-  const s = asciiDigits(text);
+  return minimiseParts([text])[0];
+}
+
+/**
+ * Several texts of one writer, in order (a client's messages), masked as ONE text with `sep` between them: a number
+ * split across two of them ("my number is 050", then "000 0000") is masked in both pieces, never left whole across
+ * the two (Codex r9). Each part comes back as minimise() would give it, plus the masks of such a number. A non-string
+ * part is ''.
+ * @param {unknown[]} parts
+ * @param {string} [sep]
+ * @returns {string[]}
+ */
+export function minimiseParts(parts, sep = '\n') {
+  const list = (Array.isArray(parts) ? parts : []).map((x) => (typeof x === 'string' ? asciiDigits(x) : ''));
+  const s = list.join(sep);
   const p = probe(s);
   const cuts = [...takeMatches(p, EMAIL_RE, '[email]'), ...takeMatches(p, IBAN_RE, '[iban]'), ...numberCuts(p.text)].sort((x, y) => x.start - y.start);
-  // Each cut covers the original characters of its probe span (a mark inside it goes with it).
-  let out = '';
-  let at = 0;
-  for (const c of cuts) {
-    const start = p.from[c.start];
-    out += s.slice(at, start) + c.mask;
-    at = p.to[c.end - 1];
+  // Each cut covers the original characters of its probe span (a mark inside it goes with it); a cut across a
+  // boundary masks its piece in each part.
+  const spans = cuts.map((c) => ({ start: p.from[c.start], end: p.to[c.end - 1], mask: c.mask }));
+  const out = [];
+  let lo = 0;
+  for (const part of list) {
+    const hi = lo + part.length;
+    let o = '';
+    let at = lo;
+    for (const c of spans) {
+      if (c.end <= lo || c.start >= hi) continue;
+      const a = Math.max(c.start, lo);
+      if (a < at) continue;
+      o += s.slice(at, a) + c.mask;
+      at = Math.min(c.end, hi);
+    }
+    out.push(o + s.slice(at, hi));
+    lo = hi + sep.length;
   }
-  return out + s.slice(at);
+  return out;
 }

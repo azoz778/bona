@@ -1145,6 +1145,23 @@ test('masking comes before every clip: a phone across the 300-character row cut,
   for (const d of ['05000', '00000', '0500000002', '0500000003', '0500000004']) assert.equal(user.includes(d), false, d);
 });
 
+test("Codex r9: a number the client split across two messages never reaches the provider whole: across history rows, or between the last row and this batch, a reply of ours between them or not", async () => {
+  const h = harness({ script: [reply('Hello.')] });
+  await h.brain.turn(turnArgs({ history: [{ role: 'user', content: 'My number is 050' }, { role: 'assistant', content: 'Thanks, the rest please?' }, { role: 'user', content: '000 0000' }] }));
+  const all = h.calls[0].body.messages.map((x) => x.content).join('\n').replace(/\D/g, '');
+  assert.equal(all.includes('0500000000'), false, 'not across two history rows');
+  assert.equal(all.includes('0000000'), false, 'no 7-digit tail either');
+  const k = harness({ script: [reply('Hello.')] });
+  await k.brain.turn(turnArgs({ history: [{ role: 'user', content: 'call me on 055 123' }], batchText: '4567 please' }));
+  const sent = k.calls[0].body.messages.map((x) => x.content).join('\n');
+  assert.equal(/0551234567|1234567|055123/.test(sent.replace(/\D/g, '')), false, 'not between the last row and this batch');
+  assert.equal(sent.includes('please'), true);
+  // Our own reply never joins the client's number: an amount in it stays.
+  const j = harness({ script: [reply('Hello.')] });
+  await j.brain.turn(turnArgs({ history: [{ role: 'assistant', content: 'from SAR 2 950 000' }, { role: 'user', content: '500 000 is my budget' }] }));
+  assert.equal(j.calls[0].body.messages.some((x) => x.content.includes('2 950 000')), true);
+});
+
 test('every history row is clipped to 300 characters after masking, also when the caller did not build the history with historyFromInbox', async () => {
   const h = harness({ script: [reply('Hello.')] });
   await h.brain.turn(turnArgs({ history: [{ role: 'user', content: `${'x'.repeat(295)} 0500000000 ${'x'.repeat(4000)}` }, { role: 'team', content: 'y'.repeat(400) }] }));

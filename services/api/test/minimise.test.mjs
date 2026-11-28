@@ -6,7 +6,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { minimise, readable } from '../lib/brain/minimise.mjs';
+import { minimise, minimiseParts, readable } from '../lib/brain/minimise.mjs';
 
 test('phone shapes are masked after Arabic-Indic digits and the separators inside digit groups are normalised', () => {
   for (const [input, want] of [
@@ -323,6 +323,26 @@ test('a 64 KB message of short digit groups or of letters is minimised quickly',
     assert.ok(performance.now() - t < 2000, `${big.slice(0, 8)}…: ${Math.round(performance.now() - t)} ms`);
   }
   assert.equal(minimise('mail sara.example+bona@example.com now'), 'mail [email] now');
+});
+
+/* Claude r14 F1: three numbers on one line; Codex r9: a "+" phone a line break splits after 10 digits. */
+test('three numbers on one line all go; a found phone the next line completes goes on', () => {
+  for (const [input, num] of [
+    ['+966 55 123 4567 / 055 123 4567 / 101 234 5678', '1012345678'], ['budget 500.000 - 055 123 4567 - 101 234 5678', '1012345678'],
+    ['+966 55 123 4567 / +966 56 111 2223 / 101 234 5678', '1012345678'], ['budget 500.000 055 123 4567 / 101 234 5678', '1012345678'],
+  ]) assert.equal(sevenOf(minimise(input), num), null, input);
+  assert.equal(minimise('+966 50 000 00\n00'), '[phone]');
+  assert.equal(minimise('call +966 50 000 0000\n12 bedrooms please'), 'call [phone]\n12 bedrooms please', 'a count on the next line stays');
+});
+
+/* Codex r9: a number split across two of the client's messages. */
+test('minimiseParts masks a series as one text: a number split across two parts is masked in both, each part as minimise gives it otherwise', () => {
+  assert.deepEqual(minimiseParts(['My number is 050', '000 0000']), ['My number is [phone]', '[phone]']);
+  assert.deepEqual(minimiseParts(['رقمي ٠٥٥', '١٢٣ ٤٥٦٧ شكرا']), ['رقمي [phone]', '[phone] شكرا']);
+  assert.deepEqual(minimiseParts(['Hi, budget 500.000', 'call 0500000000']), ['Hi, budget 500.000', 'call [phone]']);
+  assert.deepEqual(minimiseParts(['villa in Abhur?', '3 bedrooms']), ['villa in Abhur?', '3 bedrooms']);
+  assert.deepEqual(minimiseParts([null, 'x 0500000000']), ['', 'x [phone]']);
+  for (const t of ['call 0500000000', 'budget 500.000 - 600.000', 'mail a@example.com', '']) assert.deepEqual(minimiseParts([t]), [minimise(t)], t);
 });
 
 /** The first 7-digit run of `num` still readable in `out` (digits only), else null. */
