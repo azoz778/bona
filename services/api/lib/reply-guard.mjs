@@ -175,6 +175,8 @@ const forms = (text) => {
   const s = String(text ?? '');
   return [s, shown(s), shown(readable(s))];
 };
+/** The same forms, exported for the T26 brain eval (PR #102): it judges a refused amount on the form the guard read it from. */
+export const guardForms = forms;
 
 /**
  * "2 950 000" (a space, NBSP or narrow NBSP between groups of three) is one number. The run is taken whole or
