@@ -6,10 +6,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../lib/db.mjs';
-import { createStats, dayKey, median, percentile, licenceFlags, expiryMs, platformOf, DAY_MS } from '../lib/dashboard/stats.mjs';
+import { createStats, dayKey, median, percentile, licenceFlags, expiryMs, platformOf, DAY_MS, NOT_ANSWER_LINES } from '../lib/dashboard/stats.mjs';
 import { createInboxStore } from '../lib/inbox/store.mjs';
 import { HANDOVER, DISCLOSURE, FIXED_LINES, LEGACY_DISCLOSURE } from '../lib/dana-wa.mjs';
 import { disclosureVariants } from '../lib/persona.mjs';
+import * as danaCommitModule from '../lib/dana-commit.mjs';
 
 const NOW = 1_757_200_000_000;
 const now = () => NOW;
@@ -672,7 +673,11 @@ test('ownerSummary(): an answer split across 08:00 counts once, in the day of it
 });
 
 test('ownerSummary(): no fixed line PR-B3 sends as a dana row is an answer — each one alone, after the legacy prefix and after every nameless variant (PLAN T12, from T11 r12)', () => {
-  assert.equal(FIXED_LINES.length, 14, 'the 4 hand-over variants (variant 0 is also the in-hours outage line), out of hours, the outage and closing lines, both languages');
+  // The 4 hand-over variants (variant 0 is also the in-hours outage line), out of hours, the outage and closing lines, both
+  // languages; and dana-commit's BOOKING_FAILED_LINE (PR-B4) once that module defines it.
+  const bookingFailed = Object.values(danaCommitModule.BOOKING_FAILED_LINE ?? {});
+  assert.equal(FIXED_LINES.length, 14 + bookingFailed.length);
+  for (const line of bookingFailed) assert.ok(NOT_ANSWER_LINES.includes(line), `booking_failed is no answer: ${line}`);
   for (const line of FIXED_LINES) {
     const db = openDb(':memory:');
     const stats = createStats({ db, now });

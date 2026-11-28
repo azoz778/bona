@@ -7,7 +7,7 @@
  * Three lists:
  *   - the stop list: phrases anywhere in a message (STOP_PHRASES), and a bare stop word only in a
  *     short message of at most BARE_STOP_MAX_WORDS words (STOP_WORDS), because "does the bus stop near
- *     the villa?" is an enquiry;
+ *     the villa?" is an enquiry; never the bare «وقف» / «توقف» (an endowment, a stalled project);
  *   - the data list (DATA_PHRASES): a request about the client's data, anywhere in a message.
  *     Deliberately NOT the bare words privacy / خصوصية / بياناتي / رقمي / my number: "فيلا فيها
  *     خصوصية" (a villa with privacy) and "هذه بياناتي" (here are my details) are everyday enquiry
@@ -42,9 +42,13 @@ const words = (text) => normalise(text).split(/[^\p{L}\p{N}']+/u).map((w) => w.r
 
 export const STOP_PHRASES = Object.freeze([
   'stop replying', 'stop messaging', "don't message", 'dont message', 'do not message', 'do not contact', 'unsubscribe',
-  'لا ترد', 'لا تراسل', 'توقف عن الرد', 'لا تتواصل',
+  'لا ترد', 'لا تراسل', 'توقف عن الرد', 'وقف الرد', 'لا تتواصل',
 ]);
-export const STOP_WORDS = Object.freeze(['stop', 'إيقاف', 'وقف', 'توقف', 'كفى']);
+/**
+ * Not the bare «وقف» or «توقف» (T12 r1, main session): they are real-estate words — «الأرض وقف؟» (is the land
+ * an endowment?), «توقف المشروع؟» (has the project stopped?) — so only their phrase forms are on the stop list.
+ */
+export const STOP_WORDS = Object.freeze(['stop', 'إيقاف', 'كفى']);
 /** [phrase, kind]: a deletion request first (it holds "my data"), then the privacy phrases. */
 const DATA = Object.freeze([
   ...['delete my data', 'remove my data', 'erase my data', 'delete my number', 'احذف بياناتي', 'امسح بياناتي', 'حذف بياناتي', 'احذفوا رقمي']

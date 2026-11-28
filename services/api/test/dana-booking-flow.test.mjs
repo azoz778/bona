@@ -141,7 +141,7 @@ test('PLAN T12 test 6: in the test chat, a booking turn (text, PDF, confirmation
     assert.equal((await h.sender.sendTo({ jid: `${OWNER}@s.whatsapp.net`, text, kind: 'note' })).ok, true, text);
   }
   assert.equal(h.posts.length, 6);
-  assert.deepEqual(h.posts.map((p) => p.route), ['sendText', 'sendText', 'sendMedia', 'sendText', 'sendText', 'sendText'], 'text first, then the document');
+  assert.deepEqual(h.posts.map((p) => p.route), ['sendText', 'sendMedia', 'sendText', 'sendText', 'sendText', 'sendText'], "the commit's order: text, brochure, confirmation (r1)");
   const lead = h.s.getLead(LEAD);
   assert.deepEqual([lead.dana_hold_reason, lead.needs_human], [null, 0]);
   assert.equal(h.team.getSetting('dana_enabled'), '1', 'no breaker');

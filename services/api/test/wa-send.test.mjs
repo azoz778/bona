@@ -1444,6 +1444,9 @@ test("Dana to the owner's jid is counted in the day budget, and her row is count
 
 /* ------------------------------ PR-B3 (PLAN T12 tests 3, 6, 13) ------------------------------ */
 
+/** A synthetic instance: these tests never name a real one. */
+const T12_ENV = { ...ENV, BONA_WA_INSTANCE: 'bona-test' };
+
 /** A client chat with a stored client message at `at`, and a Dana row written first that answers `covers`. */
 function danaChat(h, { at = NOW - 60_000, covers = at, media = null, text = 'Dana here', id = 'LEAD-T12' } = {}) {
   if (!h.s.getLead(id)) {
@@ -1462,7 +1465,7 @@ test('T12: SEND_PER_MIN is 8 and SEND_PER_DAY follows the warm-up tiers by BONA_
   assert.deepEqual(SEND_PER_DAY_TIERS, [100, 180, 300]);
   for (const [days, cap] of [[null, 100], [0, 100], [7, 100], [8, 180], [21, 180], [22, 300], [40, 300]]) {
     const linked = days === null ? null : new Date(NOW - days * DAY - 60_000).toISOString();
-    const h = harness({ env: { ...ENV, ...(linked ? { BONA_WA_LINKED_AT: linked } : {}) } });
+    const h = harness({ env: { ...T12_ENV, ...(linked ? { BONA_WA_LINKED_AT: linked } : {}) } });
     seedOutbox(h, cap - 1, { created: NOW - 3_600_000 });
     assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff', userId: 'USR-a' })).ok, true, `day ${days}: the ${cap}th goes`);
     const over = await h.sender.sendTo({ jid: '966500000001@s.whatsapp.net', text: 'x', kind: 'staff', userId: 'USR-b' });
@@ -1472,7 +1475,7 @@ test('T12: SEND_PER_MIN is 8 and SEND_PER_DAY follows the warm-up tiers by BONA_
 });
 
 test('T12: every refusal carries its failure class — local for our own refusals, evolution for what Evolution answered', async () => {
-  const h = harness();
+  const h = harness({ env: T12_ENV });
   const local = [
     await h.sender.sendTo({ jid: 'x', text: 'x', kind: 'staff' }),
     await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'robot' }),
@@ -1485,15 +1488,15 @@ test('T12: every refusal carries its failure class — local for our own refusal
   h.team.setSetting('sending_enabled', '1');
   for (let i = 0; i < PER_RECIPIENT_PER_MIN; i += 1) await h.sender.sendTo({ jid: CLIENT_JID, text: `x${i}`, kind: 'staff' });
   assert.deepEqual(await h.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'rate_limited', failure: 'local' });
-  const off = harness({ env: { ...ENV, BONA_WA_NOTIFY: '0' } });
+  const off = harness({ env: { ...T12_ENV, BONA_WA_NOTIFY: '0' } });
   assert.equal((await off.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' })).failure, 'local');
-  const bare = harness({ env: { BONA_WA_INSTANCE: 'abdulaziz-personal' } });
+  const bare = harness({ env: { BONA_WA_INSTANCE: 'bona-test' } });
   assert.deepEqual(await bare.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' }), { ok: false, error: 'evolution-not-configured', failure: 'local' });
   for (const [reply, error, uncertain] of [
     [{ status: 400 }, 'http_400', false], [{ status: 500 }, 'http_500', true], [{ throws: netError('ECONNREFUSED') }, 'network', false],
     [{ throws: netError('ECONNRESET') }, 'network', true], [{ throws: abortError() }, 'timeout', true], [{ status: 201, body: {} }, 'no_ack', true],
   ]) {
-    const e = harness({ reply: () => reply });
+    const e = harness({ env: T12_ENV, reply: () => reply });
     const out = await e.sender.sendTo({ jid: CLIENT_JID, text: 'x', kind: 'staff' });
     assert.equal(out.ok, false);
     assert.equal(out.error, error);
@@ -1505,7 +1508,7 @@ test('T12: every refusal carries its failure class — local for our own refusal
 });
 
 test('T12: never-first — a Dana send must answer a stored client message under 24 h old (no_open_chat)', async () => {
-  const h = harness();
+  const h = harness({ env: T12_ENV });
   const ok = danaChat(h, { at: NOW - 60_000 });
   assert.equal((await h.sender.sendTo({ jid: CLIENT_JID, text: 'Dana here', kind: 'dana', leadId: 'LEAD-T12', sendId: ok })).ok, true);
   const notStored = danaChat(h, { at: NOW - 50_000, covers: NOW - 40_000 });
@@ -1530,13 +1533,13 @@ test('T12: never-first — a Dana send must answer a stored client message under
 
 test('T12: postMedia — a brochure goes as a document by URL with a caption, its row written first; a timeout is uncertain and never retried', async () => {
   assert.equal(MEDIA_TIMEOUT_MS, 45_000);
-  const h = harness();
+  const h = harness({ env: T12_ENV });
   const id = danaChat(h, { media: 'document', text: 'The brochure' });
   const doc = { url: 'https://bona.azoz.uk/brochures/bona-w012.pdf', fileName: 'Bona BONA-W012.pdf' };
   const out = await h.sender.sendTo({ jid: CLIENT_JID, text: 'The brochure', kind: 'dana', leadId: 'LEAD-T12', sendId: id, document: doc });
   assert.equal(out.ok, true);
   assert.equal(h.calls.length, 1);
-  assert.equal(h.calls[0].url, 'http://evo.test/message/sendMedia/abdulaziz-personal');
+  assert.equal(h.calls[0].url, 'http://evo.test/message/sendMedia/bona-test');
   assert.deepEqual(h.calls[0].body, { number: CLIENT, mediatype: 'document', mimetype: 'application/pdf', media: doc.url, fileName: doc.fileName, caption: 'The brochure' });
   assert.equal(h.calls[0].pending, 1, 'the row was written before the call');
   const row = h.inbox.getOutbox(id);
@@ -1558,7 +1561,7 @@ test('T12: postMedia — a brochure goes as a document by URL with a caption, it
   assert.equal(h.calls.length, 1);
 
   // A timeout (45 s; shortened here) is uncertain: the row says so, and the same send id never goes again.
-  const t = harness({ mediaTimeoutMs: 20, reply: () => new Promise(() => {}) });
+  const t = harness({ env: T12_ENV, mediaTimeoutMs: 20, reply: () => new Promise(() => {}) });
   const slowId = danaChat(t, { media: 'document', text: 'The brochure' });
   const slow = await t.sender.sendTo({ jid: CLIENT_JID, text: 'The brochure', kind: 'dana', leadId: 'LEAD-T12', sendId: slowId, document: doc });
   assert.deepEqual([slow.ok, slow.error, slow.uncertain, slow.failure], [false, 'timeout', true, 'evolution']);
