@@ -1117,6 +1117,11 @@ function rig14({ env = {}, config = {}, openai = [], google = null, realBrain = 
         evo.sends.push({ url: u, body: JSON.parse(init.body), at: t });
         return reply(201, { key: { id: `KEY-${evo.sends.length}` } });
       }
+      if (u.includes('/instance/fetchInstances') || u.includes('/chat/whatsappNumbers/')) {
+        if (options.evoDown) return reply(503, {});
+        if (u.includes('/instance/fetchInstances')) return reply(200, [{ name: 'bona-test', ownerJid: jidOf(BONA14), connectionStatus: 'open' }]);
+        return reply(200, [{ number: BONA14, exists: true }]);
+      }
       if (u.includes('/chat/findMessages/')) {
         const body = JSON.parse(init.body);
         const records = body.where?.messageTimestamp && evo.windows.length ? evo.windows.shift() : [];
@@ -1143,7 +1148,7 @@ function rig14({ env = {}, config = {}, openai = [], google = null, realBrain = 
     pacing: QUICK_PACING, danaBatchMs: 0,
     ...(realBrain ? {} : { brain: options.brain ?? createFakeBrain({ turns: options.turns ?? [] }) }),
     ...(options.waLink === null ? {} : { waLink: options.waLink ?? provenLink() }),
-    ...Object.fromEntries(Object.entries(options).filter(([k]) => !['startAt', 'db', 'retell', 'brain', 'turns', 'waLink'].includes(k))),
+    ...Object.fromEntries(Object.entries(options).filter(([k]) => !['startAt', 'db', 'retell', 'brain', 'turns', 'waLink', 'evoDown'].includes(k))),
   });
   const rec = (digits, id, text, { fromMe = false, at = t - 5_000 } = {}) => ({
     key: { id, fromMe, remoteJid: jidOf(digits) }, pushName: fromMe ? null : 'Example', messageType: 'conversation',
@@ -1804,5 +1809,66 @@ test('T14-2 the Ops panel is the owner\'s only and shows the latency, answers an
     }
   } finally {
     await h.close();
+  }
+});
+
+/* ---------------- the boot: the link probe's first round before the poller (PR-INT inertness) ---------------- */
+
+const noIntervals = { every: () => ({}), clear: () => {} };
+
+test('T14 boot: app.start runs the first link probe at once and starts the poller only after it, so a legacy own-number chat is answered at once', async () => {
+  const h = rig14({ waLink: null });
+  try {
+    const { app } = h;
+    assert.equal(app.waLink.identityOk(), false, 'before the first round: fail closed (T09)');
+    app.team.setSetting('dana_enabled', '1');
+    let identityWhenPollerStarted = null;
+    app.poller.start = () => { identityWhenPollerStarted = app.waLink.identityOk(); return true; };
+    const out = await app.start(noIntervals);
+    assert.equal(out.pollStarted, true);
+    assert.equal(identityWhenPollerStarted, true, 'the poller starts only once the instance is proven');
+    assert.ok(h.seen.some((c) => c.url.includes('/instance/fetchInstances')), 'the first round ran at boot, not 10 min later');
+    // A legacy chat on Bona's own number (dana_brain 0): answered by today's Retell agent at once.
+    h.seedLead('LEAD-20261203-boot0001', '966500000061');
+    await h.poll(h.rec('966500000061', 'C-1', 'Is the villa still available?'));
+    const sends = h.sendsTo('966500000061');
+    assert.equal(sends.length, 1, 'no 10-minute gap');
+    assert.match(sends[0].body.text, /^Dana — Bona's AI assistant\n\nRetell here/);
+    assert.ok(!h.logs.some((l) => l.evt === 'dana.skipped' && l.reason === 'identity'));
+  } finally {
+    h.app.stopTimers();
+    await h.close();
+  }
+});
+
+test('T14 boot: a first round that errors keeps T09/T12\'s fail-closed rule (the own-number chat waits for a proving round); a shared-number setup is answered as today either way', async () => {
+  // Own number, Evolution failing the identity check: Dana answers nobody on it (DESIGN §5.3), and the poller still starts.
+  const down = rig14({ waLink: null, evoDown: true });
+  try {
+    down.app.team.setSetting('dana_enabled', '1');
+    down.app.poller.start = () => true;
+    const out = await down.app.start(noIntervals);
+    assert.equal(out.pollStarted, true, 'a failed probe never stops the poller');
+    assert.equal(down.app.waLink.identityOk(), false);
+    down.seedLead('LEAD-20261203-boot0002', '966500000062');
+    await down.poll(down.rec('966500000062', 'C-1', 'hello?'));
+    assert.equal(down.sendsTo('966500000062').length, 0, 'fail closed: not proven, not answered');
+    assert.ok(down.logs.some((l) => l.evt === 'dana.skipped' && l.reason === 'identity'));
+  } finally {
+    down.app.stopTimers();
+    await down.close();
+  }
+  // Shared number (no BONA_WA_INSTANCE_JID): the guard is never read; today's legacy answer, probe or none.
+  const shared = rig14({ waLink: null, evoDown: true, env: { BONA_WA_INSTANCE_JID: '' } });
+  try {
+    shared.app.team.setSetting('dana_enabled', '1');
+    shared.app.poller.start = () => true;
+    await shared.app.start(noIntervals);
+    shared.seedLead('LEAD-20261203-boot0003', '966500000063');
+    await shared.poll(shared.rec('966500000063', 'C-1', 'hello?'));
+    assert.equal(shared.sendsTo('966500000063').length, 1, 'shared number: answered as today');
+  } finally {
+    shared.app.stopTimers();
+    await shared.close();
   }
 });

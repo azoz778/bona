@@ -835,6 +835,29 @@ export function createApp(options = {}) {
     try { waLink.start?.(); } catch (err) { log({ level: 'error', evt: 'timer.failed', timer: 'link', name: loggableName(err) }); }
     return TIMERS.map(([name, ms]) => ({ name, ms }));
   };
+  /**
+   * The real server's start (isMain): the timers and the link probe, whose first round starts at once; the poller only
+   * once that first round has answered (bounded by `firstProbeMs`), so no client message is read while the identity
+   * guard is still pending. DESIGN §5.3 / T09-T12's rule stands as it is: identityOk is false until a round proves the
+   * instance, so a first round that errors, or no Evolution to ask, leaves Dana's own-number chats unanswered until a
+   * later round proves it (every 10 min). A shared-number setup (no BONA_WA_INSTANCE_JID) never reads the guard.
+   * @returns {Promise<{ timers: { name: string, ms: number }[], pollStarted: boolean|null }>}
+   */
+  app.start = async function start({ every = null, clear = null, firstProbeMs = 15_000 } = {}) {
+    const timers = app.startTimers({ every, clear });
+    let timer = null;
+    try {
+      await Promise.race([
+        Promise.resolve().then(() => waLink.probe?.()).catch(() => {}),
+        new Promise((resolve) => { timer = setTimeout(resolve, firstProbeMs); timer.unref?.(); }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    const pollStarted = poller ? poller.start({ intervalMs: cfg.waPollMs }) : null;
+    return { timers, pollStarted };
+  };
+
   /** Every timer off, the link probe stopped, and the notes' own wake-up timer too (shutdown, tests). */
   app.stopTimers = function stopTimers() {
     if (running) {
@@ -1477,21 +1500,20 @@ if (isMain) {
   // destinations up the moment ~/.secrets/bona-marketing.env has them.
   const fanoutStarted = app.fanout.start();
   jsonLog('info', { evt: 'fanout.init', started: fanoutStarted, dests: app.fanout.dests(), everyMs: app.cfg.fanoutMs });
-  // The WhatsApp poller. `BONA_WA_POLL=0` turns it off; without Evolution credentials it
-  // starts and skips every tick rather than guessing a URL. It never sets a webhook.
-  if (app.poller) {
-    const pollStarted = app.poller.start({ intervalMs: app.cfg.waPollMs });
-    jsonLog('info', { evt: 'wa.poll.init', started: pollStarted, everyMs: app.cfg.waPollMs, ...app.poller.status() });
-  }
   // Inbox upkeep (P2-18): once now, then daily. It logs its own counts and never rejects
   // (the `.catch` only keeps a future slip from crashing the process); like the poller, it
   // is never the reason the process stays alive.
   app.inboxMaintenance().catch(() => {});
   // PR-INT's timers (TIMERS): the notes, the summary minute, the sweep, the viewing worker, the brain's
-  // models probe and the daily upkeep, plus the link probe. The probe also runs once now ($0, only with a key).
-  const timers = app.startTimers();
+  // models probe and the daily upkeep, plus the link probe, whose first round runs now. The WhatsApp
+  // poller starts once that round has answered (`app.start`): `BONA_WA_POLL=0` turns it off; without
+  // Evolution credentials it starts and skips every tick rather than guessing a URL. It never sets a
+  // webhook. The brain's probe also runs once now ($0, only with a key).
+  app.start().then(({ timers, pollStarted }) => {
+    jsonLog('info', { evt: 'timers.init', timers: timers.map((x) => x.name) });
+    if (app.poller) jsonLog('info', { evt: 'wa.poll.init', started: pollStarted, everyMs: app.cfg.waPollMs, ...app.poller.status() });
+  }).catch((err) => jsonLog('error', { evt: 'start.failed', name: loggableName(err) }));
   app.ticks.brainProbe();
-  jsonLog('info', { evt: 'timers.init', timers: timers.map((x) => x.name) });
   app.server.listen(app.cfg.port, app.cfg.host, () => {
     jsonLog('info', { evt: 'listening', ...redacted(app.cfg) });
   });
