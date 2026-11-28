@@ -726,6 +726,18 @@ test('the guard metric (Codex r1 P1, Claude r3 P2-2): repairs, guard hand-overs 
   assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'link', falseHit: false }]], 'a tool-backed price and an off-site home link, refused for the link');
   g = r.guardStats({ responses: [draft('Unit B12-07 is listed at SAR 950,000.'), repair('ok', [w010])], earlierReplies: [], siteUrl: ctx.siteUrl });
   assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'unit', unit: 'B12-07', falseHit: false }]], 'a unit refusal');
+  // Codex r13 P1: a denied amount is judged on the form the guard read it from (guardForms): Markdown between the currency
+  // and the figure is no false hit; the plain twins are judged as before, and a count of homes stays a false hit.
+  const noPrice = JSON.stringify({ count: 1, results: [{ id: 'BONA-W019', price_en: 'SAR 6,200,000' }] });
+  for (const [text, amount, falseHit] of [['Rent is **SAR** 6,500 per month.', 6500, false], ['السعر **٦٬٥٠٠** ريال', 6500, false],
+    ['Rent is SAR 6,500 per month.', 6500, false], ['السعر ٦٬٥٠٠ ريال', 6500, false]]) {
+    g = full(text, [noPrice]);
+    assert.deepEqual([g.refusals, g.falsePositives], [[{ reason: 'amount', amount, falseHit }], falseHit ? 1 : 0], text);
+  }
+  g = full('BONA-W010 سعرها **950 ألف ريال**، والمشروع فيه أكثر من 12 ألف وحدة سكنية.', [w010]);
+  assert.deepEqual([g.falsePositives, g.refusals], [1, [{ reason: 'amount', amount: 12000, falseHit: true }]], 'a count of homes, Markdown or not');
+  g = full('BONA-W010 سعرها 950 ألف ريال، والمشروع فيه أكثر من **12 ألف** وحدة سكنية.', [w010]);
+  assert.deepEqual([g.falsePositives, g.refusals], [1, [{ reason: 'amount', amount: 12000, falseHit: true }]], 'a bold count: judged on the form the client reads');
   // A refusal the guard's own check does not repeat on the draft names no reason the eval can judge: no false positive.
   g = r.guardStats({ responses: [draft('It is SAR 6.2 million.'), repair('It is SAR 6,200,000.', [tool('SAR 6,200,000')])], earlierReplies: [] });
   assert.deepEqual([g.falsePositives, g.refusals], [0, [{ reason: 'unknown', falseHit: false }]], 'an unreproduced refusal');

@@ -7,7 +7,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkReply, findAmounts, unitRefs, claimsBooking, REPAIR_NOTE } from '../lib/reply-guard.mjs';
+import { checkReply, findAmounts, unitRefs, claimsBooking, REPAIR_NOTE, guardForms } from '../lib/reply-guard.mjs';
 
 const SITE = 'https://bona-real-estate.com';
 const villa = JSON.stringify({
@@ -658,4 +658,30 @@ test('"مليون ريال و50,000 ريال رسوم السعي" checks the pri
     assert.equal(checkReply(reply, parts).ok, true, reply);
   }
   assert.equal(checkReply('سعر الفيلا مليون ريال الا ١٠٠٬٠٠٠ ريال', { toolResults: ['{"p":"SAR 1,000,000"}', '{"q":"SAR 100,000"}'] }).ok, false, 'a deduction naming its currency twice stays one amount');
+});
+
+test('guardForms (exported for the T26 eval, PR #102) is the forms checkReply reads: as written, shown, shown of readable, in that order', () => {
+  const tool = JSON.stringify({ count: 1, results: [{ id: 'BONA-W019', price_en: 'SAR 6,200,000' }] });
+  // A Markdown draft: the currency and the figure meet only once the marks are gone.
+  const draft = 'Rent is **SAR** 6,500 per month.';
+  const forms = guardForms(draft);
+  assert.equal(forms.length, 3);
+  assert.equal(forms[0], draft, 'first, the reply as written');
+  assert.equal(forms[1], 'Rent is SAR 6,500 per month.', 'then as the client reads it');
+  assert.equal(typeof forms[2], 'string');
+  assert.deepEqual(findAmounts(forms[0]), [], 'as written, no amount');
+  assert.deepEqual(findAmounts(forms[1]).map((a) => [a.raw, a.currency]), [[6500, 'SAR']], 'shown: SAR 6,500');
+  assert.deepEqual(checkReply(draft, { toolResults: [tool] }).hits, [{ kind: 'amount' }], 'the guard refuses it on that form');
+  // The third form is shown of minimise.mjs readable: invisible and direction marks out, thin spaces as spaces.
+  assert.deepEqual(guardForms('It is SAR 5,9\u200b00,000.'), ['It is SAR 5,9\u200b00,000.', 'It is SAR 5,9\u200b00,000.', 'It is SAR 5,900,000.']);
+  assert.deepEqual(guardForms('It is 85,000\u200f ريال'), ['It is 85,000\u200f ريال', 'It is 85,000\u200f ريال', 'It is 85,000 ريال']);
+  assert.deepEqual(guardForms('**Price:** SAR 5,900,000'), ['**Price:** SAR 5,900,000', 'Price: SAR 5,900,000', 'Price: SAR 5,900,000']);
+  // checkReply's amount verdict is exactly "some form of guardForms holds an amount no tool returned", draft by draft.
+  const allowed = (a) => a.raw === 6_200_000 || a.sar === 6_200_000;
+  for (const text of [draft, 'السعر **٦٬٥٠٠** ريال', 'Rent is SAR 6,500 per month.', 'BONA-W019 is *SAR 6,200,000*.', '`SAR` 6,200,000', 'Hello!', '**SAR 6,200,000**', '~SAR~ 5,900,000',
+    'It is SAR 5,9\u200b00,000.', 'It is 85,000\u200f ريال', 'It is SAR 2\u2009950\u2009000.', 'It is SAR 6,2\u200b00,000.']) {
+    const byForms = guardForms(text).some((t) => !findAmounts(t).every((a) => a.raw !== null && allowed(a)));
+    assert.equal(checkReply(text, { toolResults: [tool] }).hits.some((h) => h.kind === 'amount'), byForms, text);
+  }
+  assert.deepEqual(guardForms(null), ['', guardForms('')[1], guardForms('')[2]], 'any value is read as a string');
 });

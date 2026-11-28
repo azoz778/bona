@@ -88,7 +88,7 @@ import { createPublishedUnits } from '../lib/published-units.mjs';
 import { createBrain } from '../lib/brain.mjs';
 import { BRAIN_DEFAULTS, loadConfig } from '../lib/config.mjs';
 import { brainInput, languageOf, leadFacts as legacyFacts, recentContext, batchText as legacyBatch } from '../lib/dana-wa.mjs';
-import { checkReply, findAmounts, unitRefs, allowedFrom, REPAIR_NOTE } from '../lib/reply-guard.mjs';
+import { checkReply, findAmounts, unitRefs, allowedFrom, guardForms, REPAIR_NOTE } from '../lib/reply-guard.mjs';
 import { createDanaCommit, BOOKING_FAILED_LINE } from '../lib/dana-commit.mjs';
 import { freeSlots, dateLabel, timeLabel } from '../lib/slots.mjs';
 import { TIERS } from '../lib/pacing.mjs';
@@ -610,9 +610,14 @@ export function guardStats({ responses = [], code = null, earlierReplies = [], s
   for (const { text, results } of refused) {
     if (typeof text !== 'string' || !text.trim()) continue;
     const allowed = guardAllowed({ toolResults: results, earlierReplies });
-    const amounts = findAmounts(text);
-    const badUnits = unitRefs(text).filter((u) => !allowed.units.has(u));
-    const denied = amounts.filter((a) => !amountAllowed(allowed, a));
+    // Codex r13 P1: the guard reads each of its forms (as written, as shown, shown of readable: guardForms, in that order)
+    // and refuses on a hit in any. A denied figure (one per raw value) is judged on the LAST form that denies it, the one
+    // closest to what the client reads: Markdown between a currency and its figure ("**SAR** 6,500") or around a count
+    // ("**12 ألف** وحدة") is read as the guard read it. A plain draft's forms are one text, so it is judged as before.
+    const forms = guardForms(text);
+    const badUnits = [...new Set(forms.flatMap((t) => unitRefs(t)))].filter((u) => !allowed.units.has(u));
+    const readings = new Map();
+    for (const t of forms) for (const a of findAmounts(t)) if (!amountAllowed(allowed, a)) readings.set(a.raw, { a, t });
     // The guard's own reasons for the draft (Codex r12 P1): only an amount refusal can be a false hit; a link, a unit or
     // any other reason is a true hit, whatever amounts the draft also holds.
     const reasons = [...new Set(checkReply(text, { toolResults: results, earlierReplies, siteUrl }).hits.map((h) => h.kind))];
@@ -621,9 +626,9 @@ export function guardStats({ responses = [], code = null, earlierReplies = [], s
       // Each refused amount: a FALSE hit when the eval's own reading of its clause says it is no money (Claude r3 P2-2).
       // The guard's own parse first (Codex r5 P2): a figure it read WITH a currency (SAR, SR, ر.س …) is money, a true hit;
       // the eval's own reading judges only the figures the guard read without currency evidence.
-      judged.push(...denied.map((a) => ({ reason: 'amount', amount: a.raw, falseHit: a.raw !== null && a.currency === null && notMoney(text, a) })));
-      // The guard refused an amount its other readings found, none on the draft as written: a false hit.
-      if (!denied.length) judged.push({ reason: 'amount', amount: null, falseHit: true, kind: 'reading' });
+      for (const [raw, { a, t }] of readings) judged.push({ reason: 'amount', amount: raw, falseHit: a.raw !== null && a.currency === null && notMoney(t, a) });
+      // The guard refused an amount, yet no form holds one it denies (its check and ours disagree): a false hit.
+      if (!readings.size) judged.push({ reason: 'amount', amount: null, falseHit: true, kind: 'reading' });
     }
     for (const k of reasons.filter((x) => x !== 'amount')) {
       if (k === 'unit' && badUnits.length) for (const u of badUnits) judged.push({ reason: 'unit', unit: u, falseHit: false });
