@@ -2656,3 +2656,67 @@ test('T12 r7: owed retries back off while the link is unstable (60 s doubling, a
   }
   assert.deepEqual(gaps, [60_000, 120_000, 240_000, 480_000, 600_000]);
 });
+
+/* ======================================================================================
+ * PR-B3 r8 (Claude N7 = Codex P1-3, Codex P1s): owed lines are brain-only; an inbound wake never ends an owed
+ * hold; a queued owed retry re-reads its hold; every `missed` hand-over marks the task actually used.
+ * ====================================================================================== */
+
+test('LEGACY GUARD (r8 N7): a legacy hand-over line refused rate_limited sets no hold and sends nothing later, even with sweep()', async () => {
+  const h = bh({ auto: false, at: NOW, retellAnswer: () => ({ messages: [{ role: 'tool_call_invocation', name: 'request_human', arguments: '{}' }] }) });
+  for (let i = 0; i < 8; i += 1) await h.sender.sendTo({ jid: `9665000013${String(i).padStart(2, '0')}@s.whatsapp.net`, text: 'staff', kind: 'staff' });
+  await ask(h, 'a person please');
+  assert.equal(h.lead().dana_hold_reason, null, 'no owed hold on a legacy chat');
+  assert.equal(h.lead().needs_human, 1, "main's hand-over: the flag");
+  const before = h.calls.length;
+  await sweepFor(h, NOW + 61_000, NOW + 10 * 60_000);
+  assert.equal(h.calls.length, before, 'nothing is sent later');
+});
+
+test('T12 r8 2: an inbound wake never ends an owed closing line; the next sweep still sends it', async () => {
+  let stable = false;
+  const h = bh({ link: { identityOk: () => true, linkStable: () => stable },
+    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'privacy' } }] }); }] });
+  h.client('what do you do with what I sent you', { ts: T_IN - 30 * 60_000 + 1000 });
+  await h.dana.answer(LEAD, { ts: T_IN - 30 * 60_000 + 1000 });
+  assert.equal(h.lead().dana_hold_reason, 'owed_closing');
+  h.set(h.lead().dana_hold_until + 1000);
+  assert.deepEqual(await ask(h, 'hello?'), { skipped: 'chat_off' }, 'the batch fires before the sweep');
+  assert.equal(h.lead().dana_hold_reason, 'owed_closing', 'the owed hold survives the wake');
+  stable = true;
+  h.dana.sweep();
+  await h.dana.flush();
+  assert.ok(h.sent().at(-1).endsWith(CLOSING.en));
+});
+
+test('T12 r8 3: a stale queued owed retry re-reads its hold: after the first gets the second counted failure, the second does not send', async () => {
+  let stable = false;
+  const h = bh({ link: { identityOk: () => true, linkStable: () => stable }, evo: () => ({ status: 400 }),
+    turns: [async () => { h.tick(2000); return brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }); }] });
+  h.client('earlier', { ts: T_IN - 3 * HOUR });
+  h.danaRow({ covers: T_IN - 3 * HOUR, created: T_IN - 3 * HOUR + 1000, status: 'failed', error: 'http_400' });
+  h.client('a person please', { ts: T_IN - 30 * 60_000 + 1000 });
+  await h.dana.answer(LEAD, { ts: T_IN - 30 * 60_000 + 1000 });
+  assert.equal(h.lead().dana_hold_reason, 'owed_handover');
+  stable = true;
+  h.set(h.lead().dana_hold_until);
+  const lines = () => h.calls.filter((c) => c.url.includes('/message/')).length;
+  const before = lines();
+  h.dana.sweep();
+  h.dana.answer(LEAD, { ts: h.now(), owed: 'owed_handover' }); // a second retry queued behind the first
+  await h.dana.flush();
+  assert.equal(lines() - before, 1, 'one attempt; the stale retry saw send_failed and sent nothing');
+  assert.deepEqual([h.lead().dana_hold_reason, h.lead().dana_hold_until], ['send_failed', null]);
+});
+
+test('T12 r8 4: every missed hand-over marks the task actually used — a reused open request_human task too', async () => {
+  const h = bh({ at: T_IN - 3 * HOUR, link: { identityOk: () => true, linkStable: () => true },
+    turns: [brainReply('', { tools: [{ name: 'request_human', args: { kind: 'person' } }] }), async () => { h.tick(15_000); return brainReply('Sorry for the wait.'); }] });
+  await ask(h, 'a person please');
+  assert.equal(h.s.db.prepare("SELECT reason FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff' AND status = 'open'").get(LEAD).reason, 'request_human');
+  h.client('still there?', { ts: T_IN - 2 * HOUR + 10_000 });
+  h.set(T_IN);
+  const r = await h.dana.answer(LEAD, { ts: T_IN - 2 * HOUR + 10_000 });
+  assert.equal(r.handover, 'missed');
+  assert.equal(h.s.db.prepare("SELECT reason FROM lead_tasks WHERE lead_id = ? AND kind = 'handoff' AND status = 'open'").get(LEAD).reason, 'missed');
+});
