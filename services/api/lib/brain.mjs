@@ -289,6 +289,8 @@ export function createBrain(deps = {}) {
     spend: { day: '', dayMicro: 0, month: '', monthMicro: 0, alerted: '' },
     /** Spent by this process and not saved yet (the meter, flushSpend()). */
     unsaved: { day: '', dayMicro: 0, month: '', monthMicro: 0 },
+    /** Marker writes whose commit is unknown (refused, and the read-back failed): settled by the next read. */
+    attempts: {},
     turns: [],
   };
 
@@ -406,13 +408,21 @@ export function createBrain(deps = {}) {
    * twice). The totals (readSpend's shape) and `saved`: nothing is left unsaved.
    */
   function flushSpend(t = now()) {
+    if (team && !settleAttempts()) return { ...readSpend(t), readable: false, saved: false };
     const cur = readSpend(t);
     if (!team) return { ...cur, saved: true };
     const u = unsavedFor(cur);
     if (!cur.readable) return { ...cur, saved: false };
     // A write the store refused may still have committed (its read-back threw): the marker read back decides, so a
-    // committed charge is never left unsaved and counted twice (Codex r17).
-    const save = (k, v) => store(k, v) || readMarker(k) === v;
+    // committed charge is never left unsaved and counted twice (Codex r17). When that read throws too, the value
+    // tried is kept (state.attempts) and the next read settles it before anything is added (Codex r18).
+    const save = (k, v) => {
+      if (store(k, v)) return true;
+      const back = readMarker(k);
+      if (back === v) return true;
+      if (back === null) state.attempts[k] = v;
+      return false;
+    };
     let ok = true;
     if (u.day) { if (save('brain_usd_day', `${cur.day}:${cur.dayMicro}`)) state.unsaved.dayMicro = 0; else ok = false; }
     if (u.month) {
@@ -442,12 +452,29 @@ export function createBrain(deps = {}) {
     }
     monthAlert(cur);
   }
+  /**
+   * A write whose commit is unknown (state.attempts): a marker that holds the value tried committed it, and its part
+   * of the unsaved spend is saved; any other value did not. False while a marker still cannot be read.
+   */
+  function settleAttempts() {
+    for (const [k, v] of Object.entries(state.attempts)) {
+      const back = readMarker(k);
+      if (back === null) return false;
+      if (back === v) {
+        if (k === 'brain_usd_day') state.unsaved.dayMicro = 0;
+        else state.unsaved.monthMicro = 0;
+      }
+      delete state.attempts[k];
+    }
+    return true;
+  }
   /** The 80% and 100% month alerts (BONA_BRAIN_MONTH_ALERT_USD), once each a month, from the totals `cur`. */
   function monthAlert(cur) {
     const level = cur.monthMicro >= usd.alert * 1e6 ? 100 : cur.monthMicro >= usd.alert * 0.8 * 1e6 ? 80 : 0;
     if (!level) return;
-    const marked = /^(\d{4}-\d{2}):(80|100)$/.exec(team ? setting('brain_month_alerted') : state.spend.alerted);
-    const done = marked && marked[1] === cur.month ? Number(marked[2]) : 0;
+    // The level already sent: the marker's, or this process's own when that marker cannot be read (never sent twice, Claude r20).
+    const levelOf = (v) => { const m = /^(\d{4}-\d{2}):(80|100)$/.exec(String(v ?? '')); return m && m[1] === cur.month ? Number(m[2]) : 0; };
+    const done = Math.max(team ? levelOf(setting('brain_month_alerted')) : 0, levelOf(state.spend.alerted));
     if (level > done) {
       tell('brain_spend', { level });
       state.spend.alerted = `${cur.month}:${level}`;

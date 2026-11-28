@@ -1033,6 +1033,49 @@ test("Codex r17: a save the store committed but could not read back is no unsave
   assert.deepEqual(a.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level), [{ code: 'brain_spend', meta: { level: 100 } }], 'the $40 check-in goes once the charge is saved');
 });
 
+test("Codex r18: a save committed while both read-backs failed is settled by the next good read, never counted twice; a pending charge that crosses the month alert and the day stop alerts before the stop", async () => {
+  const env = { BONA_BRAIN_MONTH_STOP_USD: '50' };
+  const h = harness({ env, script: [reply('One.'), reply('Two.')] });
+  const start = 50_000_000 - Math.round(2.5 * MICRO);
+  h.team.setSetting('brain_usd_month', `2026-11:${start}`);
+  const realSet = h.team.setSetting.bind(h.team);
+  const realGet = h.team.getSetting.bind(h.team);
+  let broken = false;
+  h.team.setSetting = (k, v, o) => {
+    const out = realSet(k, v, o);
+    if (String(k).startsWith('brain_usd_')) { broken = true; throw new Error('read-back failed'); }
+    return out;
+  };
+  h.team.getSetting = (k) => { if (broken && String(k).startsWith('brain_usd_')) { broken = false; throw new Error('read failed'); } return realGet(k); };
+  assert.equal((await h.brain.turn(turnArgs())).ok, true);
+  h.team.setSetting = realSet;
+  h.team.getSetting = realGet;
+  assert.equal((await h.brain.turn(turnArgs())).ok, true, 'not stopped by a charge counted twice');
+  assert.equal(realGet('brain_usd_month'), `2026-11:${start + 2 * MICRO}`, 'each charge once');
+  // Day $19.99, month $39.99; the response is metered while reads fail: the next turn saves it, sends the $40 alert, then stops.
+  let failRead = false;
+  const a = harness({ script: [async () => { failRead = true; return reply('Hello.'); }, reply('never')] });
+  a.team.setSetting('brain_usd_day', '2026-11-26:19990000');
+  a.team.setSetting('brain_usd_month', '2026-11:39990000');
+  const aGet = a.team.getSetting.bind(a.team);
+  a.team.getSetting = (k) => { if (failRead && String(k).startsWith('brain_usd_')) throw new Error('disk I/O error'); return aGet(k); };
+  assert.equal((await a.brain.turn(turnArgs())).ok, true, 'paid before the reads failed: delivered');
+  failRead = false;
+  assert.deepEqual(await a.brain.turn(turnArgs()), { ok: false, code: 'budget' }, 'the day stop');
+  assert.equal(a.calls.length, 1, 'no second paid request');
+  assert.deepEqual(a.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level), [{ code: 'brain_spend', meta: { level: 100 } }], 'the month alert went first');
+});
+
+test("Claude r20: the month alert goes once even when its own marker cannot be read now and then", async () => {
+  const h = harness({ env: { BONA_BRAIN_MONTH_ALERT_USD: '10' }, script: [reply('A.'), reply('B.'), reply('C.'), reply('D.')] });
+  h.team.setSetting('brain_usd_month', '2026-11:8500000');
+  const realGet = h.team.getSetting.bind(h.team);
+  let n = 0;
+  h.team.getSetting = (k) => { if (k === 'brain_month_alerted' && (n += 1) % 2 === 0) throw new Error('busy'); return realGet(k); };
+  for (let i = 0; i < 4; i += 1) await h.brain.turn(turnArgs()); // eslint-disable-line no-await-in-loop
+  assert.deepEqual(h.alerts.filter((x) => x.code === 'brain_spend' && x.meta.level).map((x) => x.meta.level), [80]);
+});
+
 test('the runaway stops are checked before every paid request and after every response: crossing one mid-turn stops the turn at once, with the stop alert in that turn', async () => {
   const stopAlerts = (h) => h.alerts.filter((a) => a.code === 'brain_spend' && a.meta.stop);
   // A tool round takes the day from $19.99 past $20: no second round.
