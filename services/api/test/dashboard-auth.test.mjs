@@ -15,6 +15,7 @@ import {
   canonicalPhone, ipBucket, sendErrorLabel, USER_CODES_PER_HOUR, USER_CODES_PER_DAY,
 } from '../lib/dashboard/auth.mjs';
 import { normalisePhone } from '../lib/phone.mjs';
+import { loginNext, LOGIN_NEXT_RE } from '../lib/dashboard/routes.mjs';
 
 const NOW = 1_790_500_000_000;
 const sha256 = (v) => crypto.createHash('sha256').update(String(v), 'utf8').digest('hex');
@@ -420,4 +421,21 @@ test('IPv6 callers share an IP bucket per /64; IPv4-mapped addresses count as IP
   h.tick(60_000);
   assert.deepEqual(await h.auth.requestCode({ phone: '0555555520', ip: '::ffff:5.6.7.8' }), { ok: false, error: 'rate_limited' });
   h.db.close();
+});
+
+/* ---------------- T08 (PR-A3, DESIGN §3.3): where a login may return to ---------------- */
+
+test('T08-1 next= is honoured only for a lead page or an inbox chat by id; every other value is no return-to at all', () => {
+  assert.equal(String(LOGIN_NEXT_RE), String(/^\/dashboard\/(leads|inbox)\/[A-Za-z0-9-]{1,80}$/), 'the one shape DESIGN §3.3 names');
+  for (const ok of [
+    '/dashboard/leads/LEAD-20260908-aaaa0001', '/dashboard/inbox/LEAD-20260908-aaaa0001', `/dashboard/leads/${'a'.repeat(80)}`, '/dashboard/inbox/x',
+  ]) assert.equal(loginNext(ok), ok, ok);
+  // PLAN T08 test 1, verbatim, then the near misses around them.
+  for (const bad of [
+    '//evil.example', '/dashboard//x', '/dashboard/leads/../../v1', 'https://evil.example', '%2F%2Fevil', `/dashboard/leads/${'a'.repeat(81)}`,
+    '%2Fdashboard%2Fleads%2FLEAD-1', '/dashboard/leads/LEAD%2F..', '/dashboard', '/dashboard/', '/dashboard/leads', '/dashboard/leads/',
+    '/dashboard/team/x', '/dashboard/leads/a_b', '/dashboard/leads/a?b=1', '/dashboard/leads/a#b', '/dashboard/leads/a/b',
+    ' /dashboard/leads/a', '/dashboard/leads/a ', '/dashboard/leads/a\n', '\\dashboard\\leads\\a', '/Dashboard/leads/a',
+    '/v1/admin/leads/a', 'javascript:alert(1)', '/dashboard/leads/ا', '', null, undefined, 42, ['/dashboard/leads/a'], { toString: () => '/dashboard/leads/a' },
+  ]) assert.equal(loginNext(bad), null, JSON.stringify(String(bad)));
 });

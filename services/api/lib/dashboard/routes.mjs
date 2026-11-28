@@ -32,12 +32,12 @@
  */
 import { getSystemErrorMap } from 'node:util';
 import { enquiryNotifications } from '../enquiry-receipt.mjs';
-import { tasksForLead, openTasks, countOpenTasks, addTask, updateTask } from '../lead-tasks.mjs';
+import { tasksForLead, openTasks, countOpenTasks, addTask, updateTask, CALENDAR_BOOKED } from '../lead-tasks.mjs';
 import { STAGES, tokenHash } from '../db.mjs';
 import { createLimiter } from '../ratelimit.mjs';
 import { enqueueStage } from '../fanout.mjs';
 import { createStats, dayKey } from './stats.mjs';
-import { createAuth } from './auth.mjs';
+import { createAuth, parseCookies, CODE_TTL_MS } from './auth.mjs';
 import { createTiktokAccounts, AccountsError } from '../tiktok-accounts.mjs';
 import { tiktokAccountsPage, tiktokContinuePage, validateTiktokDraft } from './render-tiktok.mjs';
 import { teamPage } from './render-team.mjs';
@@ -185,6 +185,21 @@ export function isDay(value) {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
 
+/**
+ * Where a login may return to (DESIGN §3.3): a lead's page or an inbox chat, by id, so the link
+ * in an owner note opens that lead after a re-login. Nothing else is ever followed: no other
+ * page, no `..`, no second slash, no scheme, nothing encoded, nothing over 80 characters of id.
+ */
+export const LOGIN_NEXT_RE = /^\/dashboard\/(leads|inbox)\/[A-Za-z0-9-]{1,80}$/;
+/** The return-to path when `value` is one (a string matching LOGIN_NEXT_RE), else null. */
+export const loginNext = (value) => (typeof value === 'string' && LOGIN_NEXT_RE.test(value) ? value : null);
+/**
+ * The return-to rides the code step in this cookie as well as in the forms' hidden field, so a
+ * redirect that cannot read the form (a refusal before the body) or an old code tab keeps it.
+ * Scoped like the try nonce (auth.mjs): only the login routes ever see it, for the code's life.
+ */
+export const NEXT_COOKIE_NAME = 'bona_dash_next';
+
 /** Does this request belong to the dashboard? Used by the server before anything else runs. */
 const ownsDashboardPath = (p) => p === '/dashboard' || p.startsWith('/dashboard/') || p === '/v1/admin' || p.startsWith('/v1/admin/');
 
@@ -298,7 +313,7 @@ export function createDashboardRoutes({
   db, cfg = {}, inventory = null, fanout = null, app = null,
   sendWhatsApp = null, probeRetell = null,
   team = null, audit = null, sendCode = null,
-  inbox = null, sender = null, backfill = null, alerts = null,
+  inbox = null, sender = null, backfill = null, alerts = null, ownerTest = null,
   onSettingChanged = () => {}, hooks = {}, ops = () => ({}),
   auth = null, stats = null, tiktokAccounts = null, log = () => {}, now = () => Date.now(),
 } = {}) {
@@ -473,6 +488,27 @@ export function createDashboardRoutes({
   /** 302 for a navigation that never got started; 303 after a form post. */
   const toLogin = (res, query = '', status = 302) => redirect(res, `/dashboard/login${query}`, status);
 
+  /* -------------------- login return-to (DESIGN §3.3) -------------------- */
+
+  /** `query` with the return-to added, when there is one. */
+  const withNext = (query, next) => (next ? `${query}${query ? '&' : '?'}next=${encodeURIComponent(next)}` : query);
+  const nextAttributes = 'HttpOnly; Secure; SameSite=Lax; Path=/dashboard/login';
+  function addSetCookie(res, value) {
+    const existing = res.getHeader?.('Set-Cookie');
+    const list = existing === undefined ? [] : (Array.isArray(existing) ? existing : [existing]);
+    res.setHeader('Set-Cookie', [...list, value]);
+  }
+  const cookiesOf = (req) => parseCookies(req.headers.cookie);
+  /** The browser's return-to cookie, checked like the field: the server set it, but a sibling host can plant one. */
+  const nextCookie = (req) => {
+    const jar = cookiesOf(req);
+    return Object.hasOwn(jar, NEXT_COOKIE_NAME) ? loginNext(jar[NEXT_COOKIE_NAME]) : null;
+  };
+  const hasNextCookie = (req) => Object.hasOwn(cookiesOf(req), NEXT_COOKIE_NAME);
+  const setNextCookie = (res, next) => addSetCookie(res, `${NEXT_COOKIE_NAME}=${encodeURIComponent(next)}; ${nextAttributes}; Max-Age=${CODE_TTL_MS / 1000}`);
+  /** Cleared only when the browser has one: a login without a return-to sends exactly the cookies it did before. */
+  const clearNextCookie = (req, res) => { if (hasNextCookie(req)) addSetCookie(res, `${NEXT_COOKIE_NAME}=; ${nextAttributes}; Max-Age=0`); };
+
   /* -------------------- gates -------------------- */
 
   /** The origins this API answers on: its public name, and the host it was asked for. */
@@ -562,7 +598,7 @@ export function createDashboardRoutes({
     const step = url.searchParams.get('step') === 'code' ? 'code' : 'request';
     const error = url.searchParams.get('error');
     const sent = url.searchParams.get('sent') === '1';
-    return loginPage({ step, error: knownError(error), sent });
+    return loginPage({ step, error: knownError(error), sent, next: loginNext(url.searchParams.get('next')) });
   }
 
   async function loginCode({ req, res, ip }) {
@@ -574,39 +610,51 @@ export function createDashboardRoutes({
     }
     const parsed = await fieldsOf(req);
     if (!parsed.ok) return refuseBody(req, res, parsed);
+    // The login form's hidden return-to (DESIGN §3.3); anything else is no return-to at all.
+    const next = loginNext(parsed.fields.next);
     const out = await authenticator.requestCode({ phone: parsed.fields.phone, ip });
     if (!out.ok) {
       // A number that is not a number goes back to the first step to be retyped; a limit
       // stays on the code step (a code may already be on its way).
       const step = out.error === 'bad_phone' ? '' : 'step=code&';
-      return toLogin(res, `?${step}error=${encodeURIComponent(out.error)}`, 303);
+      return toLogin(res, withNext(`?${step}error=${encodeURIComponent(out.error)}`, next), 303);
     }
     // The nonce is what lets this browser — and only this browser — spend the code's
     // five attempts. See the header of `auth.mjs`.
     authenticator.setTryCookie(res, out.nonce);
-    return toLogin(res, '?step=code&sent=1', 303);
+    // The return-to lives as long as the code; a login started over without one forgets an old one.
+    if (next) setNextCookie(res, next);
+    else clearNextCookie(req, res);
+    return toLogin(res, withNext('?step=code&sent=1', next), 303);
   }
 
   async function loginVerify({ req, res, ip }) {
+    // Before the body is read only the cookie can say where the login was going.
+    const carried = nextCookie(req);
     if (!sameOrigin(req)) {
       log({ level: 'warn', evt: 'dash.origin_rejected', path: '/dashboard/login/verify', ip });
-      return toLogin(res, '?step=code&error=forbidden', 303);
+      return toLogin(res, withNext('?step=code&error=forbidden', carried), 303);
     }
-    if (!limiters.verify.take(`dashverify:${ip}`).ok) return toLogin(res, '?step=code&error=rate_limited', 303);
+    if (!limiters.verify.take(`dashverify:${ip}`).ok) return toLogin(res, withNext('?step=code&error=rate_limited', carried), 303);
     const parsed = await fieldsOf(req);
     if (!parsed.ok) return refuseBody(req, res, parsed);
+    const next = loginNext(parsed.fields.next) ?? carried;
 
     const ua = String(req.headers['user-agent'] ?? '').slice(0, 300) || null;
     const out = authenticator.verify(parsed.fields.code, ua, { nonce: authenticator.readTryCookie(req) });
     if (!out.ok) {
       // A burnt or spent code is finished; take its nonce with it rather than leaving a
       // cookie that can only ever produce the same refusal.
-      if (out.error === 'attempts' || out.error === 'used' || out.error === 'expired') authenticator.clearTryCookie(res);
-      return toLogin(res, `?step=code&error=${encodeURIComponent(out.error)}`, 303);
+      if (out.error === 'attempts' || out.error === 'used' || out.error === 'expired') {
+        authenticator.clearTryCookie(res);
+        clearNextCookie(req, res);
+      }
+      return toLogin(res, withNext(`?step=code&error=${encodeURIComponent(out.error)}`, next), 303);
     }
     authenticator.clearTryCookie(res);
+    clearNextCookie(req, res);
     authenticator.setCookie(res, out.token);
-    return redirect(res, '/dashboard');
+    return redirect(res, next ?? '/dashboard');
   }
 
   /**
@@ -988,7 +1036,12 @@ export function createDashboardRoutes({
       // not even when looking the hook up throws (callMethod reads it inside the guard).
       if(fields.task_id)callMethod(hooks,'onTaskChange',task.task_id,[task,{status:String(fields.status),dueTs}]);
       return answer(res,{form,back:back+'?ok=task',status:200,payload:{ok:true,task}});
-    }catch{return answer(res,{form,back:back+'?error=bad_task',status:400,payload:{error:'bad_task'}});}
+    }catch(err){
+      // A viewing the assistant booked on the calendar moves in Google Calendar only; the
+      // daily reconcile brings its new time back (DESIGN §3.3, §8.4; lead-tasks updateTask).
+      if(err?.code===CALENDAR_BOOKED)return answer(res,{form,back:back+'?error=calendar_booked',status:409,payload:{error:'calendar_booked'}});
+      return answer(res,{form,back:back+'?error=bad_task',status:400,payload:{error:'bad_task'}});
+    }
   }
 
   function addNote({ res, fields, form, me }, leadId) {
@@ -1243,6 +1296,22 @@ export function createDashboardRoutes({
   const openChat = (lead) => Boolean(lead && lead.inbox_state === 'in' && (lead.wa_jid || lead.wa_lid) && !excludedLead(lead));
 
   /**
+   * The rollback guard on the list (DESIGN §3.2, critic round 2 #13): a chat that joined under
+   * the own-number rule (`inbox_via` set) is left off the Inbox list, its badge and its pulse
+   * while Bona's number is not checked (ownerTest.ownNumberOk() false), as ingest refuses its
+   * records then; it stays on the Leads page. Fails closed: no ownerTest, or one that throws,
+   * reads as not checked. A chat joined by proof (`inbox_via` NULL) is listed either way.
+   */
+  const ownNumberOk = () => {
+    try { return ownerTest?.ownNumberOk?.() === true; } catch { return false; }
+  };
+  /** The rows a list shows: rule 1's exclusions, then the rollback guard (asked once a list). */
+  const listable = (rows) => {
+    const checked = ownNumberOk();
+    return rows.filter((l) => !excludedLead(l) && (checked || !l.inbox_via));
+  };
+
+  /**
    * The push key rides on `me` (P3-13): the VAPID public key when push is configured,
    * nothing otherwise. `layout` prints it as a meta tag for app.js; the inbox list draws
    * its Phone alerts panel only when it is there. Public by design — it is what every
@@ -1261,7 +1330,7 @@ export function createDashboardRoutes({
   function withUnread(user) {
     if (!inbox) return withKey(user);
     try {
-      const rows = inbox.listInbox({ userId: user.user_id, userCreated: user.created ?? 0, limit: 1000 }).filter((l) => !excludedLead(l));
+      const rows = listable(inbox.listInbox({ userId: user.user_id, userCreated: user.created ?? 0, limit: 1000 }));
       return withKey({ ...user, unread: rows.reduce((n, r) => n + (Number(r.unread) || 0), 0) });
     } catch (err) {
       log({ level: 'warn', evt: 'dash.unread_failed', error: String(err?.message ?? err).slice(0, 200) });
@@ -1394,8 +1463,38 @@ export function createDashboardRoutes({
    */
   const candidatesShown = () => inbox.listCandidates({ limit: CANDIDATES_SHOWN }).filter((c) => !excludedCandidate(c));
 
+  /** How far back "Chats to check" lists the old out leads that wrote (DESIGN §3.1). */
+  const OLD_OUT_MS = 30 * 86_400_000;
+  let oldOutStmt = null;
+  /**
+   * An out lead the owner marked before the move that wrote under the own rule (DESIGN §3.1,
+   * critic round 2 #12): the poller keeps nothing it wrote and raises the `old_out_wrote` alert,
+   * one ledger row a lead a day (`al:old_out_wrote:<lead>:<day>`). Listed from those rows of
+   * the last 30 days, whatever became of the note: the lead id and the newest time only, the
+   * name read from the lead row, never a word it wrote. Only a lead still `out` (Move brings it
+   * in, as today) and not a colleague's or a never-list number. A chat to check's row (a
+   * candidate, no lead) is not one: its chat is on the list above. A read that fails is an
+   * empty list, never a page that will not open.
+   */
+  function oldOutShown() {
+    try {
+      oldOutStmt ??= db.db.prepare(`SELECT lead_id, MAX(created) AS ts FROM owner_notes
+        WHERE kind = 'alert' AND lead_id IS NOT NULL AND dedupe_key GLOB 'al:old_out_wrote:*' AND created >= ?
+        GROUP BY lead_id ORDER BY ts DESC, lead_id LIMIT ?`);
+      const out = [];
+      for (const row of oldOutStmt.all(now() - OLD_OUT_MS, CANDIDATES_SHOWN)) {
+        const lead = db.getLead(row.lead_id);
+        if (lead && lead.inbox_state === 'out' && !excludedLead(lead)) out.push({ lead_id: lead.lead_id, name: lead.name, ts: row.ts });
+      }
+      return out;
+    } catch (err) {
+      log({ level: 'warn', evt: 'dash.section_failed', section: 'old_out', error: errorLabel(err) });
+      return [];
+    }
+  }
+
   /** The Inbox list's rows for one person, in the list's own order, with rule 1 applied. */
-  const inboxRowsFor = (me) => inbox.listInbox({ userId: me.user_id, userCreated: me.created ?? 0 }).filter((l) => !excludedLead(l));
+  const inboxRowsFor = (me) => listable(inbox.listInbox({ userId: me.user_id, userCreated: me.created ?? 0 }));
   /** What the Inbox list is drawn from (P3-12): a change in any of it redraws the list. */
   const listToken = (rows) => `${rows.length}:${rows.reduce((n, r) => n + (Number(r.unread) || 0), 0)}:${rows.reduce((m, r) => Math.max(m, Number(r.last_msg_ts) || 0), 0)}`;
 
@@ -1482,16 +1581,17 @@ export function createDashboardRoutes({
       const focusLead = /^[A-Za-z0-9_-]{1,64}$/.test(focusRaw ?? '') ? db.getLead(focusRaw) : null;
       const focus = focusLead && inbox.isUnsureChat(focusLead.lead_id) && !excludedLead(focusLead) ? focusLead.lead_id : null;
       return sendHtml(res, 200, unsurePage({
-        me, rows: inbox.listUnsure({ first: focus }).filter((l) => !excludedLead(l)), candidates: candidatesShown(), ok, error, now: now(), focus,
+        me, rows: inbox.listUnsure({ first: focus }).filter((l) => !excludedLead(l)), candidates: candidatesShown(), oldOut: oldOutShown(),
+        ok, error, now: now(), focus,
       }));
     }
     const rows = inboxRowsFor(me);
     return sendHtml(res, 200, inboxPage({
       me,
       rows,
-      // Counted from the rows the Unsure tab shows (the guesses and the chats to check),
-      // never the store's raw counts. Staff get none: the tab is not theirs.
-      unsureCount: owner ? inbox.listUnsure({ limit: 1000 }).filter((l) => !excludedLead(l)).length + candidatesShown().length : 0,
+      // Counted from the rows the Unsure tab shows (the guesses, the chats to check and the
+      // old out leads that wrote, T08), never the store's raw counts. Staff get none: the tab is not theirs.
+      unsureCount: owner ? inbox.listUnsure({ limit: 1000 }).filter((l) => !excludedLead(l)).length + candidatesShown().length + oldOutShown().length : 0,
       ok,
       error,
       now: now(),
@@ -1628,6 +1728,24 @@ export function createDashboardRoutes({
     audit?.record({ userId: me.user_id, action: 'dana_chat', target: leadId, meta: patch });
     log({ evt: 'dash.dana_chat', leadId, [key]: Number(value) });
     return answer(res, { form, back: `${back}?ok=dana`, status: 200, payload: { ok: true, ...patch } });
+  }
+
+  /**
+   * "Let the AI answer again" (DESIGN §3.3): anyone on the team, in a chat of the inbox (rule
+   * 1), clears the chat's stop (`dana_off`, the client's own since PR-B3) and the assistant's
+   * hold (`dana_hold_until`, `dana_hold_reason`). The page says to use it only if the client
+   * asked. It writes the lead row and the audit row (`dana_chat`, the patch as meta) and nothing
+   * else: no message, no wake; the assistant answers the client's next message under its usual
+   * rules. Logged by lead id only.
+   */
+  function inboxAnswerAgain({ res, form, me }, leadId) {
+    const back = `/dashboard/inbox/${encodeURIComponent(leadId)}`;
+    if (!openChat(db.getLead(leadId))) return refuseChat(res, form, me);
+    const patch = { dana_off: 0, dana_hold_until: null, dana_hold_reason: null };
+    db.updateLead(leadId, patch);
+    audit?.record({ userId: me.user_id, action: 'dana_chat', target: leadId, meta: patch });
+    log({ evt: 'dash.dana_again', leadId });
+    return answer(res, { form, back: `${back}?ok=again`, status: 200, payload: { ok: true, ...patch } });
   }
 
   async function inboxMove({ res, form, me }, leadId) {
@@ -1768,8 +1886,8 @@ export function createDashboardRoutes({
   const INBOX_PATH = /^\/dashboard\/inbox\/([A-Za-z0-9_-]{1,64})$/;
   const ADMIN_LEAD = /^\/v1\/admin\/leads\/([A-Za-z0-9_-]{1,64})(?:\/(stage|note|task))?$/;
   const ADMIN_TEAM = /^\/v1\/admin\/team\/([A-Za-z0-9_-]{1,64})\/(deactivate|reactivate|role)$/;
-  const ADMIN_INBOX = /^\/v1\/admin\/inbox\/([A-Za-z0-9_-]{1,64})\/(reply|handler|move|out|dana)$/;
-  /** Inbox writes only an owner makes (D9); reply and handler are anyone's on the team. */
+  const ADMIN_INBOX = /^\/v1\/admin\/inbox\/([A-Za-z0-9_-]{1,64})\/(reply|handler|move|out|dana|answer_again)$/;
+  /** Inbox writes only an owner makes (D9); reply, handler, the Dana switch and "Let the AI answer again" are anyone's on the team. */
   const OWNER_INBOX_WRITES = new Set(['move', 'out']);
   /** The owner's decisions on a real-estate chat to check (D17): his alone. */
   const ADMIN_CANDIDATE = /^\/v1\/admin\/inbox\/candidates\/([A-Za-z0-9_-]{1,64})\/(move|dismiss)$/;
@@ -1788,7 +1906,7 @@ export function createDashboardRoutes({
     /* --- login, the only pages reachable signed out --- */
     if (p === '/dashboard/login') {
       if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
-      if (signedIn(req)) return redirect(res, '/dashboard', 302);
+      if (signedIn(req)) return redirect(res, loginNext(url.searchParams.get('next')) ?? '/dashboard', 302);
       return sendHtml(res, 200, loginView(req, url));
     }
     if (p === '/dashboard/login/code') {
@@ -1815,7 +1933,8 @@ export function createDashboardRoutes({
       if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
       return pushLatest({ res, me: user });
     }
-    if (!user) return toLogin(res);
+    // A deep link to a lead or a chat (a note's lead link) keeps where it was going (DESIGN §3.3).
+    if (!user) return toLogin(res, withNext('', loginNext(p)));
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method_not_allowed' });
     // A thread marks itself read before it is drawn, so it counts its own badge.
     const threadMatch = INBOX_PATH.exec(p);
@@ -1918,6 +2037,7 @@ export function createDashboardRoutes({
       if (what === 'reply') return inboxReply({ ...ctx, req }, leadId);
       if (what === 'handler') return inboxHandler(ctx, leadId);
       if (what === 'dana') return inboxDana(ctx, leadId);
+      if (what === 'answer_again') return inboxAnswerAgain(ctx, leadId);
       if (what === 'move') return inboxMove(ctx, leadId);
       return inboxOut(ctx, leadId);
     }
