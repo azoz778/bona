@@ -2898,3 +2898,42 @@ test('T12 r11 2: when an owed line ends as missed, a newer waiting question is r
   assert.ok(h.notes.of('handover').some((c) => c[2].kind === 'missed'), 'missed for the original');
   assert.ok(h.sent().at(-1).endsWith('Yes, two covered spaces.'), 'the parking question answered after the missed');
 });
+
+/* ======================================================================================
+ * PR-B3 r12 (Codex P1-1, P1-2 = Claude P3): "newer than the covered message" is by (ts, insertion order), never ts
+ * alone; the stop decision scans every waiting message, not the batch's newest ten.
+ * ====================================================================================== */
+
+test('T12 r12 1: a "delete my data" in the same second as the covered question, stored after the batch read, drops the answer; the stop flow runs', async () => {
+  let q;
+  const h = bh({ turns: [async () => { h.client('delete my data', { ts: q }); return brainReply('Sure, here are the details.'); }, brainReply('never')] });
+  q = h.client('what villas do you have?');
+  await h.dana.answer(LEAD, { ts: q });
+  await h.dana.flush();
+  assert.equal(h.sent().some((t) => t.includes('Sure, here are the details.')), false, 'the answer never went');
+  assert.equal(h.sent().length, 1);
+  assert.ok(h.sent()[0].endsWith(CLOSING.en));
+  assert.equal(h.lead().dana_off, 1);
+  assert.deepEqual(h.notes.of('stopped').map((c) => c[2]), ['deletion']);
+});
+
+test('T12 r12 1: a follow-up in the same second as an answered question is not swallowed by the answer', async () => {
+  const h = bh({ turns: [brainReply('Of course.'), brainReply('It is from the published price.')] });
+  const q = h.client('do you have villas?');
+  await h.dana.answer(LEAD, { ts: q });
+  h.client('and the price?', { ts: q }); // same second, stored after the answer
+  await h.dana.answer(LEAD, { ts: q });
+  assert.equal(h.brain.calls.length, 2, 'the follow-up was still waiting');
+  assert.deepEqual(h.brain.calls[1].batchParts, ['and the price?']);
+});
+
+test('T12 r12 2: the stop check scans every waiting message, not the newest ten: "delete my data" then 10 more → no model call', async () => {
+  const h = bh({ turns: [brainReply('never')] });
+  h.client('delete my data', { ts: T_IN - 11_000 });
+  for (let i = 1; i <= 10; i += 1) h.client(`m${i}`, { ts: T_IN - 11_000 + i * 1000 });
+  await h.dana.answer(LEAD, { ts: T_IN - 1000 });
+  assert.equal(h.brain.calls.length, 0);
+  assert.equal(h.lead().dana_off, 1);
+  assert.ok(h.sent()[0].endsWith(CLOSING.en));
+  assert.deepEqual(h.notes.of('stopped').map((c) => c[2]), ['deletion']);
+});

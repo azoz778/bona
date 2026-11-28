@@ -183,6 +183,15 @@ const FACT_FIELDS = ['name', 'interest', 'budget', 'district', 'listing_id', 'st
 const COUNTED_SQL = "(status = 'uncertain' OR (status = 'failed' AND (error LIKE 'http\\_%' ESCAPE '\\' OR error IN ('network','timeout','no_ack'))))";
 /** The outage line's own outbox row says so in `error` (read only for failed rows elsewhere): it answers nothing (r5 N6). */
 const OUTAGE_MARK = 'outage_line';
+/**
+ * Every other brain row says in `error` which stored client message it covers, by insertion order: `cov:<rowid>` (r12).
+ * Evolution stamps whole seconds, so (ts, rowid) orders two messages of one second; a row without it (Retell-era, or
+ * written before this) covers every message of its second, the store's rule.
+ */
+const COV_PREFIX = 'cov:';
+const covRidOf = (error) => (typeof error === 'string' && error.startsWith(COV_PREFIX) && /^\d+$/.test(error.slice(COV_PREFIX.length)) ? Number(error.slice(COV_PREFIX.length)) : Infinity);
+/** (ts, rid) after (bTs, bRid)? A message without a rid is placed after every row of its second. */
+const after = (ts, rid, bTs, bRid) => Number(ts) > bTs || (Number(ts) === bTs && Number(rid ?? Infinity) > bRid);
 /** Skips worth a log line; the rest are states, not events (P4-15). */
 const LOGGED_SKIPS = new Set(['human_recent', 'needs_human', 'lid_only', 'old', 'cap_chat', 'nothing', 'dropped_human', 'hold', 'backlog', 'loop', 'identity', 'rule_off', 'no_open_chat', 'stop_request', 'not_brain']);
 /** A hand-over re-check that finds one of these does nothing at all: no flag, no alert, no line. */
@@ -399,6 +408,8 @@ export function createDana({
   // leadId → the message an owed line was owed for (r10): it covers that one only, never a newer message. After a
   // restart the oldest waiting message stands in (it can only leave a newer one waiting, never swallow it).
   const owedFor = new Map();
+  // leadId → the covered message of the step now running ({ ts, rid }): runs of one chat never overlap (r12).
+  const turnCover = new Map();
   let identityAlertAt = -Infinity;
   let stopped = false;            // stop() is final: no wake arms a run after it
   const stmts = {};
@@ -441,6 +452,22 @@ export function createDana({
     if (db.getLead(leadId)?.dana_hold_reason === reason) clearHold(leadId);
   }
   /**
+   * THE covered message's insertion order (r12): the running step's (turnCover), else the newest stored client message
+   * of that second. Messages of the same second stored after it are newer, everywhere this boundary is read.
+   */
+  function coverRid(leadId, coversTs) {
+    const c = turnCover.get(String(leadId));
+    if (c && Number(c.ts) === Number(coversTs) && Number.isFinite(Number(c.rid))) return Number(c.rid);
+    const r = prep('coverRid', "SELECT MAX(rowid) AS rid FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts = ?").get(String(leadId), Number(coversTs));
+    return Number.isFinite(Number(r?.rid)) ? Number(r.rid) : Infinity;
+  }
+  /** Every stored client message of the last 24 h after (coversTs, its rid), oldest first: never ts alone (r12). */
+  function messagesAfter(leadId, coversTs, rid = coverRid(leadId, coversTs)) {
+    return prep('afterRows', `SELECT rowid AS rid, * FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts >= ? AND ts >= ?
+        ORDER BY ts, rowid`).all(String(leadId), Number(coversTs), now() - DAY_MS).filter((m) => after(m.ts, m.rid, Number(coversTs), rid));
+  }
+
+  /**
    * Client messages newer than `coversTs` still waiting in a brain chat get their own run (r11): when a hold ends, or
    * a bubble is dropped for a stop request, nothing newer is stranded; each reaches an answer, or its own `missed`
    * at its own 2-h mark. Inside a run the wake is queued behind it (pendingAgain), else armed now.
@@ -450,7 +477,8 @@ export function createDana({
     const id = String(leadId);
     const lead = db.getLead(id);
     if (!useBrain(lead)) return;
-    const newer = pendingFor(id, lead).filter((m) => Number(m.ts) > Number(coversTs));
+    const rid = coverRid(id, coversTs);
+    const newer = pendingFor(id, lead, { all: true }).filter((m) => after(m.ts, m.rid, Number(coversTs), rid));
     if (!newer.length) return;
     const ts = Number(newer[newer.length - 1].ts);
     if (inflight.has(id)) pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, ts));
@@ -515,20 +543,30 @@ export function createDana({
    * hand-over, closing or neutral line answers what it covered, as on main (r5 N6). From the database: a restart
    * loses no message.
    */
-  function pendingFor(leadId, lead = db.getLead(leadId)) {
-    if (!useBrain(lead)) return inbox.unansweredClientMessages(leadId, { limit: CONTEXT_MESSAGES });
+  function pendingFor(leadId, lead = db.getLead(leadId), { all = false } = {}) {
+    if (!useBrain(lead)) return inbox.unansweredClientMessages(leadId, { limit: all ? 1000 : CONTEXT_MESSAGES });
     const id = String(leadId);
     const t = now();
-    let bound = Math.max(t - DAY_MS, Number(prep('humanTs', `SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ? AND direction = 'out'
-        AND sender_kind IN ('staff','owner_number')`).get(id)?.ts ?? 0) || 0);
+    // The boundary is a (ts, rid) pair (r12): a person's answer, a staff send, and every row that answered, each
+    // covering up to the message it names (`cov:<rowid>`), or its whole second when it names none.
+    let bTs = t - DAY_MS;
+    let bRid = Infinity;
+    const bump = (ts, rid = Infinity) => {
+      if (after(ts, rid, bTs, bRid)) { bTs = Number(ts); bRid = Number(rid); }
+    };
+    const human = prep('humanTs', `SELECT MAX(ts) AS ts FROM wa_messages WHERE lead_id = ? AND direction = 'out'
+        AND sender_kind IN ('staff','owner_number')`).get(id)?.ts;
+    if (Number.isFinite(Number(human))) bump(Number(human));
     const window = outageWindow(t);
     for (const r of prep('outRows', `SELECT sender_kind, covers_ts, created, error FROM wa_outbox WHERE lead_id = ?
         AND sender_kind IN ('staff','dana') AND status <> 'failed' AND created >= ?`).all(id, t - DAY_MS)) {
       if (r.sender_kind === 'dana' && r.error === OUTAGE_MARK && Number(r.created) >= window) continue;
-      bound = Math.max(bound, Number(r.covers_ts ?? r.created));
+      if (r.sender_kind === 'staff') { bump(Number(r.created)); continue; }
+      bump(Number(r.covers_ts ?? r.created), covRidOf(r.error));
     }
-    return prep('since', `SELECT * FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts > ?
-        ORDER BY ts DESC, rowid DESC LIMIT ?`).all(id, bound, CONTEXT_MESSAGES).reverse();
+    const rows = prep('pendRows', `SELECT rowid AS rid, * FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts >= ?
+        ORDER BY ts, rowid`).all(id, bTs).filter((m) => after(m.ts, m.rid, bTs, bRid));
+    return all ? rows : rows.slice(-CONTEXT_MESSAGES);
   }
 
   /**
@@ -734,7 +772,9 @@ export function createDana({
     });
     if (!ins.inserted) return { sent: false, error: 'bad_send_id', failure: 'local' };
     if (guarded) prep('guard', 'UPDATE wa_outbox SET guarded = 1 WHERE send_id = ?').run(sendId);
-    const markRow = () => { if (mark) prep('mark', "UPDATE wa_outbox SET error = ? WHERE send_id = ? AND status <> 'failed'").run(mark, sendId); };
+    // The outage line's mark, or (any other brain row) the covered message by insertion order (r12).
+    const markVal = mark ?? (viaBrain ? `${COV_PREFIX}${coverRid(lead.lead_id, coversTs)}` : null);
+    const markRow = () => { if (markVal && !markVal.endsWith('Infinity')) prep('mark', "UPDATE wa_outbox SET error = ? WHERE send_id = ? AND status <> 'failed'").run(markVal, sendId); };
     markRow();
     const out = await sender.sendTo({ jid, text: body, kind: 'dana', leadId: lead.lead_id, sendId, ...(document ? { document } : {}) });
     // The sender wrote its own error on an unsure row; the outage line's mark goes back on (failures count by status).
@@ -886,12 +926,12 @@ export function createDana({
     // A stop, privacy or deletion request stored after what this bubble covers wins (r11): the bubble does not go
     // (the closing line itself excepted), and the chat is woken so the stop flow runs.
     if (!closing) {
-      const later = prep('laterIn', `SELECT ts, text FROM wa_messages WHERE lead_id = ? AND direction = 'in' AND ts > ?
-          ORDER BY ts DESC LIMIT 20`).all(String(leadId), Number(coversTs));
+      // Every message after the covered one (by insertion order, never ts alone), within 24 h, however many (r12).
+      const later = messagesAfter(leadId, coversTs);
       const hit = later.find((m) => typeof m.text === 'string' && matchStopWords(m.text));
       if (hit) {
         const id = String(leadId);
-        pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, Number(later[0].ts)));
+        pendingAgain.set(id, Math.max(pendingAgain.get(id) ?? 0, Number(later[later.length - 1].ts)));
         return no('stop_request');
       }
     }
@@ -1015,7 +1055,7 @@ export function createDana({
    */
   function oweLine(leadId, reason, r, coversTs = null) {
     if (!defers(r)) return false;
-    if (coversTs !== null && coversTs !== undefined && !owedFor.has(leadId)) owedFor.set(leadId, Number(coversTs));
+    if (coversTs !== null && coversTs !== undefined && !owedFor.has(leadId)) owedFor.set(leadId, { ts: Number(coversTs), rid: coverRid(leadId, coversTs) });
     let until;
     if (r.stopped === 'backlog') {
       const n = (owedStreak.get(leadId) ?? 0) + 1;
@@ -1042,7 +1082,7 @@ export function createDana({
     const forget = (coversTs = null) => endHold(leadId, { own: reason, coversTs });
     // The chat left the brain path meanwhile (dana_brain off, out of auto mode): the owed line ends unsent (r10).
     if (!useBrain(lead)) { forget(); return skip(leadId, 'not_brain'); }
-    const waiting = pendingFor(leadId, lead);
+    const waiting = pendingFor(leadId, lead, { all: true });
     if (!waiting.length) { forget(); return skip(leadId, 'nothing'); }
     // A stop, privacy or deletion request among the waiting messages wins over an owed hand-over, before it is due or
     // after (r10): the stop flow (closing line, dana_off, the stopped note) replaces it; it is never sent first.
@@ -1055,9 +1095,10 @@ export function createDana({
     const t = now();
     if (holdDeadline(lead, t) > t) return skip(leadId, 'hold');
     // It covers the message it was owed for, never a newer one (r10).
-    const owedTs = owedFor.get(leadId);
-    const target = waiting.find((m) => Number(m.ts) === owedTs) ?? waiting[0];
+    const o = owedFor.get(leadId);
+    const target = (o && (waiting.find((m) => Number(m.ts) === o.ts && Number(m.rid) === o.rid) ?? waiting.find((m) => Number(m.ts) === o.ts))) ?? waiting[0];
     const coversTs = target.ts;
+    turnCover.set(String(leadId), { ts: Number(target.ts), rid: Number(target.rid) });
     const language = languageOf({ lead, texts: waiting.filter((m) => Number(m.ts) <= Number(coversTs)).map((m) => m.text) });
     const auto = autoOf(lead);
     // Past the 2-h mark: straight to `missed` (the hold ends, the task used reads missed, the note), no line (r9).
@@ -1343,6 +1384,8 @@ export function createDana({
       return skip(leadId, 'nothing');
     }
     const lead = e.lead;
+    // The covered message by insertion order, for every boundary this run reads (r12).
+    turnCover.set(String(leadId), { ts: Number(batch[batch.length - 1].ts), rid: Number(batch[batch.length - 1].rid ?? coverRid(leadId, batch[batch.length - 1].ts)) });
     // A recovery run: an outage of this chat is open, read from its marked line, whatever hold it has now (r6).
     const recovering = viaBrain && openOutage(leadId, started);
     const language = languageOf({ lead, texts: batch.map((m) => m.text) });
@@ -1371,8 +1414,9 @@ export function createDana({
       }
       backlog.delete(leadId);
     }
-    // The code stop-word check, before any model call (DESIGN §4.1; both paths).
-    const stopHit = batch.map((m) => (typeof m.text === 'string' ? matchStopWords(m.text) : null)).find(Boolean);
+    // The code stop-word check, before any model call (DESIGN §4.1; both paths), on EVERY waiting message, not only
+    // the batch's newest ten (r12).
+    const stopHit = pendingFor(leadId, lead, { all: true }).map((m) => (typeof m.text === 'string' ? matchStopWords(m.text) : null)).find(Boolean);
     if (stopHit) return stopChat(lead, language, stopHit.kind, coversTs, { viaBrain });
     // The loop guard of a brain chat (sticky): held until a person writes; the owner hears "looks automated".
     if (viaBrain && looping(leadId, started)) {
