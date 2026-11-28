@@ -142,9 +142,12 @@ function harness({
   inbox.pruneCandidates = (o) => { calls.prune.push(o); return realPrune(o); };
   const ownerish = (l) => st.active && st.ownNumberOk
     && (l?.phone_e164 === OWNER_DIGITS || String(l?.wa_jid ?? '').startsWith(`${OWNER_DIGITS}@`) || l?.wa_lid === OWNER_LID);
+  // The same owner-test switch the poller reads, as index.mjs wires it: since PR-A2 (T07) ingest refuses a Bona-number
+  // chat (`rule_off`) while `ownerTest.ownNumberOk()` is not true, and reads a missing switch as false.
+  const ot = ownerTest === 'fake' ? fakeOwnerTest(st, calls) : ownerTest === 'stub' ? createOwnerTest() : ownerTest;
   const ingestor = createIngest({
     db, inbox, ownerUserId: () => null, ownerPhone: String(env.BONA_WA_INSTANCE_JID ?? '').split('@')[0] || OWNER_DIGITS,
-    isExcludedLead: (l) => !ownerish(l) && isExcludedLead(team, db, l), log, now,
+    isExcludedLead: (l) => !ownerish(l) && isExcludedLead(team, db, l), ownerTest: ot, log, now,
   });
   const ingest = (lead, rec) => ingestor.ingest(lead, rec);
   // The poller's own ingest may fail its first `ingestFails` calls (a busy store); the backfill keeps the real one.
@@ -164,7 +167,6 @@ function harness({
   });
   const sent = [];
   const sendWhatsApp = async (text) => { sent.push(text); return { ok: true }; };
-  const ot = ownerTest === 'fake' ? fakeOwnerTest(st, calls) : ownerTest === 'stub' ? createOwnerTest() : ownerTest;
   const nt = notes === 'fake' ? fakeNotes(calls) : notes === 'stub' ? createOwnerNotes({ db, siteUrl: SITE, sendNote: sendWhatsApp, log }) : notes;
   const queue = [];
   const poller = createPoller({
@@ -995,7 +997,11 @@ test('T06-9 our own note in the owner\'s chat on Bona\'s number is never his cha
   assert.equal(tally.replies, 0, 'a note is no reply to his test');
   assert.equal(h.lead('LEAD-own').first_reply_ts, null);
   assert.equal(h.lead('LEAD-own').updated, NOW - DAY);
-  // An answer in his chat that is not a note is still his chat's.
+  // An answer in his chat that is not a note is still his chat's: a dashboard reply (its key recorded). A line typed
+  // on the phone there is ingest's to drop (PR-A2, DESIGN §3.2: his test chat keeps only dashboard and assistant sends).
+  const staff = h.team.addUser({ name: 'Mona', phone: COLLEAGUE_DIGITS, role: 'staff' });
+  h.inbox.insertOutbox({ send_id: 'SND-real', lead_id: 'LEAD-own', jid: OWNER, text: 'we will send the floor plan today', user_id: staff.user_id, sender_kind: 'staff' });
+  h.inbox.updateOutbox('SND-real', { status: 'accepted', key_id: 'REAL' });
   h.push([msg({ id: 'REAL', jid: OWNER, fromMe: true, pushName: null, ts: NOW - 30_000, text: 'we will send the floor plan today' })]);
   const t2 = await h.tick();
   assert.equal(t2.ignored, 0);
@@ -1456,7 +1462,7 @@ test('T06-16b/16c on Bona\'s number a dismissed caller\'s Ref line joins nothing
   }
 });
 
-test('T06-16 off Bona\'s number the dismissal is today\'s (a Ref joins); and before PR-A2 adds the lookup, nothing is held', async () => {
+test('T06-16 off Bona\'s number the dismissal is today\'s (a Ref joins); on Bona\'s number the store\'s own lookup (PR-A2) holds the mark', async () => {
   const p = harness({ env: PERSONAL, state: { ownInbox: true } });
   seedSession(p);
   seedDismissed(p, { candId: 'CND-phone', phone: digitsOf(111), jid: jidOf(111), at: LINKED_AT - DAY });
@@ -1469,7 +1475,8 @@ test('T06-16 off Bona\'s number the dismissal is today\'s (a Ref joins); and bef
   seedDismissed(h, { candId: 'CND-phone', phone: digitsOf(111), jid: jidOf(111), at: LINKED_AT - DAY });
   h.push([msg({ id: 'R1', jid: jidOf(111), text: 'Hello\nRef BONA-W003 · K7Q2XR' })]);
   await h.tick();
-  assert.equal(h.leads()[0]?.inbox_state, 'in', 'no lookup on the store yet: the Ref joins as today');
+  // PR-A2 (T07) is in: the store's own dismissedCandidateFor holds the mark without the harness's stand-in.
+  assert.notEqual(h.leads()[0]?.inbox_state, 'in', "the store's own lookup: a dismissed chat does not join on a Ref");
   h.close();
 });
 
