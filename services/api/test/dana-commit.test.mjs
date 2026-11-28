@@ -475,9 +475,11 @@ test("the booking sign is read in the claim's own sentence (the viewing tool tur
       assert.deepEqual(await c.afterPreSend({ lead: LEAD, turn: brainReply(text, { tools }), text, language: lang }), { bubbles: [{ kind: 'text', text }] }, text);
     }
   }
-  // A viewing tool in the turn is a sign for every sentence: the claim in the second one hands over.
+  // A viewing tool in the turn is a sign for every sentence but a stock one (Claude r6 P3-1): a claim about the home
+  // itself hands over, the stock sentence does not.
   const slots = { name: 'viewing_slots', args: { listing_id: 'BONA-W003' }, result: { bookable: true, slots: [] } };
-  assert.ok(await caughtWith(c, untouched[0][0], 'en', [slots]));
+  assert.deepEqual(await c.afterPreSend({ lead: LEAD, turn: brainReply(untouched[0][0], { tools: [slots] }), text: untouched[0][0], language: 'en' }), { bubbles: [{ kind: 'text', text: untouched[0][0] }] });
+  assert.ok(await caughtWith(c, 'Hope to see you soon! It is booked.', 'en', [slots]));
 });
 
 /* ---------------- PR-B4 r5 (the r4 reviews) ---------------- */
@@ -620,7 +622,7 @@ const CORPUS = [
   ['denial', 'لسه ما حجزت لك، إيش اسمك الكريم؟', 'ar', false, false],
   ['denial', 'Monday at 12 is taken; shall I keep Sunday at 10?', 'en', false, false],
   // ordinary answers (stock, price, delivery, brochures, needs, goodbyes)
-  ['ordinary', 'Yes, the developer has confirmed delivery in Q4 2027.', 'en', false],
+  ['ordinary', 'Yes, the developer has confirmed delivery in Q4 2027.', 'en', false, false],
   ['ordinary', 'Confirmed: it has a private pool', 'en', false],
   ['ordinary', 'The 2-bedroom units are fully booked right now, but the 3-bedroom ones are available.', 'en', false],
   ['ordinary', 'تم تأكيد موعد التسليم في الربع الرابع 2027', 'ar', false],
@@ -685,6 +687,37 @@ const CORPUS = [
   ['ordinary', 'تم تأكيد وجود مسبح خاص. والفريق يرد من الأحد إلى الخميس 10:00–19:00', 'ar', false],
   ['claim', 'Your viewing is booked for Sunday, 10:00–11:00.', 'en', true, true],
   ['claim', 'Booked: 10:00–11:00 on Sunday.', 'en', true, true],
+  // r6 (Codex P1): «محجوز / محجوزة / انحجز», with its denials and future forms; a stock sentence stays untouched
+  ['claim', 'موعدك محجوز يوم الأحد الساعة ١٠.', 'ar', true, true],
+  ['claim', 'تمام، المعاينة محجوزة لك يوم الأحد', 'ar', true, true],
+  ['claim', 'خلاص انحجز موعدك يوم الأحد', 'ar', true, true],
+  ['denial', 'موعدك لسه مو محجوز، إيش اسمك الكريم؟', 'ar', false, false],
+  ['denial', 'الموعد مو محجوز للحين، أرسل لي اسمك', 'ar', false, false],
+  ['denial', 'المعاينة غير محجوزة بعد، إيش اسمك؟', 'ar', false, false],
+  ['ordinary', 'راح يكون موعدك محجوز بعد ما ترسل لي اسمك', 'ar', false, false],
+  ['ordinary', 'الشقة محجوزة', 'ar', false, false],
+  ['ordinary', 'الشقة محجوزة للحين، وعندنا وحدة ثانية متاحة', 'ar', false, false],
+  // r6 (Codex P2): the conditional cut covers every claim word
+  ['ordinary', 'Once your viewing is scheduled, you’ll get a confirmation here. What name should I use?', 'en', false, false],
+  ['ordinary', 'When your slot is reserved, a confirmation comes here. What name should I use?', 'en', false, false],
+  ['ordinary', 'Once it is set, you get a message here.', 'en', false, false],
+  ['ordinary', 'لما يتم تثبيت الموعد توصلك رسالة هنا', 'ar', false, false],
+  // r6 (Claude P3-1): a stock, price or delivery sentence needs its own sign, with a viewing tool in the turn too
+  ['ordinary', 'The handover is scheduled for Q4 2027.', 'en', false, false],
+  ['ordinary', 'Delivery is scheduled for December 2027.', 'en', false, false],
+  ['ordinary', 'Prices are locked in for off-plan buyers this month.', 'en', false, false],
+  ['ordinary', 'Each villa has two reserved parking spaces.', 'en', false, false],
+  ['ordinary', 'The finishing is set for a premium standard.', 'en', false, false],
+  ['ordinary', 'Construction is scheduled to finish in 2027, and the price is set for the launch phase.', 'en', false, false],
+  // r6 (Claude P3-2): modal passives and a bare "your time" are no booking
+  ['ordinary', 'Viewings can be scheduled Sunday to Thursday, 10:00–19:00. Shall I check the free times?', 'en', false, false],
+  ['ordinary', 'Viewings can be booked Sunday to Thursday. Shall I check the free times for you?', 'en', false, false],
+  ['ordinary', 'Viewings are scheduled Sunday to Thursday, 10 am to 7 pm.', 'en', false, false],
+  ['ordinary', 'Take your time. Yes, the private pool is confirmed.', 'en', false, false],
+  ['ordinary', 'Yes, confirmed: it has a private pool. Thanks for your time!', 'en', false, false],
+  ['claim', 'Your time slot is reserved.', 'en', true, true],
+  ['claim', 'Your viewing time is confirmed.', 'en', true, true],
+  ['claim', 'Your viewings are booked for Sunday and Monday.', 'en', true, true],
 ].map(([kind, text, lang, trips, viewing]) => ({ kind, text, lang, trips, viewing }));
 
 test(`the claim corpus: ${CORPUS.filter((r) => r.trips).length} claims trip and ${CORPUS.filter((r) => !r.trips).length} non-claims pass, with no tool, with save_needs only, and with a viewing tool where the row says`, async () => {
