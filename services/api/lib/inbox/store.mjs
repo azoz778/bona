@@ -420,8 +420,12 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
    * after this person's read mark or, with none, after their account was made (P2-8) —
    * a new colleague does not start with every old message unread. `handler_name` is null
    * for a handler who has been deactivated: the chat has nobody on it now.
+   *
+   * `proofOnly: true` (T08, DESIGN §13.2): only the chats joined by proof (`inbox_via` NULL),
+   * left out in the SQL so the limit counts only what is listed. The dashboard asks for it
+   * while Bona's number is not checked. Without it the query is exactly as before.
    */
-  function listInbox({ userId = null, userCreated = 0, limit = 200 } = {}) {
+  function listInbox({ userId = null, userCreated = 0, limit = 200, proofOnly = false } = {}) {
     return prep(`SELECT l.*,
                    (SELECT COUNT(*) FROM wa_messages m
                      WHERE m.lead_id = l.lead_id AND m.direction = 'in'
@@ -431,7 +435,7 @@ export function createInboxStore(store, { now = () => Date.now(), onPurge = () =
                  FROM leads l
                  LEFT JOIN wa_messages lm ON lm.rowid = (SELECT m2.rowid FROM wa_messages m2 WHERE m2.lead_id = l.lead_id ORDER BY m2.ts DESC, m2.rowid DESC LIMIT 1)
                  LEFT JOIN users u ON u.user_id = l.handler_user_id AND u.active = 1
-                 WHERE ${IN_CHAT}
+                 WHERE ${IN_CHAT}${proofOnly === true ? ' AND l.inbox_via IS NULL' : ''}
                  ORDER BY (unread > 0) DESC, COALESCE(l.last_msg_ts, l.inbox_since, l.created) DESC, l.rowid DESC
                  LIMIT ?`)
       .all(str(userId), num(userCreated), clampLimit(limit, 200)).map(leadRow);

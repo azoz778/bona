@@ -1316,10 +1316,16 @@ export function createDashboardRoutes({
   /** Rule 1: the one test every inbox read and write goes through first (the rollback guard included). */
   const openChat = (lead) => Boolean(lead && lead.inbox_state === 'in' && (lead.wa_jid || lead.wa_lid) && !excludedLead(lead) && !viaHidden(lead));
 
-  /** The rows a list shows: rule 1's exclusions, then the rollback guard (asked once a list). */
-  const listable = (rows) => {
+  /**
+   * One person's Inbox rows, with rule 1 and the rollback guard applied. While the guard is on
+   * the store leaves the own-number chats out in its SQL (`proofOnly`), before its limit, so
+   * they cannot crowd older proof-joined chats off the list; the filter here stays as a belt.
+   * The guard is asked once a list.
+   */
+  const inboxRows = (user, limit) => {
     const checked = ownNumberOk();
-    return rows.filter((l) => !excludedLead(l) && !viaHidden(l, checked));
+    return inbox.listInbox({ userId: user.user_id, userCreated: user.created ?? 0, limit, proofOnly: !checked })
+      .filter((l) => !excludedLead(l) && !viaHidden(l, checked));
   };
 
   /**
@@ -1341,7 +1347,7 @@ export function createDashboardRoutes({
   function withUnread(user) {
     if (!inbox) return withKey(user);
     try {
-      const rows = listable(inbox.listInbox({ userId: user.user_id, userCreated: user.created ?? 0, limit: 1000 }));
+      const rows = inboxRows(user, 1000);
       return withKey({ ...user, unread: rows.reduce((n, r) => n + (Number(r.unread) || 0), 0) });
     } catch (err) {
       log({ level: 'warn', evt: 'dash.unread_failed', error: String(err?.message ?? err).slice(0, 200) });
@@ -1513,7 +1519,7 @@ export function createDashboardRoutes({
   }
 
   /** The Inbox list's rows for one person, in the list's own order, with rule 1 applied. */
-  const inboxRowsFor = (me) => listable(inbox.listInbox({ userId: me.user_id, userCreated: me.created ?? 0 }));
+  const inboxRowsFor = (me) => inboxRows(me, undefined);
   /** What the Inbox list is drawn from (P3-12): a change in any of it redraws the list. */
   const listToken = (rows) => `${rows.length}:${rows.reduce((n, r) => n + (Number(r.unread) || 0), 0)}:${rows.reduce((m, r) => Math.max(m, Number(r.last_msg_ts) || 0), 0)}`;
 

@@ -2601,6 +2601,30 @@ test('T08-5 while Bona\'s number is not checked an inbox_via chat cannot be open
   }));
 });
 
+test('T08-5 an older proof-joined chat behind 1,001 newer unread own-number chats is still listed, on the badge and opened by an alert while the guard is on', async () => {
+  let inbox;
+  await withTeamRoutes(async ({ db, get, login }) => {
+    const owner = await login(OWNER_PHONE);
+    const t = Date.now() + 10_000;
+    const proof = chatLead(db, { id: 'LEAD-20261128-eeee0000', name: 'Proof Client', phone: '966500020000', last_msg_ts: t });
+    inbox.upsertMessage({ key_id: 'K-proof', lead_id: proof, jid: null, direction: 'in', sender_kind: 'client', text: 'hello', ts: t });
+    db.transaction(() => {
+      for (let i = 1; i <= 1001; i += 1) {
+        const n = String(i).padStart(4, '0');
+        const id = chatLead(db, { id: `LEAD-20261128-dddd${n}`, name: `Own ${n}`, phone: `96650002${n}`, inbox_via: 'own_number', last_msg_ts: t + i });
+        inbox.upsertMessage({ key_id: `K-own-${n}`, lead_id: id, jid: null, direction: 'in', sender_kind: 'client', text: 'hi', ts: t + i });
+      }
+    });
+    const list = await (await get('/dashboard/inbox', { cookie: owner })).text();
+    assert.match(list, /Proof Client/, 'the list: the store leaves the own-number chats out before its limit');
+    assert.doesNotMatch(list, /Own \d{4}/);
+    assert.match(list, /Inbox<span class="c">1<\/span>/, 'the badge counts its unread message');
+    const open = await get('/dashboard/push/open', { cookie: owner });
+    assert.equal(open.status, 302);
+    assert.equal(open.headers.get('location'), `/dashboard/inbox/${proof}`, 'an alert opens it');
+  }, ({ db }) => { inbox = createInboxStore(db); return { inbox, ownerTest: { ownNumberOk: () => false } }; });
+});
+
 test('T08-5 without an ownerTest the routes fail closed: an inbox_via chat is not listed, a proof chat is', async () => {
   await withTeamRoutes(async ({ db, get, login }) => {
     chatLead(db, { id: 'LEAD-20261128-aaaa0090', name: 'Own Number Client', phone: '966500000090', inbox_via: 'own_number' });
