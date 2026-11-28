@@ -567,3 +567,15 @@ test('"مليون ريال ونص" is a value the guard cannot read, never SAR 1
   assert.equal(checkReply('مليون ريال تقريبا', parts).ok, true);
   assert.equal(checkReply('السعر 2 مليون ريال والدفعة الأولى 10%', parts).ok, true);
 });
+
+/* Codex r30 P2: a spelled-out million keeps the currency written after it. */
+test('"مليون دولار" is USD 1,000,000: refused against a published SAR 1,000,000', () => {
+  const parts = { toolResults: ['{"p":"SAR 1,000,000"}', '{"q":"SAR 2,000,000"}'] };
+  for (const reply of ['السعر مليون دولار', 'السعر مليونين دولار', 'a million dollars', 'one million USD', 'مليون يورو']) {
+    assert.equal(checkReply(reply, parts).ok, false, reply);
+  }
+  for (const reply of ['السعر مليون ريال', 'السعر مليونين ريال سعودي', 'a million riyals', 'السعر مليون']) {
+    assert.equal(checkReply(reply, parts).ok, true, reply);
+  }
+  assert.deepEqual(findAmounts('مليون دولار').map((a) => a.currency), ['USD']);
+});

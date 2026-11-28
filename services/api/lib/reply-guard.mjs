@@ -312,7 +312,10 @@ export function findAmounts(text) {
         if (one && !NUMBER_WORD_BEFORE_RE.test(lead.slice(0, one.index + 1))) raw = 1e6;
       }
     }
-    out.push({ raw, sar: raw, currency: null, at, scale: 1e6, end });
+    // The currency right after the word goes with it ("مليون دولار" is USD 1,000,000, never SAR, Codex r30).
+    const c = CURRENCY_FIRST_RE.exec(s.slice(end));
+    const currency = c ? currencyOf(c[0].replace(/^[\s-]+/, '')) : null;
+    out.push({ raw, sar: raw == null ? null : Math.round(raw * SAR_RATE[currency ?? 'SAR']), currency, at, scale: 1e6, end });
   }
   for (const m of s.matchAll(THOUSAND_WORD_RE)) {
     const [at, end] = m.indices.groups.word;
